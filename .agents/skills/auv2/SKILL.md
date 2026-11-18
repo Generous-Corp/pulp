@@ -417,6 +417,18 @@ Things that bite:
   null callbacks, values pointing into the table's own storage, which therefore
   must outlive every array the host is holding. The table rebuilds only when a
   caller re-points it, never on a host read.
+- **Programs declared in code.** `set_programs(names, on_select)` on the
+  adapter (forwarding to `FactoryPresetTable::set_programs`) publishes names
+  with no file behind them, numbered `0..n-1`; preset files follow. A declared
+  program carries no parameter values: `load(i)` only runs `on_select(i)`. The
+  adapter also makes entry 0 the present preset, because with no files AUBase
+  leaves `PresentPreset` at `{-1, "Untitled"}` and hosts such as REAPER show
+  "No preset". Declaring programs again, or `set_directory`, rebuilds the
+  `AUPreset` records, so do both straight after construction, before a host
+  holds an array. Declaring again also re-points the present preset (first
+  program, or "Untitled" for an empty list), and a select callback runs from a
+  copy so it may redeclare. A saved state restores the program name under
+  number -1 and never re-runs the callback.
 - The preset load writes the `StateStore` outside `ScopedHostParamWrite`, so the
   `wire_host_parameter_bridge` listener fires and the host learns every value
   that moved. That is deliberate — suppressing it would leave the host's

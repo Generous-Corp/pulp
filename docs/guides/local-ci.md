@@ -3890,6 +3890,21 @@ Two candidate signals were evaluated against live runs and are deliberately
   A same-configuration verdict on each base would make the rule checkable and
   would have cleared all four.
 
+### One flake re-enqueue when the same test ejected two pull requests
+
+`[auto_merge] flake_requeue = "apply"` (a bounded trial from 2026-11-17) lets
+the steward re-enqueue an approved, green head once, with no new push, when the
+test that ejected its merge group also ejected a different pull request's group
+within 24 hours. The guards are once per head; a breaker, so a re-admitted head
+ejected again on the same signature stops that signature; and, for the trial,
+`flake_max_requeues = 1` re-enqueue per signature per window (Shipyard's
+default is 3). The steward also files one root-cause
+issue per signature. The rollback is manual: the steward tick's `flake_requeue` records are
+read daily, and the trial goes back to `"shadow"` if a re-admitted group fails
+again on the same signature, or after 2 re-admissions in 7 days. In
+5 days of shadow it made one decision: #12448, with #12374, at 2026-11-17
+10:04Z, about 54 minutes before that head was actually re-enqueued.
+
 ### One same-head retry after a network ejection
 
 `.shipyard/config.toml` also opts Pulp into Shipyard's environment re-enqueue:
@@ -4852,8 +4867,8 @@ not start on a head whose `drift-fast` or `Enforce version & skill sync` check
 is already red. Both are required checks in their own workflows, so `needs:`
 cannot reach them; the `cheap-first` job (`tools/ci/cheap_first_gate.py`) reads
 their newest GitHub Actions check runs on the head the build tests (the pull
-request's head sha, the `pr_number` dispatch commit, or the merge group's own
-commit) and publishes a verdict:
+request's head sha or the `pr_number` dispatch commit) and publishes a verdict.
+Merge groups do not wait (see below):
 
 - `pass`: every cheap check is green, skipped, neutral or cancelled, or never
   appeared within 10 minutes. The matrix starts.
@@ -4872,8 +4887,8 @@ pull requests and dispatches, `macos-merge-group` in the queue) do not need
 `cheap-first`, so a docs-only head or a receipt-reused group still reports
 `macos` in seconds rather than at the gate's deadline. The
 gate never weakens a check: the red cheap check is required, so the head could
-not merge either way. A push run, a plain dispatch and a pull request into a
-base other than `main` pass at once. `PULP_CHEAP_FIRST_MODE=off` (repository
+not merge either way. A merge group, a push run, a plain dispatch and a pull
+request into a base other than `main` pass at once. `PULP_CHEAP_FIRST_MODE=off` (repository
 variable) turns the wait off without a change.
 
 After fixing a flaky cheap check by re-running it, re-run the Build run's
@@ -4898,8 +4913,18 @@ settle window above was removed for adding latency that bought too little:
   have saved 20.5 a day. Not all of it is saved: a cheap check that is red,
   re-run and green delays the native leg rather than sparing it.
 
-A red version & skill sync alone now also withholds the macOS result for that
-head, so fix the bump before expecting one. `tools/ci/test_cheap_first_gate.py`
+Measured after it shipped (2026-11-15..17), the estimate held for pull
+requests but not for merge groups: over 20 merge-group Build and Test runs the
+native `macos` job was created a median 8.8 minutes after the run started,
+when `cheap-first` finished, instead of about 0.7 minutes (after the
+preamble), on every group, while a cheap check was red in only 2 of 83 groups
+(about 48 gate-VM minutes in 48 hours). A group with a red cheap check is
+ejected anyway, because that check is required. So a merge group passes at
+once and its native leg starts with the preamble; `macos-cheap-first-blocked`
+now acts on pull requests and dispatches only.
+
+A red version & skill sync alone now also withholds the macOS result for a
+pull-request head, so fix the bump before expecting one. `tools/ci/test_cheap_first_gate.py`
 (the `cheap-first-gate-selftest` ctest) covers the verdicts and
 `tools/scripts/test_build_workflow.py` (`CheapFirstGateTest`) the wiring.
 

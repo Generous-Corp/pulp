@@ -842,6 +842,11 @@ int diff_graphs(const std::vector<std::string>& args) {
         events.addMember("removed", string_array(diff.event_connections_removed));
         events.addMember("changed", string_array(diff.event_connections_changed));
         result.addMember("event_connections", events);
+        auto assets = choc::value::createObject("SpectralAssets");
+        assets.addMember("added", string_array(diff.spectral_assets_added));
+        assets.addMember("removed", string_array(diff.spectral_assets_removed));
+        assets.addMember("changed", string_array(diff.spectral_assets_changed));
+        result.addMember("spectral_assets", assets);
         result.addMember("layout_changed", string_array(diff.layout_changed));
         result.addMember("sections_changed", string_array(diff.sections_changed));
         std::cout << choc::json::toString(result) << '\n';
@@ -869,6 +874,12 @@ int diff_graphs(const std::vector<std::string>& args) {
         std::cout << "- event connection " << key << '\n';
     for (const auto& key : diff.event_connections_changed)
         std::cout << "~ event connection " << key << '\n';
+    for (const auto& id : diff.spectral_assets_added)
+        std::cout << "+ spectral asset " << id << '\n';
+    for (const auto& id : diff.spectral_assets_removed)
+        std::cout << "- spectral asset " << id << '\n';
+    for (const auto& id : diff.spectral_assets_changed)
+        std::cout << "~ spectral asset " << id << '\n';
     for (const auto& name : diff.sections_changed)
         std::cout << "~ section " << name << '\n';
     for (const auto& id : diff.layout_changed)
@@ -990,17 +1001,12 @@ int cmd_graph(const std::vector<std::string>& args) {
         }
         // Stamping an envelope on a plain document asserts that the written
         // graph is the document, so the tolerant load must not have dropped an
-        // edge. A spectral document is read strictly and has no envelope form;
-        // it is recognised by the serializer's rule (a node with a spectral
-        // identity, which every spectral stage carries), and its save is
-        // refused by the writer with the reason.
+        // edge. A spectral document is read strictly and restores every edge,
+        // spectral lanes included, so it passes the same check.
         const bool adds_identity =
             loaded.ok && !saved_identity && op == "save" &&
             std::find(args.begin() + 2, args.end(), "--saved-identity") != args.end();
-        const bool spectral =
-            std::any_of(graph_ptr->nodes().begin(), graph_ptr->nodes().end(),
-                        [](const auto& node) { return node.spectral_identity.has_value(); });
-        if (adds_identity && !spectral) {
+        if (adds_identity) {
             if (auto missing = pulp::host::GraphSerializer::unrestored_connection(
                     *graph_ptr, *text, loaded.persisted_node_ids)) {
                 loaded.ok = false;

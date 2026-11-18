@@ -294,6 +294,12 @@ struct Lv2ProbeCapture {
     std::uint32_t param_event_drops = 0;
     float gain_seen_in_process = 0.0f;
     bool state_store_wired_during_define = false;
+    // Offsets of the MIDI events delivered to the last process() call and the
+    // adapter's refusal count for that block. Fixed storage: process() runs
+    // under the adapter's no-allocation guard.
+    std::array<std::int32_t, 16> midi_offsets{};
+    std::size_t midi_offset_count = 0;
+    std::uint32_t refused_events = 0;
 
     void reset() { *this = {}; }
 };
@@ -351,6 +357,11 @@ public:
         }
         g_lv2_probe.gain_seen_in_process =
             state().get_value(kLv2ProbeGainParam);
+        g_lv2_probe.refused_events = context.timing.refused_events;
+        g_lv2_probe.midi_offset_count = 0;
+        for (const auto& ev : midi_in)
+            if (g_lv2_probe.midi_offset_count < g_lv2_probe.midi_offsets.size())
+                g_lv2_probe.midi_offsets[g_lv2_probe.midi_offset_count++] = ev.sample_offset;
         for (const auto& ev : midi_in) {
             g_lv2_probe.first_status = ev.data()[0];
             g_lv2_probe.first_note = ev.size() > 1 ? ev.data()[1] : 0;
@@ -2221,4 +2232,87 @@ TEST_CASE("LV2 run routes the second input bus to the processor's side chain",
         }
     }
     lv2_generic::deactivate(handle.handle);
+}
+
+namespace {
+
+// One run() of `frames` over a MIDI sequence stamped in `unit` (0 for the
+// default frame unit). Returns the delivered offsets; the refusal count is
+// left in g_lv2_probe.
+std::vector<std::int32_t> run_lv2_midi_block(const std::vector<std::int64_t>& times,
+                                             const char* unit_uri, std::uint32_t frames,
+                                             bool use_beats = false) {
+    Lv2FeatureBundle features;
+    Lv2HandleGuard handle{
+        lv2_generic::instantiate(&lv2_generic::g_lv2_descriptor, 44100.0, "", features.features)};
+    REQUIRE(handle.handle != nullptr);
+    auto* inst = static_cast<PulpLv2Instance*>(handle.handle);
+    REQUIRE(inst->urid_atom_frame_time != 0);
+
+    std::vector<float> input(frames), output(frames);
+    float gain = 1.0f;
+    LV2SequenceBuffer midi_in;
+    const uint32_t capacity = prepare_sequence(midi_in, inst->urid_atom_sequence);
+    if (unit_uri)
+        midi_in.as_seq()->body.unit = features.map.map(features.map.handle, unit_uri);
+    for (const auto time : times) {
+        struct alignas(8) {
+            LV2_Atom_Event hdr;
+            uint8_t payload[3];
+        } pkt{};
+        if (use_beats)
+            pkt.hdr.time.beats = static_cast<double>(time);
+        else
+            pkt.hdr.time.frames = time;
+        pkt.hdr.body.type = inst->urid_midi_event;
+        pkt.hdr.body.size = 3;
+        pkt.payload[0] = 0x90;
+        pkt.payload[1] = 60;
+        pkt.payload[2] = 100;
+        REQUIRE(lv2_atom_sequence_append_event(midi_in.as_seq(), capacity, &pkt.hdr));
+    }
+    LV2SequenceBuffer midi_out;
+    midi_out.prepare_as_output_port();
+    lv2_generic::connect_port(handle.handle, 0, input.data());
+    lv2_generic::connect_port(handle.handle, 1, output.data());
+    lv2_generic::connect_port(handle.handle, 2, &gain);
+    lv2_generic::connect_port(handle.handle, 3, midi_in.as_seq());
+    lv2_generic::connect_port(handle.handle, 4, midi_out.as_seq());
+    lv2_generic::activate(handle.handle);
+    lv2_generic::run(handle.handle, frames);
+    lv2_generic::deactivate(handle.handle);
+    REQUIRE(g_lv2_probe.process_calls == 1);
+    return {g_lv2_probe.midi_offsets.begin(),
+            g_lv2_probe.midi_offsets.begin() +
+                static_cast<std::ptrdiff_t>(g_lv2_probe.midi_offset_count)};
+}
+
+} // namespace
+
+TEST_CASE("LV2 run() refuses MIDI times outside the block, never clamping them",
+          "[format][lv2][offsets]") {
+    Lv2FactoryGuard factory(&make_lv2_entry_probe);
+    // Positive control: every time inside the block, nothing refused.
+    REQUIRE(run_lv2_midi_block({0, 31, 63}, nullptr, 64) == std::vector<std::int32_t>{0, 31, 63});
+    REQUIRE(g_lv2_probe.refused_events == 0);
+
+    g_lv2_probe.reset();
+    // frames - 1 accepted; at the end, past it by far, and negative refused.
+    REQUIRE(run_lv2_midi_block({-1, 0, 63, 64, std::int64_t{1} << 40}, nullptr, 64) ==
+            std::vector<std::int32_t>{0, 63});
+    REQUIRE(g_lv2_probe.refused_events == 3);
+}
+
+TEST_CASE("LV2 run() reads event times as frames only in a frame-unit sequence",
+          "[format][lv2][offsets]") {
+    Lv2FactoryGuard factory(&make_lv2_entry_probe);
+    // An explicit atom:frameTime unit is frames, like the unit 0.
+    REQUIRE(run_lv2_midi_block({5, 9}, LV2_ATOM__frameTime, 64) == std::vector<std::int32_t>{5, 9});
+    REQUIRE(g_lv2_probe.refused_events == 0);
+
+    g_lv2_probe.reset();
+    // A beat-time sequence: beat 0 shares its bytes with frame 0, so reading
+    // time.frames would deliver it at offset 0. Every event is refused.
+    REQUIRE(run_lv2_midi_block({0, 1}, LV2_ATOM__beatTime, 64, /*use_beats=*/true).empty());
+    REQUIRE(g_lv2_probe.refused_events == 2);
 }

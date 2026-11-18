@@ -64,6 +64,7 @@ struct DocumentView {
     std::map<std::string, NodeRecord> nodes;
     std::map<std::string, std::string> connections;
     std::map<std::string, std::string> event_connections;
+    std::map<std::string, std::string> spectral_assets;
     std::map<std::string, std::string> sections;
     std::string digest;
     std::string profile;
@@ -72,7 +73,7 @@ struct DocumentView {
 bool is_identity_section(std::string_view name) {
     return name == "nodes" || name == "connections" || name == "processors" ||
            name == "identity_schema" || name == "logical_identities" || name == "bindings" ||
-           name == "event_connections";
+           name == "event_connections" || name == "spectral_assets";
 }
 
 template <typename V> std::int64_t node_id_of(const V& value) {
@@ -154,6 +155,11 @@ std::string view_digest(const DocumentView& view) {
         field(key);
         field(attributes);
     }
+    for (const auto& [key, row] : view.spectral_assets) {
+        field("spectral_asset");
+        field(key);
+        field(row);
+    }
     for (const auto& [name, value] : view.sections) {
         field("section");
         field(name);
@@ -206,6 +212,13 @@ std::optional<GraphDocumentDiffCode> read_document(std::string_view json, Docume
                     continue;
                 if (name == "layout")
                     record.layout = canonical(member.value);
+                else if (name == "spectral" && member.value.isObject())
+                    // Stage kind, gains, asset ids and the frame contract
+                    // each compare as their own field.
+                    for (std::uint32_t k = 0; k < member.value.size(); ++k) {
+                        const auto part = member.value.getObjectMemberAt(k);
+                        record.fields["spectral." + std::string(part.name)] = canonical(part.value);
+                    }
                 else
                     record.fields[name] = canonical(member.value);
             }
@@ -284,6 +297,21 @@ std::optional<GraphDocumentDiffCode> read_document(std::string_view json, Docume
                              std::to_string(node_id_of(e["destination_port"])) + "]";
             view.event_connections[key] =
                 "{\"kind\":" + std::to_string(node_id_of(e["kind"])) + "}";
+        }
+    }
+    // Spectral asset rows are keyed by their content-addressed id. The diff
+    // never decodes or verifies them (the spectral loader does), so a row
+    // without a string id or a repeated id still gets a key of its own.
+    if (root.hasObjectMember("spectral_assets") && root["spectral_assets"].isArray()) {
+        const auto& assets = root["spectral_assets"];
+        for (std::uint32_t i = 0; i < assets.size(); ++i) {
+            const auto& row = assets[i];
+            const bool named = row.isObject() && row.hasObjectMember("id") && row["id"].isString();
+            const auto id = named ? std::string(row["id"].getString()) : std::string("unnamed");
+            auto key = id;
+            for (std::size_t n = 2; view.spectral_assets.contains(key); ++n)
+                key = id + " #" + std::to_string(n);
+            view.spectral_assets.emplace(std::move(key), canonical(row));
         }
     }
     for (std::uint32_t m = 0; m < root.size(); ++m) {
@@ -430,6 +458,12 @@ GraphDocumentDiff diff_graph_documents(std::string_view before, std::string_view
                          if (a != b)
                              diff.event_connections_changed.push_back(key);
                      });
+        compare_maps(lhs.spectral_assets, rhs.spectral_assets, diff.spectral_assets_added,
+                     diff.spectral_assets_removed,
+                     [&](const std::string& key, const std::string& a, const std::string& b) {
+                         if (a != b)
+                             diff.spectral_assets_changed.push_back(key);
+                     });
         std::vector<std::string> sections_added, sections_removed;
         compare_maps(lhs.sections, rhs.sections, sections_added, sections_removed,
                      [&](const std::string& name, const std::string& a, const std::string& b) {
@@ -496,12 +530,14 @@ const char* graph_history_code_name(GraphHistoryCode code) noexcept {
         return "RestoreFailed";
     case GraphHistoryCode::PortIdentityMismatch:
         return "PortIdentityMismatch";
+    case GraphHistoryCode::ByteBudgetExceeded:
+        return "ByteBudgetExceeded";
     }
     return "CaptureFailed";
 }
 
-GraphEditHistory::GraphEditHistory(std::size_t capacity)
-    : capacity_(std::max<std::size_t>(1, capacity)) {}
+GraphEditHistory::GraphEditHistory(std::size_t capacity, std::size_t byte_budget)
+    : capacity_(std::max<std::size_t>(1, capacity)), byte_budget_(byte_budget) {}
 
 GraphEditCheckpoint GraphEditHistory::checkpoint(const SignalGraph& graph,
                                                  const GraphEditorLayout& editor_layout) {
@@ -538,11 +574,30 @@ GraphHistoryResult GraphEditHistory::commit(GraphEditCheckpoint before, const Si
         result.code = GraphHistoryCode::NoChange;
         return result;
     }
-    result.port_changes = diff_port_identities(before.ports.before, after.ports.before);
-    undo_.push_back({std::move(label), std::move(before), std::move(after)});
+    Entry entry{std::move(label), std::move(before), std::move(after)};
+    // The bytes the history would retain after this commit: the redo stack is
+    // cleared and the oldest undo entries beyond capacity are dropped, exactly
+    // as below. Over budget refuses with nothing changed, so no step that is
+    // recorded now stops working.
+    const auto entry_bytes = entry.bytes();
+    std::size_t kept = 0;
+    std::size_t kept_entries = 0;
+    for (auto it = undo_.rbegin(); it != undo_.rend() && kept_entries + 1 < capacity_;
+         ++it, ++kept_entries)
+        kept += it->bytes();
+    if (entry_bytes > byte_budget_ || kept > byte_budget_ - entry_bytes) {
+        result.code = GraphHistoryCode::ByteBudgetExceeded;
+        result.detail = "recording this edit would retain " + std::to_string(kept + entry_bytes) +
+                        " bytes of history, over the " + std::to_string(byte_budget_) +
+                        "-byte budget; nothing was recorded";
+        return result;
+    }
+    result.port_changes = diff_port_identities(entry.before.ports.before, entry.after.ports.before);
+    undo_.push_back(std::move(entry));
     redo_.clear();
     while (undo_.size() > capacity_)
         undo_.pop_front();
+    retained_bytes_ = kept + entry_bytes;
     result.code = GraphHistoryCode::Ok;
     return result;
 }
@@ -639,6 +694,9 @@ GraphHistoryResult GraphEditHistory::step(SignalGraph& graph, const GraphLoadOpt
     // in it) is touched.
     {
         SignalGraph scratch;
+        // The live graph's limits decide what it admits, including the block a
+        // spectral document is admitted at.
+        scratch.set_limits(graph.limits());
         if (!GraphSerializer::copy_custom_node_types(graph, scratch)) {
             result.code = GraphHistoryCode::RestoreFailed;
             result.detail = "the live graph's custom node types could not be staged for a trial "
@@ -661,6 +719,15 @@ GraphHistoryResult GraphEditHistory::step(SignalGraph& graph, const GraphLoadOpt
     const auto rollback = [&](GraphHistoryCode code, std::string detail) {
         result.code = code;
         result.detail = std::move(detail);
+        // A load refused before it changed the graph (an active spectral
+        // controller refuses every load) leaves the pre-call document in
+        // place, and reloading it would be refused the same way.
+        if (GraphSerializer::to_saved_document(graph) == current &&
+            fingerprint(qualified_port_identities(graph)) == current_fingerprint) {
+            result.rolled_back = true;
+            result.node_ids = live_node_ids(graph);
+            return result;
+        }
         const auto restored = GraphSerializer::from_saved_document(graph, current, options);
         result.rolled_back = !faithful(graph, restored, current_fingerprint).has_value();
         result.node_ids = live_node_ids(graph);
@@ -690,6 +757,7 @@ std::string_view GraphEditHistory::redo_label() const noexcept {
 void GraphEditHistory::clear() noexcept {
     undo_.clear();
     redo_.clear();
+    retained_bytes_ = 0;
 }
 
 } // namespace pulp::host
