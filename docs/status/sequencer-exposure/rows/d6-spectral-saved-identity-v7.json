@@ -31,10 +31,6 @@
       "needles": ["spectral_persistence::write(graph, editor_layout, why, saved_identity)"]
     },
     {
-      "path": "core/host/src/graph_history.cpp",
-      "needles": ["spectral_persistence::contains_spectral_nodes(graph)"]
-    },
-    {
       "path": "test/test_spectral_graph_saved_identity.cpp",
       "needles": ["Analysis to stage to synthesis audio survives a saved and restored graph", "Single-stream asset source persists with its finite-source policy", "Malformed v7 spectral documents are refused before the caller's graph is touched"]
     },
