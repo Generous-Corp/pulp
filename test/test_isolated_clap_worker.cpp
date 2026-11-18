@@ -2,6 +2,7 @@
 #include "harness/scoped_rt_process_probe.hpp"
 #include "isolated_clap_endpoint.hpp"
 #include "isolated_recovery_test_hook.hpp"
+#include <algorithm>
 #include <array>
 #include <atomic>
 #include <catch2/catch_test_macros.hpp>
@@ -19,6 +20,7 @@
 #include <sys/proc.h>
 #include <sys/sysctl.h>
 #include <thread>
+#include <vector>
 #include <unistd.h>
 
 using namespace pulp;
@@ -278,6 +280,19 @@ struct SiblingRender {
 };
 constexpr int kSiblingBlocks = 16;
 constexpr int kKillAfterBlock = 6;
+
+// The sibling's own oracle, independent of any second run: the gain applied
+// to the previous block's input (one block of plugin delay compensation),
+// zero for the first block. A sibling silenced or dropped in both runs fails it.
+std::vector<float> expected_sibling() {
+    std::vector<float> expected;
+    for (int block = 0; block < kSiblingBlocks; ++block)
+        for (std::size_t c = 0; c < 2; ++c)
+            for (std::size_t n = 0; n < 64; ++n)
+                expected.push_back(
+                    block == 0 ? 0.0f : static_cast<float>(block + n + 64 * c) / 256 * 0.25f);
+    return expected;
+}
 // The callback period of MacClapStereo64V1 (64 frames at 48 kHz). The guide
 // promises a callback without waits, so a fault must never stretch a block.
 constexpr auto kBlockPeriod = std::chrono::microseconds(64'000'000 / 48'000);
@@ -361,6 +376,13 @@ TEST_CASE("Isolated CLAP killed worker keeps in-process sibling bit-exact", "[ho
     // The first terminal reason never clears, including after graph release.
     REQUIRE(faulted.control->status().reason == IsolationReason::worker_exited);
 
+    const auto oracle = expected_sibling();
+    REQUIRE(std::any_of(oracle.begin(), oracle.end(), [](float v) { return v != 0.0f; }));
+    REQUIRE(reference.sibling.size() == oracle.size());
+    for (std::size_t i = 0; i < oracle.size(); ++i) {
+        INFO("sample=" << i);
+        REQUIRE(reference.sibling[i] == oracle[i]);
+    }
     // The sibling path never observes the fault: every sample of every block,
     // before and after the kill, matches the fault-free reference exactly.
     REQUIRE(killed.sibling.size() == reference.sibling.size());

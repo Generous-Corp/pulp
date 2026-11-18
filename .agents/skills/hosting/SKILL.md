@@ -68,6 +68,15 @@ hostile-fixture, endpoint, sibling/PDC and production-mutation controls together
 Functional callback traps do not establish full realtime or A10 qualification;
 host death and deliberate group escape are outside first-mode custody.
 
+**The child-process session deadline is enforced again after the session
+callback returns.** `start_retained_with_standard_input_channel` rejects a
+session that completed after `standard_input_timeout_ms`, whatever deadlines the
+callback used inside it. The isolated launch carries two exchanges (hello, then
+the load report), so its session is `kLaunchSessionBudget` (two exchange
+budgets) and each exchange takes `launch_exchange_deadline(now, session)`. Give
+any new exchange inside a launch its own budget the same way and grow the session
+budget with it, or a slow earlier phase silently shortens the later one.
+
 **The Windows worker transport differs from the POSIX one in three places.**
 The control channel is an overlapped named pipe, so every transfer on either
 end must be overlapped and deadline-bounded (`isolated_clap_windows_channel.hpp`);
@@ -638,6 +647,17 @@ commit, because it is the one reset step another thread can make fail (`Busy`
 while the ingress block is open). `VoiceBankBinding::activate()` is a
 control-thread call; the audio owner resets a bank with
 `reserve_event_reset()` / `commit_event_reset()`.
+
+A graph `ProcessingFailure` is not retryable: a refused projection restores
+the block's records into the ingress and leaves the cursor in place, and the
+same records fail the same way again (the MPE fan-out preflight alone refuses
+any block with 8 or more MIDI records). Keeping the records would make the next
+block, which maps onto the same cursor, replay them a block late and stack its
+own on top. The binding therefore drops a failed block's graph records and
+zeroes the graph output; a direct ingress user must clear the ingress itself.
+`begin_host_event_block()` refuses a block longer than the prepared frame
+limit, because `process_checked()` would refuse it with `Frames` before
+projecting and nothing could seal the open ingress block afterwards.
 
 ### Edge probes publish once per block, from the calling thread
 

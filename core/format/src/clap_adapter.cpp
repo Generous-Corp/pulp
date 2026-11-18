@@ -895,10 +895,9 @@ static bool is_ump_expression_state_event(const midi::UmpPacket& packet) {
                : type == midi::UmpMessageType::Midi2ChannelVoice && controller == 74;
 }
 
-static bool clap_phase_decode_midi_events(PulpClapPlugin* self,
-                                          const clap_process_t* process,
-                                          bool& sidecar_event_seen,
-                                          bool& state_event_dropped) {
+static bool clap_phase_decode_midi_events(PulpClapPlugin* self, const clap_process_t* process,
+                                          pulp::format::EventTimeAdmission& admission,
+                                          bool& sidecar_event_seen, bool& state_event_dropped) {
     // Build MIDI from CLAP note events. Reuse per-instance scratch buffers so
     // capacity survives warmup and the steady-state process path stays RT-safe.
     auto& midi_in = self->midi_in;
@@ -926,6 +925,26 @@ static bool clap_phase_decode_midi_events(PulpClapPlugin* self,
             auto* hdr = in_events->get(in_events, i);
             // Same CLAP event-space gate as the param/gesture loop above.
             if (hdr->space_id != CLAP_CORE_EVENT_SPACE_ID) continue;
+            // Every event this loop delivers carries a block offset. A time
+            // outside the rendered frames is refused and counted, never
+            // clamped; CLAP times are unsigned, so they are widened rather
+            // than cast to int32.
+            const bool timed_event =
+                hdr->type == CLAP_EVENT_NOTE_ON || hdr->type == CLAP_EVENT_NOTE_OFF ||
+                hdr->type == CLAP_EVENT_NOTE_CHOKE || hdr->type == CLAP_EVENT_MIDI ||
+                hdr->type == CLAP_EVENT_MIDI_SYSEX ||
+                (hdr->type == CLAP_EVENT_NOTE_EXPRESSION && self->mpe.enabled)
+#if defined(CLAP_VERSION_GE) && CLAP_VERSION_GE(1, 1, 0)
+                || (hdr->type == CLAP_EVENT_MIDI2 && self->ump_enabled)
+#endif
+                ;
+            std::int32_t event_offset = 0;
+            if (timed_event) {
+                const auto admitted = admission.admit(static_cast<std::int64_t>(hdr->time));
+                if (!admitted)
+                    continue;
+                event_offset = *admitted;
+            }
             if (hdr->type == CLAP_EVENT_NOTE_ON) {
                 sidecar_event_seen = true;
                 const auto ev = load_event<clap_event_note_t>(hdr);
@@ -933,7 +952,7 @@ static bool clap_phase_decode_midi_events(PulpClapPlugin* self,
                     static_cast<uint8_t>(ev.channel),
                     static_cast<uint8_t>(ev.key),
                     static_cast<uint8_t>(ev.velocity * 127.0));
-                me.sample_offset = static_cast<int32_t>(hdr->time);
+                me.sample_offset = event_offset;
                 state_event_dropped |= !midi_in.add(me);
             } else if (hdr->type == CLAP_EVENT_NOTE_OFF) {
                 sidecar_event_seen = true;
@@ -942,7 +961,7 @@ static bool clap_phase_decode_midi_events(PulpClapPlugin* self,
                     static_cast<uint8_t>(ev.channel),
                     static_cast<uint8_t>(ev.key),
                     static_cast<uint8_t>(ev.velocity * 127.0));
-                me.sample_offset = static_cast<int32_t>(hdr->time);
+                me.sample_offset = event_offset;
                 state_event_dropped |= !midi_in.add(me);
             } else if (hdr->type == CLAP_EVENT_NOTE_CHOKE) {
                 sidecar_event_seen = true;
@@ -957,7 +976,7 @@ static bool clap_phase_decode_midi_events(PulpClapPlugin* self,
                     static_cast<uint8_t>(ev.channel),
                     static_cast<uint8_t>(ev.key),
                     0);
-                me.sample_offset = static_cast<int32_t>(hdr->time);
+                me.sample_offset = event_offset;
                 state_event_dropped |= !midi_in.add(me);
             } else if (hdr->type == CLAP_EVENT_NOTE_EXPRESSION) {
                 // CLAP per-note expression. Pulp already has an MPE
@@ -988,7 +1007,7 @@ static bool clap_phase_decode_midi_events(PulpClapPlugin* self,
                     // matching member-channel voice by convention. A
                     // future pass can route via the UMP sidecar for true
                     // per-note fidelity.
-                    const auto t = static_cast<int32_t>(hdr->time);
+                    const auto t = event_offset;
                     midi::MidiEvent me{};
                     bool emitted = false;
                     switch (ev.expression_id) {
@@ -1058,10 +1077,8 @@ static bool clap_phase_decode_midi_events(PulpClapPlugin* self,
                 // and program change. `port_index` is informational for
                 // multi-port plugins; single-port plugins accept all.
                 const auto ev = load_event<clap_event_midi_t>(hdr);
-                midi::MidiEvent me{
-                    choc::midi::ShortMessage(ev.data[0], ev.data[1], ev.data[2]),
-                    static_cast<int32_t>(hdr->time),
-                    0.0};
+                midi::MidiEvent me{choc::midi::ShortMessage(ev.data[0], ev.data[1], ev.data[2]),
+                                   event_offset, 0.0};
                 const bool ownership_event = is_midi_ownership_event(me);
                 const bool state_event = ownership_event ||
                     ((self->mpe.enabled || self->ump_enabled) &&
@@ -1075,11 +1092,7 @@ static bool clap_phase_decode_midi_events(PulpClapPlugin* self,
                 // on the process path.
                 const auto ev = load_event<clap_event_midi_sysex_t>(hdr);
                 if (ev.buffer && ev.size > 0) {
-                    midi_in.add_sysex_copy(
-                        ev.buffer,
-                        ev.size,
-                        static_cast<int32_t>(hdr->time),
-                        0.0);
+                    midi_in.add_sysex_copy(ev.buffer, ev.size, event_offset, 0.0);
                 }
 #if defined(CLAP_VERSION_GE) && CLAP_VERSION_GE(1, 1, 0)
             } else if (hdr->type == CLAP_EVENT_MIDI2) {
@@ -1103,8 +1116,7 @@ static bool clap_phase_decode_midi_events(PulpClapPlugin* self,
                                             is_ump_expression_state_event(p);
                     const bool state_event = ownership_event ||
                         is_ump_expression_state_event(p);
-                    if (!self->ump_buffer.add(
-                            p, static_cast<int32_t>(hdr->time)) && state_event)
+                    if (!self->ump_buffer.add(p, event_offset) && state_event)
                         state_event_dropped = true;
                     host_delivered_ump = true;
                 }
@@ -2104,9 +2116,9 @@ clap_process_status clap_process(const clap_plugin_t* plugin, const clap_process
 
     bool sidecar_event_seen = false;
     bool state_event_dropped = false;
-    const bool host_delivered_ump =
-        clap_phase_decode_midi_events(self, process, sidecar_event_seen,
-                                      state_event_dropped);
+    pulp::format::EventTimeAdmission event_admission{static_cast<std::int64_t>(num_samples)};
+    const bool host_delivered_ump = clap_phase_decode_midi_events(
+        self, process, event_admission, sidecar_event_seen, state_event_dropped);
     if (state_event_dropped) {
         // A partial stateful stream is unsafe even on a normal render: a
         // retained attack followed by a dropped release can stick forever,
@@ -2119,6 +2131,7 @@ clap_process_status clap_process(const clap_plugin_t* plugin, const clap_process
     }
 
     auto ctx = clap_phase_build_context(self, process, num_samples);
+    ctx.timing.refused_events = event_admission.refused;
 
     auto all_params = self->store.all_params();
     clap_phase_snapshot_params(self, all_params);

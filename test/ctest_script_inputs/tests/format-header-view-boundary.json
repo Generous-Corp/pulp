@@ -3,6 +3,7 @@
  "record": {
   "entry": "tools/scripts/format_header_view_boundary.py",
   "inputs": [
+   "core/runtime/include/pulp/runtime/build_info.hpp.in",
    "tools/scripts/format_header_view_boundary.py"
   ],
   "kind": "python"

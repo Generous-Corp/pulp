@@ -424,6 +424,7 @@ inline LV2_Handle instantiate(
     inst->urid_midi_event = urid_map->map(urid_map->handle, LV2_MIDI__MidiEvent);
     inst->urid_atom_sequence = urid_map->map(urid_map->handle, LV2_ATOM__Sequence);
     inst->urid_atom_chunk = urid_map->map(urid_map->handle, LV2_ATOM__Chunk);
+    inst->urid_atom_frame_time = urid_map->map(urid_map->handle, LV2_ATOM__frameTime);
     inst->urid_state_blob = urid_map->map(urid_map->handle, lv2_adapter::kStateBlobUri);
 
     auto& time_urids = inst->time_urids;
@@ -763,20 +764,31 @@ inline void run(LV2_Handle handle, uint32_t n_samples) {
         // prepared maximum, because the host timeline moved over all of it.
         Lv2BlockTransport block_transport(inst->transport, requested_samples, inst->sample_rate);
         bool transport_received = false;
+        // MIDI event times are admitted against the frames the Processor
+        // renders: one outside them, or any event of a sequence that is not
+        // stamped in frames, is refused and counted, never clamped.
+        format::EventTimeAdmission event_admission{static_cast<std::int64_t>(n_samples)};
         if (inst->midi_in_atom && inst->urid_atom_sequence && inst->urid_midi_event) {
             const auto* seq = static_cast<const LV2_Atom_Sequence*>(inst->midi_in_atom);
             if (seq->atom.type == inst->urid_atom_sequence) {
                 const auto& time_urids = inst->time_urids;
+                const bool in_frames =
+                    format::lv2_sequence_unit_is_frames(seq->body.unit, inst->urid_atom_frame_time);
                 LV2_ATOM_SEQUENCE_FOREACH(seq, ev) {
                     if (ev->body.type == inst->urid_midi_event) {
                         const auto* data = reinterpret_cast<const uint8_t*>(ev + 1);
                         const uint32_t size = ev->body.size;
-                        if (size >= 1 && size <= 3 && (data[0] & 0x80)) {
+                        if (size < 1 || size > 3 || !(data[0] & 0x80))
+                            continue;
+                        // A beat-time stamp is never read as frames.
+                        const auto offset =
+                            event_admission.admit(in_frames, in_frames ? ev->time.frames : 0);
+                        if (offset) {
                             midi::MidiEvent me;
                             me.message =
                                 choc::midi::ShortMessage(data[0], size > 1 ? data[1] : uint8_t{0},
                                                          size > 2 ? data[2] : uint8_t{0});
-                            me.sample_offset = static_cast<int32_t>(ev->time.frames);
+                            me.sample_offset = *offset;
                             inst->midi_in.add(me);
                         }
                         continue;
@@ -793,7 +805,10 @@ inline void run(LV2_Handle handle, uint32_t n_samples) {
                     const auto* obj = reinterpret_cast<const LV2_Atom_Object*>(&ev->body);
                     lv2_adapter::Lv2TimePosition fresh{};
                     if (decode_time_position(obj, time_urids, fresh)) {
-                        block_transport.apply(fresh, ev->time.frames);
+                        // A Position in a sequence not stamped in frames has
+                        // no frame of its own; -1 places it at the previous
+                        // event's frame, as for any out-of-block time.
+                        block_transport.apply(fresh, in_frames ? ev->time.frames : -1);
                         transport_received = true;
                     }
                 }
@@ -816,6 +831,7 @@ inline void run(LV2_Handle handle, uint32_t n_samples) {
                 inst->timing_discontinuity_pending);
             if (block_transport.rate_changed() && proc_ctx.timing.transport_moving)
                 proc_ctx.timing.playback_rate = format::PlaybackRate::NonUnit;
+            proc_ctx.timing.refused_events = event_admission.refused;
             inst->transport = block_transport.next_block_start();
         } else {
             // No transport ever seen: still run the diff so the snapshot tracks
@@ -823,6 +839,7 @@ inline void run(LV2_Handle handle, uint32_t n_samples) {
             boundary::apply_host_transport(proc_ctx, boundary::HostTransport{},
                                            inst->playhead_prev);
             proc_ctx.timing.discontinuity = inst->timing_discontinuity_pending;
+            proc_ctx.timing.refused_events = event_admission.refused;
         }
 
         inst->processor->process(process_buffers, inst->midi_in, inst->midi_out,
