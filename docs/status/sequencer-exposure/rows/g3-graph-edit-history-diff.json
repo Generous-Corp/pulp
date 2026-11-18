@@ -64,7 +64,7 @@
       "evidence": [
         {
           "kind": "cli_handler",
-          "path": "tools/cli/cmd_graph.cpp",
+          "path": "tools/cli/cmd_graph_diff.cpp",
           "needles": ["int diff_graphs("]
         },
         {

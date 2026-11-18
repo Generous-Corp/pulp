@@ -6,6 +6,11 @@
 
 #include <pluginterfaces/base/keycodes.h>
 
+#if defined(__linux__)
+#include "host_run_loop_lease.hpp"
+#include "vst3_host_run_loop.hpp"
+#endif
+
 #include <algorithm>
 #include <cstdint>
 #include <cstring>
@@ -14,6 +19,13 @@
 namespace pulp::format::vst3 {
 
 using namespace Steinberg;
+
+#if defined(__linux__)
+struct HostRunLoopLeaseBox {
+    explicit HostRunLoopLeaseBox(platform::HostRunLoop& loop) : lease(loop) {}
+    detail::HostRunLoopLease lease;
+};
+#endif
 
 ContractPlugView* ContractPlugView::create(PulpVst3Processor& owner, Processor& processor,
                                            state::StateStore& store, EditorFactory& factory,
@@ -44,6 +56,10 @@ ContractPlugView::ContractPlugView(PulpVst3Processor& owner)
 ContractPlugView::~ContractPlugView() {
     // Destroying the session invalidates an editor the host never detached.
     session_.reset();
+#if defined(__linux__)
+    run_loop_lease_.reset();
+    run_loop_.reset();
+#endif
     if (owner_ != nullptr)
         owner_->forget_contract_view(this);
 }
@@ -90,6 +106,25 @@ tresult PLUGIN_API ContractPlugView::attached(void* parent, FIDString type) {
     if (!session_->attach(native))
         return kResultFalse;
     return CPluginView::attached(parent, type);
+}
+
+tresult PLUGIN_API ContractPlugView::setFrame(IPlugFrame* frame) {
+#if defined(__linux__)
+    // A frame brings its own run loop: let go of the previous one first (this
+    // stops the editor's posts and timers under it), then lend the new one.
+    run_loop_lease_.reset();
+    run_loop_.reset();
+#endif
+    const auto result = CPluginView::setFrame(frame);
+#if defined(__linux__)
+    if (frame != nullptr) {
+        if (auto loop = HostRunLoop::from_frame(frame)) {
+            run_loop_ = std::move(loop);
+            run_loop_lease_ = std::make_unique<HostRunLoopLeaseBox>(*run_loop_);
+        }
+    }
+#endif
+    return result;
 }
 
 tresult PLUGIN_API ContractPlugView::removed() {

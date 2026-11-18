@@ -61,6 +61,7 @@
 #if defined(__linux__) && !defined(__ANDROID__)
 
 #include <cassert>
+#include "atspi_property_policy.hpp"
 #include "atspi_text_offsets.hpp"
 #include <pulp/view/accessibility.hpp>
 #include <pulp/view/accessibility_provider.hpp>
@@ -503,8 +504,18 @@ struct AtspiProvider {
         const std::string& m = ctx.member();
         if (m == "Get") {
             std::string iface, prop;
-            ctx.args().read_string(iface);
-            ctx.args().read_string(prop);
+            if (!ctx.args().read_string(iface) || !ctx.args().read_string(prop)) {
+                ctx.error(atspi_props::error_name(atspi_props::SetVerdict::invalid_args),
+                          "Get expects (interface, property)");
+                return true;
+            }
+            // Validate before building the reply: a reply started for a
+            // property that does not exist would be leaked by the decline path.
+            if (!atspi_props::is_readable(shape_for(index), iface, prop)) {
+                ctx.error(atspi_props::error_name(atspi_props::SetVerdict::unknown_property),
+                          "No such property: " + iface + "." + prop);
+                return true;
+            }
             DBus::Writer w = ctx.reply();
             return append_property_variant(w, index, iface, prop);
         }
@@ -519,30 +530,49 @@ struct AtspiProvider {
         }
         if (m == "Set") {
             std::string iface, prop;
-            ctx.args().read_string(iface);
-            ctx.args().read_string(prop);
-            // Application.Id (i) is writable — the registry sets it.
-            if (index == 0 && iface == kIfaceApplication && prop == "Id") {
-                DBus::Reader var;
-                int v = 0;
-                if (ctx.args().recurse(var) && var.read_int32(v)) app_id = v;
+            if (!ctx.args().read_string(iface) || !ctx.args().read_string(prop)) {
+                ctx.error(atspi_props::error_name(atspi_props::SetVerdict::invalid_args),
+                          "Set expects (interface, property, value)");
+                return true;
             }
-            // Value.CurrentValue (d) is writable — an AT-driven adjust (Orca's
+            DBus::Reader var;
+            int var_type = 0;
+            if (ctx.args().arg_type() == atspi_props::kTypeVariant && ctx.args().recurse(var)) {
+                var_type = var.arg_type();
+            }
+            const auto verdict = atspi_props::decide_set(shape_for(index), iface, prop, var_type);
+            if (verdict != atspi_props::SetVerdict::apply) {
+                ctx.error(atspi_props::error_name(verdict), "Cannot set " + iface + "." + prop);
+                return true;
+            }
+            // Application.Id (i) is writable: the registry sets it.
+            if (iface == kIfaceApplication && prop == "Id") {
+                int v = 0;
+                if (var.read_int32(v))
+                    app_id = v;
+            }
+            // Value.CurrentValue (d) is writable: an AT-driven adjust (Orca's
             // "increase/decrease") sets it; route to the View's value interface
             // along the SAME path a user adjust takes (set_current_value).
             else if (iface == kIfaceValue && prop == "CurrentValue") {
-                if (AccessibilityValueInterface* vif = value_iface(index)) {
-                    DBus::Reader var;
-                    double v = 0.0;
-                    if (ctx.args().recurse(var) && var.read_double(v)) {
-                        vif->set_current_value(v);
-                    }
+                double v = 0.0;
+                if (AccessibilityValueInterface* vif = value_iface(index);
+                    vif && var.read_double(v)) {
+                    vif->set_current_value(v);
                 }
             }
             ctx.reply();  // empty success ack
             return true;
         }
         return false;
+    }
+
+    atspi_props::NodeShape shape_for(int index) const {
+        atspi_props::NodeShape n;
+        n.is_root = (index == 0);
+        n.has_text = interfaces_for(index).text;
+        n.has_value = value_iface(index) != nullptr;
+        return n;
     }
 
     std::string name_for(int index) const {
