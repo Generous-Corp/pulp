@@ -1004,6 +1004,11 @@ inline const void* get_static_extension(const clap_plugin_t* plugin, const char*
         if (const auto* contract = clap_adapter::contract_timer_extension(plugin))
             return contract;
 #endif
+#if defined(PULP_CLAP_CONTRACT_GUI)
+    if (strcmp(id, CLAP_EXT_POSIX_FD_SUPPORT) == 0)
+        if (const auto* contract = clap_adapter::contract_posix_fd_extension(plugin))
+            return contract;
+#endif
 #if defined(PULP_CLAP_GUI) && PULP_CLAP_GUI && defined(__linux__)
     if (strcmp(id, CLAP_EXT_TIMER_SUPPORT) == 0)
         return &native_timer_ext;

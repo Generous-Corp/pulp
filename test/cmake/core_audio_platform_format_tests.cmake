@@ -390,6 +390,13 @@ pulp_add_test_suite(pulp-test-editor-host GROUP pulp-test-group-cap-format
 pulp_add_test_suite(pulp-test-main-thread-timer GROUP pulp-test-group-cap-format
     LIBRARIES pulp::format)
 
+# MainThreadScope and MainThreadTimer through a host's run loop (HostRunLoop),
+# driven by a fake loop, where the main thread is the host's.
+if(UNIX AND NOT APPLE)
+    pulp_add_test_suite(pulp-test-platform-host-run-loop
+        LIBRARIES pulp::platform)
+endif()
+
 # The same timer, and post_to_main_thread, inside AppKit's nested run loops
 # (menu tracking, modal panels) entered from a main-queue block. Its own
 # process: it creates the shared NSApplication and runs nested loops.

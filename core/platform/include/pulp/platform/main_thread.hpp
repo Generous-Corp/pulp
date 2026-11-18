@@ -25,8 +25,14 @@
 /// `NSModalPanelRunLoopMode` once AppKit's NSApplication exists, which is
 /// always true inside a host.
 ///
-/// Off Apple platforms there is no backend yet: main_thread_supported() is
-/// false, post() returns false and timers never fire.
+/// Off Apple platforms the main thread usually belongs to a host (a plug-in
+/// editor runs inside a DAW's UI thread), so there is no run loop to add
+/// sources to. A host that exposes its own loop (VST3 `Linux::IRunLoop`, CLAP
+/// timer-support and posix-fd-support) is given to this layer as a
+/// HostRunLoop, and posts and timers then run on the host's UI thread through
+/// it, with no thread and no connection of their own. Without a registered
+/// HostRunLoop main_thread_supported() is false, post() returns false (the
+/// refusal is visible to the caller) and timers never fire.
 
 #include <chrono>
 #include <cstdint>
@@ -36,12 +42,65 @@
 
 namespace pulp::platform {
 
+/// A host's UI run loop, for platforms where the main thread is the host's.
+/// An adapter implements this over the host's own API and registers it for as
+/// long as an editor can run.
+///
+/// Every member is called on the host's UI thread, except `on_ui_thread`,
+/// which may be called from any thread and must not call back into this layer.
+/// A host callback that is registered must not run after its remove call
+/// returns, and removing a timer or a descriptor from inside its own callback
+/// must be allowed.
+class HostRunLoop {
+  public:
+    virtual ~HostRunLoop() = default;
+
+    /// Whether the calling thread is the host's UI thread.
+    virtual bool on_ui_thread() const = 0;
+
+    /// Call `tick` every `period` on the UI thread until `remove_timer`.
+    /// Returns an id, or 0 when the host refuses.
+    virtual std::uint64_t add_timer(std::chrono::milliseconds period,
+                                    std::function<void()> tick) = 0;
+    virtual void remove_timer(std::uint64_t id) = 0;
+
+    /// Call `readable` on the UI thread while the descriptor `fd` is readable,
+    /// until `remove_fd`. Returns an id, or 0 when the host cannot watch
+    /// descriptors; posts then wake the UI thread through a short polling
+    /// timer instead.
+    virtual std::uint64_t add_fd(int fd, std::function<void()> readable) {
+        (void)fd;
+        (void)readable;
+        return 0;
+    }
+    virtual void remove_fd(std::uint64_t id) {
+        (void)id;
+    }
+};
+
+/// Identifies a registered host run loop; 0 is never a token.
+using HostRunLoopToken = std::uint64_t;
+
+/// Make `loop` the run loop that scopes and timers created from now on use,
+/// until `unregister_host_run_loop`. Registrations nest: the latest is used,
+/// and the previous one is used again once it is removed. `loop` must outlive
+/// its registration. UI thread only. Apple platforms have a run loop of their
+/// own: this returns 0 there and the loop is never called.
+HostRunLoopToken register_host_run_loop(HostRunLoop& loop);
+
+/// Remove a registration. Every scope and timer created under it stops
+/// first, through the loop itself, so the host keeps no callback into this
+/// binary; their later posts are refused. Returns false for an unknown token.
+/// UI thread only.
+bool unregister_host_run_loop(HostRunLoopToken token);
+
 /// Whether this platform has a main-thread backend for MainThreadScope and
-/// MainThreadTimer.
+/// MainThreadTimer: always on Apple platforms, elsewhere while a HostRunLoop
+/// is registered.
 bool main_thread_supported() noexcept;
 
-/// Whether the calling thread is the process main thread. False on platforms
-/// without a backend.
+/// Whether the calling thread is the process main thread, or the registered
+/// HostRunLoop's UI thread. False on platforms without a backend.
 bool is_main_thread() noexcept;
 
 namespace detail {
@@ -56,7 +115,9 @@ std::uint64_t main_thread_callouts() noexcept;
 /// Owner of the work one client (typically one editor) schedules on the main
 /// thread.
 ///
-/// Construct and destroy it on the main thread. When the destructor returns,
+/// Construct and destroy it on the main thread (the UI thread of the
+/// HostRunLoop in use, which must be registered when it is constructed; a scope
+/// made without one refuses every post). When the destructor returns,
 /// no task posted through it and no timer bound to it will run again, and no
 /// run-loop callback into this binary remains. Destroying the scope from
 /// inside one of its own tasks or timers is allowed; the remaining queued

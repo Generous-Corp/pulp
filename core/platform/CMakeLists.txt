@@ -105,6 +105,12 @@ elseif(UNIX AND NOT APPLE)
     target_link_libraries(pulp-platform PRIVATE ${CMAKE_DL_LIBS})
 endif()
 
+if(NOT APPLE)
+    # The main thread is a host's: scopes and timers run through the
+    # HostRunLoop an adapter registers.
+    target_sources(pulp-platform PRIVATE src/main_thread_host.cpp)
+endif()
+
 if(NOT (APPLE AND NOT IOS))
     target_sources(pulp-platform PRIVATE
         src/file_drag_stub.cpp

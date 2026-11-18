@@ -3,6 +3,8 @@
 #include <pulp/format/clap_adapter.hpp>
 #include <pulp/format/contract_editor_session.hpp>
 #include <pulp/format/detail/editor_environment.hpp>
+#include "clap_host_run_loop.hpp"
+#include "host_run_loop_lease.hpp"
 #include <pulp/runtime/log.hpp>
 
 #include <clap/ext/state.h>
@@ -23,12 +25,22 @@ struct ContractGui {
     const clap_host_t* host = nullptr;
     const clap_host_timer_support_t* host_timer = nullptr;
     clap_id timer_id = CLAP_INVALID_ID;
+#if !defined(__APPLE__)
+    // The host's run loop, lent to the platform layer while the editor can
+    // run: declared before the session so it outlives the editor.
+    std::unique_ptr<ClapHostRunLoop> run_loop;
+    std::unique_ptr<detail::HostRunLoopLease> run_loop_lease;
+#endif
     std::unique_ptr<ContractEditorSession> session;
 
     ~ContractGui() {
         stop_timer();
         // Destroying an attached session invalidates its editor.
         session.reset();
+#if !defined(__APPLE__)
+        run_loop_lease.reset();
+        run_loop.reset();
+#endif
     }
     void stop_timer() {
         if (timer_id != CLAP_INVALID_ID && host_timer != nullptr)
@@ -98,6 +110,17 @@ bool gui_create(const clap_plugin_t* plugin, const char* api, bool is_floating) 
     if (gui->host_timer != nullptr && (gui->host_timer->register_timer == nullptr ||
                                        gui->host_timer->unregister_timer == nullptr))
         gui->host_timer = nullptr;
+
+#if !defined(__APPLE__)
+    // Posts and timers an editor makes run on the host's UI thread through its
+    // timer and file descriptor support.
+    auto run_loop = std::make_unique<ClapHostRunLoop>(self->host);
+    if (run_loop->usable()) {
+        gui->run_loop_lease =
+            std::make_unique<detail::HostRunLoopLease>(*run_loop, run_loop->watches_fds());
+        gui->run_loop = std::move(run_loop);
+    }
+#endif
 
     ContractEditorSession::HostHooks hooks;
     hooks.request_resize = [self](const EditorSize& size) {
@@ -273,8 +296,29 @@ void on_timer(const clap_plugin_t* plugin, clap_id timer_id) {
     if (self == nullptr || !self->contract_gui)
         return;
     auto& gui = *gui_of(*self);
-    if (timer_id == gui.timer_id && gui.session)
+    if (timer_id == gui.timer_id && gui.session) {
         gui.session->tick();
+        return;
+    }
+#if !defined(__APPLE__)
+    if (gui.run_loop)
+        gui.run_loop->on_timer(timer_id);
+#endif
+}
+
+void on_fd(const clap_plugin_t* plugin, int fd, clap_posix_fd_flags_t flags) {
+#if !defined(__APPLE__)
+    auto* self = self_of(plugin);
+    if (self == nullptr || !self->contract_gui)
+        return;
+    auto& gui = *gui_of(*self);
+    if (gui.run_loop)
+        gui.run_loop->on_fd(fd, flags);
+#else
+    (void)plugin;
+    (void)fd;
+    (void)flags;
+#endif
 }
 
 const clap_plugin_gui_t s_contract_gui = {
@@ -299,6 +343,10 @@ const clap_plugin_timer_support_t s_contract_timer = {
     .on_timer = on_timer,
 };
 
+const clap_plugin_posix_fd_support_t s_contract_fd = {
+    .on_fd = on_fd,
+};
+
 } // namespace
 
 const clap_plugin_gui_t* contract_gui_extension(const clap_plugin_t* plugin) {
@@ -307,6 +355,15 @@ const clap_plugin_gui_t* contract_gui_extension(const clap_plugin_t* plugin) {
 
 const clap_plugin_timer_support_t* contract_timer_extension(const clap_plugin_t* plugin) {
     return applies(self_of(plugin)) ? &s_contract_timer : nullptr;
+}
+
+const clap_plugin_posix_fd_support_t* contract_posix_fd_extension(const clap_plugin_t* plugin) {
+#if !defined(__APPLE__)
+    return applies(self_of(plugin)) ? &s_contract_fd : nullptr;
+#else
+    (void)plugin;
+    return nullptr;
+#endif
 }
 
 ContractEditorSession* contract_gui_session(const clap_plugin_t* plugin) {

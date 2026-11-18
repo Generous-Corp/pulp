@@ -537,6 +537,16 @@ straight:
   session's own tick is a main-queue dispatch source, so tests pump the real
   run loop (`test_support::MainLoop`) and wait for ticks rather than count
   posted tasks.
+- Main-thread work off Apple: `gui_create` lends the host's `timer-support` (and
+  `posix-fd-support`, which the plug-in exposes only while the contract GUI
+  applies) to the platform layer as a `HostRunLoop`
+  (`clap_host_run_loop.hpp`, held by a `HostRunLoopLease` that outlives the
+  session). An editor's `platform::MainThreadScope` / `MainThreadTimer` then
+  run on the host's UI thread; `on_timer` forwards ids that are not the idle
+  timer, and `on_fd` forwards descriptors. A host with timers but no fd support
+  is polled on a short timer only by scopes the editor makes (the process-wide
+  post scope is not opened), so `post_to_main_thread` is refused there. The
+  fake host in `test_clap_contract_editor.cpp` counts live timers and fds.
 - Sizing comes from `Editor::size_hints()` through the session, not the adapter:
   `can_resize` / `get_resize_hints` / `adjust_size` follow
   `ContractEditorSession::resizable()` and `constrain()`. An editor that declares
