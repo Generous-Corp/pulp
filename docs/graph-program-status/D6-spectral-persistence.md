@@ -32,10 +32,8 @@ of D6 (`# flow 2`) is a separate change and is not part of this one.
   source node gets an authored ID like every other node. It previously
   bypassed the mint, contrary to the D1 design note that every add path
   allocates one; the v7 writer refuses a node without a valid authored ID.
-- `GraphEditHistory::checkpoint` declines a spectral graph, and
-  `to_saved_subgraph_document` refuses subgraph records on a spectral graph,
-  so the new v7 writer does not open history or subgraph persistence to
-  spectral graphs early.
+- `to_saved_subgraph_document` refuses subgraph records on a spectral graph,
+  so the v7 writer does not open subgraph persistence to spectral graphs.
 
 ## Refusal discipline
 
@@ -64,9 +62,9 @@ hooks cover both points (`fail_next_spectral_candidate_build`,
 
 ## Remainder
 
-- Spectral edit history (S7): checkpoint and restore need a bound on total
-  retained bytes, because each checkpoint embeds the assets. Remove the
-  `contains_spectral_nodes` guard in `GraphEditHistory::checkpoint` with it.
+- Spectral edit history is implemented: `GraphEditHistory` checkpoints
+  spectral graphs and bounds its total retained bytes (see
+  `docs/guides/spectral-asset-replay.md`, "Diff and edit history").
 - The installed A3 replay consumer still records a format 6 fixture; an
   installed v7 consumer (analysis and single-stream source) is not built yet.
 - Notation for spectral constructors (`# flow 2`) is the separate D6a change.
