@@ -81,6 +81,11 @@ class CodeqlCppShardTests(unittest.TestCase):
             by_name["examples-a"]["ignore"].split(), by_name["examples-b"]["paths"].split()
         )
 
+    def test_tools_b_takes_everything_tools_a_does_not(self) -> None:
+        by_name = {m["shard"]: m for m in self.cpp_job()["strategy"]["matrix"]["include"]}
+        self.assertEqual(by_name["tools-b"]["paths"], "tools")
+        self.assertEqual(by_name["tools-b"]["ignore"].split(), by_name["tools-a"]["paths"].split())
+
     def test_core_rest_ignores_exactly_the_named_core_shards(self) -> None:
         by_name = {m["shard"]: m for m in self.cpp_job()["strategy"]["matrix"]["include"]}
         named = []
