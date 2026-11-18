@@ -214,10 +214,10 @@ build_process_context(const ProcessData& data, const ProcessSetup& setup, int32 
         // set, but that is the quarter-note position of the last bar
         // start, not a bar index. Deriving matches `ProcessContext::bar`
         // and stays consistent with the AU/CLAP paths.
-        pulp::format::detail::derive_bar_from_beats(ctx);
         if (ctx.has_transport(pulp::format::TransportField::BeatPosition) &&
             ctx.has_transport(pulp::format::TransportField::TimeSignature)) {
-            ctx.transport_validity.set(pulp::format::TransportField::Bar);
+            ctx.transport_validity.set(pulp::format::TransportField::Bar,
+                                       pulp::format::detail::derive_bar_from_beats(ctx));
         }
     }
 

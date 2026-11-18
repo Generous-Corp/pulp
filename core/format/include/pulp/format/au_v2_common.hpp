@@ -308,10 +308,9 @@ inline void apply_host_callbacks_to_process_context(ProcessContext& ctx, const a
         ctx.transport_validity.set(TransportField::HostTime);
     }
 
-    detail::derive_bar_from_beats(ctx);
     if (ctx.has_transport(TransportField::BeatPosition) &&
         ctx.has_transport(TransportField::TimeSignature)) {
-        ctx.transport_validity.set(TransportField::Bar);
+        ctx.transport_validity.set(TransportField::Bar, detail::derive_bar_from_beats(ctx));
     }
     detail::compute_playhead_changes(
         ctx, previous, detail::TransportDiffMode::FieldValidity);

@@ -1539,6 +1539,18 @@ TEST_CASE("AU v2 host callbacks leave a non-finite beat or tempo unknown",
         REQUIRE(ordinary.has_transport(TransportField::BeatPosition));
     }
 
+    // A finite beat can still be outside the representable int64 bar range.
+    // It remains a valid beat position, but the derived bar must stay unknown.
+    transport.beat = 1.0e300;
+    transport.tempo = 120.0;
+    pulp::format::detail::PlayheadSnapshot previous_extreme;
+    auto extreme = pulp::format::au::make_render_process_context(48000.0, kFrames);
+    pulp::format::au::apply_host_callbacks_to_process_context(extreme, effect, previous_extreme,
+                                                              kSliceOffset);
+    REQUIRE(extreme.has_transport(TransportField::BeatPosition));
+    REQUIRE_FALSE(extreme.has_transport(TransportField::Bar));
+    REQUIRE(extreme.bar == 0);
+
     // Control: a finite tempo advances the beat by the slice offset.
     transport.beat = 2.0;
     pulp::format::detail::PlayheadSnapshot previous;
