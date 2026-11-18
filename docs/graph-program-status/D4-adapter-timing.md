@@ -128,8 +128,15 @@ playing transport read as a jump on each sliced render.
 `format::detail::au_event_raw_offset()` is the one AU v3 event placement
 (immediate window, or absolute against the rounded block `mSampleTime`, with
 overflow refused). The AU v3 MIDI path admits through it and refuses
-(`format::admit_au_event_time()`), as does the host path
-(`au_event_block_time()`). AU v3 parameter events still use
+(`format::admit_au_event_time()`). The host path (`au_event_block_time()`)
+calls that same admission rather than repeating the range check, so the two
+accept exactly the same times, including the refusal of an in-block offset
+past `INT32_MAX`. The host copy used to omit that cap; it could not overflow
+its `uint32_t` output (every offset is below the `uint32_t` frame count), but
+for a block longer than `INT32_MAX` frames it accepted offsets the adapter
+refused. No AU host renders blocks that long, so the difference was latent.
+A parity test in `test/test_process_timing.cpp` runs both over the same
+boundary cases. AU v3 parameter events still use
 `au_event_block_offset()`, which clamps an out-of-block offset to the nearest
 edge and falls back to the event time when the block time is unusable.
 

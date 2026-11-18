@@ -593,6 +593,23 @@ lane quietly stops exercising the code. `pulp-test-control-runtime-closure-sanit
 asserts whichever direction is true for the build it is compiled into, so each
 lane checks its own.
 
+## Windows: tests render offscreen by default
+
+A test must not put a window on the developer's screen. ctest exports
+`PULP_TEST_OFFSCREEN=1` for every registered test (the root `CMakeLists.txt`
+adds a `TEST_INCLUDE_FILES` script that sets it unless the caller already
+did). Under it the macOS window hosts, popup panels and test fixtures present
+into an ordered-in window that is fully transparent, click-through and never
+activates the application (`pulp/platform/test_visibility.hpp`); the SDL host
+parks its window outside the display. Presentation stays real, so a test that
+checks frames are presented still passes. Running an app by hand is unaffected.
+
+A visible window is opt-in with `PULP_TEST_SHOW_WINDOWS=1`. Tests that need
+it: `pulp-test-mac-hover-cursor-live` (drives the real pointer; it skips under
+the default) and the REAPER real-DAW smoke (`tools/testing/daw-smoke`, which
+launches a real host outside ctest). New tests use `order_in_window` rather
+than `makeKeyAndOrderFront`, or park the window far off screen.
+
 ## Adding a test — where will it land?
 
 - **A core unit/integration test** → add it with no special label. It runs on the

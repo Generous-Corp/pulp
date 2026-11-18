@@ -390,6 +390,29 @@ pulp_add_test_suite(pulp-test-editor-host GROUP pulp-test-group-cap-format
 pulp_add_test_suite(pulp-test-main-thread-timer GROUP pulp-test-group-cap-format
     LIBRARIES pulp::format)
 
+# MainThreadScope and MainThreadTimer through a host's run loop (HostRunLoop),
+# driven by a fake loop, where the main thread is the host's.
+if(UNIX AND NOT APPLE)
+    pulp_add_test_suite(pulp-test-platform-host-run-loop
+        LIBRARIES pulp::platform)
+endif()
+
+if(UNIX AND NOT APPLE)
+    # Stopping the hosted idle timer off-thread after the host loop is withdrawn.
+    pulp_add_test_suite(pulp-test-main-thread-timer-host-loop
+        LIBRARIES pulp::format)
+    if(PULP_HAS_VST3)
+        # The VST3 host run loop's handlers when a callback destroys the loop.
+        add_executable(pulp-test-vst3-host-run-loop-lifetime
+            test_vst3_host_run_loop_lifetime.cpp)
+        target_include_directories(pulp-test-vst3-host-run-loop-lifetime PRIVATE
+            ${CMAKE_SOURCE_DIR}/core/format/src)
+        target_link_libraries(pulp-test-vst3-host-run-loop-lifetime PRIVATE
+            pulp::format-core Catch2::Catch2WithMain)
+        catch_discover_tests(pulp-test-vst3-host-run-loop-lifetime)
+    endif()
+endif()
+
 # The same timer, and post_to_main_thread, inside AppKit's nested run loops
 # (menu tracking, modal panels) entered from a main-queue block. Its own
 # process: it creates the shared NSApplication and runs nested loops.

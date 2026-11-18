@@ -1699,7 +1699,7 @@ public:
                 mac_menu::install_application_menu(
                     menu_commands_, [] { pulp::view::mac_lifecycle::request_cocoa_app_stop(); });
                 show();
-                [NSApp activateIgnoringOtherApps:YES];
+                pulp::platform::activate_app_for_window();
             }
             [NSApp run];
             pulp::view::mac_lifecycle::pump_cocoa_main_thread_until(ready_to_return);
@@ -1855,7 +1855,7 @@ public:
     void adopt_foreground_role() {
         if (foreground_role_adopted_) return;
         foreground_role_adopted_ = true;
-        [NSApp setActivationPolicy:NSApplicationActivationPolicyRegular];
+        [NSApp setActivationPolicy:pulp::platform::foreground_activation_policy()];
         mac_menu::install_application_menu(
             menu_commands_, [] { pulp::view::mac_lifecycle::request_cocoa_app_stop(); });
     }
@@ -2190,7 +2190,7 @@ public:
             if (!options_initially_hidden_) {
                 show();
                 [window_ makeFirstResponder:metal_view_];
-                [NSApp activateIgnoringOtherApps:YES];
+                pulp::platform::activate_app_for_window();
             }
             [NSApp run];
             pulp::view::mac_lifecycle::pump_cocoa_main_thread_until(ready_to_return);

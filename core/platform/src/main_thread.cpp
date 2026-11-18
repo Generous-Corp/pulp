@@ -156,6 +156,15 @@ bool main_thread_supported() noexcept {
     return true;
 }
 
+// The main run loop is always there: a host's own loop is never needed.
+HostRunLoopToken register_host_run_loop(HostRunLoop&) {
+    return 0;
+}
+
+bool unregister_host_run_loop(HostRunLoopToken) {
+    return false;
+}
+
 bool is_main_thread() noexcept {
     return pthread_main_np() != 0;
 }
@@ -205,6 +214,10 @@ void MainThreadScope::remove_teardown(std::uint64_t id) {
             return;
         }
     }
+}
+
+MainThreadScope::FdWatch MainThreadScope::watch_fd(int, std::function<void()>) {
+    return {};
 }
 
 bool MainThreadScope::post(std::function<void()> fn) {
@@ -299,61 +312,6 @@ std::chrono::microseconds MainThreadTimer::tolerance() const {
         return std::chrono::microseconds(0);
     return std::chrono::microseconds(
         static_cast<long long>(CFRunLoopTimerGetTolerance(state_->timer) * 1.0e6));
-}
-
-#else // !__APPLE__
-
-namespace detail {
-struct MainThreadScopeState {};
-struct MainThreadTimerState {};
-std::uint64_t main_thread_callouts() noexcept {
-    return 0;
-}
-} // namespace detail
-
-bool main_thread_supported() noexcept {
-    return false;
-}
-
-bool is_main_thread() noexcept {
-    return false;
-}
-
-MainThreadScope::MainThreadScope() : state_(std::make_shared<detail::MainThreadScopeState>()) {}
-MainThreadScope::~MainThreadScope() = default;
-bool MainThreadScope::post(std::function<void()>) {
-    return false;
-}
-MainThreadScope::Handle MainThreadScope::handle() const {
-    return Handle(state_);
-}
-std::uint64_t MainThreadScope::add_teardown(std::function<void()>) {
-    return 0;
-}
-void MainThreadScope::remove_teardown(std::uint64_t) {}
-MainThreadScope::Handle::Handle(std::weak_ptr<detail::MainThreadScopeState> state)
-    : state_(std::move(state)) {}
-bool MainThreadScope::Handle::post(std::function<void()>) const {
-    return false;
-}
-bool MainThreadScope::Handle::alive() const {
-    return !state_.expired();
-}
-
-MainThreadTimer::MainThreadTimer(MainThreadScope&, std::function<void()>)
-    : state_(std::make_shared<detail::MainThreadTimerState>()) {}
-MainThreadTimer::~MainThreadTimer() = default;
-void MainThreadTimer::fire_after(std::chrono::milliseconds) {}
-void MainThreadTimer::fire_every(std::chrono::milliseconds) {}
-void MainThreadTimer::cancel() {}
-bool MainThreadTimer::pending() const {
-    return false;
-}
-std::optional<std::chrono::steady_clock::time_point> MainThreadTimer::next_fire() const {
-    return std::nullopt;
-}
-std::chrono::microseconds MainThreadTimer::tolerance() const {
-    return std::chrono::microseconds(0);
 }
 
 #endif

@@ -130,6 +130,25 @@ destroying editors. `ParamPort::get()` and `ParamPort::info()` may be called
 from any thread. A `VisualPort` has one reader thread, normally the editor's
 frame tick; the audio thread publishes without locks.
 
+### Main-thread work on Linux
+
+An editor that posts work to the main thread (`platform::MainThreadScope`) or
+runs a timer (`platform::MainThreadTimer`) runs it on the host's UI thread
+through the host's own run loop, with no thread or X connection of its own. The
+adapters lend the loop to the platform layer while an editor can run:
+
+- VST3: the view's `IPlugFrame` must offer `Linux::IRunLoop`. `setFrame()` lends
+  it (timers through `registerTimer`, wake-ups through `registerEventHandler`)
+  and `setFrame(nullptr)` takes it back, stopping everything made under it.
+- CLAP: `gui_create` lends the host's `timer-support`, and `posix-fd-support`
+  when the host has it; a host without descriptor watches is polled on a short
+  timer instead, but only for scopes an editor makes itself.
+
+Without a loop (no editor open, or a host that offers none) `post` is refused
+and timers never fire, so a caller sees the refusal rather than a task that
+never runs. Destroy an editor's scopes before the editor's window goes; a
+loop that goes first stops them.
+
 ## Parameters
 
 Values are in the parameter's plain domain. A continuous edit is

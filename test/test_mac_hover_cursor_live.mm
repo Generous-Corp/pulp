@@ -55,6 +55,7 @@
 // measurement aborts as VOID rather than emitting a verdict when it detects
 // the pointer is not where it put it.
 
+#include <pulp/platform/test_visibility.hpp>
 #import <AppKit/AppKit.h>
 #import <ApplicationServices/ApplicationServices.h>
 
@@ -190,6 +191,10 @@ bool pointer_is_where_we_put_it(CGPoint want) {
 // server, no Accessibility trust, or no observable cursor must skip rather than
 // report a passing measurement of nothing.
 bool live_window_session_available() {
+    // Drives the real pointer over a visible window: opt in with
+    // PULP_TEST_SHOW_WINDOWS=1 when the default offscreen mode is active.
+    if (pulp::platform::test_windows_offscreen())
+        return false;
     if (NSApp == nil) return false;
     if (!AXIsProcessTrusted()) return false;
     if ([NSScreen screens].count == 0) return false;
