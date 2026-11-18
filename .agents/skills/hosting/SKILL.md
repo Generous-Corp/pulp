@@ -1243,8 +1243,14 @@ save/reopen render proof beside the legacy caller-owned route controls.
   touched, so a format 6 load gets the same migrated IDs every time. Every
   spectral node factory must go through `push_node_locked_` (a direct
   `nodes_.push_back` leaves the node without an authored ID, and the v7
-  writer then refuses it). `GraphEditHistory::checkpoint` still declines
-  spectral graphs until history bounds retained asset bytes.
+  writer then refuses it). `GraphEditHistory` covers spectral graphs; its
+  `byte_budget` bounds total retained bytes (every checkpoint embeds the
+  assets) and a commit past it is refused with `ByteBudgetExceeded`, never by
+  evicting entries. A prepared spectral graph refuses every load, so call
+  `stop_spectral_controller()` before undo or redo. The diff reports a
+  spectral node's `spectral` record member by member (`spectral.gains`,
+  `spectral.stage`, `spectral.asset`) and assets by id under
+  `spectral_assets`.
 - Use `connect_automation()` for sparse two-point-per-block control events.
   Use `connect_audio_rate_modulation()` only for continuous, automatable
   `HostParamInfo::rate == AudioRate` params; do not route dense CV into

@@ -1589,12 +1589,16 @@ the v6 file first. The JSON
 result reports `code` (`Ok`), `equal`, a numbering-independent digest of each
 compared document (`before_digest`, `after_digest`; equal documents have equal
 digests), `nodes`
-(`added`, `removed`, and `changed` with each node's differing `fields`),
+(`added`, `removed`, and `changed` with each node's differing `fields`; a
+spectral node's `spectral` record is compared member by member, as
+`spectral.gains`, `spectral.stage`, `spectral.asset` and so on),
 `connections` (`added`, `removed`, `changed`, keyed as
 `<source identity>[<port>] -> <destination identity>[<port>]`),
 `event_connections` (`added`, `removed`, `changed`, the graph event connection
 keyed as `<producer identity>[<port>] => <consumer identity>[<port>]`; a kind
 change is `changed`),
+`spectral_assets` (`added`, `removed`, `changed`, embedded spectral assets by
+asset id; new bytes are a new id, so one asset removed and one added),
 `layout_changed` (editor layout only, never semantic), and `sections_changed`
 (other top-level members such as `format_version` or `sample_regions`; NodeIds
 in `sample_regions` are compared as the identities they bind, and the other
