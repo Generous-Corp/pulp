@@ -70,7 +70,7 @@ inline void order_in_window(NSWindow* window, bool make_key = true) {
     if (make_key)
         [window makeKeyAndOrderFront:nil];
     else
-        [window orderFrontRegardless];
+        [window orderFront:nil];
 }
 
 /// Dock/menu-bar role for a foreground app: Accessory (no Dock icon, no menu
