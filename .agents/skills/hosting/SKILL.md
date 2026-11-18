@@ -203,7 +203,14 @@ while `restore_state()` checks every value (bounds included) before the first
 write. A release through `dispatch_deferred()` also retires the key in the
 bank's MPE tracker, and a graph failure during `render()` silences the whole
 block. `begin_block()` with a block open is `Busy` and `publish()` with no block
-is `StaleEpoch`, matching `HostEventIngress`. Saved-bank activation,
+is `StaleEpoch`, matching `HostEventIngress`. On a reset the bank cuts every
+voice (`HardCut`) unless `set_retirement_policy()` opted into `DrainRetired`;
+a drain deadline is counted in rendered frames and `render()` splits its graph
+slices at it, so do not move the cut to a block boundary (that breaks
+partition invariance). A drain is tied to its generation: a steal or All Sound
+Off clears it, otherwise the old deadline would cut the replacement note. The
+owner's `reset()` is skipped while anything drains, so an owner that needs it
+must tolerate it running later. Saved-bank activation,
 edit/undo, DAW adapters, and paced
 realtime qualification remain open; do not infer them from the source-installed
 consumer.
@@ -647,6 +654,12 @@ commit, because it is the one reset step another thread can make fail (`Busy`
 while the ingress block is open). `VoiceBankBinding::activate()` is a
 control-thread call; the audio owner resets a bank with
 `reserve_event_reset()` / `commit_event_reset()`.
+
+`process_checked()` advances the trigger cursor after a routed failure only
+when the producer already ran. No graph a trigger plan admits reaches that
+branch today (every admitted node's routed binding cannot fail), so a test that
+wants it must first admit a node that can fail; do not count the MPE preflight
+case as covering it, since that refusal returns before routed execution.
 
 A graph `ProcessingFailure` is not retryable: a refused projection restores
 the block's records into the ingress and leaves the cursor in place, and the
@@ -1270,7 +1283,11 @@ save/reopen render proof beside the legacy caller-owned route controls.
   `stop_spectral_controller()` before undo or redo. The diff reports a
   spectral node's `spectral` record member by member (`spectral.gains`,
   `spectral.stage`, `spectral.asset`) and assets by id under
-  `spectral_assets`.
+  `spectral_assets`. Event connection records on one endpoint pair are paired
+  by sorted kind like parallel audio connections (`key`, `key #2`), since
+  inspection admits two records that differ only by kind. A `Diverged` detail
+  counts node, connection, event connection, spectral asset and section
+  differences.
 - Use `connect_automation()` for sparse two-point-per-block control events.
   Use `connect_audio_rate_modulation()` only for continuous, automatable
   `HostParamInfo::rate == AudioRate` params; do not route dense CV into

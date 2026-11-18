@@ -24,6 +24,7 @@
 #include <limits>
 #include <memory>
 #include <optional>
+#include <set>
 #include <vector>
 
 using namespace pulp;
@@ -42,6 +43,9 @@ constexpr int kMaxFrames = 256;
 struct ObservedBlock {
     format::ProcessContext ctx;
     std::vector<std::int32_t> offsets;
+    // Notes the probe still holds after this block, applying a requested
+    // reset before the block's events as a voice-owning Processor would.
+    std::size_t held = 0;
 };
 
 std::vector<ObservedBlock>* g_sink = nullptr;
@@ -70,14 +74,26 @@ class TimingProbe final : public format::Processor {
             for (std::size_t i = 0; i < out.num_samples(); ++i)
                 oc[i] = 0.0f;
         }
+        if (ctx.reset_requested)
+            held_.clear();
+        for (const auto& event : midi_in) {
+            if (event.is_note_on())
+                held_.insert(event.note());
+            else if (event.is_note_off())
+                held_.erase(event.note());
+        }
         if (!g_sink)
             return;
         ObservedBlock block;
         block.ctx = ctx;
         for (const auto& event : midi_in)
             block.offsets.push_back(event.sample_offset);
+        block.held = held_.size();
         g_sink->push_back(block);
     }
+
+  private:
+    std::set<int> held_;
 };
 
 std::unique_ptr<format::Processor> make_probe() {
@@ -126,6 +142,8 @@ struct Block {
     std::int64_t project = 0;
     int frames = 64;
     std::vector<std::int32_t> event_offsets{};
+    // Note-offs for the same key as the note-ons in `event_offsets`.
+    std::vector<std::int32_t> note_off_offsets{};
 };
 
 struct Vst3Host {
@@ -178,6 +196,16 @@ struct Vst3Host {
             event.noteOn.pitch = 60;
             event.noteOn.velocity = 0.8f;
             event.noteOn.noteId = -1;
+            in_events.addEvent(event);
+        }
+        for (const auto offset : block.note_off_offsets) {
+            Steinberg::Vst::Event event{};
+            event.type = Steinberg::Vst::Event::kNoteOffEvent;
+            event.sampleOffset = offset;
+            event.noteOff.channel = 0;
+            event.noteOff.pitch = 60;
+            event.noteOff.velocity = 0.0f;
+            event.noteOff.noteId = -1;
             in_events.addEvent(event);
         }
 
@@ -369,6 +397,56 @@ TEST_CASE("VST3 event offsets outside the block are refused, never clamped",
     REQUIRE(results ==
             std::vector<HostEventResult>{HostEventResult::Accepted, HostEventResult::Accepted});
     REQUIRE(projected == std::vector<std::int64_t>{0, 31});
+}
+
+TEST_CASE("VST3 requests a reset after refusing a host event so no release is lost",
+          "[process-timing][vst3][offsets][reset]") {
+    Vst3Host host;
+    // A note-on in the block and its release exactly at the end: the release
+    // is refused, so this block leaves the note held.
+    host.run({.continuous = 0,
+              .project = 0,
+              .frames = 32,
+              .event_offsets = {0},
+              .note_off_offsets = {32}});
+    host.run({.continuous = 32, .project = 32, .frames = 32});
+    host.run({.continuous = 64, .project = 64, .frames = 32});
+    // A release in the unrendered tail of an oversized block is refused too.
+    host.run({.continuous = 96, .project = 96, .frames = 32, .event_offsets = {0}});
+    host.run({.continuous = 128,
+              .project = 128,
+              .frames = 2 * kMaxFrames,
+              .note_off_offsets = {kMaxFrames + 1}});
+    host.run({.continuous = 128 + 2 * kMaxFrames, .project = 128 + 2 * kMaxFrames, .frames = 32});
+    // Negative control: an in-block release refuses nothing and requests no
+    // reset.
+    host.run({.continuous = 160 + 2 * kMaxFrames,
+              .project = 160 + 2 * kMaxFrames,
+              .frames = 32,
+              .event_offsets = {0},
+              .note_off_offsets = {31}});
+    host.run({.continuous = 192 + 2 * kMaxFrames, .project = 192 + 2 * kMaxFrames, .frames = 32});
+    REQUIRE(host.observed.size() == 8);
+
+    // The refusing block itself is delivered as decoded, without a reset.
+    CHECK(host.observed[0].offsets == std::vector<std::int32_t>{0});
+    CHECK(host.observed[0].ctx.timing.refused_events == 1);
+    CHECK_FALSE(host.observed[0].ctx.reset_requested);
+    CHECK(host.observed[0].held == 1);
+    // The next block carries the reset once, so the note is released there.
+    CHECK(host.observed[1].ctx.reset_requested);
+    CHECK(host.observed[1].held == 0);
+    CHECK_FALSE(host.observed[2].ctx.reset_requested);
+
+    CHECK(host.observed[3].held == 1);
+    CHECK(host.observed[4].ctx.timing.refused_events == 1);
+    CHECK(host.observed[4].held == 1);
+    CHECK(host.observed[5].ctx.reset_requested);
+    CHECK(host.observed[5].held == 0);
+
+    CHECK(host.observed[6].ctx.timing.refused_events == 0);
+    CHECK(host.observed[6].held == 0);
+    CHECK_FALSE(host.observed[7].ctx.reset_requested);
 }
 
 TEST_CASE("VST3 events in the unrendered tail of an oversized block are refused",

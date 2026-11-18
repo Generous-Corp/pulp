@@ -842,11 +842,16 @@ inline void run(LV2_Handle handle, uint32_t n_samples) {
             proc_ctx.timing.refused_events = event_admission.refused;
         }
 
+        // A block that refused a host event owes the next one a reset: the
+        // refused event may have been a release the count cannot identify.
+        if (inst->refused_event_reset_pending)
+            proc_ctx.reset_requested = true;
         inst->processor->process(process_buffers, inst->midi_in, inst->midi_out,
                                  proc_ctx);
         // A tail past the prepared maximum never reached the Processor, so
         // the next block does not follow the last frame it saw.
         inst->timing_discontinuity_pending = requested_samples > n_samples;
+        inst->refused_event_reset_pending = event_admission.refused != 0;
 
         // Serialize outgoing MIDI back to the LV2 atom output port.
         write_midi_out_to_sequence(

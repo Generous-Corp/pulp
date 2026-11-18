@@ -51,9 +51,22 @@ The bound is the rendered frame count, so in an oversized host block whose
 prefix alone is rendered (CLAP, VST3, LV2) an event in the unrendered tail is
 refused too. Before this policy the AU v3 MIDI path copied `eventSampleTime`
 as an offset without placing it; with a valid block time it is now placed on
-the render axis, as AU v3 parameter events already were. Refusing a release
-can leave a note held; `refused_events` is the fact a Processor reads to
-reconcile its voices.
+the render axis, as AU v3 parameter events already were.
+
+A refused event may be a release (a note-off at or past the end of the block,
+before it, or in an unrendered tail), and `refused_events` is only a count: it
+does not say which voice the event was for. So every adapter treats a refusal
+the way CLAP already treats a dropped stateful event. The refusing block is
+delivered as decoded, and the next block the Processor observes carries
+`ProcessContext::reset_requested`, with the adapter's MPE tracker reset (CLAP,
+VST3, AU v3) before that block's events are tracked. The request survives a
+block the Processor does not observe (bypass, state-restore contention) and is
+consumed once a Processor call has seen it. A Processor that clears its voices
+on `reset_requested`, as `Processor::release()` already asks, therefore holds a
+note whose release was refused for at most one block. The adapters cannot tell
+a refused release from any other refused MIDI byte stream (a sustain pedal, a
+running-status message, SysEx), so any refusal requests the reset. Compliant
+hosts never trigger it.
 
 ## Per-format sources
 
@@ -140,12 +153,16 @@ edge and falls back to the event time when the block time is unusable.
   control), clock-source changes, a retired-epoch record refused. The adapter
   refuses out-of-block note times itself (at the end, and a time a cast to
   `int32_t` would have turned negative) and events in the unrendered tail of
-  an oversized block, with an in-block positive control.
+  an oversized block, with an in-block positive control. A note-on with its
+  release at the end of the block, or in an oversized tail, stays held in a
+  voice-tracking probe only until the next block, which carries the reset
+  once; an in-block release requests none.
 - `test/test_vst3_process_timing.cpp`: the real `PulpVst3Processor` through
   activation, processing restart, seek, cycle wrap, stopped transport, gap,
   `kContTimeValid` dropping out, a missing context, four partitions, and
   adapter refusal of negative, end, `INT32_MAX` and unrendered-tail offsets
-  with an in-block positive control.
+  with an in-block positive control, and the same refused-release reset
+  trace as CLAP.
 - `test/test_vst3_plugin_state.cpp`: the requirement mask now must include
   `kNeedContinousTimeSamples` because the decoder consumes it.
 - `test/test_au_plugin_state.mm`: the real AU v3 render block through
@@ -153,7 +170,8 @@ edge and falls back to the event time when the block time is unusable.
   reset, bypass with and without a counter, oversized and output-less renders,
   and re-allocation; MIDI placed against the block time (last frame and an
   immediate offset accepted; end, before, huge and a small absolute time
-  refused; an absolute time without a sample time refused).
+  refused; an absolute time without a sample time refused), each refusing
+  render followed by exactly one reset render.
   `test/test_au_multibus.mm` resets between two renders of one time stamp and
   requires a fresh Processor call.
 - `test/test_lv2_adapter.cpp`: the real LV2 `run()` through activation and
@@ -161,8 +179,9 @@ edge and falls back to the event time when the block time is unusable.
   block without the rate fact), a mid-block `time:Position`, partial and
   multiple Positions in one block, speed changes, stops and starts inside a
   block, numeric boundaries, a clamped tail, MIDI times refused outside the
-  block, and a beat-time sequence refused whole (beat 0 shares its bytes with
-  frame 0) beside an explicit `atom:frameTime` positive control.
+  block, a refused release followed by one reset `run()`, and a beat-time
+  sequence refused whole (beat 0 shares its bytes with frame 0) beside an
+  explicit `atom:frameTime` positive control.
 - `test/test_au_v2_process_timing.cpp`: the real AU v2 effect through
   `AUBase::DoRender` with a host input callback and host transport callbacks,
   and the instrument and MIDI processor through `Render()`: activation, invalid
