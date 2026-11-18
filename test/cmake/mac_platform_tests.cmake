@@ -351,7 +351,8 @@ if(TARGET pulp-native)
 endif()
 if(TARGET pulp-native)
     # The installed SDK carries the native surface: an outside project finds
-    # Pulp with COMPONENTS native and links MetalSurface, FramePump and input.
+    # Pulp with COMPONENTS native and links MetalSurface, FramePump and input
+    # on macOS, and the input and GL surface parts elsewhere.
     add_test(NAME cmake-native-sdk-consumer
         COMMAND ${CMAKE_COMMAND}
             -DPULP_BUILD_DIR=${CMAKE_BINARY_DIR}
