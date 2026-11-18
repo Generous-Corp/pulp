@@ -821,13 +821,7 @@ class ReleaseArtifactContentsTests(unittest.TestCase):
         # PulpInstallRules.cmake installs pulp-native wherever the target
         # exists, and integrations/pulp-native builds on every platform. The
         # union check above cannot see a platform that omits it.
-        for platform in (
-            "darwin-arm64",
-            "darwin-x64",
-            "linux-x64",
-            "linux-arm64",
-            "windows-x64",
-        ):
+        for platform in rac.DEFAULT_MATRIX.platforms:
             with self.subTest(platform=platform):
                 self.assertIn(
                     "pulp-native",
