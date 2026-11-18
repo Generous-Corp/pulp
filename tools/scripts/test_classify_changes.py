@@ -426,14 +426,15 @@ class IosCompileRequiredTests(unittest.TestCase):
                 root_text,
             )
             self.assertIsNotNone(guarded, f"{subdir} lost its NOT IOS guard")
-        # pulp-native builds on macOS and Windows only: integrations/CMakeLists.txt
-        # refuses it on iOS, and the root adds its example plug-in only when the
+        # pulp-native builds on desktop macOS, Windows and Linux only:
+        # integrations/CMakeLists.txt refuses it on iOS, and the root adds its example plug-in only when the
         # pulp-native target exists. Its CMake, and that of packages built on it, never
         # runs in the iOS gate either.
         integrations_text = (repo / "integrations/CMakeLists.txt").read_text(encoding="utf-8")
         self.assertRegex(
             integrations_text,
-            r"if\(NOT \(\(APPLE AND NOT IOS AND NOT PULP_IOS\) OR WIN32\)\)\s*\n"
+            r"if\(NOT \(\(APPLE AND NOT IOS AND NOT PULP_IOS\) OR WIN32 OR\s*\n"
+            r"\s*\(UNIX AND NOT APPLE AND NOT ANDROID AND NOT EMSCRIPTEN\)\)\)\s*\n"
             r"\s*message\(FATAL_ERROR\s*\n"
             r"\s*\"PULP_ENABLE_PULP_NATIVE=ON",
             "pulp-native lost its iOS refusal",
