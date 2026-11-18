@@ -42,6 +42,7 @@ Required platform notes:
 - macOS: no extra package discovery beyond the system WebKit framework
 - Windows: normal Visual Studio/CMake toolchain plus a WebView2-capable runtime
 - Linux: `gtk+-3.0` and `webkit2gtk-4.1` available through `pkg-config`
+- Linux: the WebView is not in the `pulp::view` umbrella. A target that uses `WebViewPanel` links `pulp::view-webview` itself; every other plug-in must have no gtk, webkit or javascriptcore in its NEEDED list (`linux-webview-optional-artifacts`, with a link-closure check at configure). Missing GTK3/WebKitGTK dev files turn `PULP_BUILD_WEBVIEW` off with a warning.
 
 Keep claims narrow:
 - macOS has the deepest runtime proof today, including Monaco in a native host
