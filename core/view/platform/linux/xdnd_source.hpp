@@ -128,7 +128,10 @@ inline bool run_drag_source(Display* display, int screen, const std::vector<std:
     // The protocol source: an unmapped input-only window created on this
     // connection. Targets address XdndStatus / XdndFinished to it, and those
     // messages reach the client that created the window, which is this pumped
-    // connection.
+    // connection. No event mask is selected on it on purpose: XDND peers send
+    // with XSendEvent and an empty event mask, and Xlib defines that case as
+    // delivery to the client that created the destination window, whatever that
+    // client selected. A ClientMessage cannot be selected by any mask.
     XSetWindowAttributes source_attrs{};
     source_attrs.override_redirect = True;
     const Window root = RootWindow(display, screen);

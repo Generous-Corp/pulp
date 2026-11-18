@@ -25,6 +25,8 @@
 #include <pulp/platform/dbus.hpp>
 #include <atomic>
 #include <chrono>
+#include <cstdlib>
+#include <cstdio>
 #include <thread>
 #include <vector>
 #endif
@@ -405,7 +407,8 @@ struct WireNode {
 // Drive a blocking client call on a worker thread while the server pumps on
 // this (main) thread, mirroring the existing test_dbus loopback: send_with_
 // reply_and_block pumps only the CLIENT connection, so the provider must
-// dispatch() concurrently to route + answer. Returns false on timeout.
+// dispatch() concurrently to route + answer. Returns false when the call fails;
+// a call that never returns ends the process with a named failure.
 template <typename CallFn>
 bool run_client_call(void* provider_handle, CallFn&& call_fn) {
     std::atomic<bool> done{false};
@@ -414,9 +417,20 @@ bool run_client_call(void* provider_handle, CallFn&& call_fn) {
         ok = call_fn();
         done = true;
     });
-    for (int i = 0; i < 400 && !done.load(); ++i) {
+    // Each client call is itself bounded (call_method's default timeout is 5 s),
+    // so allow a little longer than that before treating the run as hung.
+    for (int i = 0; i < 1600 && !done.load(); ++i) {
         pulp::view::accessibility_pump(provider_handle);
         std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    }
+    if (!done.load()) {
+        // The call never returned. Joining would hang the run, and the worker
+        // holds references into this frame, so it cannot be detached either:
+        // end the process with a named failure instead.
+        std::fprintf(stderr,
+                     "FAIL bounded client call expired: an AT-SPI client call did not return\n");
+        std::fflush(stderr);
+        std::_Exit(3);
     }
     worker.join();
     return ok.load();
@@ -592,7 +606,7 @@ TEST_CASE("Linux AT-SPI exports a per-widget Accessible + Component tree",
         if (!client.connect_session()) return false;
         return client.call_method(
             server_name, gain_node.path, kIfaceComponent, "GetExtents",
-            [](DBus::Writer& w) { w.append_uint32(0u); },  // coord_type=screen
+            [](DBus::Writer& w) { w.append_uint32(1u); }, // coord_type=window
             [&](DBus::Reader& r) {
                 // reply: (iiii). Each read_int32 advances the cursor (the
                 // Reader contract), so no explicit next() between fields.
