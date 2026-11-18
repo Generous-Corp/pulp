@@ -6,6 +6,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include "../core/platform/platform/linux/meminfo_pressure.hpp"
+#include "../core/view/platform/linux/atspi_property_policy.hpp"
 #include "../core/view/platform/linux/atspi_text_offsets.hpp"
 #include "../core/view/platform/linux/xdnd_selection.hpp"
 #include <pulp/view/platform/atspi_geometry.hpp>
@@ -205,4 +206,50 @@ TEST_CASE("a non-positive scale is treated as 1", "[view][linux][pure][accessibi
     g.scale = 0.0f;
     CHECK(atspi::root_rect_in(10, 10, 20, 20, atspi::kCoordWindow, g) ==
           atspi::PixelRect{10, 10, 20, 20});
+}
+
+namespace props = pulp::view::atspi_props;
+
+TEST_CASE("AT-SPI Properties.Get readability follows the node shape", "[view][linux][pure]") {
+    const props::NodeShape root{true, false, false};
+    const props::NodeShape leaf{false, false, false};
+    const props::NodeShape slider{false, false, true};
+    const props::NodeShape field{false, true, false};
+    CHECK(props::is_readable(leaf, "org.a11y.atspi.Accessible", "Name"));
+    CHECK(props::is_readable(root, "org.a11y.atspi.Application", "Id"));
+    CHECK_FALSE(props::is_readable(leaf, "org.a11y.atspi.Application", "Id"));
+    CHECK(props::is_readable(slider, "org.a11y.atspi.Value", "CurrentValue"));
+    CHECK_FALSE(props::is_readable(leaf, "org.a11y.atspi.Value", "CurrentValue"));
+    CHECK(props::is_readable(field, "org.a11y.atspi.Text", "CaretOffset"));
+    CHECK_FALSE(props::is_readable(leaf, "org.a11y.atspi.Text", "CaretOffset"));
+    CHECK_FALSE(props::is_readable(leaf, "org.a11y.atspi.Accessible", "Nope"));
+    CHECK_FALSE(props::is_readable(leaf, "org.example.Unknown", "Name"));
+}
+
+TEST_CASE("AT-SPI Properties.Set maps each rejection to its D-Bus error", "[view][linux][pure]") {
+    const props::NodeShape root{true, false, false};
+    const props::NodeShape leaf{false, false, false};
+    const props::NodeShape slider{false, false, true};
+    using V = props::SetVerdict;
+    CHECK(props::decide_set(root, "org.a11y.atspi.Application", "Id", 'i') == V::apply);
+    CHECK(props::decide_set(root, "org.a11y.atspi.Application", "Id", 'd') == V::invalid_args);
+    CHECK(props::decide_set(root, "org.a11y.atspi.Application", "Id", 0) == V::invalid_args);
+    CHECK(props::decide_set(leaf, "org.a11y.atspi.Application", "Id", 'i') == V::unknown_property);
+    CHECK(props::decide_set(slider, "org.a11y.atspi.Value", "CurrentValue", 'd') == V::apply);
+    CHECK(props::decide_set(slider, "org.a11y.atspi.Value", "CurrentValue", 's') ==
+          V::invalid_args);
+    CHECK(props::decide_set(leaf, "org.a11y.atspi.Value", "CurrentValue", 'd') ==
+          V::unknown_property);
+    CHECK(props::decide_set(slider, "org.a11y.atspi.Value", "MaximumValue", 'd') == V::read_only);
+    CHECK(props::decide_set(leaf, "org.a11y.atspi.Accessible", "Name", 's') == V::read_only);
+    CHECK(props::decide_set(leaf, "org.a11y.atspi.Accessible", "Bogus", 's') ==
+          V::unknown_property);
+    CHECK(props::decide_set(leaf, "org.example.Unknown", "X", 's') == V::unknown_property);
+    CHECK(std::string(props::error_name(V::unknown_property)) ==
+          "org.freedesktop.DBus.Error.UnknownProperty");
+    CHECK(std::string(props::error_name(V::read_only)) ==
+          "org.freedesktop.DBus.Error.PropertyReadOnly");
+    CHECK(std::string(props::error_name(V::invalid_args)) ==
+          "org.freedesktop.DBus.Error.InvalidArgs");
+    CHECK(std::string(props::error_name(V::apply)).empty());
 }

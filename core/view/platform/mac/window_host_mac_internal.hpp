@@ -16,6 +16,7 @@
 #include <pulp/view/input_events.hpp>
 #include <pulp/view/plugin_view_host.hpp> // kEditorHostClear{R,G,B}
 #include <pulp/view/view.hpp>  // View::CursorStyle (set_ns_cursor_for_style)
+#include <pulp/platform/test_visibility.hpp>
 
 #include <cstdint>
 

@@ -42,6 +42,8 @@
 #include <pluginterfaces/gui/iplugviewcontentscalesupport.h>
 #include <public.sdk/source/common/pluginview.h>
 
+#include <pulp/platform/main_thread.hpp>
+
 #include <functional>
 #include <memory>
 
@@ -74,6 +76,7 @@ class ContractPlugView final : public Steinberg::CPluginView,
     Steinberg::tresult PLUGIN_API isPlatformTypeSupported(Steinberg::FIDString type) override;
     Steinberg::tresult PLUGIN_API attached(void* parent, Steinberg::FIDString type) override;
     Steinberg::tresult PLUGIN_API removed() override;
+    Steinberg::tresult PLUGIN_API setFrame(Steinberg::IPlugFrame* frame) override;
     Steinberg::tresult PLUGIN_API onKeyDown(Steinberg::char16 key, Steinberg::int16 keyCode,
                                             Steinberg::int16 modifiers) override;
     Steinberg::tresult PLUGIN_API onKeyUp(Steinberg::char16 key, Steinberg::int16 keyCode,
@@ -120,6 +123,13 @@ class ContractPlugView final : public Steinberg::CPluginView,
     Steinberg::tresult offer(const EditorKeyEvent& event);
 
     PulpVst3Processor* owner_;
+#if defined(__linux__)
+    // The host's run loop (IPlugFrame's IRunLoop), lent to the platform layer
+    // while the frame is set so the editor's posts and timers run on the
+    // host's UI thread. Declared before the session so it outlives the editor.
+    std::unique_ptr<platform::HostRunLoop> run_loop_;
+    std::unique_ptr<struct HostRunLoopLeaseBox> run_loop_lease_;
+#endif
     std::unique_ptr<ContractEditorSession> session_;
 };
 

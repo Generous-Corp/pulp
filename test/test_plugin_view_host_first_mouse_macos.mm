@@ -15,6 +15,7 @@
 
 #if TARGET_OS_OSX
 
+#include <pulp/platform/test_visibility.hpp>
 #import <AppKit/AppKit.h>
 
 #include <catch2/catch_test_macros.hpp>
@@ -75,7 +76,10 @@ void send_click(NSWindow* window, NSView* view, NSPoint local) {
 void check_first_press_lands(bool use_gpu) {
     [NSApplication sharedApplication];
     [NSApp setActivationPolicy:NSApplicationActivationPolicyAccessory];
-    [NSApp activateIgnoringOtherApps:YES];
+    pulp::platform::activate_app_for_window();
+    // Offscreen test runs must never take focus from the user.
+    if (pulp::platform::test_windows_offscreen())
+        REQUIRE_FALSE(NSApp.isActive);
 
     View root;
     root.set_bounds({0, 0, 320, 200});
@@ -96,20 +100,20 @@ void check_first_press_lands(bool use_gpu) {
     auto host = PluginViewHost::create(root, options);
     REQUIRE(host != nullptr);
 
-    NSWindow* editor_window = make_window(NSMakeRect(40, 40, 320, 200));
+    NSWindow* editor_window = make_window(NSMakeRect(-4000, 40, 320, 200));
     host->attach_to_parent((__bridge void*) editor_window.contentView);
     NSView* native_view = (__bridge NSView*) host->native_handle();
     REQUIRE(native_view != nil);
-    [editor_window orderFront:nil];
+    pulp::platform::order_in_window(editor_window, false);
 
     CHECK([native_view acceptsFirstMouse:nil]);
     // Control: the tree itself resolves a press here to the target, so a
     // miss below is AppKit's routing, not the view tree.
     REQUIRE(root.hit_test({160.0f, 100.0f}) == child_ptr);
     // The host's own window takes key, as a DAW's arrange window does.
-    NSWindow* host_window = make_window(NSMakeRect(420, 40, 120, 80));
+    NSWindow* host_window = make_window(NSMakeRect(-3500, 40, 120, 80));
     for (int press = 0; press < 3; ++press) {
-        [host_window makeKeyAndOrderFront:nil];
+        pulp::platform::order_in_window(host_window);
         pump(0.1);
         // Control: the editor window is really not key, so this press is the
         // one AppKit gates on -acceptsFirstMouse:.
@@ -118,6 +122,8 @@ void check_first_press_lands(bool use_gpu) {
         send_click(editor_window, native_view, NSMakePoint(160, 30 + press * 60));
         CHECK(clicks == before + 1);
     }
+    if (pulp::platform::test_windows_offscreen())
+        CHECK_FALSE(NSApp.isActive);
 
     [host_window orderOut:nil];
     [editor_window orderOut:nil];

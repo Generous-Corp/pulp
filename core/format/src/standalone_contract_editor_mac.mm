@@ -2,6 +2,7 @@
 // (detail/standalone_contract_editor.hpp): one NSWindow whose content view is
 // the editor's parent, driven by a plain event loop that also ticks the editor.
 
+#include <pulp/platform/test_visibility.hpp>
 #include <pulp/format/detail/standalone_contract_editor.hpp>
 
 #include <TargetConditionals.h>
@@ -354,8 +355,8 @@ bool run_standalone_contract_editor(Processor& processor, state::StateStore& sto
     if (!options.headless) {
         session->visibility_changed(true);
         [window center];
-        [window makeKeyAndOrderFront:nil];
-        [NSApp activateIgnoringOtherApps:YES];
+        pulp::platform::order_in_window(window);
+        pulp::platform::activate_app_for_window();
     }
 
     bool ok = true;

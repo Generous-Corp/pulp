@@ -53,6 +53,15 @@ if(PULP_BUILD_TESTS AND APPLE AND PULP_HAS_CLAP AND CMAKE_SYSTEM_PROCESSOR MATCH
     target_compile_definitions(pulp-test-clap-worker-mismatched PRIVATE
         PULP_ISOLATED_CLAP_SUPPORTED=1
         PULP_CLAP_WORKER_BUILD="0000000000000000000000000000000000000000000000000000000000000000")
+    # The production worker source and fingerprint, plus a hello delay read
+    # from the environment, so launch budgets are measured on a real worker.
+    add_executable(pulp-test-clap-worker-delayed clap_worker_main.cpp)
+    target_include_directories(pulp-test-clap-worker-delayed PRIVATE "${PULP_ROOT_DIR}/core/host/src")
+    target_link_libraries(pulp-test-clap-worker-delayed PRIVATE pulp::host pulp::runtime clap)
+    target_compile_definitions(pulp-test-clap-worker-delayed PRIVATE
+        PULP_ISOLATED_CLAP_SUPPORTED=1
+        PULP_CLAP_WORKER_TEST_HELLO_DELAY=1
+        PULP_CLAP_WORKER_BUILD="${_clap_worker_fingerprint}")
     add_executable(pulp-test-isolated-clap-construction
         "${PULP_ROOT_DIR}/test/fixtures/isolated_clap/construction_probe.cpp")
     target_link_libraries(pulp-test-isolated-clap-construction PRIVATE pulp::host)
@@ -60,14 +69,17 @@ if(PULP_BUILD_TESTS AND APPLE AND PULP_HAS_CLAP AND CMAKE_SYSTEM_PROCESSOR MATCH
     add_library(pulp-isolated-clap-fixture MODULE "${PULP_ROOT_DIR}/test/fixtures/isolated_clap/plugin.cpp")
     target_link_libraries(pulp-isolated-clap-fixture PRIVATE clap)
     set_target_properties(pulp-isolated-clap-fixture PROPERTIES PREFIX "" SUFFIX ".clap")
-    add_executable(pulp-test-isolated-clap-worker "${PULP_ROOT_DIR}/test/test_isolated_clap_worker.cpp")
+    add_executable(pulp-test-isolated-clap-worker "${PULP_ROOT_DIR}/test/test_isolated_clap_worker.cpp"
+        "${PULP_ROOT_DIR}/test/test_isolated_clap_launch_budget.cpp")
     target_link_libraries(pulp-test-isolated-clap-worker PRIVATE pulp::host Catch2::Catch2WithMain)
     target_include_directories(pulp-test-isolated-clap-worker PRIVATE "${PULP_ROOT_DIR}/core/host/src")
     target_compile_definitions(pulp-test-isolated-clap-worker PRIVATE
         PULP_ISOLATED_CLAP_FIXTURE="$<TARGET_FILE:pulp-isolated-clap-fixture>"
         PULP_CLAP_WORKER_PATH="$<TARGET_FILE:pulp-clap-worker>"
-        PULP_MISMATCHED_CLAP_WORKER_PATH="$<TARGET_FILE:pulp-test-clap-worker-mismatched>")
-    add_dependencies(pulp-test-isolated-clap-worker pulp-isolated-clap-fixture pulp-clap-worker pulp-test-clap-worker-mismatched)
+        PULP_MISMATCHED_CLAP_WORKER_PATH="$<TARGET_FILE:pulp-test-clap-worker-mismatched>"
+        PULP_DELAYED_CLAP_WORKER_PATH="$<TARGET_FILE:pulp-test-clap-worker-delayed>")
+    add_dependencies(pulp-test-isolated-clap-worker pulp-isolated-clap-fixture pulp-clap-worker
+        pulp-test-clap-worker-mismatched pulp-test-clap-worker-delayed)
     target_sources(pulp-test-isolated-clap-worker PRIVATE
         "${PULP_ROOT_DIR}/test/native_components/rt_intercept_test_support.cpp"
         "${PULP_ROOT_DIR}/test/fixtures/isolated_clap/callback_syscall_traps.cpp")

@@ -620,3 +620,9 @@ pulp_add_test_suite(pulp-test-voice-identity
 pulp_add_test_suite(pulp-test-voice-template
     SOURCES test_voice_template.cpp
     LIBRARIES pulp::host pulp::format pulp::graph)
+
+# Fixed-count voice-template declarations: expansion, the v7 document record,
+# restore, v6 compatibility, planted refusals, diff and edit history.
+pulp_add_test_suite(pulp-test-subgraph-voices
+    SOURCES test_subgraph_voices.cpp
+    LIBRARIES pulp::host pulp::format pulp::graph)

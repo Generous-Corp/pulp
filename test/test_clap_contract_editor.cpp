@@ -15,20 +15,25 @@
 
 #include <pulp/format/clap_adapter.hpp>
 #include <pulp/format/contract_editor_session.hpp>
+#include <pulp/format/detail/main_thread_timer.hpp>
 #include <pulp/format/processor.hpp>
+#include <pulp/platform/main_thread.hpp>
 #include <pulp/state/store.hpp>
 
 #include <clap/clap.h>
 #include <clap/ext/gui.h>
 #include <clap/ext/params.h>
 #include <clap/ext/state.h>
+#include <clap/ext/posix-fd-support.h>
 #include <clap/ext/timer-support.h>
 
 #include <array>
 #include <cstddef>
 #include <cstring>
+#include <functional>
 #include <memory>
 #include <string>
+#include <thread>
 #include <vector>
 
 using pulp::test_support::contract_config;
@@ -130,7 +135,10 @@ struct FakeHost {
     clap_host_gui_t gui{};
     clap_host_state_t state{};
     clap_host_timer_support_t timers{};
+    clap_host_posix_fd_support_t fds{};
     bool offers_timers = false;
+    bool offers_fds = false;
+    std::vector<int> live_fds;
     bool refuse_timers = false;
     bool accept_resize = true;
     bool inside_host_call = false;
@@ -158,6 +166,8 @@ struct FakeHost {
                 return &self->state;
             if (std::strcmp(id, CLAP_EXT_TIMER_SUPPORT) == 0)
                 return self->offers_timers ? &self->timers : nullptr;
+            if (std::strcmp(id, CLAP_EXT_POSIX_FD_SUPPORT) == 0)
+                return self->offers_fds ? &self->fds : nullptr;
             return nullptr;
         };
         host.request_restart = [](const clap_host_t*) {};
@@ -188,6 +198,20 @@ struct FakeHost {
             *id = self->next_timer++;
             self->live_timers.push_back(*id);
             return true;
+        };
+        fds.register_fd = [](const clap_host_t* h, int fd, clap_posix_fd_flags_t) {
+            static_cast<FakeHost*>(h->host_data)->live_fds.push_back(fd);
+            return true;
+        };
+        fds.modify_fd = [](const clap_host_t*, int, clap_posix_fd_flags_t) { return true; };
+        fds.unregister_fd = [](const clap_host_t* h, int fd) {
+            auto& live = static_cast<FakeHost*>(h->host_data)->live_fds;
+            for (auto it = live.begin(); it != live.end(); ++it)
+                if (*it == fd) {
+                    live.erase(it);
+                    return true;
+                }
+            return false;
         };
         timers.unregister_timer = [](const clap_host_t* h, clap_id id) {
             auto* self = static_cast<FakeHost*>(h->host_data);
@@ -800,3 +824,107 @@ TEST_CASE("an editor request cancels an older CLAP correction before acknowledgm
     REQUIRE(p.gui->set_size(p.plugin, 640, 480));
     p.gui->destroy(p.plugin);
 }
+
+#if !defined(__APPLE__)
+
+TEST_CASE("a CLAP contract editor's posts and timers run through the host's timers and fds",
+          "[clap][editor-host][clap-contract][host-run-loop]") {
+    EditorEnvironment env;
+    reset_contract_recording();
+    g_processor_has_factory = true;
+    FakeHost host;
+    host.offers_timers = true;
+    host.offers_fds = true;
+    OpenPlugin p(host);
+    auto* timer = static_cast<const clap_plugin_timer_support_t*>(
+        p.plugin->get_extension(p.plugin, CLAP_EXT_TIMER_SUPPORT));
+    auto* fd_ext = static_cast<const clap_plugin_posix_fd_support_t*>(
+        p.plugin->get_extension(p.plugin, CLAP_EXT_POSIX_FD_SUPPORT));
+    REQUIRE(timer != nullptr);
+    REQUIRE(fd_ext != nullptr);
+    REQUIRE_FALSE(pulp::platform::main_thread_supported());
+
+    // Opening the GUI lends the host's loop; its wake descriptor is watched.
+    REQUIRE(p.gui->create(p.plugin, platform_api(), false));
+    REQUIRE(pulp::platform::main_thread_supported());
+    REQUIRE(host.live_fds.size() == 1);
+    const int wake_fd = host.live_fds.front();
+
+    // A post from another thread waits for the host to report the descriptor.
+    std::thread::id ran_on;
+    std::function<void()> task = [&] { ran_on = std::this_thread::get_id(); };
+    bool posted = false;
+    std::thread worker([&] { posted = pulp::format::detail::post_to_main_thread(task); });
+    worker.join();
+    REQUIRE(posted);
+    REQUIRE(ran_on == std::thread::id{});
+    fd_ext->on_fd(p.plugin, wake_fd + 1000, CLAP_POSIX_FD_READ); // someone else's descriptor
+    REQUIRE(ran_on == std::thread::id{});
+    fd_ext->on_fd(p.plugin, wake_fd, CLAP_POSIX_FD_READ);
+    REQUIRE(ran_on == std::this_thread::get_id());
+
+    // A platform timer an editor makes is one of the host's timers.
+    pulp::platform::MainThreadScope scope;
+    int fires = 0;
+    pulp::platform::MainThreadTimer ticker(scope, [&] { ++fires; });
+    ticker.fire_every(std::chrono::milliseconds(20));
+    REQUIRE(host.live_timers.size() == 1);
+    REQUIRE(host.last_period == 20);
+    const clap_id id = host.live_timers.front();
+    timer->on_timer(p.plugin, id);
+    timer->on_timer(p.plugin, id);
+    REQUIRE(fires == 2);
+
+    // Closing the GUI withdraws the loop and every registration under it.
+    p.gui->destroy(p.plugin);
+    REQUIRE(host.live_fds.empty());
+    REQUIRE(host.live_timers.empty());
+    REQUIRE_FALSE(pulp::platform::main_thread_supported());
+    REQUIRE_FALSE(ticker.pending());
+    std::function<void()> late = [] {};
+    REQUIRE_FALSE(pulp::format::detail::post_to_main_thread(late));
+}
+
+TEST_CASE("a CLAP host without descriptor watches still runs an editor's own timers",
+          "[clap][editor-host][clap-contract][host-run-loop]") {
+    EditorEnvironment env;
+    reset_contract_recording();
+    g_processor_has_factory = true;
+    FakeHost host;
+    host.offers_timers = true;
+    OpenPlugin p(host);
+    auto* timer = static_cast<const clap_plugin_timer_support_t*>(
+        p.plugin->get_extension(p.plugin, CLAP_EXT_TIMER_SUPPORT));
+
+    REQUIRE(p.gui->create(p.plugin, platform_api(), false));
+    // No watch: the process-wide post scope is not opened, so the host's
+    // timers are untouched until an editor makes a scope of its own.
+    REQUIRE(host.live_timers.empty());
+    REQUIRE(pulp::platform::main_thread_supported());
+    std::function<void()> task = [] {};
+    REQUIRE_FALSE(pulp::format::detail::post_to_main_thread(task));
+
+    int ran = 0;
+    pulp::platform::MainThreadScope scope;
+    REQUIRE(host.live_timers.size() == 1); // its wake-up poll
+    scope.post([&] { ++ran; });
+    timer->on_timer(p.plugin, host.live_timers.front());
+    REQUIRE(ran == 1);
+    p.gui->destroy(p.plugin);
+}
+
+TEST_CASE("a CLAP host without timers leaves the platform layer without a loop",
+          "[clap][editor-host][clap-contract][host-run-loop]") {
+    EditorEnvironment env;
+    reset_contract_recording();
+    g_processor_has_factory = true;
+    FakeHost host;
+    OpenPlugin p(host);
+    REQUIRE(p.gui->create(p.plugin, platform_api(), false));
+    REQUIRE_FALSE(pulp::platform::main_thread_supported());
+    pulp::platform::MainThreadScope scope;
+    REQUIRE_FALSE(scope.post([] {}));
+    p.gui->destroy(p.plugin);
+}
+
+#endif

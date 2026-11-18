@@ -16,7 +16,7 @@ on:
       - "docs/**"
       - "planning"
   schedule:
-    - cron: '23 3 * * 1'
+    - cron: '23 3 * * *'
   workflow_dispatch:
 
 # A new push to a PR retires the previous head's analysis: CodeQL is advisory
@@ -34,10 +34,8 @@ permissions:
 jobs:
   analyze:
     name: Analyze ${{ matrix.language }}
-    # C++ CodeQL is retained for main, scheduled, and manual scans, but its
-    # repository-wide buildless extraction routinely exceeds a PR job budget.
-    # PR compilation/security coverage remains in the required native gates;
-    # CodeQL is advisory and must not monopolize the PR fleet.
+    # C++ is scanned by the sharded `analyze-cpp` job below, not here: one
+    # repository-wide extraction never finished (see that job).
     if: github.event_name != 'schedule' || github.repository == vars.PULP_PRIMARY_REPO
     runs-on: ${{ matrix.runner }}
     # Native autobuild can exceed 45 minutes on the hosted macOS/Linux images;
@@ -48,12 +46,6 @@ jobs:
       matrix:
         include:
           - language: actions
-            build-mode: none
-            runner: ubuntu-latest
-          - language: c-cpp
-            # Buildless extraction keeps CodeQL from monopolizing a runner for
-            # 90 minutes on this repository's full native graph. Compilation
-            # coverage remains in the required GCC/macOS/Windows build gates.
             build-mode: none
             runner: ubuntu-latest
           - language: javascript-typescript
@@ -74,7 +66,6 @@ jobs:
         uses: actions/checkout@v7.0.1
 
       - name: Initialize CodeQL
-        if: matrix.language != 'c-cpp' || github.event_name != 'pull_request'
         uses: github/codeql-action/init@v4
         with:
           languages: ${{ matrix.language }}
@@ -82,13 +73,97 @@ jobs:
           config-file: ./.github/codeql-config.yml
 
       - name: Autobuild
-        if: >-
-          (matrix.build-mode == 'autobuild') &&
-          (matrix.language != 'c-cpp' || github.event_name != 'pull_request')
+        if: matrix.build-mode == 'autobuild'
         uses: github/codeql-action/autobuild@v4
 
       - name: Analyze
-        if: matrix.language != 'c-cpp' || github.event_name != 'pull_request'
         uses: github/codeql-action/analyze@v4
         with:
           category: "/language:${{ matrix.language }}"
+
+  # C++ is analyzed in shards, nightly and on demand, not on every push.
+  #
+  # One buildless extraction of the whole repository (about 3,850 translation
+  # units) never completed: 0 of 271 runs from 2026-11-11 to 2026-11-17. The
+  # single extractor process grows about 0.5 GB a minute until the 16 GB runner
+  # is out of memory and is shut down (or the 90-minute timeout hits), so the
+  # cost is the size of one process, not the thread count. Each shard below
+  # extracts a slice in 2 to 12 minutes. The slices come from bisecting that
+  # failure; `rest` takes everything the named slices do not, so a new
+  # directory is still scanned.
+  #
+  # Two translation units make the extractor spin with growing memory and no
+  # end (more than 20 minutes alone, while the other 3,800 finish in minutes):
+  # tools/audio/host-probe/au_effect_ab.cpp and
+  # examples/pulp-delay/test_pulp_delay_ui.cpp. They are excluded until the
+  # cause is found; both are exercised by the build and test gates.
+  #
+  # Not a per-push job: 20 shards a push on hosted runners would queue behind
+  # the required Linux leg for no gain, since the scan is advisory.
+  analyze-cpp:
+    name: Analyze c-cpp (${{ matrix.shard }})
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'schedule' && github.repository == vars.PULP_PRIMARY_REPO)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {shard: core-view, paths: "core/view"}
+          - {shard: core-audio-host-format, paths: "core/audio core/host core/format"}
+          - {shard: core-timeline-canvas-platform, paths: "core/timeline core/canvas core/platform"}
+          - {shard: core-rest, paths: "core", ignore: "core/view core/audio core/host core/format core/timeline core/canvas core/platform"}
+          - {shard: tools-a, paths: "tools/appearance tools/audio tools/clap-worker tools/clap_param_probe.c tools/cli"}
+          - {shard: tools-b, paths: "tools", ignore: "tools/appearance tools/audio tools/clap-worker tools/clap_param_probe.c tools/cli"}
+          - {shard: examples-a, paths: "examples", ignore: "examples/ink-signal-sampler examples/ink-signal-showcase examples/ios-auv3-chainer examples/ios-auv3-gpu-smoke examples/ios-auv3-jsc-threejs examples/ios-auv3-synth examples/midi-learn-demo examples/pulp-compressor examples/pulp-delay examples/pulp-effect examples/pulp-gain examples/pulp-multi-out examples/pulp-pluck examples/pulp-tone examples/pulp-transpose examples/rust-gain examples/sample-region-allpass examples/sdf-effects-demo examples/sdf-text-demo"}
+          - {shard: examples-b, paths: "examples/ink-signal-sampler examples/ink-signal-showcase examples/ios-auv3-chainer examples/ios-auv3-gpu-smoke examples/ios-auv3-jsc-threejs examples/ios-auv3-synth examples/midi-learn-demo examples/pulp-compressor examples/pulp-delay examples/pulp-effect examples/pulp-gain examples/pulp-multi-out examples/pulp-pluck examples/pulp-tone examples/pulp-transpose examples/rust-gain examples/sample-region-allpass examples/sdf-effects-demo examples/sdf-text-demo"}
+          - {shard: test-a-d, paths: "test/test_a*.cpp test/test_b*.cpp test/test_c*.cpp test/test_d*.cpp test/test_e*.cpp"}
+          - {shard: test-f-l, paths: "test/test_f*.cpp test/test_g*.cpp test/test_h*.cpp test/test_i*.cpp test/test_j*.cpp test/test_k*.cpp test/test_l*.cpp"}
+          - {shard: test-m-r, paths: "test/test_m*.cpp test/test_n*.cpp test/test_o*.cpp test/test_p*.cpp test/test_q*.cpp test/test_r*.cpp"}
+          - {shard: test-s, paths: "test/test_s*.cpp"}
+          - {shard: test-t-z, paths: "test/test_t*.cpp test/test_u*.cpp test/test_v*.cpp test/test_w*.cpp test/test_x*.cpp test/test_y*.cpp test/test_z*.cpp"}
+          - {shard: test-rest, paths: "test", ignore: "test/test_a*.cpp test/test_b*.cpp test/test_c*.cpp test/test_d*.cpp test/test_e*.cpp test/test_f*.cpp test/test_g*.cpp test/test_h*.cpp test/test_i*.cpp test/test_j*.cpp test/test_k*.cpp test/test_l*.cpp test/test_m*.cpp test/test_n*.cpp test/test_o*.cpp test/test_p*.cpp test/test_q*.cpp test/test_r*.cpp test/test_s*.cpp test/test_t*.cpp test/test_u*.cpp test/test_v*.cpp test/test_w*.cpp test/test_x*.cpp test/test_y*.cpp test/test_z*.cpp"}
+          - {shard: rest, paths: ".", ignore: "core tools examples test"}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7.0.1
+
+      - name: Select this shard
+        env:
+          SHARD_PATHS: ${{ matrix.paths }}
+          SHARD_IGNORE: ${{ matrix.ignore }}
+        run: |
+          set -euo pipefail
+          {
+            echo "name: pulp-codeql-cpp-${{ matrix.shard }}"
+            if [ "$SHARD_PATHS" != "." ]; then
+              echo "paths:"
+              for p in $SHARD_PATHS; do
+                if [ -d "$p" ]; then echo "  - $p/**"; else echo "  - $p"; fi
+              done
+            fi
+            echo "paths-ignore:"
+            # What .github/codeql-config.yml ignores, plus the two translation
+            # units named above.
+            echo "  - test/fixtures/import-differential/holdout/**"
+            echo "  - tools/audio/host-probe/au_effect_ab.cpp"
+            echo "  - examples/pulp-delay/test_pulp_delay_ui.cpp"
+            for p in $SHARD_IGNORE; do
+              if [ -d "$p" ]; then echo "  - $p/**"; else echo "  - $p"; fi
+            done
+          } > .github/codeql-cpp-shard.yml
+          cat .github/codeql-cpp-shard.yml
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v4
+        with:
+          languages: c-cpp
+          build-mode: none
+          config-file: ./.github/codeql-cpp-shard.yml
+
+      - name: Analyze
+        uses: github/codeql-action/analyze@v4
+        with:
+          category: "/language:c-cpp/shard:${{ matrix.shard }}"

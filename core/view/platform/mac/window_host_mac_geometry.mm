@@ -399,6 +399,9 @@ NSWindow* create_configured_window(const pulp::view::WindowOptions& options) {
     // than in one of them.
     [window setAcceptsMouseMovedEvents:YES];
 
+    // Test runs present into a transparent, click-through window.
+    pulp::platform::make_window_invisible_for_test(window);
+
     return window;
 }
 
