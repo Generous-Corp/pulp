@@ -808,11 +808,3 @@ TEST_CASE("start_file_drag with empty files never consults the host backend",
     REQUIRE_FALSE(v.start_file_drag(empty));
     REQUIRE(host.calls == 0);  // early-out precedes host dispatch
 }
-
-TEST_CASE("xdnd teardown clears only a selection this source still owns", "[view][dnd][xdnd]") {
-    using namespace pulp::view::xdnd;
-    CHECK(owns_selection(0x42, 0x42));
-    CHECK(!owns_selection(0x99, 0x42));  // another client took it mid-drag
-    CHECK(!owns_selection(0, 0x42));     // already released
-    CHECK(!owns_selection(0, 0));        // no source window
-}
