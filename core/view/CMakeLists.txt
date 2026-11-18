@@ -175,6 +175,25 @@ include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/PulpViewSources.cmake")
 find_package(PkgConfig QUIET)
 
 option(PULP_BUILD_WEBVIEW "Include native WebView support (WebKit / WebView2 / WebKitGTK)" OFF)
+# On Linux the WebView needs GTK3 and WebKitGTK development files. Without them
+# the WebView is left out, with a warning, rather than failing the configure:
+# nothing else in Pulp needs GTK or WebKit.
+set(_pulp_webview_on_linux FALSE)
+if(PULP_BUILD_WEBVIEW AND UNIX AND NOT APPLE AND NOT ANDROID)
+    set(_pulp_webview_on_linux TRUE)
+    if(PkgConfig_FOUND)
+        pkg_check_modules(GTK3 QUIET IMPORTED_TARGET gtk+-3.0)
+        pkg_check_modules(WEBKIT2GTK QUIET IMPORTED_TARGET webkit2gtk-4.1)
+    endif()
+    if(NOT (GTK3_FOUND AND WEBKIT2GTK_FOUND))
+        message(WARNING
+            "PULP_BUILD_WEBVIEW=ON but GTK3 or WebKitGTK 4.1 development files "
+            "(libgtk-3-dev, libwebkit2gtk-4.1-dev) were not found: building without WebView")
+        set(PULP_BUILD_WEBVIEW OFF CACHE BOOL
+            "Include native WebView support (WebKit / WebView2 / WebKitGTK)" FORCE)
+        set(_pulp_webview_on_linux FALSE)
+    endif()
+endif()
 if(PULP_BUILD_WEBVIEW)
     add_library(pulp-view-webview STATIC
         src/web_view.cpp
@@ -202,20 +221,24 @@ if(PULP_BUILD_WEBVIEW)
     target_link_libraries(pulp-view-webview PUBLIC pulp::view-core)
     # editor_bridge_webview.cpp adapts the Pulp-kept EditorBridge.
     target_link_libraries(pulp-view-webview PUBLIC pulp::view-tooling)
-    target_link_libraries(pulp-view PUBLIC pulp::view-webview)
     # PUBLIC so tests and downstream callers see whether this composition
     # compiles WebView in.
     target_compile_definitions(pulp-view-webview PUBLIC PULP_BUILD_WEBVIEW=1)
-    target_compile_definitions(pulp-view PUBLIC PULP_BUILD_WEBVIEW=1)
+    if(_pulp_webview_on_linux)
+        # WebKitGTK and its JavaScriptCore are shared libraries a desktop may
+        # not have, so a plug-in that never shows a web view must not need
+        # them: on Linux the umbrella leaves the WebView out, and a target that
+        # uses WebViewPanel links pulp::view-webview itself.
+    else()
+        target_link_libraries(pulp-view PUBLIC pulp::view-webview)
+        target_compile_definitions(pulp-view PUBLIC PULP_BUILD_WEBVIEW=1)
+    endif()
     if(APPLE AND NOT PULP_IOS)
         # In-process WKWebView snapshot → PNG so native WebView overlays are
         # headlessly capturable (WebViewPanel::snapshot_png()).
         target_sources(pulp-view-webview PRIVATE platform/mac/web_view_snapshot_mac.mm)
         target_link_libraries(pulp-view-webview PRIVATE "-framework WebKit")
     elseif(UNIX AND NOT APPLE AND NOT ANDROID)
-        find_package(PkgConfig REQUIRED)
-        pkg_check_modules(GTK3 REQUIRED IMPORTED_TARGET gtk+-3.0)
-        pkg_check_modules(WEBKIT2GTK REQUIRED IMPORTED_TARGET webkit2gtk-4.1)
         target_link_libraries(pulp-view-webview PRIVATE PkgConfig::GTK3 PkgConfig::WEBKIT2GTK)
     # Android: WebView is handled by the Kotlin layer, not native GTK
     endif()
