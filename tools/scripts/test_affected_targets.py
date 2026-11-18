@@ -767,6 +767,8 @@ class RegistrationFragments(unittest.TestCase):
             "bracket": "message([[URL #x]])\ninclude(shared-options.cmake)\n",
             "bracket-level": "message([==[a ]] #x]==])\ninclude(shared-options.cmake)\n",
             "apostrophe": "message('URL #x')\ninclude(shared-options.cmake)\n",
+            "balanced-after-comment-strip":
+                "message([[a #]])\ninclude(shared-options.cmake)\nmessage([[b]])\n",
             "unterminated": "message(\"URL #x)\ninclude(shared-options.cmake)\n",
         })
 
