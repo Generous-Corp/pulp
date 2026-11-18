@@ -22,6 +22,8 @@
 #include <windows.h>
 #include <shobjidl.h>   // IFileDialog, IFileOpenDialog, IShellItem(Array)
 
+#include <pulp/platform/win/text_convert.hpp>
+
 #include <optional>
 #include <filesystem>
 #include <string>
@@ -31,9 +33,10 @@ namespace pulp::platform {
 
 namespace {
 
-// Per-call apartment-threaded COM init. RPC_E_CHANGED_MODE means COM was
-// already initialized in another mode on this thread — that's fine, we just
-// must not CoUninitialize in that case.
+// Per-call apartment-threaded COM init. IFileDialog::Show needs a
+// single-threaded apartment, so a thread already in another apartment mode
+// (RPC_E_CHANGED_MODE) is refused instead of being driven from the wrong one.
+// CoUninitialize is paired only with a successful initialization.
 struct ComInit {
     HRESULT hr;
     ComInit() {
@@ -42,25 +45,17 @@ struct ComInit {
     ~ComInit() {
         if (SUCCEEDED(hr)) CoUninitialize();
     }
-    bool usable() const { return SUCCEEDED(hr) || hr == RPC_E_CHANGED_MODE; }
+    bool usable() const {
+        return win_text::sta_init_usable(hr);
+    }
 };
 
 std::wstring utf8_to_utf16(const std::string& s) {
-    if (s.empty()) return std::wstring();
-    int n = MultiByteToWideChar(CP_UTF8, 0, s.data(), static_cast<int>(s.size()), nullptr, 0);
-    if (n <= 0) return std::wstring();
-    std::wstring w(static_cast<size_t>(n), L'\0');
-    MultiByteToWideChar(CP_UTF8, 0, s.data(), static_cast<int>(s.size()), w.data(), n);
-    return w;
+    return win_text::to_wide(s);
 }
 
 std::string utf16_to_utf8(const wchar_t* w) {
-    if (!w) return std::string();
-    int n = WideCharToMultiByte(CP_UTF8, 0, w, -1, nullptr, 0, nullptr, nullptr);
-    if (n <= 1) return std::string();
-    std::string s(static_cast<size_t>(n - 1), '\0');  // n includes the NUL
-    WideCharToMultiByte(CP_UTF8, 0, w, -1, s.data(), n, nullptr, nullptr);
-    return s;
+    return win_text::from_wide(w);
 }
 
 // Filesystem path of a shell item, or nullopt for non-filesystem items.

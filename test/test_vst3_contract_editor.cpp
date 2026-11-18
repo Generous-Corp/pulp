@@ -21,6 +21,7 @@
 #include <pulp/format/vst3_adapter.hpp>
 #include "support/manual_snap_timer.hpp"
 #include <pulp/format/vst3_contract_view.hpp>
+#include <pulp/platform/main_thread.hpp>
 #include <pulp/state/store.hpp>
 
 #include <pluginterfaces/base/keycodes.h>
@@ -30,10 +31,14 @@
 #include <public.sdk/source/common/pluginview.h>
 
 #include <cstdlib>
+#include <functional>
 #include <memory>
 #include <optional>
 #include <string>
+#include <thread>
 #include <vector>
+
+#include <pulp/format/detail/main_thread_timer.hpp>
 
 using pulp::format::Editor;
 using pulp::format::EditorContext;
@@ -1243,3 +1248,181 @@ TEST_CASE("a fixed editor's requested size survives host constraint negotiation"
     view->release();
     REQUIRE(processor.terminate() == Steinberg::kResultOk);
 }
+
+#if defined(__linux__)
+
+namespace {
+
+// A host's IRunLoop that does nothing until the test turns it by hand.
+class FakeVst3RunLoop final : public Steinberg::Linux::IRunLoop {
+  public:
+    Steinberg::tresult PLUGIN_API registerEventHandler(
+        Steinberg::Linux::IEventHandler* handler, Steinberg::Linux::FileDescriptor fd) override {
+        handlers.push_back({handler, fd});
+        return Steinberg::kResultTrue;
+    }
+    Steinberg::tresult PLUGIN_API
+    unregisterEventHandler(Steinberg::Linux::IEventHandler* handler) override {
+        for (auto it = handlers.begin(); it != handlers.end(); ++it)
+            if (it->first == handler) {
+                handlers.erase(it);
+                return Steinberg::kResultTrue;
+            }
+        return Steinberg::kResultFalse;
+    }
+    Steinberg::tresult PLUGIN_API registerTimer(Steinberg::Linux::ITimerHandler* handler,
+                                                Steinberg::Linux::TimerInterval ms) override {
+        timers.push_back({handler, ms});
+        return Steinberg::kResultTrue;
+    }
+    Steinberg::tresult PLUGIN_API
+    unregisterTimer(Steinberg::Linux::ITimerHandler* handler) override {
+        for (auto it = timers.begin(); it != timers.end(); ++it)
+            if (it->first == handler) {
+                timers.erase(it);
+                return Steinberg::kResultTrue;
+            }
+        return Steinberg::kResultFalse;
+    }
+    Steinberg::tresult PLUGIN_API queryInterface(const Steinberg::TUID iid, void** obj) override {
+        if (Steinberg::FUnknownPrivate::iidEqual(iid, Steinberg::Linux::IRunLoop::iid) ||
+            Steinberg::FUnknownPrivate::iidEqual(iid, Steinberg::FUnknown::iid)) {
+            *obj = static_cast<Steinberg::Linux::IRunLoop*>(this);
+            return Steinberg::kResultTrue;
+        }
+        *obj = nullptr;
+        return Steinberg::kNoInterface;
+    }
+    Steinberg::uint32 PLUGIN_API addRef() override {
+        return 1;
+    }
+    Steinberg::uint32 PLUGIN_API release() override {
+        return 1;
+    }
+
+    void fire_timers() {
+        auto copy = timers;
+        for (auto& entry : copy)
+            entry.first->onTimer();
+    }
+
+    std::vector<std::pair<Steinberg::Linux::IEventHandler*, int>> handlers;
+    std::vector<std::pair<Steinberg::Linux::ITimerHandler*, std::uint64_t>> timers;
+};
+
+class FakeVst3Frame final : public Steinberg::IPlugFrame {
+  public:
+    explicit FakeVst3Frame(FakeVst3RunLoop* run_loop) : run_loop_(run_loop) {}
+    Steinberg::tresult PLUGIN_API resizeView(Steinberg::IPlugView*, Steinberg::ViewRect*) override {
+        return Steinberg::kResultTrue;
+    }
+    Steinberg::tresult PLUGIN_API queryInterface(const Steinberg::TUID iid, void** obj) override {
+        if (run_loop_ != nullptr &&
+            Steinberg::FUnknownPrivate::iidEqual(iid, Steinberg::Linux::IRunLoop::iid)) {
+            *obj = static_cast<Steinberg::Linux::IRunLoop*>(run_loop_);
+            return Steinberg::kResultTrue;
+        }
+        if (Steinberg::FUnknownPrivate::iidEqual(iid, Steinberg::IPlugFrame::iid) ||
+            Steinberg::FUnknownPrivate::iidEqual(iid, Steinberg::FUnknown::iid)) {
+            *obj = static_cast<Steinberg::IPlugFrame*>(this);
+            return Steinberg::kResultTrue;
+        }
+        *obj = nullptr;
+        return Steinberg::kNoInterface;
+    }
+    Steinberg::uint32 PLUGIN_API addRef() override {
+        return 1;
+    }
+    Steinberg::uint32 PLUGIN_API release() override {
+        return 1;
+    }
+
+  private:
+    FakeVst3RunLoop* run_loop_;
+};
+
+} // namespace
+
+TEST_CASE("a VST3 contract editor runs its idle tick and posts through the host's IRunLoop",
+          "[vst3][editor-host][vst3-contract][idle][host-run-loop]") {
+    EditorEnvironment env;
+    g_log = {};
+    g_config = {};
+    HostApp host_app;
+    PulpVst3Processor processor(create_contract_processor);
+    REQUIRE(processor.initialize(&host_app) == Steinberg::kResultOk);
+    REQUIRE_FALSE(pulp::platform::main_thread_supported());
+
+    FakeVst3RunLoop run_loop;
+    FakeVst3Frame frame(&run_loop);
+    auto* view = open_contract_view(processor);
+
+    // The frame brings the host's loop; the platform layer lends it to the
+    // editor's posts and timers, and watches one descriptor for wake-ups.
+    REQUIRE(view->setFrame(&frame) == Steinberg::kResultTrue);
+    REQUIRE(pulp::platform::main_thread_supported());
+    REQUIRE(run_loop.timers.empty());
+
+    REQUIRE(view->attached(fake_parent(), Steinberg::kPlatformTypeX11EmbedWindowID) ==
+            Steinberg::kResultTrue);
+    // The idle tick is the host's timer, at the session's interval, and runs
+    // only when the host turns its loop.
+    REQUIRE(run_loop.timers.size() == 1);
+    REQUIRE(run_loop.timers[0].second == ContractPlugView::kIdleIntervalMs);
+    REQUIRE(g_log.idles == 0);
+    run_loop.fire_timers();
+    run_loop.fire_timers();
+    REQUIRE(g_log.idles == 2);
+
+    // Work posted from another thread runs on this thread when the host's
+    // descriptor watch fires.
+    REQUIRE_FALSE(run_loop.handlers.empty());
+    std::thread::id ran_on;
+    std::function<void()> task = [&] { ran_on = std::this_thread::get_id(); };
+    bool posted = false;
+    std::thread worker([&] { posted = pulp::format::detail::post_to_main_thread(task); });
+    worker.join();
+    REQUIRE(posted);
+    REQUIRE(ran_on == std::thread::id{});
+    for (auto& entry : run_loop.handlers)
+        entry.first->onFDIsSet(entry.second);
+    REQUIRE(ran_on == std::this_thread::get_id());
+
+    // removed(): the idle timer goes; the loop stays lent while the frame is.
+    REQUIRE(view->removed() == Steinberg::kResultOk);
+    REQUIRE(run_loop.timers.empty());
+    run_loop.fire_timers();
+    REQUIRE(g_log.idles == 2);
+
+    // The frame going away withdraws every registration the host holds.
+    REQUIRE(view->setFrame(nullptr) == Steinberg::kResultTrue);
+    REQUIRE(run_loop.handlers.empty());
+    REQUIRE(run_loop.timers.empty());
+    REQUIRE_FALSE(pulp::platform::main_thread_supported());
+    std::function<void()> late = [] {};
+    REQUIRE_FALSE(pulp::format::detail::post_to_main_thread(late));
+
+    view->release();
+    REQUIRE(processor.terminate() == Steinberg::kResultOk);
+}
+
+TEST_CASE("a VST3 host without an IRunLoop leaves the editor's posts refused",
+          "[vst3][editor-host][vst3-contract][host-run-loop]") {
+    EditorEnvironment env;
+    g_log = {};
+    g_config = {};
+    HostApp host_app;
+    PulpVst3Processor processor(create_contract_processor);
+    REQUIRE(processor.initialize(&host_app) == Steinberg::kResultOk);
+
+    FakeVst3Frame frame(nullptr);
+    auto* view = open_contract_view(processor);
+    REQUIRE(view->setFrame(&frame) == Steinberg::kResultTrue);
+    REQUIRE_FALSE(pulp::platform::main_thread_supported());
+    std::function<void()> task = [] {};
+    REQUIRE_FALSE(pulp::format::detail::post_to_main_thread(task));
+    view->release();
+    REQUIRE(processor.terminate() == Steinberg::kResultOk);
+}
+
+#endif
