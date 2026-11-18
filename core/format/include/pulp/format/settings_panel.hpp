@@ -2,6 +2,7 @@
 
 #include <pulp/audio/device.hpp>
 #include <pulp/format/standalone.hpp>
+#include <pulp/format/standalone_settings_model.hpp>
 #include <pulp/format/test_signal.hpp>
 #include <pulp/midi/device.hpp>
 #include <pulp/view/audio_bridge.hpp>
@@ -80,14 +81,11 @@ public:
 private:
     void build_audio_tab();
     void build_midi_tab();
-    void rebuild_device_lists();
-    void rebuild_midi_list();
-    void rebuild_rate_and_buffer_lists();
+    void sync_selectors();
+    void sync_buffer_items();
+    void sync_midi_list();
     void apply_config();
     void update_latency_label();
-    [[nodiscard]] int current_output_device_index() const;
-    [[nodiscard]] int current_sample_rate_index() const;
-    [[nodiscard]] int current_buffer_size_index() const;
 
     SettingsPanelCallbacks callbacks_;
     audio::AudioSystem* audio_sys_ = nullptr;
@@ -95,7 +93,8 @@ private:
     view::AudioBridge* input_bridge_ = nullptr;
     view::AudioBridge* output_bridge_ = nullptr;
 
-    StandaloneConfig current_config_;
+    // The device lists, selections and config rules. The panel only draws them.
+    StandaloneSettingsModel model_{StandaloneSettingsModel::Options{false}};
 
     // Tab panel
     view::TabPanel* tab_panel_ = nullptr;
@@ -119,13 +118,6 @@ private:
     // Updates tab, when the app can update itself (owned by tab_panel_).
     AppUpdatesSettingsView* updates_view_ = nullptr;
     int updates_poll_count_ = 0;
-
-    // Cached device info for mapping combo indices to IDs
-    std::vector<audio::DeviceInfo> output_devices_;
-    std::vector<audio::DeviceInfo> input_devices_;
-    std::vector<midi::MidiPortInfo> midi_ports_;
-    std::vector<double> available_rates_;
-    std::vector<int> available_buffers_;
 
     // Hotplug flags (set from OS thread, read from UI poll)
     std::atomic<bool> devices_changed_{false};

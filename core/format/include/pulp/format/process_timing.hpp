@@ -30,6 +30,7 @@
 #include <pulp/format/detail/host_sample_position.hpp>
 
 #include <cstdint>
+#include <limits>
 #include <optional>
 
 namespace pulp::format {
@@ -69,6 +70,13 @@ struct ProcessTiming {
     /// it delivered: the first block after activation, a host reset, or a
     /// processing restart.
     bool discontinuity = false;
+    /// Host events (notes, MIDI, SysEx, UMP) the adapter refused this block
+    /// because their time did not place them inside the frames the Processor
+    /// renders: before the first frame, at or past the end, or in a unit the
+    /// adapter cannot convert to a frame offset. A refused event is not
+    /// delivered at all; it is never moved to a block edge. Saturates at the
+    /// type's maximum. See `classify_event_time()`.
+    std::uint32_t refused_events = 0;
 
     /// True when the transport position advances one sample per frame, so a
     /// projection may compare its delta with elapsed samples.
@@ -202,6 +210,99 @@ inline constexpr ProcessTiming lv2_process_timing(bool has_frame, std::int64_t f
     if (timing.transport_moving)
         timing.playback_rate = speed == 1.0 ? PlaybackRate::Unit : PlaybackRate::NonUnit;
     return timing;
+}
+
+// ---------------------------------------------------------------------------
+// Event-time placement. Every adapter that copies a host event time into a
+// block offset (`MidiEvent::sample_offset`, a SysEx or UMP offset) classifies
+// it first with the same function and applies one policy: an event inside the
+// block keeps its offset unchanged; any other event is refused, counted on
+// `ProcessTiming::refused_events`, and never clamped into the block. Nothing is
+// read through an out-of-range offset.
+// ---------------------------------------------------------------------------
+
+/// Where a host event time falls against the block the Processor renders.
+enum class EventTimePlacement : std::uint8_t {
+    /// 0 <= time < frames: delivered at that offset.
+    InBlock = 0,
+    /// The time is negative.
+    BeforeBlock,
+    /// The time is at or past the last rendered frame (every time is, for a
+    /// block of zero frames).
+    AtOrPastEnd,
+    /// The time is not a frame offset into this block: an LV2 sequence in
+    /// beat units, or an Audio Unit absolute event time when the render has
+    /// no usable sample time to place it against.
+    WrongUnit,
+};
+
+/// Classify a frame offset against a block of `frames` rendered frames.
+constexpr EventTimePlacement classify_event_time(std::int64_t time, std::int64_t frames) noexcept {
+    if (time < 0)
+        return EventTimePlacement::BeforeBlock;
+    if (time >= frames)
+        return EventTimePlacement::AtOrPastEnd;
+    return EventTimePlacement::InBlock;
+}
+
+/// Classify a time the host may have expressed in another unit.
+/// `time_in_frames` is false when the host's time is not a frame offset (the
+/// value is then never read as one).
+constexpr EventTimePlacement classify_event_time(bool time_in_frames, std::int64_t time,
+                                                 std::int64_t frames) noexcept {
+    if (!time_in_frames)
+        return EventTimePlacement::WrongUnit;
+    return classify_event_time(time, frames);
+}
+
+/// Per-block admission an adapter runs over each host event time while it
+/// decodes. `admit()` returns the offset to deliver for an in-block time and
+/// nullopt for any other, counting the refusal. Copy `refused` onto
+/// `ProcessTiming::refused_events` once the block's timing is built.
+/// Allocation-free and lock-free.
+struct EventTimeAdmission {
+    std::int64_t frames = 0;
+    std::uint32_t refused = 0;
+
+    constexpr std::optional<std::int32_t> admit(bool time_in_frames, std::int64_t time) noexcept {
+        if (classify_event_time(time_in_frames, time, frames) == EventTimePlacement::InBlock &&
+            time <= std::numeric_limits<std::int32_t>::max())
+            return static_cast<std::int32_t>(time);
+        if (refused < std::numeric_limits<std::uint32_t>::max())
+            ++refused;
+        return std::nullopt;
+    }
+
+    constexpr std::optional<std::int32_t> admit(std::int64_t time) noexcept {
+        return admit(true, time);
+    }
+};
+
+/// Admit an Audio Unit render event time (`AURenderEvent::eventSampleTime`).
+/// The time is placed with `detail::au_event_raw_offset()`, the same
+/// arithmetic the host timeline uses: inside the `AUEventSampleTimeImmediate`
+/// window it is already an offset, otherwise it is absolute and placed against
+/// the render's rounded `mSampleTime`. A time that cannot be placed (absolute,
+/// with no usable block sample time) is `WrongUnit`; a placed time outside the
+/// block is refused like any other. `immediate` is
+/// `AUEventSampleTimeImmediate`.
+inline std::optional<std::int32_t>
+admit_au_event_time(EventTimeAdmission& admission, std::int64_t event_sample_time,
+                    std::int64_t immediate, std::optional<double> block_sample_time) noexcept {
+    const auto offset =
+        detail::au_event_raw_offset(event_sample_time, immediate, block_sample_time);
+    return admission.admit(offset.has_value(), offset.value_or(0));
+}
+
+/// True when an LV2 atom sequence's events are time-stamped in frames.
+/// `sequence_unit` is `LV2_Atom_Sequence_Body::unit`: 0, or the host's URID
+/// for `atom:frameTime` (`frame_time_urid`), means `LV2_Atom_Event::time` holds
+/// `frames`. Any other unit (`atom:beatTime` stores a beat count in the same
+/// bytes) is not a frame offset, and an unmapped `frame_time_urid` matches only
+/// the unit 0.
+constexpr bool lv2_sequence_unit_is_frames(std::uint32_t sequence_unit,
+                                           std::uint32_t frame_time_urid) noexcept {
+    return sequence_unit == 0 || (frame_time_urid != 0 && sequence_unit == frame_time_urid);
 }
 
 } // namespace pulp::format

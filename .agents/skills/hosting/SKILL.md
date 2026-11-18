@@ -648,6 +648,17 @@ while the ingress block is open). `VoiceBankBinding::activate()` is a
 control-thread call; the audio owner resets a bank with
 `reserve_event_reset()` / `commit_event_reset()`.
 
+A graph `ProcessingFailure` is not retryable: a refused projection restores
+the block's records into the ingress and leaves the cursor in place, and the
+same records fail the same way again (the MPE fan-out preflight alone refuses
+any block with 8 or more MIDI records). Keeping the records would make the next
+block, which maps onto the same cursor, replay them a block late and stack its
+own on top. The binding therefore drops a failed block's graph records and
+zeroes the graph output; a direct ingress user must clear the ingress itself.
+`begin_host_event_block()` refuses a block longer than the prepared frame
+limit, because `process_checked()` would refuse it with `Frames` before
+projecting and nothing could seal the open ingress block afterwards.
+
 ### Edge probes publish once per block, from the calling thread
 
 Every edge probe kind observes into a per-block stage in the executor and is

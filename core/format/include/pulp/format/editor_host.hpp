@@ -520,6 +520,10 @@ enum class HostAction : std::uint16_t {
     parameter_context_menu = 1,
     /// Ask the host to close this editor's window.
     close_editor = 2,
+    /// Open the host's audio and MIDI settings (a standalone host's device,
+    /// sample rate, buffer size and MIDI input window). False from a host
+    /// that has none, such as a plug-in host, where the DAW owns routing.
+    open_settings = 3,
 };
 
 /// One host action and its arguments.
