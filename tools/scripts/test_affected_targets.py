@@ -714,6 +714,28 @@ class RegistrationFragments(unittest.TestCase):
             sel = self.fx.select(["test/cmake/knob_tests.cmake"])
             self.assertEqual(sel.mode, "all", name)
 
+    def test_scoped_set_and_unset_stay_global(self) -> None:
+        for name, text in {
+            "set-parent": "set(KNOB_FLAGS -DX PARENT_SCOPE)\n",
+            "set-environment": "set(ENV{KNOB_FLAGS} -DX)\n",
+            "set-cache": "set(KNOB_FLAGS -DX CACHE STRING \"\")\n",
+            "unset-parent": "unset(KNOB_FLAGS PARENT_SCOPE)\n",
+            "unset-environment": "unset(ENV{KNOB_FLAGS})\n",
+        }.items():
+            self.fx.touch("test/cmake/knob_tests.cmake", text)
+            sel = self.fx.select(["test/cmake/knob_tests.cmake"])
+            self.assertEqual(sel.mode, "all", name)
+
+    def test_same_line_command_stream_stays_global(self) -> None:
+        for name, text in {
+            "include": "message(STATUS local) include(shared-options.cmake)\n",
+            "target": "message(STATUS local) target_compile_definitions(pulp-test-label PRIVATE FLAG)\n",
+            "unknown": "message(STATUS local) custom-project-command()\n",
+        }.items():
+            self.fx.touch("test/cmake/knob_tests.cmake", text)
+            sel = self.fx.select(["test/cmake/knob_tests.cmake"])
+            self.assertEqual(sel.mode, "all", name)
+
     def test_removed_shared_assignment_stays_global(self) -> None:
         self.fx.touch("test/cmake/label_tests.cmake", "message(${KNOB_FLAGS.with-dot})\n")
         self.fx.touch("test/cmake/knob_tests.cmake",

@@ -1362,19 +1362,6 @@ REGISTRATION_FRAGMENT_RE = re.compile(r"^test/cmake/(?:fragments/)?[^/]+\.cmake$
 SHARED_FRAGMENT_NAMES = frozenset({"fragments.cmake"})
 _CMAKE_COMMENT = re.compile(r"#.*")
 _CMAKE_COMMAND_NAME = r"[A-Za-z_][A-Za-z0-9_.-]*"
-_CMAKE_DEFINES_COMMAND = re.compile(
-    rf"^\s*(?:function|macro)\s*\(\s*({_CMAKE_COMMAND_NAME})", re.M | re.I)
-_CMAKE_SETS_VARIABLE = re.compile(
-    rf"^\s*set\s*\(\s*({_CMAKE_COMMAND_NAME})", re.M | re.I)
-_CMAKE_GLOBAL_STATE = re.compile(
-    r"^\s*(?:include_directories|add_compile_options|add_compile_definitions|add_definitions"
-    r"|link_libraries|link_directories|add_subdirectory|option)\s*\("
-    r"|^\s*set\s*\(\s*CMAKE_\w+"
-    r"|^\s*set\s*\([^)]*\bCACHE\b"
-    r"|^\s*set_property\s*\(\s*(?:GLOBAL|DIRECTORY)\b"
-    r"|^\s*(?:include|configure_file|file|execute_process|add_custom_command|add_custom_target)\s*\("
-    r"|^\s*(?:set_tests_properties|set_target_properties|set_source_files_properties)\s*\("
-    r"|^\s*target_[A-Za-z0-9_.-]+\s*\(", re.M | re.I)
 
 # Commands that only describe the registration owned by this file. Anything
 # else is conservatively treated as shared: an unrecognized command may be a
@@ -1387,7 +1374,65 @@ _CMAKE_LOCAL_COMMANDS = frozenset({
     "if", "elseif", "else", "endif", "foreach", "endforeach", "while", "endwhile",
     "break", "continue", "return",
 })
-_CMAKE_COMMAND = re.compile(rf"^\s*({_CMAKE_COMMAND_NAME})\s*\(", re.M)
+_CMAKE_COMMAND_CALL = re.compile(
+    rf"(?<![A-Za-z0-9_.-])({_CMAKE_COMMAND_NAME})\s*\(", re.I)
+_CMAKE_GLOBAL_COMMANDS = frozenset({
+    "include", "configure_file", "file", "execute_process", "add_subdirectory",
+    "include_directories", "add_compile_options", "add_compile_definitions", "add_definitions",
+    "link_libraries", "link_directories", "option", "set_property", "set_tests_properties",
+    "set_target_properties", "set_source_files_properties", "add_custom_command",
+    "add_custom_target",
+})
+
+
+def _cmake_command_invocations(text: str) -> list[tuple[str, str]]:
+    """Return every command and its balanced argument text in a CMake file."""
+    invocations: list[tuple[str, str]] = []
+    for match in _CMAKE_COMMAND_CALL.finditer(text):
+        open_index = match.end() - 1
+        depth = 1
+        quote: str | None = None
+        escaped = False
+        index = open_index + 1
+        while index < len(text) and depth:
+            char = text[index]
+            if quote is not None:
+                if escaped:
+                    escaped = False
+                elif char == "\\":
+                    escaped = True
+                elif char == quote:
+                    quote = None
+            elif char in "\"'":
+                quote = char
+            elif char == "(":
+                depth += 1
+            elif char == ")":
+                depth -= 1
+            index += 1
+        if depth == 0:
+            invocations.append((match.group(1).lower(), text[open_index + 1:index - 1]))
+    return invocations
+
+
+def _cmake_command_arguments(body: str) -> list[str]:
+    """Return conservative whitespace-delimited command arguments."""
+    return re.findall(r'"(?:\\.|[^"\\])*"|\S+', body)
+
+
+def _cmake_scoped_set(body: str) -> bool:
+    """Whether set/unset changes state outside this registration fragment."""
+    args = _cmake_command_arguments(body)
+    if not args:
+        return False
+    first = args[0].upper()
+    options = {arg.upper() for arg in args[1:]}
+    return (
+        first.startswith("CMAKE_")
+        or first.startswith("ENV{")
+        or "CACHE" in options
+        or "PARENT_SCOPE" in options
+    )
 
 
 def _test_cmake_texts(source_root: str, ref: str | None = None) -> dict[str, str]:
@@ -1432,18 +1477,35 @@ def _shared_fragment_reason_current(rel: str, texts: dict[str, str]) -> str | No
         return "unreadable"
     if os.path.basename(rel) in SHARED_FRAGMENT_NAMES:
         return "aggregates every fragment"
-    if _CMAKE_GLOBAL_STATE.search(text):
+    invocations = _cmake_command_invocations(text)
+    commands = {name for name, _body in invocations}
+    if any(name in _CMAKE_GLOBAL_COMMANDS or name.startswith("target_")
+           for name in commands):
         return "touches directory, cache or global state"
-    commands = {name.lower() for name in _CMAKE_COMMAND.findall(text)}
+    if any(name in {"set", "unset"} and _cmake_scoped_set(body)
+           for name, body in invocations):
+        return "touches directory, cache or global state"
     unknown = sorted(commands - _CMAKE_LOCAL_COMMANDS)
     if unknown:
         return f"uses unrecognized CMake command {unknown[0]}"
     others = {name: body for name, body in texts.items() if name != rel}
-    for name in set(_CMAKE_DEFINES_COMMAND.findall(text)):
-        call = re.compile(r"^\s*" + re.escape(name) + r"\s*\(", re.M | re.I)
-        if any(call.search(body) for body in others.values()):
+    defined = {
+        args[0].lower()
+        for name, body in invocations
+        for args in [_cmake_command_arguments(body)]
+        if name in {"function", "macro"} and args
+    }
+    for name in defined:
+        if any(name in {command for command, _body in _cmake_command_invocations(body)}
+               for body in others.values()):
             return f"defines {name}(), called from another file"
-    for name in set(_CMAKE_SETS_VARIABLE.findall(text)):
+    set_variables = {
+        args[0]
+        for name, body in invocations
+        for args in [_cmake_command_arguments(body)]
+        if name == "set" and args and not args[0].upper().startswith("ENV{")
+    }
+    for name in set_variables:
         word = re.compile(r"\b" + re.escape(name) + r"\b")
         if any(word.search(body) for body in others.values()):
             return f"sets {name}, read by another file"
