@@ -1619,6 +1619,19 @@ struct ScopedAuV3HostWriting {
         // not leak last block's sysex into this one.
         pulp::midi::MidiBuffer& midi_in = bridge->midi_in;
         pulp::midi::MidiBuffer& midi_out = bridge->midi_out;
+        // MIDI event times are placed like every other AU render event and
+        // admitted against this render's frames: one outside the block, or
+        // one that cannot be placed, is refused and counted on
+        // ProcessContext::timing, never clamped. An event list counts once.
+        pulp::format::EventTimeAdmission event_admission{static_cast<std::int64_t>(frameCount)};
+        std::optional<double> event_block_sample_time;
+        if (timestamp && (timestamp->mFlags & kAudioTimeStampSampleTimeValid) != 0)
+            event_block_sample_time = timestamp->mSampleTime;
+        const auto admit_event_time = [&](AUEventSampleTime event_sample_time) {
+            return pulp::format::admit_au_event_time(
+                event_admission, static_cast<std::int64_t>(event_sample_time),
+                static_cast<std::int64_t>(AUEventSampleTimeImmediate), event_block_sample_time);
+        };
         // No-alloc tripwire over the adapter-owned MIDI input translation: the
         // buffer reset, the render-event parse loop (short MIDI, UMP sysex7
         // reassembly into the pre-reserved payload pool), the guarded param
@@ -1673,14 +1686,16 @@ struct ScopedAuV3HostWriting {
                     const AUMIDIEvent& m = event->MIDI;
                     // A well-formed short MIDI message has a status byte
                     // (MSB set) and total length 1..3. Skip anything else.
-                    if (m.length >= 1 && m.length <= 3 && (m.data[0] & 0x80)) {
+                    const auto offset = (m.length >= 1 && m.length <= 3 && (m.data[0] & 0x80))
+                                            ? admit_event_time(event->head.eventSampleTime)
+                                            : std::nullopt;
+                    if (offset) {
                         pulp::midi::MidiEvent me;
                         me.message = choc::midi::ShortMessage(
                             m.data[0],
                             m.length > 1 ? m.data[1] : uint8_t(0),
                             m.length > 2 ? m.data[2] : uint8_t(0));
-                        me.sample_offset =
-                            static_cast<int32_t>(event->head.eventSampleTime);
+                        me.sample_offset = *offset;
                         midi_in.add(me);
                         // A host is free to keep using this transport even
                         // after the unit reports kMIDIProtocol_2_0 — the
@@ -1706,14 +1721,15 @@ struct ScopedAuV3HostWriting {
                     // surrounding MIDIEventList's event sample time.
                     const auto& elist = event->MIDIEventsList;
                     const MIDIEventList* packets = &elist.eventList;
-                    if (packets) {
+                    const auto list_offset = admit_event_time(event->head.eventSampleTime);
+                    if (packets && list_offset) {
                         struct EmitCtx {
                             pulp::midi::MidiBuffer* sink;
                             int32_t sample_offset;
                         };
                         EmitCtx ctx{
                             &midi_in,
-                            static_cast<int32_t>(event->head.eventSampleTime),
+                            *list_offset,
                         };
                         // add_sysex_copy (not add_sysex(vector)) so the payload is
                         // copied into the buffer's pre-reserved realtime payload
@@ -1945,6 +1961,7 @@ struct ScopedAuV3HostWriting {
         ctx.timing.discontinuity =
             bridge->timing_discontinuity_pending.load(std::memory_order_acquire) ||
             (bridge->timing_block_skipped && !ctx.timing.has_steady_sample);
+        ctx.timing.refused_events = event_admission.refused;
 
         // One entry per declared bus, so ProcessBusBufferInfo::index equals the
         // descriptor index. Entries for a bus without channels stay empty and
