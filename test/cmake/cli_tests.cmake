@@ -245,7 +245,7 @@ if(TARGET pulp-host)
         target_compile_definitions(pulp-test-cli-graph-spectral-saved-identity PRIVATE
             PULP_TEST_GRAPH_DIFF_MCP=1)
     endif()
-    pulp_test_spawns(pulp-test-cli-graph-spectral-saved-identity pulp-cli)
+    pulp_test_spawns(pulp-test-cli-graph-spectral-saved-identity pulp-cli pulp-mcp)
     catch_discover_tests(pulp-test-cli-graph-spectral-saved-identity)
 endif()
 
