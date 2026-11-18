@@ -1,28 +1,62 @@
-#include "atomic_text_file.hpp"
+// `pulp graph`: the dispatcher, the helpers every graph subcommand shares, and
+// the handlers that load one graph document and print or rewrite it (inspect,
+// explain, validate, fmt, canonicalize and save). probe, render, report and
+// diff live in their own translation units; cmd_graph_internal.hpp lists them.
+
 #include "cli_common.hpp"
+#include "cmd_graph_internal.hpp"
 
 #include <algorithm>
-#include <charconv>
 #include <choc/text/choc_JSON.h>
-#include <cmath>
 #include <filesystem>
-#include <fstream>
 #include <iostream>
-#include <map>
+#include <memory>
 #include <optional>
-#include <pulp/audio/audio_file.hpp>
-#include <pulp/host/graph_history.hpp>
 #include <pulp/host/graph_patch.hpp>
-#include <pulp/host/graph_rt_report.hpp>
 #include <pulp/host/graph_serializer.hpp>
-#include <pulp/host/offline_signal_graph_host.hpp>
 #include <pulp/host/signal_graph.hpp>
 #include <string>
 #include <utility>
 #include <vector>
 
+namespace pulp_cli::graph_detail {
+
+std::string patch_code(Code code) {
+    return pulp::host::graph_patch_code_name(code);
+}
+
+Code file_load_code(const pulp::host::GraphSerializer::LoadResult& loaded) {
+    if (loaded.error.starts_with("graph file exceeds "))
+        return Code::ResourceLimit;
+    return loaded.error.starts_with("graph file ") ? Code::FileUnreadable : Code::InvalidDocument;
+}
+
+void json_error(const std::string& code, const std::string& message) {
+    auto value = choc::value::createObject("GraphError");
+    value.addMember("valid", false);
+    value.addMember("code", code);
+    value.addMember("message", message);
+    std::cout << choc::json::toString(value) << '\n';
+}
+
+std::optional<std::string> read_graph_document(const std::string& path, Code& code,
+                                               std::string& message) {
+    std::string text;
+    if (!pulp::host::GraphSerializer::read_file_bounded(path, text, message)) {
+        // The serializer reader names the cause: the byte limit is a resource
+        // limit, anything else (missing, changed while reading) is unreadable.
+        code =
+            message.starts_with("graph file exceeds") ? Code::ResourceLimit : Code::FileUnreadable;
+        return std::nullopt;
+    }
+    return text;
+}
+
+} // namespace pulp_cli::graph_detail
+
 namespace {
-using Code = pulp::host::GraphPatchDiagnostic::Code;
+using namespace pulp_cli::graph_detail;
+
 void usage() {
     std::cout << "Usage: pulp graph "
                  "<catalog|inspect|validate|explain|render|probe|report|fmt|canonicalize|save> "
@@ -42,652 +76,10 @@ void usage() {
                  "[--edge-kind audio|control|event] [--destination-param ID] "
                  "[--plan] [--latency] [--node-loads]\n";
 }
-// Failures that C++ callers also see (loading a graph or notation file) use
-// the GraphPatchDiagnostic code names verbatim; the CLI never renames them.
-std::string patch_code(pulp::host::GraphPatchDiagnostic::Code code) {
-    return pulp::host::graph_patch_code_name(code);
-}
 
-// GraphSerializer::from_file reports file failures as text; an oversize file
-// is the same ResourceLimit that validate and diff report for it.
-Code file_load_code(const pulp::host::GraphSerializer::LoadResult& loaded) {
-    if (loaded.error.starts_with("graph file exceeds "))
-        return Code::ResourceLimit;
-    return loaded.error.starts_with("graph file ") ? Code::FileUnreadable : Code::InvalidDocument;
-}
-
-void json_error(const std::string& code, const std::string& message) {
-    auto value = choc::value::createObject("GraphError");
-    value.addMember("valid", false);
-    value.addMember("code", code);
-    value.addMember("message", message);
-    std::cout << choc::json::toString(value) << '\n';
-}
-
-// Each attach refusal names its cause and the change that clears it, so a
-// caller can act on the message without reading the probe implementation.
-std::pair<std::string, std::string> probe_refusal(pulp::host::SignalGraph::EdgeProbeStatus status,
-                                                  const std::string& edge_kind) {
-    using Status = pulp::host::SignalGraph::EdgeProbeStatus;
-    switch (status) {
-    case Status::Unprepared:
-        return {"Unprepared", "the graph is not prepared, so no edge can be probed; check that "
-                              "`pulp graph validate` accepts the file"};
-    case Status::UnknownPort:
-        if (edge_kind == "control")
-            return {"UnknownPort",
-                    "no such port: --source-port must name an output port of --source-node; a "
-                    "control edge is selected by --destination-node and --destination-param, "
-                    "not by a destination port"};
-        return {"UnknownPort",
-                "no such port: --source-port must name an output port of --source-node and "
-                "--destination-port an input port of --destination-node"};
-    case Status::MissingEdge:
-        if (edge_kind == "control")
-            return {"MissingEdge",
-                    "no automation edge reaches --destination-param on --destination-node; graphs "
-                    "loaded by the CLI cannot contain automation edges, so control probes are "
-                    "available only through the C++ API (SignalGraph::attach_control_edge_probe)"};
-        return {"MissingEdge", "no connection joins the named source and destination ports; pick "
-                               "a pair from the graph file's connections array"};
-    case Status::UnsupportedKind:
-        return {"UnsupportedKind",
-                "the selected ports do not carry a " + edge_kind +
-                    " edge; use --edge-kind audio for audio connections, event for MIDI "
-                    "connections and control for automation connections"};
-    case Status::UnsupportedExecution:
-        return {"UnsupportedExecution",
-                "edge probes attach only to the routed serial or parallel executor; enable "
-                "canonical routing, disable anticipation, then prepare the graph again"};
-    case Status::Busy:
-        return {"Busy", "a live swap edit is open, or eight displaced probes are still parked "
-                        "because a snapshot holder or running process() pins them; commit or "
-                        "cancel the edit, or release the snapshot holders, then retry"};
-    case Status::Attached:
-    case Status::Detached:
-        break;
-    }
-    return {"Detached", "the probe did not attach"};
-}
-
-int probe_graph(const std::vector<std::string>& args) {
-    using Graph = pulp::host::SignalGraph;
-    const auto fail = [](const std::string& code, const std::string& message) {
-        json_error(code, message);
-        return 2;
-    };
-    std::map<std::string, std::string> options;
-    bool include_plan = false;
-    bool include_latency = false;
-    bool include_node_loads = false;
-    std::string edge_kind = "audio";
-    for (std::size_t i = 2; i < args.size(); ++i) {
-        if (args[i] == "--json")
-            continue;
-        if (args[i] == "--plan") {
-            include_plan = true;
-            continue;
-        }
-        if (args[i] == "--latency") {
-            include_latency = true;
-            continue;
-        }
-        if (args[i] == "--node-loads") {
-            include_node_loads = true;
-            continue;
-        }
-        const auto key = args[i];
-        if (key != "--input" && key != "--source-node" && key != "--source-port" &&
-            key != "--destination-node" && key != "--destination-port" && key != "--block-frames" &&
-            key != "--edge-kind" && key != "--destination-param")
-            return fail("invalid_option", "unknown probe option: " + key);
-        if (++i == args.size() || !options.emplace(key, args[i]).second)
-            return fail("invalid_option", "each probe option requires one value: " + key);
-    }
-    if (options.contains("--edge-kind")) {
-        edge_kind = options["--edge-kind"];
-        if (edge_kind != "audio" && edge_kind != "control" && edge_kind != "event")
-            return fail("invalid_edge_kind", "edge-kind must be audio, control or event");
-    }
-    for (const auto* key : {"--input", "--source-node", "--source-port", "--destination-node"})
-        if (options[key].empty())
-            return fail("missing_option", std::string("probe requires ") + key);
-    if (edge_kind != "control" && options["--destination-port"].empty())
-        return fail("missing_option", "probe requires --destination-port for audio/event edges");
-    if (edge_kind == "control" && options["--destination-param"].empty())
-        return fail("missing_option", "control probes require --destination-param");
-    int block = 64;
-    if (options.contains("--block-frames")) {
-        const auto& value = options["--block-frames"];
-        const auto parsed = std::from_chars(value.data(), value.data() + value.size(), block);
-        if (parsed.ec != std::errc{} || parsed.ptr != value.data() + value.size() || block < 1 ||
-            block > 4096)
-            return fail("invalid_block_frames", "block-frames must be an integer from 1 to 4096");
-    }
-    std::ifstream graph_file(args[1], std::ios::binary);
-    if (!graph_file)
-        return fail(patch_code(Code::FileUnreadable), "graph file is unreadable: " + args[1]);
-    // The probe shares the reload and notation bound. The buffer is sized from
-    // the file, and the extra byte detects a file that grew while it was read.
-    constexpr auto limit = pulp::host::max_graph_notation_bytes;
-    std::error_code size_error;
-    const auto size = std::filesystem::file_size(args[1], size_error);
-    if (size_error)
-        return fail(patch_code(Code::FileUnreadable), "graph file could not be read: " + args[1]);
-    if (size > limit)
-        return fail("graph_file_limit",
-                    "probe admits graph files no larger than " + std::to_string(limit) + " bytes");
-    std::string text(static_cast<std::size_t>(size) + 1, '\0');
-    graph_file.read(text.data(), static_cast<std::streamsize>(text.size()));
-    if (graph_file.bad() || static_cast<std::uintmax_t>(graph_file.gcount()) != size)
-        return fail(patch_code(Code::FileUnreadable), "graph file could not be read: " + args[1]);
-    text.resize(static_cast<std::size_t>(size));
-    try {
-        const auto document = choc::json::parse(text);
-        const auto nodes = document["nodes"];
-        const auto connections = document["connections"];
-        if (!document.isObject() || !nodes.isArray() || !connections.isArray())
-            return fail(patch_code(Code::InvalidDocument),
-                        "graph requires nodes and connections arrays");
-        if (nodes.size() > 128 || connections.size() > 512)
-            return fail("graph_limit", "probe admits at most 128 nodes and 512 connections");
-        if (document.hasObjectMember("sample_regions") && document["sample_regions"].size() != 0)
-            return fail("unsupported_node", "offline probe does not admit sample regions");
-        std::int64_t ports = 0;
-        for (const auto node : nodes) {
-            for (const auto* key : {"num_input_ports", "num_output_ports"}) {
-                const auto value = node[key];
-                if (!value.isInt())
-                    return fail("graph_limit", "port counts must be bounded integers");
-                const auto count = value.getInt64();
-                if (count < 0 || count > 1024 || (ports += count) > 1024)
-                    return fail("graph_limit", "probe admits at most 1024 declared ports");
-            }
-            const auto type = node["type"].getString();
-            if (type != "audio_in" && type != "audio_out" && type != "gain" && type != "midi_in" &&
-                type != "midi_out")
-                return fail("unsupported_node",
-                            "offline probe requires built-in input, output, gain or MIDI nodes");
-        }
-    } catch (const std::exception& error) {
-        return fail(patch_code(Code::InvalidDocument), error.what());
-    }
-    Graph graph;
-    pulp::host::GraphLoadOptions load_options;
-    load_options.load_plugins = false;
-    const auto loaded = pulp::host::GraphSerializer::from_json(graph, text, load_options);
-    if (!loaded.ok)
-        return fail(patch_code(Code::InvalidDocument), loaded.error);
-    if (!loaded.missing_plugins.empty() || !loaded.missing_custom_node_types.empty())
-        return fail("unresolved_node", "probe refuses unresolved node types");
-    for (const auto& node : graph.nodes())
-        if (node.type == pulp::host::NodeType::Plugin || node.type == pulp::host::NodeType::Custom)
-            return fail("unsupported_node",
-                        "offline probe supports only built-in input, output, gain and MIDI nodes");
-    const pulp::host::GraphNode* source = nullptr;
-    const pulp::host::GraphNode* destination = nullptr;
-    for (const auto& node : graph.nodes()) {
-        if (node.name == options["--source-node"]) {
-            if (source)
-                return fail("ambiguous_node", "source node name must be unique");
-            source = &node;
-        }
-        if (node.name == options["--destination-node"]) {
-            if (destination)
-                return fail("ambiguous_node", "destination node name must be unique");
-            destination = &node;
-        }
-    }
-    if (!source || !destination)
-        return fail("unknown_node", "use existing unique source and destination node names");
-    const auto source_port = source->out(options["--source-port"]);
-    const auto destination_port = edge_kind == "control"
-                                      ? pulp::host::PortHandle{}
-                                      : destination->in(options["--destination-port"]);
-    auto input = pulp::audio::read_audio_file(options["--input"], [block](const auto& info) {
-        return info.sample_rate >= 8000 && info.sample_rate <= 192000 && info.num_channels >= 1 &&
-               info.num_channels <= 8 && info.num_frames >= 1 && info.num_frames <= 480000 &&
-               (info.num_frames + block - 1) / block <= 4096;
-    });
-    if (!input || input->empty())
-        return fail("input_limit", "input must decode to 1..8 channels, 8000..192000 Hz, 1..480000 "
-                                   "frames and at most 4096 blocks");
-    for (const auto& channel : input->channels)
-        for (const auto sample : channel)
-            if (!std::isfinite(sample))
-                return fail("non_finite_input", "input samples must be finite");
-    graph.set_limits({.max_nodes = 128,
-                      .max_connections = 512,
-                      .max_ports = 1024,
-                      .max_block_size = 4096,
-                      .max_estimated_work_units = 4194304});
-    if (!graph.validate_generated_graph(block).accepted)
-        return fail("graph_limit", "graph exceeds offline probe resource limits");
-    pulp::host::OfflineSignalGraphHost host(graph);
-    if (!host.prepare({.sample_rate = static_cast<double>(input->sample_rate),
-                       .block_frames = block,
-                       .input_channels = static_cast<int>(input->num_channels()),
-                       .output_channels = 8}))
-        return fail("prepare_failed", "graph preparation failed");
-    Graph::EdgeProbeStatus status = Graph::EdgeProbeStatus::Busy;
-    if (edge_kind == "audio") {
-        status = graph.attach_audio_edge_probe(source_port, destination_port);
-    } else if (edge_kind == "event") {
-        status = graph.attach_event_edge_probe(source_port, destination_port);
-    } else {
-        std::uint32_t parameter = 0;
-        const auto text = options["--destination-param"];
-        const auto parsed = std::from_chars(text.data(), text.data() + text.size(), parameter);
-        if (parsed.ec != std::errc{} || parsed.ptr != text.data() + text.size())
-            return fail("invalid_destination_param", "destination-param must be an integer");
-        status = graph.attach_control_edge_probe(source_port, destination->id, parameter);
-    }
-    if (status != Graph::EdgeProbeStatus::Attached) {
-        const auto [code, message] = probe_refusal(status, edge_kind);
-        return fail(code, message);
-    }
-    const auto identity = edge_kind == "audio"     ? graph.audio_edge_probe_identity()
-                          : edge_kind == "control" ? graph.control_edge_probe_identity()
-                                                   : graph.event_edge_probe_identity();
-    if (edge_kind == "event") {
-        pulp::midi::MidiBuffer events;
-        events.reserve(4);
-        events.add(pulp::midi::MidiEvent::note_on(0, 60, 100));
-        events.sort();
-        if (!graph.inject_midi(source->id, events))
-            return fail("event_injection_failed", "event probe could not seed the MIDI input");
-    }
-    // Timing is opt-in: an unattached/ordinary graph remains on the zero-cost
-    // path, and the per-node clock reads begin only when requested by tooling.
-    if (include_node_loads)
-        graph.set_node_load_monitoring(true);
-    auto records = choc::value::createEmptyArray();
-    std::vector<float*> pointers(input->num_channels());
-    for (std::uint64_t offset = 0; offset < input->num_frames(); offset += block) {
-        const auto count = std::min<std::uint64_t>(block, input->num_frames() - offset);
-        for (std::size_t c = 0; c < pointers.size(); ++c)
-            pointers[c] = input->channels[c].data() + offset;
-        const auto rendered = host.render(
-            {.frame_count = count,
-             .input = {pointers.data(), pointers.size(), static_cast<std::size_t>(count)}});
-        if (!rendered.ok)
-            return fail("render_failed", "offline probe render failed");
-        pulp::graph::GraphRuntimeProbeSample sample;
-        auto read_sample = [&] {
-            if (edge_kind == "audio")
-                return graph.read_audio_edge_probe(sample);
-            if (edge_kind == "control")
-                return graph.read_control_edge_probe(sample);
-            return graph.read_event_edge_probe(sample);
-        };
-        while (read_sample()) {
-            if (edge_kind == "audio" && (!std::isfinite(sample.peak) || !std::isfinite(sample.rms)))
-                return fail("non_finite_sample",
-                            "probe measurement is non-finite; no JSON sample report was published");
-            auto record = choc::value::createObject("ProbeSample");
-            record.addMember("sequence", static_cast<int64_t>(sample.sequence));
-            record.addMember("timestamp_samples", static_cast<int64_t>(sample.timestamp_samples));
-            record.addMember("edge_index", static_cast<int64_t>(sample.edge_index));
-            record.addMember("frames", static_cast<int64_t>(sample.frames));
-            record.addMember("kind", static_cast<int64_t>(sample.kind));
-            record.addMember("peak", sample.peak);
-            record.addMember("rms", sample.rms);
-            record.addMember("value", sample.value);
-            record.addMember("value_end", sample.value_end);
-            record.addMember("payload_id", static_cast<int64_t>(sample.payload_id));
-            record.addMember("payload_count", static_cast<int64_t>(sample.payload_count));
-            record.addMember("payload_status", static_cast<int64_t>(sample.payload_status));
-            record.addMember("payload_offset", static_cast<int64_t>(sample.payload_offset));
-            record.addMember("payload_dropped", static_cast<int64_t>(sample.payload_dropped));
-            records.addArrayElement(record);
-        }
-    }
-    auto report = choc::value::createObject("GraphProbe");
-    report.addMember("valid", true);
-    report.addMember("code", "Attached");
-    report.addMember("edge_kind", edge_kind);
-    report.addMember("observation", edge_kind == "audio" ? "source_before_mixing_and_pdc"
-                                    : edge_kind == "control"
-                                        ? "per_edge_mapped_and_slewed_before_mixing_and_bounds"
-                                        : "events_before_destination_consumer");
-    report.addMember("sample_rate", static_cast<int64_t>(input->sample_rate));
-    report.addMember("frames", static_cast<int64_t>(input->num_frames()));
-    report.addMember("dropped", static_cast<int64_t>(
-                                    edge_kind == "audio"     ? graph.audio_edge_probe_dropped()
-                                    : edge_kind == "control" ? graph.control_edge_probe_dropped()
-                                                             : graph.event_edge_probe_dropped()));
-    auto id = choc::value::createObject("ProbeIdentity");
-    id.addMember("graph_identity", std::to_string(identity.authoring.graph_identity));
-    id.addMember("generation", std::to_string(identity.authoring.generation));
-    id.addMember("connection", std::to_string(identity.connection));
-    id.addMember("source", static_cast<int64_t>(identity.source));
-    id.addMember("destination", static_cast<int64_t>(identity.destination));
-    id.addMember("source_port", static_cast<int64_t>(identity.source_port));
-    id.addMember("destination_port", static_cast<int64_t>(identity.destination_port));
-    id.addMember("parameter_id", static_cast<int64_t>(identity.parameter_id));
-    report.addMember("identity", id);
-    report.addMember("records", records);
-    if (include_plan) {
-        auto plan = choc::value::createObject("GraphPlan");
-        auto nodes = choc::value::createEmptyArray();
-        for (const auto& node : graph.nodes()) {
-            auto item = choc::value::createObject("GraphPlanNode");
-            item.addMember("id", static_cast<int64_t>(node.id));
-            item.addMember("name", node.name);
-            item.addMember("input_ports", node.num_input_ports);
-            item.addMember("output_ports", node.num_output_ports);
-            nodes.addArrayElement(item);
-        }
-        auto connections = choc::value::createEmptyArray();
-        for (const auto& edge : graph.connections()) {
-            auto item = choc::value::createObject("GraphPlanConnection");
-            item.addMember("source_node", static_cast<int64_t>(edge.source_node));
-            item.addMember("source_port", static_cast<int64_t>(edge.source_port));
-            item.addMember("destination_node", static_cast<int64_t>(edge.dest_node));
-            item.addMember("destination_port", static_cast<int64_t>(edge.dest_port));
-            item.addMember("feedback", edge.feedback);
-            item.addMember("midi", edge.midi);
-            item.addMember("automation", edge.automation);
-            item.addMember("audio_rate_modulation", edge.audio_rate_modulation);
-            item.addMember("sidechain", edge.sidechain);
-            connections.addArrayElement(item);
-        }
-        plan.addMember("nodes", nodes);
-        plan.addMember("connections", connections);
-        report.addMember("plan", plan);
-    }
-    if (include_latency) {
-        auto latency = choc::value::createObject("LatencyPDC");
-        latency.addMember("total_latency_samples", graph.latency_samples());
-        auto snapshot = graph.prepared_latency_snapshot();
-        if (!snapshot)
-            return fail("unprepared_latency",
-                        "latency/PDC introspection requires a prepared graph");
-        auto nodes = choc::value::createEmptyArray();
-        auto connections = choc::value::createEmptyArray();
-        {
-            for (const auto& node : snapshot->nodes) {
-                auto item = choc::value::createObject("LatencyNode");
-                item.addMember("node_id", static_cast<int64_t>(node.node_id));
-                item.addMember("input_latency_samples", node.input_latency_samples);
-                item.addMember("output_latency_samples", node.output_latency_samples);
-                nodes.addArrayElement(item);
-            }
-            for (const auto& edge : snapshot->connections) {
-                auto item = choc::value::createObject("PDCConnection");
-                item.addMember("source_node", static_cast<int64_t>(edge.connection.source_node));
-                item.addMember("source_port", static_cast<int64_t>(edge.connection.source_port));
-                item.addMember("destination_node", static_cast<int64_t>(edge.connection.dest_node));
-                item.addMember("destination_port", static_cast<int64_t>(edge.connection.dest_port));
-                item.addMember("delay_samples", edge.delay_samples);
-                connections.addArrayElement(item);
-            }
-        }
-        latency.addMember("nodes", nodes);
-        latency.addMember("connections", connections);
-        report.addMember("latency_pdc", latency);
-    }
-    if (include_node_loads) {
-        auto loads = choc::value::createEmptyArray();
-        for (const auto& entry : graph.node_loads()) {
-            auto item = choc::value::createObject("NodeLoad");
-            item.addMember("node_id", static_cast<int64_t>(entry.node_id));
-            item.addMember("load", entry.load.load);
-            item.addMember("callback_count", static_cast<int64_t>(entry.load.callback_count));
-            loads.addArrayElement(item);
-        }
-        report.addMember("node_loads", loads);
-    }
-    std::cout << choc::json::toString(report) << '\n';
-    return 0;
-}
-bool parse_report_int(const std::string& text, int min, int max, int& out) {
-    int value = 0;
-    const auto parsed = std::from_chars(text.data(), text.data() + text.size(), value);
-    if (parsed.ec != std::errc{} || parsed.ptr != text.data() + text.size() || value < min ||
-        value > max)
-        return false;
-    out = value;
-    return true;
-}
-
-// `pulp graph report`: prepare the graph offline and print the static realtime
-// report (declared contracts, latency semantics, and a measured pass) as JSON.
-int report_graph(const std::vector<std::string>& args) {
-    int sample_rate = 48000;
-    int max_block = 512;
-    int block = 0;
-    int measure_blocks = 16;
-    for (std::size_t i = 2; i < args.size(); ++i) {
-        const auto& key = args[i];
-        if (key == "--json")
-            continue;
-        int* target = key == "--sample-rate"      ? &sample_rate
-                      : key == "--max-block-size" ? &max_block
-                      : key == "--block-size"     ? &block
-                      : key == "--measure-blocks" ? &measure_blocks
-                                                  : nullptr;
-        if (target == nullptr) {
-            json_error("invalid_option", "unknown report option: " + key);
-            return 2;
-        }
-        const int min = target == &measure_blocks ? 0 : 1;
-        const int max = target == &sample_rate ? 768000 : target == &measure_blocks ? 4096 : 16384;
-        if (++i == args.size() || !parse_report_int(args[i], min, max, *target)) {
-            json_error("invalid_option", key + " requires an integer from " + std::to_string(min) +
-                                             " to " + std::to_string(max));
-            return 2;
-        }
-    }
-    if (block > max_block) {
-        json_error("invalid_option", "--block-size must not exceed --max-block-size");
-        return 2;
-    }
-    pulp::host::SignalGraph graph;
-    pulp::host::GraphLoadOptions load_options;
-    load_options.load_plugins = false;
-    const auto loaded = pulp::host::GraphSerializer::from_file(graph, args[1], load_options);
-    if (!loaded.ok) {
-        json_error(patch_code(file_load_code(loaded)), loaded.error);
-        return 1;
-    }
-    if (!graph.prepare(static_cast<double>(sample_rate), max_block)) {
-        json_error("prepare_failed", "graph preparation failed");
-        return 1;
-    }
-    pulp::host::GraphRtReportOptions report_options;
-    report_options.block_size = block;
-    auto report = pulp::host::build_graph_rt_report(graph, report_options);
-    if (measure_blocks > 0) {
-        pulp::host::GraphRtMeasureOptions measure;
-        measure.blocks = measure_blocks;
-        measure.block_size = report.block_size;
-        if (const auto measured = pulp::host::measure_graph_rt_work(graph, measure))
-            pulp::host::apply_graph_rt_measurement(report, *measured, report_options);
-    }
-    std::cout << pulp::host::graph_rt_report_to_json(report) << '\n';
-    return 0;
-}
-// Render admission: the input decodes once, through the same bounded probe
-// as `graph probe`, and its length bounds the output allocation as well.
-constexpr std::uint64_t kRenderMaxFrames = 28800000;       // 10 minutes at 48 kHz
-constexpr std::uint64_t kRenderMaxInputSamples = 57600000; // frames x channels
-constexpr std::uint64_t kRenderDefaultFrames = 48000;
-
-struct RenderOptions {
-    std::string input;
-    std::string output;
-    std::uint64_t frames = 0; // 0 = input length, or kRenderDefaultFrames without input
-};
-
-std::optional<RenderOptions> parse_render_options(const std::vector<std::string>& args,
-                                                  std::string& code, std::string& message) {
-    RenderOptions options;
-    bool seen_input = false;
-    bool seen_output = false;
-    bool seen_frames = false;
-    for (std::size_t i = 2; i < args.size(); ++i) {
-        const auto& key = args[i];
-        if (key == "--json")
-            continue;
-        bool* seen = key == "--input"    ? &seen_input
-                     : key == "--output" ? &seen_output
-                     : key == "--frames" ? &seen_frames
-                                         : nullptr;
-        if (seen == nullptr) {
-            code = "invalid_option";
-            message = "unknown render option: " + key +
-                      " (render accepts --input WAV, --output WAV, --frames N and --json)";
-            return std::nullopt;
-        }
-        if (*seen) {
-            code = "invalid_option";
-            message = key + " may be given only once";
-            return std::nullopt;
-        }
-        *seen = true;
-        if (++i == args.size() || args[i].empty()) {
-            code = key == "--output" ? "missing_output" : "invalid_option";
-            message = key == "--output"  ? "--output requires a WAV path"
-                      : key == "--input" ? "--input requires a WAV path"
-                                         : "--frames requires an integer";
-            return std::nullopt;
-        }
-        if (key == "--input") {
-            options.input = args[i];
-        } else if (key == "--output") {
-            options.output = args[i];
-        } else {
-            const auto& value = args[i];
-            std::uint64_t frames = 0;
-            const auto parsed = std::from_chars(value.data(), value.data() + value.size(), frames);
-            if (parsed.ec != std::errc{} || parsed.ptr != value.data() + value.size() ||
-                frames < 1 || frames > kRenderMaxFrames) {
-                code = "invalid_option";
-                message =
-                    "--frames requires an integer from 1 to " + std::to_string(kRenderMaxFrames);
-                return std::nullopt;
-            }
-            options.frames = frames;
-        }
-    }
-    return options;
-}
-
-// `pulp graph render`: drive the graph offline with the decoded --input (or
-// with silence when the graph has no audio_in node) and report what came out.
-int render_graph(pulp::host::SignalGraph& graph,
-                 const pulp::host::GraphSerializer::LoadResult& loaded,
-                 const RenderOptions& options, bool json) {
-    const auto fail = [json](const std::string& code, const std::string& message, int status) {
-        if (json)
-            json_error(code, message);
-        else
-            std::cerr << "pulp graph: " << message << '\n';
-        return status;
-    };
-    if (!loaded.missing_plugins.empty() || !loaded.missing_custom_node_types.empty())
-        return fail("unresolved_node", "cannot render with unresolved node types", 1);
-    const bool has_audio_in =
-        std::any_of(graph.nodes().begin(), graph.nodes().end(),
-                    [](const auto& node) { return node.type == pulp::host::NodeType::AudioInput; });
-    // Without this refusal an audio_in graph renders the host's zero padding
-    // and reports success, which reads as a working graph that outputs silence.
-    if (has_audio_in && options.input.empty())
-        return fail("missing_input",
-                    "the graph reads audio from an audio_in node, so render needs a source: pass "
-                    "--input file.wav (its sample rate, channel count and length drive the render)",
-                    2);
-    std::optional<pulp::audio::AudioFileData> input;
-    if (!options.input.empty()) {
-        input = pulp::audio::read_audio_file(options.input, [](const auto& info) {
-            return info.sample_rate >= 8000 && info.sample_rate <= 192000 &&
-                   info.num_channels >= 1 && info.num_channels <= 8 && info.num_frames >= 1 &&
-                   info.num_frames <= kRenderMaxFrames &&
-                   info.num_frames * info.num_channels <= kRenderMaxInputSamples;
-        });
-        if (!input || input->empty())
-            return fail("input_limit",
-                        "input must decode to 1..8 channels, 8000..192000 Hz, 1.." +
-                            std::to_string(kRenderMaxFrames) + " frames and at most " +
-                            std::to_string(kRenderMaxInputSamples) + " samples in total",
-                        2);
-        for (const auto& channel : input->channels)
-            for (const auto sample : channel)
-                if (!std::isfinite(sample))
-                    return fail("non_finite_input", "input samples must be finite", 2);
-    }
-    pulp::host::OfflineSignalGraphConfig config;
-    if (input) {
-        config.sample_rate = static_cast<double>(input->sample_rate);
-        config.input_channels = static_cast<int>(input->num_channels());
-        config.output_channels = std::max(2, config.input_channels);
-    }
-    pulp::host::OfflineSignalGraphHost host(graph);
-    if (!host.prepare(config))
-        return fail("prepare_failed", "graph preparation failed", 1);
-    const std::uint64_t frames = options.frames != 0 ? options.frames
-                                 : input             ? input->num_frames()
-                                                     : kRenderDefaultFrames;
-    std::vector<const float*> pointers;
-    pulp::host::OfflineSignalGraphOptions render_options;
-    render_options.frame_count = frames;
-    if (input) {
-        for (const auto& channel : input->channels)
-            pointers.push_back(channel.data());
-        render_options.input = {pointers.data(), pointers.size(),
-                                static_cast<std::size_t>(input->num_frames())};
-    }
-    const auto rendered = host.render(render_options);
-    if (!rendered.ok)
-        return fail("render_failed", "offline render failed", 1);
-    float peak = 0.0f;
-    for (std::size_t channel = 0; channel < rendered.audio.num_channels(); ++channel)
-        for (const auto sample : rendered.audio.channel(channel)) {
-            if (!std::isfinite(sample))
-                return fail("non_finite_output", "the graph produced non-finite samples", 1);
-            peak = std::max(peak, std::abs(sample));
-        }
-    const auto sample_rate = static_cast<std::int64_t>(config.sample_rate);
-    if (!options.output.empty()) {
-        pulp::audio::AudioFileData file;
-        file.sample_rate = static_cast<std::uint32_t>(sample_rate);
-        for (std::size_t channel = 0; channel < rendered.audio.num_channels(); ++channel) {
-            const auto samples = rendered.audio.channel(channel);
-            file.channels.emplace_back(samples.begin(), samples.end());
-        }
-        if (!pulp::audio::write_wav_file(options.output, file, pulp::audio::WavBitDepth::Float32))
-            return fail("output_failed", "could not write WAV output", 1);
-    }
-    if (json) {
-        auto result = choc::value::createObject("GraphRender");
-        result.addMember("valid", true);
-        result.addMember("code", patch_code(Code::Ok));
-        result.addMember("frames", static_cast<std::int64_t>(frames));
-        result.addMember("sample_rate", sample_rate);
-        result.addMember("channels", static_cast<std::int64_t>(rendered.audio.num_channels()));
-        result.addMember("blocks", static_cast<std::int64_t>(rendered.blocks_rendered));
-        result.addMember("peak", static_cast<double>(peak));
-        std::cout << choc::json::toString(result) << '\n';
-    } else {
-        std::cout << "rendered " << frames << " frames at " << sample_rate << " Hz in "
-                  << rendered.blocks_rendered << " blocks (peak " << peak << ")\n";
-    }
-    return 0;
-}
-// Reads one saved document for diff without parsing it. The bound matches the
-// serializer's file limit so a diff never reads more than a load would.
-std::optional<std::string> read_graph_document(const std::string& path, Code& code,
-                                               std::string& message) {
-    std::string text;
-    if (!pulp::host::GraphSerializer::read_file_bounded(path, text, message)) {
-        // The serializer reader names the cause: the byte limit is a resource
-        // limit, anything else (missing, changed while reading) is unreadable.
-        code =
-            message.starts_with("graph file exceeds") ? Code::ResourceLimit : Code::FileUnreadable;
-        return std::nullopt;
-    }
-    return text;
+// True when `flag` appears after the subcommand and its path.
+bool has_flag(const std::vector<std::string>& args, const char* flag) {
+    return std::find(args.begin() + 2, args.end(), flag) != args.end();
 }
 
 struct RewriteDeclaration {
@@ -738,157 +130,274 @@ RewriteDeclaration declares_rewrite_content(const std::string& text) {
     return out;
 }
 
-choc::value::Value string_array(const std::vector<std::string>& values) {
-    auto array = choc::value::createEmptyArray();
-    for (const auto& value : values)
-        array.addArrayElement(value);
-    return array;
+// One loaded document and what the rewrite handlers need to know about it.
+struct LoadedGraph {
+    std::unique_ptr<pulp::host::SignalGraph> graph = std::make_unique<pulp::host::SignalGraph>();
+    pulp::host::GraphSerializer::LoadResult loaded;
+    bool saved_identity = false;
+};
+
+// Strict load through the notation/patch loader (validate, `.pat` inputs and
+// `fmt --notation`).
+int load_strict(const std::string& path, bool json, LoadedGraph& out) {
+    auto strict = pulp::host::load_graph_patch_file(path);
+    if (!strict) {
+        if (json) {
+            // The loader's typed diagnostic is the contract for notation
+            // and saved graphs alike, so the code matches the C++ API.
+            std::cout << pulp::host::graph_patch_diagnostic_json(strict.diagnostic) << '\n';
+        } else
+            std::cerr << "pulp graph: " << strict.diagnostic.message() << '\n';
+        return 1;
+    }
+    out.graph = std::move(strict.graph);
+    out.loaded.ok = true;
+    return 0;
 }
 
-int diff_graphs(const std::vector<std::string>& args) {
-    const bool json = std::find(args.begin() + 1, args.end(), "--json") != args.end();
-    std::vector<std::string> paths;
-    for (std::size_t i = 1; i < args.size(); ++i) {
-        if (args[i] == "--json")
-            continue;
-        if (args[i].starts_with("--")) {
-            if (json)
-                json_error("invalid_option", "unknown diff option: " + args[i]);
-            else
-                std::cerr << "pulp graph: unknown diff option: " << args[i] << '\n';
-            return 2;
-        }
-        paths.push_back(args[i]);
-    }
-    if (paths.size() != 2) {
+// Load for save, fmt and canonicalize.
+int load_for_rewrite(const std::string& op, const std::vector<std::string>& args,
+                     const std::string& path, bool json, LoadedGraph& out) {
+    auto& graph_ptr = out.graph;
+    auto& loaded = out.loaded;
+    pulp::host::GraphLoadOptions opts;
+    opts.load_plugins = false;
+    // A rewrite must not drop what the plain writer cannot express: the
+    // saved-identity envelope is kept (and verified on load), and subgraph
+    // records, which need the caller's templates, are refused.
+    Code read_code = Code::Ok;
+    std::string message;
+    auto text = read_graph_document(path, read_code, message);
+    if (!text) {
         if (json)
-            json_error("missing_input", "diff requires exactly two graph files: BEFORE AFTER");
+            json_error(patch_code(read_code), message);
         else
-            std::cerr << "pulp graph: diff requires exactly two graph files: BEFORE AFTER\n";
-        return 2;
+            std::cerr << "pulp graph: " << message << '\n';
+        return 1;
     }
-    std::string documents[2];
-    for (std::size_t i = 0; i < 2; ++i) {
-        Code code = Code::Ok;
-        std::string message;
-        auto text = read_graph_document(paths[i], code, message);
-        if (!text) {
-            if (json)
-                json_error(patch_code(code), message);
-            else
-                std::cerr << "pulp graph: " << message << '\n';
-            return 1;
-        }
-        documents[i] = std::move(*text);
+    const auto declared = declares_rewrite_content(*text);
+    out.saved_identity = declared.saved_identity;
+    if (declared.subgraph_records) {
+        const std::string refusal =
+            "the document holds subgraph records, which need the authoring templates to "
+            "rewrite; rewriting it here would drop every subgraph instance";
+        if (json)
+            json_error("subgraph_records_unsupported", refusal);
+        else
+            std::cerr << "pulp graph: " << refusal << '\n';
+        return 1;
     }
-    const auto diff = pulp::host::diff_graph_documents(documents[0], documents[1]);
-    if (!diff.ok()) {
-        const bool after = diff.code == pulp::host::GraphDocumentDiffCode::AfterRefused ||
-                           diff.detail.starts_with("after:");
-        // A plain graph (any format) has no envelope: the inspector refuses
-        // a v4+ one as missing it and an older one by format version.
-        const bool missing_identity =
-            diff.refusal == pulp::host::GraphDocumentRefusal::LogicalIdentityMissing ||
-            diff.refusal == pulp::host::GraphDocumentRefusal::InvalidFormatVersion;
-        const std::string resave =
-            "write the identity envelope with: pulp graph save FILE --output FILE "
-            "--saved-identity";
-        if (json) {
-            // The document refusal is the C++ InvalidDocument class; the
-            // inspection refusal and the side name the exact cause.
-            auto value = choc::value::createObject("GraphError");
-            value.addMember("valid", false);
-            value.addMember("code", patch_code(Code::InvalidDocument));
-            value.addMember("refusal", pulp::host::graph_document_refusal_name(diff.refusal));
-            value.addMember("side", after ? "after" : "before");
-            value.addMember("message", diff.detail);
-            if (missing_identity)
-                value.addMember("hint", resave);
-            std::cout << choc::json::toString(value) << '\n';
-        } else {
-            std::cerr << "pulp graph: cannot diff (" << (after ? paths[1] : paths[0])
-                      << "): " << diff.detail << '\n';
-            if (missing_identity)
-                std::cerr << "pulp graph: " << resave << '\n';
+    loaded = out.saved_identity
+                 ? pulp::host::GraphSerializer::from_saved_document(*graph_ptr, *text, opts)
+                 : pulp::host::GraphSerializer::from_json(*graph_ptr, *text, opts);
+    // A rewrite writes back only the nodes the load created, so a node
+    // record the tolerant load could not add would vanish from the file.
+    if (loaded.ok && !loaded.unrestored_node_ids.empty()) {
+        loaded.ok = false;
+        loaded.error = "node_not_restored: node record " +
+                       std::to_string(loaded.unrestored_node_ids.front()) +
+                       " could not be added to the graph; rewriting the document would "
+                       "drop it";
+    }
+    // Stamping an envelope on a plain document asserts that the written
+    // graph is the document, so the tolerant load must not have dropped an
+    // edge. A spectral document is read strictly and restores every edge,
+    // spectral lanes included, so it passes the same check.
+    const bool adds_identity =
+        loaded.ok && !out.saved_identity && op == "save" && has_flag(args, "--saved-identity");
+    if (adds_identity) {
+        if (auto missing = pulp::host::GraphSerializer::unrestored_connection(
+                *graph_ptr, *text, loaded.persisted_node_ids)) {
+            loaded.ok = false;
+            loaded.error = "connection_not_restored: " + *missing +
+                           "; the identity envelope would describe a different graph";
         }
+    }
+    if (!loaded.ok) {
+        if (json)
+            json_error(patch_code(Code::InvalidDocument), loaded.error);
+        else
+            std::cerr << "pulp graph: " << loaded.error << '\n';
+        return 1;
+    }
+    return 0;
+}
+
+// Tolerant file load for inspect, explain and render.
+int load_tolerant(const std::string& path, bool json, LoadedGraph& out) {
+    pulp::host::GraphLoadOptions opts;
+    opts.load_plugins = false;
+    out.loaded = pulp::host::GraphSerializer::from_file(*out.graph, path, opts);
+    if (!out.loaded.ok) {
+        if (json)
+            json_error(patch_code(file_load_code(out.loaded)), out.loaded.error);
+        else
+            std::cerr << "pulp graph: " << out.loaded.error << '\n';
+        return 1;
+    }
+    return 0;
+}
+
+int format_notation(const pulp::host::SignalGraph& graph, bool json) {
+    const auto formatted = pulp::host::format_graph_patch(graph);
+    if (!formatted) {
+        if (json)
+            std::cout << pulp::host::graph_patch_diagnostic_json(formatted.diagnostic) << '\n';
+        else
+            std::cerr << formatted.diagnostic.message() << '\n';
         return 1;
     }
     if (json) {
-        auto result = choc::value::createObject("GraphDiff");
+        auto result = choc::value::createObject("GraphNotation");
         result.addMember("valid", true);
         result.addMember("code", patch_code(Code::Ok));
-        result.addMember("equal", diff.equal());
-        result.addMember("before_digest", diff.before_digest);
-        result.addMember("after_digest", diff.after_digest);
-        auto nodes = choc::value::createObject("Nodes");
-        nodes.addMember("added", string_array(diff.nodes_added));
-        nodes.addMember("removed", string_array(diff.nodes_removed));
-        auto changed = choc::value::createEmptyArray();
-        for (const auto& change : diff.nodes_changed) {
-            auto item = choc::value::createObject("NodeChange");
-            item.addMember("identity", change.identity);
-            item.addMember("fields", string_array(change.fields));
-            changed.addArrayElement(item);
-        }
-        nodes.addMember("changed", changed);
-        result.addMember("nodes", nodes);
-        auto connections = choc::value::createObject("Connections");
-        connections.addMember("added", string_array(diff.connections_added));
-        connections.addMember("removed", string_array(diff.connections_removed));
-        connections.addMember("changed", string_array(diff.connections_changed));
-        result.addMember("connections", connections);
-        auto events = choc::value::createObject("EventConnections");
-        events.addMember("added", string_array(diff.event_connections_added));
-        events.addMember("removed", string_array(diff.event_connections_removed));
-        events.addMember("changed", string_array(diff.event_connections_changed));
-        result.addMember("event_connections", events);
-        auto assets = choc::value::createObject("SpectralAssets");
-        assets.addMember("added", string_array(diff.spectral_assets_added));
-        assets.addMember("removed", string_array(diff.spectral_assets_removed));
-        assets.addMember("changed", string_array(diff.spectral_assets_changed));
-        result.addMember("spectral_assets", assets);
-        result.addMember("layout_changed", string_array(diff.layout_changed));
-        result.addMember("sections_changed", string_array(diff.sections_changed));
+        result.addMember("notation", formatted.text);
         std::cout << choc::json::toString(result) << '\n';
-        return 0;
+    } else
+        std::cout << formatted.text;
+    return 0;
+}
+
+int print_validate(const pulp::host::SignalGraph& graph, bool json) {
+    if (json) {
+        std::cout << "{\"valid\":true,\"code\":\"" << patch_code(Code::Ok)
+                  << "\",\"format_version\":"
+                  << pulp::host::GraphSerializer::current_format_version()
+                  << ",\"nodes\":" << graph.nodes().size()
+                  << ",\"connections\":" << graph.connections().size() << "}\n";
+    } else
+        std::cout << "valid: true\nformat_version: "
+                  << pulp::host::GraphSerializer::current_format_version()
+                  << "\nnodes: " << graph.nodes().size()
+                  << "\nconnections: " << graph.connections().size() << "\n";
+    return 0;
+}
+
+int print_inspect(const pulp::host::SignalGraph& graph,
+                  const pulp::host::GraphSerializer::LoadResult& loaded, bool json) {
+    if (json)
+        std::cout << "{\"valid\":true,\"format_version\":"
+                  << pulp::host::GraphSerializer::current_format_version()
+                  << ",\"nodes\":" << graph.nodes().size()
+                  << ",\"connections\":" << graph.connections().size()
+                  << ",\"missing_plugins\":" << loaded.missing_plugins.size() << "}\n";
+    else
+        std::cout << "format_version: " << pulp::host::GraphSerializer::current_format_version()
+                  << "\nnodes: " << graph.nodes().size()
+                  << "\nconnections: " << graph.connections().size()
+                  << "\nmissing_plugins: " << loaded.missing_plugins.size() << "\n";
+    return 0;
+}
+
+int save_graph(const std::vector<std::string>& args, const pulp::host::SignalGraph& graph,
+               const pulp::host::GraphSerializer::LoadResult& loaded, bool saved_identity,
+               bool json) {
+    const auto output_arg = std::find(args.begin() + 2, args.end(), "--output");
+    if (output_arg == args.end() || output_arg + 1 == args.end() || (*(output_arg + 1)).empty()) {
+        if (json)
+            json_error("missing_output", "save requires --output PATH");
+        else
+            std::cerr << "pulp graph: save requires --output PATH\n";
+        return 2;
     }
-    for (const auto& id : diff.nodes_added)
-        std::cout << "+ node " << id << '\n';
-    for (const auto& id : diff.nodes_removed)
-        std::cout << "- node " << id << '\n';
-    for (const auto& change : diff.nodes_changed) {
-        std::cout << "~ node " << change.identity << " (";
-        for (std::size_t i = 0; i < change.fields.size(); ++i)
-            std::cout << (i ? ", " : "") << change.fields[i];
-        std::cout << ")\n";
+    if (!loaded.missing_plugins.empty() || !loaded.state_restore_failures.empty() ||
+        !loaded.missing_custom_node_types.empty()) {
+        if (json)
+            json_error("serialization_refused",
+                       "cannot save with unresolved plugin or custom node state");
+        else
+            std::cerr << "pulp graph: cannot save with unresolved plugin or custom node state\n";
+        return 1;
     }
-    for (const auto& key : diff.connections_added)
-        std::cout << "+ connection " << key << '\n';
-    for (const auto& key : diff.connections_removed)
-        std::cout << "- connection " << key << '\n';
-    for (const auto& key : diff.connections_changed)
-        std::cout << "~ connection " << key << '\n';
-    for (const auto& key : diff.event_connections_added)
-        std::cout << "+ event connection " << key << '\n';
-    for (const auto& key : diff.event_connections_removed)
-        std::cout << "- event connection " << key << '\n';
-    for (const auto& key : diff.event_connections_changed)
-        std::cout << "~ event connection " << key << '\n';
-    for (const auto& id : diff.spectral_assets_added)
-        std::cout << "+ spectral asset " << id << '\n';
-    for (const auto& id : diff.spectral_assets_removed)
-        std::cout << "- spectral asset " << id << '\n';
-    for (const auto& id : diff.spectral_assets_changed)
-        std::cout << "~ spectral asset " << id << '\n';
-    for (const auto& name : diff.sections_changed)
-        std::cout << "~ section " << name << '\n';
-    for (const auto& id : diff.layout_changed)
-        std::cout << "  layout " << id << '\n';
-    if (diff.equal())
-        std::cout << "no semantic differences\n";
+    const bool write_identity = saved_identity || has_flag(args, "--saved-identity");
+    const auto saved =
+        write_identity
+            ? pulp::host::GraphSerializer::to_saved_file(graph, *(output_arg + 1),
+                                                         loaded.editor_layout)
+            : pulp::host::GraphSerializer::to_file(graph, *(output_arg + 1), loaded.editor_layout);
+    if (!saved.ok) {
+        if (json)
+            json_error(pulp::host::GraphSerializer::save_code_name(saved.code), saved.error);
+        else
+            std::cerr << "pulp graph: " << saved.error << '\n';
+        return 1;
+    }
+    if (json)
+        std::cout << "{\"valid\":true,\"code\":\"saved\"}\n";
+    return 0;
+}
+
+int canonicalize_graph(const std::string& path, const pulp::host::SignalGraph& graph,
+                       const pulp::host::GraphSerializer::LoadResult& loaded, bool saved_identity,
+                       bool json) {
+    if (!loaded.missing_plugins.empty()) {
+        if (json) {
+            json_error("unresolved_node", "cannot canonicalize while plugin nodes are "
+                                          "unresolved; resolve all plugins first");
+            return 1;
+        }
+        std::cerr << "pulp graph: cannot canonicalize while plugin nodes are unresolved; "
+                     "resolve all plugins first\n";
+        return 1;
+    }
+    if (!loaded.state_restore_failures.empty()) {
+        if (json) {
+            json_error("RestoreFailed", std::to_string(loaded.state_restore_failures.size()) +
+                                            " plugin(s) rejected their persisted state; "
+                                            "canonicalizing would overwrite it");
+            return 1;
+        }
+        std::cerr << "pulp graph: cannot canonicalize because "
+                  << loaded.state_restore_failures.size()
+                  << " plugin(s) rejected their persisted state; canonicalizing would "
+                     "overwrite it\n";
+        return 1;
+    }
+    const auto saved =
+        saved_identity ? pulp::host::GraphSerializer::to_saved_file(
+                             graph, std::filesystem::path(path), loaded.editor_layout)
+                       : pulp::host::GraphSerializer::to_file(graph, std::filesystem::path(path),
+                                                              loaded.editor_layout);
+    if (!saved.ok) {
+        if (json) {
+            json_error(pulp::host::GraphSerializer::save_code_name(saved.code), saved.error);
+            return 1;
+        }
+        std::cerr << "pulp graph: cannot canonicalize graph ("
+                  << pulp::host::GraphSerializer::save_code_name(saved.code) << "): " << saved.error
+                  << '\n';
+        return 1;
+    }
+    if (json)
+        std::cout << "{\"valid\":true,\"code\":\"Ok\"}\n";
+    return 0;
+}
+
+// Refuses probe-only flags and unknown subcommands for the single-document
+// operations. Returns 0 when `op` may proceed.
+int check_document_operation(const std::string& op, const std::vector<std::string>& args,
+                             bool json) {
+    for (const auto* flag : {"--plan", "--latency", "--node-loads"}) {
+        if (has_flag(args, flag)) {
+            if (json)
+                json_error("invalid_option", std::string(flag) + " is only valid for graph probe");
+            else
+                std::cerr << "pulp graph: " << flag << " is only valid for graph probe\n";
+            return 2;
+        }
+    }
+    if (op != "inspect" && op != "validate" && op != "explain" && op != "render" && op != "fmt" &&
+        op != "canonicalize" && op != "save") {
+        if (json)
+            json_error("unknown_operation", "unknown graph subcommand: " + op);
+        else
+            std::cerr << "pulp graph: unknown subcommand '" << op << "'\n";
+        return 2;
+    }
     return 0;
 }
 } // namespace
+
 int cmd_graph(const std::vector<std::string>& args) {
     if (args.empty() || args[0] == "help" || args[0] == "--help" || args[0] == "-h") {
         usage();
@@ -910,24 +419,9 @@ int cmd_graph(const std::vector<std::string>& args) {
         return probe_graph(args);
     if (op == "report")
         return report_graph(args);
-    const bool json = std::find(args.begin() + 2, args.end(), "--json") != args.end();
-    for (const auto* flag : {"--plan", "--latency", "--node-loads"}) {
-        if (std::find(args.begin() + 2, args.end(), flag) != args.end()) {
-            if (json)
-                json_error("invalid_option", std::string(flag) + " is only valid for graph probe");
-            else
-                std::cerr << "pulp graph: " << flag << " is only valid for graph probe\n";
-            return 2;
-        }
-    }
-    if (op != "inspect" && op != "validate" && op != "explain" && op != "render" && op != "fmt" &&
-        op != "canonicalize" && op != "save") {
-        if (json)
-            json_error("unknown_operation", "unknown graph subcommand: " + op);
-        else
-            std::cerr << "pulp graph: unknown subcommand '" << op << "'\n";
-        return 2;
-    }
+    const bool json = has_flag(args, "--json");
+    if (const auto status = check_document_operation(op, args, json))
+        return status;
     std::optional<RenderOptions> render_options;
     if (op == "render") {
         std::string code;
@@ -941,227 +435,31 @@ int cmd_graph(const std::vector<std::string>& args) {
             return 2;
         }
     }
-    auto graph_ptr = std::make_unique<pulp::host::SignalGraph>();
-    pulp::host::GraphLoadOptions opts;
-    opts.load_plugins = false;
-    pulp::host::GraphSerializer::LoadResult loaded;
-    bool saved_identity = false;
+    LoadedGraph document;
     const bool notation = std::filesystem::path(path).extension() == ".pat";
-    if (op == "validate" || notation ||
-        (op == "fmt" && std::find(args.begin() + 2, args.end(), "--notation") != args.end())) {
-        auto strict = pulp::host::load_graph_patch_file(path);
-        if (!strict) {
-            if (json) {
-                // The loader's typed diagnostic is the contract for notation
-                // and saved graphs alike, so the code matches the C++ API.
-                std::cout << pulp::host::graph_patch_diagnostic_json(strict.diagnostic) << '\n';
-            } else
-                std::cerr << "pulp graph: " << strict.diagnostic.message() << '\n';
-            return 1;
-        }
-        graph_ptr = std::move(strict.graph);
-        loaded.ok = true;
-    } else if (op == "save" || op == "fmt" || op == "canonicalize") {
-        // A rewrite must not drop what the plain writer cannot express: the
-        // saved-identity envelope is kept (and verified on load), and subgraph
-        // records, which need the caller's templates, are refused.
-        Code read_code = Code::Ok;
-        std::string message;
-        auto text = read_graph_document(path, read_code, message);
-        if (!text) {
-            if (json)
-                json_error(patch_code(read_code), message);
-            else
-                std::cerr << "pulp graph: " << message << '\n';
-            return 1;
-        }
-        const auto declared = declares_rewrite_content(*text);
-        saved_identity = declared.saved_identity;
-        if (declared.subgraph_records) {
-            const std::string refusal =
-                "the document holds subgraph records, which need the authoring templates to "
-                "rewrite; rewriting it here would drop every subgraph instance";
-            if (json)
-                json_error("subgraph_records_unsupported", refusal);
-            else
-                std::cerr << "pulp graph: " << refusal << '\n';
-            return 1;
-        }
-        loaded = saved_identity
-                     ? pulp::host::GraphSerializer::from_saved_document(*graph_ptr, *text, opts)
-                     : pulp::host::GraphSerializer::from_json(*graph_ptr, *text, opts);
-        // A rewrite writes back only the nodes the load created, so a node
-        // record the tolerant load could not add would vanish from the file.
-        if (loaded.ok && !loaded.unrestored_node_ids.empty()) {
-            loaded.ok = false;
-            loaded.error = "node_not_restored: node record " +
-                           std::to_string(loaded.unrestored_node_ids.front()) +
-                           " could not be added to the graph; rewriting the document would "
-                           "drop it";
-        }
-        // Stamping an envelope on a plain document asserts that the written
-        // graph is the document, so the tolerant load must not have dropped an
-        // edge. A spectral document is read strictly and restores every edge,
-        // spectral lanes included, so it passes the same check.
-        const bool adds_identity =
-            loaded.ok && !saved_identity && op == "save" &&
-            std::find(args.begin() + 2, args.end(), "--saved-identity") != args.end();
-        if (adds_identity) {
-            if (auto missing = pulp::host::GraphSerializer::unrestored_connection(
-                    *graph_ptr, *text, loaded.persisted_node_ids)) {
-                loaded.ok = false;
-                loaded.error = "connection_not_restored: " + *missing +
-                               "; the identity envelope would describe a different graph";
-            }
-        }
-        if (!loaded.ok) {
-            if (json)
-                json_error(patch_code(Code::InvalidDocument), loaded.error);
-            else
-                std::cerr << "pulp graph: " << loaded.error << '\n';
-            return 1;
-        }
-    } else {
-        loaded = pulp::host::GraphSerializer::from_file(*graph_ptr, path, opts);
-        if (!loaded.ok) {
-            if (json)
-                json_error(patch_code(file_load_code(loaded)), loaded.error);
-            else
-                std::cerr << "pulp graph: " << loaded.error << '\n';
-            return 1;
-        }
-    }
-    auto& graph = *graph_ptr;
-    const bool as_notation = std::find(args.begin() + 2, args.end(), "--notation") != args.end();
-    if (op == "fmt" && (notation || as_notation)) {
-        const auto formatted = pulp::host::format_graph_patch(graph);
-        if (!formatted) {
-            if (json)
-                std::cout << pulp::host::graph_patch_diagnostic_json(formatted.diagnostic) << '\n';
-            else
-                std::cerr << formatted.diagnostic.message() << '\n';
-            return 1;
-        }
-        if (json) {
-            auto result = choc::value::createObject("GraphNotation");
-            result.addMember("valid", true);
-            result.addMember("code", patch_code(Code::Ok));
-            result.addMember("notation", formatted.text);
-            std::cout << choc::json::toString(result) << '\n';
-        } else
-            std::cout << formatted.text;
-        return 0;
-    }
-    if (op == "validate") {
-        if (json) {
-            std::cout << "{\"valid\":true,\"code\":\"" << patch_code(Code::Ok)
-                      << "\",\"format_version\":"
-                      << pulp::host::GraphSerializer::current_format_version()
-                      << ",\"nodes\":" << graph.nodes().size()
-                      << ",\"connections\":" << graph.connections().size() << "}\n";
-        } else
-            std::cout << "valid: true\nformat_version: "
-                      << pulp::host::GraphSerializer::current_format_version()
-                      << "\nnodes: " << graph.nodes().size()
-                      << "\nconnections: " << graph.connections().size() << "\n";
-        return 0;
-    }
-    if (op == "inspect" || op == "explain") {
-        if (json)
-            std::cout << "{\"valid\":true,\"format_version\":"
-                      << pulp::host::GraphSerializer::current_format_version()
-                      << ",\"nodes\":" << graph.nodes().size()
-                      << ",\"connections\":" << graph.connections().size()
-                      << ",\"missing_plugins\":" << loaded.missing_plugins.size() << "}\n";
-        else
-            std::cout << "format_version: " << pulp::host::GraphSerializer::current_format_version()
-                      << "\nnodes: " << graph.nodes().size()
-                      << "\nconnections: " << graph.connections().size()
-                      << "\nmissing_plugins: " << loaded.missing_plugins.size() << "\n";
-        return 0;
-    }
+    const bool as_notation = has_flag(args, "--notation");
+    int load_status = 0;
+    if (op == "validate" || notation || (op == "fmt" && as_notation))
+        load_status = load_strict(path, json, document);
+    else if (op == "save" || op == "fmt" || op == "canonicalize")
+        load_status = load_for_rewrite(op, args, path, json, document);
+    else
+        load_status = load_tolerant(path, json, document);
+    if (load_status != 0)
+        return load_status;
+    auto& graph = *document.graph;
+    const auto& loaded = document.loaded;
+    if (op == "fmt" && (notation || as_notation))
+        return format_notation(graph, json);
+    if (op == "validate")
+        return print_validate(graph, json);
+    if (op == "inspect" || op == "explain")
+        return print_inspect(graph, loaded, json);
     if (op == "render")
         return render_graph(graph, loaded, *render_options, json);
-    if (op == "save") {
-        const auto output_arg = std::find(args.begin() + 2, args.end(), "--output");
-        if (output_arg == args.end() || output_arg + 1 == args.end() ||
-            (*(output_arg + 1)).empty()) {
-            if (json)
-                json_error("missing_output", "save requires --output PATH");
-            else
-                std::cerr << "pulp graph: save requires --output PATH\n";
-            return 2;
-        }
-        if (!loaded.missing_plugins.empty() || !loaded.state_restore_failures.empty() ||
-            !loaded.missing_custom_node_types.empty()) {
-            if (json)
-                json_error("serialization_refused",
-                           "cannot save with unresolved plugin or custom node state");
-            else
-                std::cerr
-                    << "pulp graph: cannot save with unresolved plugin or custom node state\n";
-            return 1;
-        }
-        const bool write_identity = saved_identity || std::find(args.begin() + 2, args.end(),
-                                                                "--saved-identity") != args.end();
-        const auto saved = write_identity ? pulp::host::GraphSerializer::to_saved_file(
-                                                graph, *(output_arg + 1), loaded.editor_layout)
-                                          : pulp::host::GraphSerializer::to_file(
-                                                graph, *(output_arg + 1), loaded.editor_layout);
-        if (!saved.ok) {
-            if (json)
-                json_error(pulp::host::GraphSerializer::save_code_name(saved.code), saved.error);
-            else
-                std::cerr << "pulp graph: " << saved.error << '\n';
-            return 1;
-        }
-        if (json)
-            std::cout << "{\"valid\":true,\"code\":\"saved\"}\n";
-        return 0;
-    }
-    if (op == "canonicalize" || op == "fmt") {
-        if (!loaded.missing_plugins.empty()) {
-            if (json) {
-                json_error("unresolved_node", "cannot canonicalize while plugin nodes are "
-                                              "unresolved; resolve all plugins first");
-                return 1;
-            }
-            std::cerr << "pulp graph: cannot canonicalize while plugin nodes are unresolved; "
-                         "resolve all plugins first\n";
-            return 1;
-        }
-        if (!loaded.state_restore_failures.empty()) {
-            if (json) {
-                json_error("RestoreFailed",
-                           std::to_string(loaded.state_restore_failures.size()) +
-                               " plugin(s) rejected their persisted state; canonicalizing would "
-                               "overwrite it");
-                return 1;
-            }
-            std::cerr << "pulp graph: cannot canonicalize because "
-                      << loaded.state_restore_failures.size()
-                      << " plugin(s) rejected their persisted state; canonicalizing would "
-                         "overwrite it\n";
-            return 1;
-        }
-        const auto saved = saved_identity
-                               ? pulp::host::GraphSerializer::to_saved_file(
-                                     graph, std::filesystem::path(path), loaded.editor_layout)
-                               : pulp::host::GraphSerializer::to_file(
-                                     graph, std::filesystem::path(path), loaded.editor_layout);
-        if (!saved.ok) {
-            if (json) {
-                json_error(pulp::host::GraphSerializer::save_code_name(saved.code), saved.error);
-                return 1;
-            }
-            std::cerr << "pulp graph: cannot canonicalize graph ("
-                      << pulp::host::GraphSerializer::save_code_name(saved.code)
-                      << "): " << saved.error << '\n';
-            return 1;
-        }
-        if (json)
-            std::cout << "{\"valid\":true,\"code\":\"Ok\"}\n";
-        return 0;
-    }
+    if (op == "save")
+        return save_graph(args, graph, loaded, document.saved_identity, json);
+    if (op == "canonicalize" || op == "fmt")
+        return canonicalize_graph(path, graph, loaded, document.saved_identity, json);
     return 2;
 }

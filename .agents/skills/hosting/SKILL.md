@@ -2442,6 +2442,8 @@ Watch out for:
   same-named node), and a v6/v7 pair is refused rather than compared. A
   pre-v4 legacy file is refused as `invalid_format_version`, not
   `logical_identity_missing`; re-save it with `to_saved_document` first.
+  The CLI front end is `tools/cli/cmd_graph_diff.cpp`; `pulp graph probe`,
+  `render` and `report` are in `cmd_graph_probe.cpp` and `cmd_graph_render.cpp`.
 - A graph event connection (`connect_graph_event`) persists ONLY in the
   saved-identity v7 document (`event_connections`, endpoints by authored ID).
   `to_json`/`to_file` refuse a graph that holds one rather than drop it, and a

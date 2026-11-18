@@ -469,10 +469,28 @@ staged `browser_capture-v1/` copy, the capability probe hits
 `ERR_MODULE_NOT_FOUND`, and discovery reports that the system Chrome "does not
 provide the required headless/CDP capture capabilities".
 
+### `pulp graph` is split across `tools/cli/cmd_graph*.cpp`
+
+`cmd_graph.cpp` is the dispatcher, the single-document handlers (inspect,
+explain, validate, fmt, canonicalize, save) and the code names, JSON error
+envelope and bounded document reader every subcommand shares. `probe` lives in
+`cmd_graph_probe.cpp`, `render` and `report` in `cmd_graph_render.cpp` and
+`diff` in `cmd_graph_diff.cpp`; the private `cmd_graph_internal.hpp` declares
+what crosses between them. Each new source is one more translation unit that
+reaches the host headers, so the header fan-out guard asks for a
+`Fanout-Grow:` trailer; fold a small helper into an existing file instead of
+adding a source for it. A new graph source file must be added to the
+`pulp-cli` source list in `tools/cli/CMakeLists.txt` and to the file list that
+`every CLI graph code the source emits is documented` in
+`test/test_cli_graph_code_parity.cpp` scans; that test finds emitted codes by
+the literal `fail("code"` and `json_error("code"` spellings, so keep refusal
+codes as string literals at the call site rather than behind a helper that
+takes the code from a variable.
+
 ### `pulp graph probe` refusals must name the cause and the fix
 
 Every `EdgeProbeStatus` refusal from `pulp graph probe` maps, in
-`probe_refusal()` in `tools/cli/cmd_graph.cpp`, to the enum spelling as `code`
+`probe_refusal()` in `tools/cli/cmd_graph_probe.cpp`, to the enum spelling as `code`
 plus a `message` that says what is wrong and what to change. One generic
 "cannot attach" string for every refusal left an agent with no next step. When
 the host adds an `EdgeProbeStatus` value, add its message there; the switch has
@@ -506,11 +524,11 @@ Every `GraphDocumentDiff` list must reach both output forms. A list the CLI
 does not print is a change `pulp graph diff` reports as equal-looking text
 while `equal` is false: when a field is added to the diff (for example
 `event_connections_added`, `_removed`, `_changed`), add it to the `--json`
-object and the text lines in `cmd_graph.cpp`, and to `docs/reference/cli.md`.
+object and the text lines in `cmd_graph_diff.cpp`, and to `docs/reference/cli.md`.
 
 ### `pulp graph render` must be driven by its input and report its level
 
-`render_graph()` in `tools/cli/cmd_graph.cpp` decodes `--input` through the
+`render_graph()` in `tools/cli/cmd_graph_render.cpp` decodes `--input` through the
 same bounded `read_audio_file` admission probe that `graph probe` uses and
 passes it as `OfflineSignalGraphOptions::input`. `OfflineSignalGraphHost`
 zero-pads a missing input, so a render that forgets the input view (or ignores
@@ -4355,7 +4373,7 @@ Processor registrations belong to the C++ catalog, not the default tool catalog.
 
 Graph and notation load failures print `graph_patch_code_name` verbatim (`Ok`,
 `InvalidDocument`, `FileUnreadable`, ...); never rewrite a code in
-`cmd_graph.cpp` (an earlier `invalid_graph` rewrite made the CLI disagree with
+`tools/cli/cmd_graph*.cpp` (an earlier `invalid_graph` rewrite made the CLI disagree with
 the C++ API). New CLI-only codes go in the `docs/reference/cli.md` table, and a
 new C++ code needs a row in `test/test_cli_graph_code_parity.cpp`, the code list
 in `docs/status/cli-commands.yaml` and, when MCP must agree, a fixture in
