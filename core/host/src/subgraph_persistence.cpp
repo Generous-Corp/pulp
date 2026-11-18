@@ -5,6 +5,7 @@
 #include "spectral_graph_persistence.hpp"
 #include "subgraph_custom_member.hpp"
 #include "subgraph_persistence_test_access.hpp"
+#include "subgraph_voice_records.hpp"
 
 #include <choc/text/choc_JSON.h>
 
@@ -350,10 +351,44 @@ bool rebind_instance(SignalGraph& graph, const SubgraphTemplate& definition,
 std::string to_saved_subgraph_document(
     const SignalGraph& graph, std::span<const SubgraphInstance> subgraphs,
     const std::unordered_map<NodeId, std::pair<float, float>>& editor_layout) {
+    return to_saved_subgraph_document(graph, subgraphs, {}, editor_layout);
+}
+
+std::string to_saved_subgraph_document(
+    const SignalGraph& graph, std::span<const SubgraphInstance> subgraphs,
+    std::span<const SubgraphVoiceBank> voice_banks,
+    const std::unordered_map<NodeId, std::pair<float, float>>& editor_layout) {
     const auto identities = GraphSerializer::saved_node_identities(graph);
+    // Every voice is written as an ordinary record, so it goes through the
+    // same identity, membership and liveness checks as any instance. The
+    // restore derives each voice identity from its declaration, so a voice
+    // that does not carry its derived identity, index and template, or that
+    // holds an event connection, is refused here.
+    std::vector<const SubgraphInstance*> instances;
+    for (const auto& instance : subgraphs)
+        instances.push_back(&instance);
+    std::map<std::string, const SubgraphVoiceBank*> banks;
+    for (const auto& bank : voice_banks) {
+        const auto& declaration = bank.declaration;
+        if (!detail::voice_declaration_identity_valid(declaration.identity) ||
+            declaration.template_identity.empty() || declaration.voice_count < 1 ||
+            declaration.voice_count > kMaxSubgraphVoices ||
+            bank.voices.size() != declaration.voice_count ||
+            !banks.emplace(declaration.identity, &bank).second)
+            return {};
+        for (std::uint32_t k = 0; k < declaration.voice_count; ++k) {
+            const auto& voice = bank.voices[k];
+            if (voice.instance_identity != subgraph_voice_identity(declaration.identity, k) ||
+                voice.instance_index != k ||
+                voice.template_identity != declaration.template_identity || voice.event_edge)
+                return {};
+            instances.push_back(&voice);
+        }
+    }
     std::map<std::string, const SubgraphInstance*> ordered;
     std::unordered_set<NodeId> claimed;
-    for (const auto& instance : subgraphs) {
+    for (const auto* entry : instances) {
+        const auto& instance = *entry;
         if (instance.template_identity.empty() || instance.instance_identity.empty() ||
             instance.nodes.empty() ||
             !ordered.emplace(instance.instance_identity, &instance).second)
@@ -380,14 +415,14 @@ std::string to_saved_subgraph_document(
 
     // Spectral and subgraph families do not mix: the spectral document has a
     // closed member set with no subgraph records.
-    if (!subgraphs.empty() && spectral_persistence::contains_spectral_nodes(graph))
+    if (!instances.empty() && spectral_persistence::contains_spectral_nodes(graph))
         return {};
     const auto document = GraphSerializer::to_saved_document(graph, editor_layout);
     if (document.empty())
         return {};
     // No records: the saved document is already complete. A spectral v7
     // envelope is closed, so it must not gain an empty `subgraphs` member.
-    if (subgraphs.empty())
+    if (instances.empty())
         return document;
     try {
         auto root = choc::json::parse(document);
@@ -435,6 +470,22 @@ std::string to_saved_subgraph_document(
             records.addArrayElement(record);
         }
         root.addMember("subgraphs", records);
+        if (!banks.empty()) {
+            auto declarations = choc::value::createEmptyArray();
+            for (const auto& [identity, bank] : banks) {
+                auto declaration = choc::value::createObject("VoiceDeclaration");
+                declaration.addMember("identity", identity);
+                declaration.addMember("template_identity", bank->declaration.template_identity);
+                declaration.addMember("voice_count",
+                                      static_cast<std::int64_t>(bank->declaration.voice_count));
+                auto voices = choc::value::createEmptyArray();
+                for (const auto& voice : bank->voices)
+                    voices.addArrayElement(voice.instance_identity);
+                declaration.addMember("voices", voices);
+                declarations.addArrayElement(declaration);
+            }
+            root.addMember("voice_declarations", declarations);
+        }
         return choc::json::toString(root, true);
     } catch (...) {
         return {};
@@ -477,6 +528,51 @@ load_and_rebind(SignalGraph& graph, const std::string& json, const choc::value::
     return ordered;
 }
 
+// Move each declared voice out of `instances` into its bank. Inspection has
+// already proved every declared voice has a record with the declared
+// template and index; what is left is the template itself: a voice template
+// that declares an event connection is refused, since a graph holds one.
+bool split_voice_banks(const choc::value::ValueView& root, std::vector<SubgraphInstance>& instances,
+                       std::vector<SubgraphVoiceBank>& banks, Refusal& refusal) {
+    banks.clear();
+    if (!root.hasObjectMember("voice_declarations"))
+        return true;
+    std::map<std::string, SubgraphInstance> by_identity;
+    for (auto& instance : instances)
+        by_identity.emplace(instance.instance_identity, std::move(instance));
+    std::map<std::string, SubgraphVoiceBank> ordered;
+    const auto& declarations = root["voice_declarations"];
+    for (std::uint32_t i = 0; i < declarations.size(); ++i) {
+        const auto& record = declarations[i];
+        SubgraphVoiceBank bank;
+        bank.declaration.identity = std::string(record["identity"].getString());
+        bank.declaration.template_identity = std::string(record["template_identity"].getString());
+        bank.declaration.voice_count = static_cast<std::uint32_t>(record["voice_count"].getInt64());
+        for (std::uint32_t k = 0; k < bank.declaration.voice_count; ++k) {
+            const auto voice =
+                by_identity.extract(subgraph_voice_identity(bank.declaration.identity, k));
+            if (voice.empty()) {
+                refusal.error = "subgraph_instance_mismatch: voice " + std::to_string(k) + " of " +
+                                bank.declaration.identity + " was not restored";
+                return false;
+            }
+            if (voice.mapped().event_edge) {
+                refusal.error = "subgraph_instance_mismatch: " + bank.declaration.identity +
+                                ": a voice template cannot declare an event connection";
+                return false;
+            }
+            bank.voices.push_back(std::move(voice.mapped()));
+        }
+        ordered.emplace(bank.declaration.identity, std::move(bank));
+    }
+    instances.clear();
+    for (auto& [identity, instance] : by_identity)
+        instances.push_back(std::move(instance));
+    for (auto& [identity, bank] : ordered)
+        banks.push_back(std::move(bank));
+    return true;
+}
+
 } // namespace
 
 SubgraphDocumentLoad from_saved_subgraph_document(SignalGraph& graph, const std::string& json,
@@ -490,6 +586,7 @@ SubgraphDocumentLoad from_saved_subgraph_document(SignalGraph& graph, const std:
     const auto refuse = [&](std::string error) {
         detail::refuse_load(out.load, live_load_started ? &graph : nullptr, std::move(error));
         out.subgraphs.clear();
+        out.voice_banks.clear();
         return std::move(out);
     };
     try {
@@ -538,8 +635,12 @@ SubgraphDocumentLoad from_saved_subgraph_document(SignalGraph& graph, const std:
                               "not be staged for a candidate restore");
             GraphSerializer::LoadResult candidate_load;
             Refusal refusal;
-            if (!load_and_rebind(candidate, json, records, by_identity, match_names, options,
-                                 candidate_load, refusal))
+            auto candidate_instances =
+                load_and_rebind(candidate, json, records, by_identity, match_names, options,
+                                candidate_load, refusal);
+            std::vector<SubgraphVoiceBank> candidate_banks;
+            if (!candidate_instances ||
+                !split_voice_banks(root.getView(), *candidate_instances, candidate_banks, refusal))
                 return refuse(std::move(refusal.error));
         }
 
@@ -550,7 +651,7 @@ SubgraphDocumentLoad from_saved_subgraph_document(SignalGraph& graph, const std:
         Refusal refusal;
         auto restored = load_and_rebind(graph, json, records, by_identity, match_names, options,
                                         out.load, refusal);
-        if (!restored)
+        if (!restored || !split_voice_banks(root.getView(), *restored, out.voice_banks, refusal))
             return refuse(std::move(refusal.error));
         out.subgraphs = std::move(*restored);
         return out;

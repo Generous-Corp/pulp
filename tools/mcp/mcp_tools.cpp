@@ -10,6 +10,7 @@
 #include <mutex>
 #include <sstream>
 #include <string>
+#include <utility>
 
 namespace fs = std::filesystem;
 
@@ -164,6 +165,19 @@ std::string graph_diff_input_error(const std::string& code, const std::string& m
                                        ",\"message\":" + json_string(message) + "}\n");
 }
 
+// A failed diff that printed nothing (a timeout, an output cap, a
+// cancellation or a crash) still tells the caller why it failed.
+std::string graph_diff_silent_failure_text(const pulp::platform::ProcessResult& process) {
+    if (process.timed_out)
+        return "Error: graph diff timed out";
+    if (process.output_limit_exceeded)
+        return "Error: graph diff output exceeded its limit";
+    if (process.was_cancelled)
+        return "Error: graph diff was cancelled";
+    return "Error: graph diff exited with code " + std::to_string(process.exit_code) +
+           " and no output";
+}
+
 // Delegates to `pulp-cpp graph diff BEFORE AFTER --json`, the one
 // implementation the CLI runs. The process is the matched sibling of this
 // server, started without a shell, with a deadline and an output cap. A
@@ -182,8 +196,16 @@ std::string handle_graph_diff(const std::string& params_json) {
         extract_bool(params_json, "node_loads", false))
         return graph_diff_input_error("invalid_option",
                                       "plan, latency and node_loads are only valid for probe");
-    const auto before = extract_string(params_json, "before");
-    const auto after = extract_string(params_json, "after");
+    // The paths are decoded JSON strings: an escaped backslash in a Windows
+    // path, an escaped quote or a \u escape reaches the CLI as the character
+    // it denotes, not as its escape sequence.
+    std::string before, after;
+    for (auto [key, value] : {std::pair{"before", &before}, std::pair{"after", &after}}) {
+        if (!extract_decoded_string(params_json, key, *value) &&
+            !extract_raw(params_json, key).empty())
+            return graph_diff_input_error("invalid_option",
+                                          std::string(key) + " must be a valid JSON string");
+    }
     if (before.empty() || after.empty())
         return graph_diff_input_error("missing_input",
                                       "diff requires exactly two graph files: BEFORE AFTER");
@@ -203,8 +225,9 @@ std::string handle_graph_diff(const std::string& params_json) {
         binary.string(), {"graph", "diff", before, after, "--json"}, options);
     const bool failed = process.exit_code != 0 || process.timed_out ||
                         process.output_limit_exceeded || process.was_cancelled;
-    const auto output =
-        process.stdout_output.empty() ? process.stderr_output : process.stdout_output;
+    auto output = process.stdout_output.empty() ? process.stderr_output : process.stdout_output;
+    if (failed && output.empty())
+        output = graph_diff_silent_failure_text(process);
     return graph_tool_result(failed, output);
 }
 } // namespace

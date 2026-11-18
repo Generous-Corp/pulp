@@ -6,9 +6,16 @@ draw in the host's window without Pulp's view layer, Skia, Dawn, Vellum or
 RmlUi. It is not the default way to build an editor: for that, see
 "Choosing a UI stack" in the [editor-host contract](editor-host-contract.md).
 
-The package is on by default on macOS (`PULP_ENABLE_PULP_NATIVE`) because it
-needs only system frameworks. Nothing in Pulp core links it. macOS is the only
-platform so far.
+The package is on by default on macOS, Windows and Linux
+(`PULP_ENABLE_PULP_NATIVE`) because it needs only system libraries, and it ships
+in every desktop SDK as the `native` component (`find_package(Pulp COMPONENTS
+native)`, target `Pulp::native`). Nothing in Pulp core links it.
+
+| Platform | Surface |
+|---|---|
+| macOS | `MetalSurface`, `FramePump`, AppKit input, and an offscreen `GlSurface` for tests |
+| Windows | `GlSurface` over a child window with a WGL context |
+| Linux | the shared input and surface types; `GlSurface::create` returns null until the X11 backend lands |
 
 ## The pieces
 

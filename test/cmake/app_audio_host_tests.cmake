@@ -799,7 +799,7 @@ pulp_add_test_suite(pulp-test-identity LIBRARIES pulp::runtime)
 # WebView tests (requires PULP_BUILD_WEBVIEW — WebViewPanel::create is only compiled when ON)
 if(PULP_BUILD_WEBVIEW)
     add_executable(pulp-test-webview test_web_view.cpp)
-    target_link_libraries(pulp-test-webview PRIVATE pulp::view Catch2::Catch2WithMain)
+    target_link_libraries(pulp-test-webview PRIVATE pulp::view pulp::view-webview Catch2::Catch2WithMain)
     catch_discover_tests(pulp-test-webview)
 
     # G2: examples/webview-plugin native-editor retention + host-agnostic attach.
@@ -807,7 +807,7 @@ if(PULP_BUILD_WEBVIEW)
     # WebViewPanel) and includes the example header directly.
     pulp_add_test_suite(pulp-test-webview-plugin-example
         SOURCES test_webview_plugin_example.cpp
-        LIBRARIES pulp::format pulp::view pulp::state)
+        LIBRARIES pulp::format pulp::view pulp::view-webview pulp::state)
 endif()
 
 # WebView backend detection smoke — always built. Validates that
