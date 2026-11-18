@@ -3,6 +3,10 @@ pulp_add_test_suite(pulp-test-voice-bank-binding
     SOURCES test_voice_bank_binding.cpp
     LIBRARIES pulp::host pulp::format pulp::graph)
 
+pulp_add_test_suite(pulp-test-voice-bank-retirement
+    SOURCES test_voice_bank_retirement.cpp harness/rt_allocation_probe.cpp
+    LIBRARIES pulp::host pulp::format pulp::graph)
+
 if(UNIX AND NOT CMAKE_CROSSCOMPILING)
     add_test(NAME cmake-g6-voice-bank-sdk-consumer
         COMMAND ${CMAKE_COMMAND}

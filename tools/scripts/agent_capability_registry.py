@@ -259,10 +259,10 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
     },
     {
         'include': 'pulp/host/voice_bank_binding.hpp',
-        'fingerprint': 'sha256:362af2c4fdc765cb0467f42e2882c155204f7441163dc0b951b245670cd74b55',
+        'fingerprint': 'sha256:e6eddfaa7c95f923774b0d4890a16a6dd5e9f387cb318435721d35375b8dd975',
         'disposition': 'infrastructure',
         'capability_keys': [],
-        'rationale': 'Bounded eight-slot graph voice-bank runtime with sustain; saved activation and paced realtime qualification remain open.',
+        'rationale': 'Bounded eight-slot graph voice-bank runtime with a documented sustain contract and a HardCut default or opt-in DrainRetired reset policy; saved activation and paced realtime qualification remain open.',
     },
     {
         'include': 'pulp/host/custom_node_oversampling.hpp',
