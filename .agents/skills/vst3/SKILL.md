@@ -838,15 +838,6 @@ that check runs before `has_editor()`. Things to keep straight:
 
 ## Gotchas
 
-### Linux: the VST3 is a bundle, not a bare `.so`
-
-`_pulp_add_vst3` assembles `VST3/<Name>.vst3/Contents/<machine>-linux/<Name>.so`
-after the module links (the SDK loader builds the path from `uname -m`:
-`x86_64`, `aarch64`). The linker output beside it stays for staging. The
-`linux-vst3-bundle-layout` test checks the layout with an independent
-`uname -m`, ELF magic and the exported `GetPluginFactory`, and a control run on
-the bare module must fail; the host-probe bundle test now loads the bundle.
-
 ### Linux: export only `GetPluginFactory` / `ModuleEntry` / `ModuleExit`
 
 On Linux a plug-in image exports only its entry points: `_pulp_apply_elf_exports`

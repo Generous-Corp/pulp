@@ -378,7 +378,7 @@ pulp build
 Output locations:
 - VST3:
   - macOS: `build/VST3/MyGain.vst3`
-  - Linux: `build/VST3/MyGain.vst3/Contents/<machine>-linux/MyGain.so` (the VST3 SDK layout; `<machine>` is what `uname -m` prints). The bare `build/VST3/libMyGain.so` is the linker output, not what a host scans.
+  - Linux: `build/VST3/libMyGain.so`
   - Windows: `build/VST3/Debug/MyGain.dll`
 - CLAP:
   - macOS / Linux: `build/CLAP/MyGain.clap`
