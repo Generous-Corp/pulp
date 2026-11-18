@@ -4096,3 +4096,20 @@ a shell. `StandaloneApp` recreates its audio system on every `start()`, so a
 settings UI must re-read `audio_system()` / `midi_system()` after an apply rather
 than cache them. Replace the default window with
 `StandaloneApp::set_settings_window_opener()`.
+
+## Tests render offscreen by default; a visible window is opt-in
+
+ctest runs every test with `PULP_TEST_OFFSCREEN=1` (set from the root
+`CMakeLists.txt` through a `TEST_INCLUDE_FILES` script, honoring a value the
+caller already exported). Under it the window hosts, popup panels and test
+fixtures order their window in through `pulp::platform::order_in_window`
+(`core/platform/include/pulp/platform/test_visibility.hpp`): the window is
+fully transparent, click-through, ordered back and never activates the app, so
+compositing, occlusion and drawable acquisition stay real but nothing reaches
+the user's screen. A developer running an app by hand does not set the variable
+and sees ordinary windows. A test that must put glass on screen (a watched
+live-pointer run, a REAPER smoke run) opts in with `PULP_TEST_SHOW_WINDOWS=1`.
+New test code that needs an ordered-in `NSWindow` calls `order_in_window` and
+`activate_app_for_window` instead of `makeKeyAndOrderFront` /
+`activateIgnoringOtherApps`, or parks the window at a far-off-screen origin.
+`test_offscreen_windows.mm` proves the policy and that frames still present.

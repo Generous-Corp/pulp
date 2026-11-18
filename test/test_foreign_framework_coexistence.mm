@@ -32,6 +32,7 @@
 // process. Construction alone gives a real NSWindow-backed host, and we pump
 // the run loop by hand exactly like an embedding host would.
 
+#include <pulp/platform/test_visibility.hpp>
 #import <AppKit/AppKit.h>
 #import <Foundation/Foundation.h>
 
@@ -116,7 +117,7 @@ TEST_CASE("Pulp CPU-host idle pump fires under a foreign modal run-loop mode",
                   styleMask:NSWindowStyleMaskTitled
                     backing:NSBackingStoreBuffered
                       defer:YES];
-    [foreign orderFront:nil];
+    pulp::platform::order_in_window(foreign, false);
 
     // Sanity: the pump fires in the ordinary default mode.
     pump_run_loop(NSDefaultRunLoopMode, 200ms);
@@ -192,7 +193,7 @@ TEST_CASE("Pulp timers, UI, and audio stay live across a foreign window's lifecy
                   styleMask:(NSWindowStyleMaskTitled | NSWindowStyleMaskResizable)
                     backing:NSBackingStoreBuffered
                       defer:YES];
-    [foreign orderFront:nil];
+    pulp::platform::order_in_window(foreign, false);
     pump_run_loop(NSDefaultRunLoopMode, 80ms);
 
     // Drive a Pulp UI interaction while the foreign window is up.
@@ -206,7 +207,7 @@ TEST_CASE("Pulp timers, UI, and audio stay live across a foreign window's lifecy
 
     // ── focus ─────────────────────────────────────────────────────────────
     [foreign makeFirstResponder:[foreign contentView]];
-    [foreign orderFront:nil];
+    pulp::platform::order_in_window(foreign, false);
     pump_run_loop(NSEventTrackingRunLoopMode, 80ms);
     root.set_bounds({0, 0, 320, 240});
     root.simulate_click({80, 60});

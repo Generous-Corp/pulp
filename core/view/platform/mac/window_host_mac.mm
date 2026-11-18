@@ -1,4 +1,5 @@
 // Per-binary-unique ObjC class names (see header).
+#include <pulp/platform/test_visibility.hpp>
 #include "pulp_mac_objc_names.h"
 #include "mac_gpu_host_config.h"
 #include <pulp/view/window_host.hpp>
@@ -1547,7 +1548,9 @@ public:
         root_.set_frame_clock(nullptr);
     }
 
-    void show() override { [window_ makeKeyAndOrderFront:nil]; }
+    void show() override {
+        pulp::platform::order_in_window(window_);
+    }
     void hide() override { [window_ orderOut:nil]; }
     bool is_visible() const override { return [window_ isVisible]; }
     void repaint() override { [view_ setNeedsDisplay:YES]; }
@@ -1699,7 +1702,7 @@ public:
                 mac_menu::install_application_menu(
                     menu_commands_, [] { pulp::view::mac_lifecycle::request_cocoa_app_stop(); });
                 show();
-                [NSApp activateIgnoringOtherApps:YES];
+                pulp::platform::activate_app_for_window();
             }
             [NSApp run];
             pulp::view::mac_lifecycle::pump_cocoa_main_thread_until(ready_to_return);
@@ -1855,7 +1858,11 @@ public:
     void adopt_foreground_role() {
         if (foreground_role_adopted_) return;
         foreground_role_adopted_ = true;
-        [NSApp setActivationPolicy:NSApplicationActivationPolicyRegular];
+        // Offscreen test runs stay Accessory: no Dock icon, no menu bar, no
+        // activation.
+        [NSApp setActivationPolicy:pulp::platform::test_windows_offscreen()
+                                       ? NSApplicationActivationPolicyAccessory
+                                       : NSApplicationActivationPolicyRegular];
         mac_menu::install_application_menu(
             menu_commands_, [] { pulp::view::mac_lifecycle::request_cocoa_app_stop(); });
     }
@@ -1881,7 +1888,7 @@ public:
             tracker_.invalidate_all();
             render_frame();
         }
-        [window_ makeKeyAndOrderFront:nil];
+        pulp::platform::order_in_window(window_);
         // A SECONDARY GPU window is created via WindowHost::create and never
         // enters run_event_loop() (only the primary window does), so it would
         // otherwise have NO CVDisplayLink. Without one, needs_repaint_ set by
@@ -2190,7 +2197,7 @@ public:
             if (!options_initially_hidden_) {
                 show();
                 [window_ makeFirstResponder:metal_view_];
-                [NSApp activateIgnoringOtherApps:YES];
+                pulp::platform::activate_app_for_window();
             }
             [NSApp run];
             pulp::view::mac_lifecycle::pump_cocoa_main_thread_until(ready_to_return);

@@ -707,6 +707,15 @@ if(PULP_BUILD_TESTS AND NOT ANDROID AND NOT IOS)
             "For a stripped build set -DPULP_PROFILE=release (tools/cmake/PulpProfiles.cmake).")
     endif()
     enable_testing()
+    # ctest runs every registered test with PULP_TEST_OFFSCREEN=1 unless the
+    # caller already set it, so window hosts present into a transparent,
+    # non-activating window instead of on the user's screen. A caller opts in
+    # to visible windows with PULP_TEST_SHOW_WINDOWS=1 (see
+    # pulp/platform/test_visibility.hpp).
+    file(WRITE "${CMAKE_BINARY_DIR}/pulp_test_offscreen.cmake"
+        "if(NOT DEFINED ENV{PULP_TEST_OFFSCREEN})\n    set(ENV{PULP_TEST_OFFSCREEN} 1)\nendif()\n")
+    set_property(DIRECTORY APPEND PROPERTY TEST_INCLUDE_FILES
+        "${CMAKE_BINARY_DIR}/pulp_test_offscreen.cmake")
     # The file-api query is retained in the build tree so the Vellum closure
     # receipt can be regenerated from the exact configured target graph. The
     # gate is enforcing; only explicitly pending P4/P12/P13/P17 debts remain
