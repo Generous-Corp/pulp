@@ -221,6 +221,11 @@ repository-scoped `PULP_LOCAL_LINUX_RUNS_ON_JSON` lane. Keeping those selectors
 distinct prevents automatic branch content from matching the less-isolated
 repository runner through GitHub's subset-based label selection.
 
+The MacPro Linux pool was retired on 2026-11-18. Until the repository variables
+are removed, the workflow ignores either selector when its JSON contains
+`pulp-host-macpro` and uses the hosted Linux fallback, so a stale setting cannot
+queue the required gate forever.
+
 Every gate in this workflow compares HEAD against one diff base, which the
 "Resolve diff base" step computes once through `tools/scripts/ci_diff_base.py`
 (tests: `tools/scripts/test_ci_diff_base.py`, run by the same workflow).

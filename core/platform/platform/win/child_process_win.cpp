@@ -18,6 +18,8 @@
 #define NOMINMAX
 #include <windows.h>
 
+#include <pulp/platform/win/text_convert.hpp>
+
 #include "duplex_channel_win.hpp"
 
 namespace pulp::platform {
@@ -602,9 +604,9 @@ bool ChildProcess::start_impl(const std::string& command, const std::vector<std:
         }
     }
 
-    STARTUPINFOEXA startup{};
+    STARTUPINFOEXW startup{};
     auto& si = startup.StartupInfo;
-    si.cb = sizeof(STARTUPINFOA);
+    si.cb = sizeof(STARTUPINFOW);
     si.dwFlags = STARTF_USESTDHANDLES;
 
     SECURITY_ATTRIBUTES sa{};
@@ -715,16 +717,21 @@ bool ChildProcess::start_impl(const std::string& command, const std::vector<std:
     // launch call and nothing before it.
     const bool duplex_ready = !standard_input_session || duplex.make_child_inheritable();
 
+    // The command line and working directory are UTF-8; the wide entry point
+    // keeps non-ASCII paths and arguments intact regardless of the ANSI code
+    // page. CreateProcessW may write into the command-line buffer, so it gets
+    // its own mutable, NUL-terminated copy.
+    std::wstring wide_cmdline = pulp::platform::win_text::to_wide(cmdline);
+    wide_cmdline.push_back(L'\0');
+    const std::wstring wide_cwd = pulp::platform::win_text::to_wide(options.working_directory);
+
     PROCESS_INFORMATION pi{};
-    BOOL ok =
-        ((custody && retained_job == nullptr) || !duplex_ready)
-            ? FALSE
-            : CreateProcessA(nullptr, cmdline.data(), nullptr, nullptr,
-                             TRUE, // inherit handles
-                             creation_flags, nullptr,
-                             options.working_directory.empty() ? nullptr
-                                                               : options.working_directory.c_str(),
-                             &si, &pi);
+    BOOL ok = ((custody && retained_job == nullptr) || !duplex_ready)
+                  ? FALSE
+                  : CreateProcessW(nullptr, wide_cmdline.data(), nullptr, nullptr,
+                                   TRUE, // inherit handles
+                                   creation_flags, nullptr,
+                                   wide_cwd.empty() ? nullptr : wide_cwd.c_str(), &si, &pi);
 
     if (attributes_initialized)
         DeleteProcThreadAttributeList(startup.lpAttributeList);

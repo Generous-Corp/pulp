@@ -200,6 +200,10 @@ class SignalGraph::PreparedTopologyEdit {
     SampleRegionResult reject_sample_region_(SampleRegionId id, SampleRegionRefusalReason reason,
                                              std::string message, NodeId node = 0);
     std::optional<Result> sample_region_preparation_result_(double sample_rate, int max_block_size);
+    std::optional<Result> admission_result_(double sample_rate, int max_block_size,
+                                            std::optional<GraphMutationLock>& candidate_lock,
+                                            std::shared_ptr<CompiledGraph>& old_keepalive,
+                                            bool& dimensions_changed);
     PreparedDescriptionResult build_prepared_description_(double sample_rate,
                                                           int max_block_size) const;
 

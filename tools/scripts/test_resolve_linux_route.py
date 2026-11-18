@@ -272,7 +272,8 @@ def test_workflow_keeps_configured_and_authorized_selectors_distinct() -> None:
     trusted_dispatcher = PR_SAFE_WORKFLOW.read_text(encoding="utf-8")
     assert (
         "TRUSTED_SELECTOR_JSON: "
-        "${{ vars.PULP_AUTO_LINUX_RUNS_ON_JSON || '' }}"
+        "${{ !contains(vars.PULP_AUTO_LINUX_RUNS_ON_JSON, 'pulp-host-macpro') "
+        "&& vars.PULP_AUTO_LINUX_RUNS_ON_JSON || '' }}"
         in trusted_dispatcher
     )
     assert (

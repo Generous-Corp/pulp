@@ -29,12 +29,14 @@ target_sources(pulp-host PRIVATE
     src/signal_graph_live_swap.cpp
     src/signal_graph_live_swap_catalog.cpp
     src/signal_graph_prepared_description_capture.cpp
+    src/signal_graph_prepared_edit_admission.cpp
     src/signal_graph_prepared_topology_edit.cpp
     src/prepared_description.cpp
     src/resolved_identity_validation.cpp
     src/offline_signal_graph_host.cpp
     src/plugin_slot.cpp
     src/graph_serializer.cpp
+    src/graph_serializer_regions.cpp
     src/graph_patch.cpp
     src/graph_patch_constructors.cpp
     src/graph_file_reload.cpp

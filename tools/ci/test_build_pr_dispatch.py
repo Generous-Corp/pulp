@@ -368,7 +368,7 @@ class LinuxRoutingTest(unittest.TestCase):
     def test_the_operator_selectors_are_blanked_on_a_pr_dispatch(self) -> None:
         self.assertEqual(self.env["EXPLICIT_LINUX_RUNNER_SELECTOR_JSON"],
                          "${{ inputs.pr_number == '' && (inputs.linux_runner_selector_json || "
-                         "(github.event_name == 'workflow_dispatch' && vars.PULP_LOCAL_LINUX_RUNS_ON_JSON)) || '' }}")
+                         "(github.event_name == 'workflow_dispatch' && !contains(vars.PULP_LOCAL_LINUX_RUNS_ON_JSON, 'pulp-host-macpro') && vars.PULP_LOCAL_LINUX_RUNS_ON_JSON)) || '' }}")
         self.assertEqual(self.env["WORKFLOW_DISPATCH_LINUX_SELECTOR"],
                          "${{ inputs.pr_number == '' && inputs.linux_runner_selector_json || '' }}")
         self.assertEqual(self.env["DISPATCH_PR_NUMBER"], "${{ inputs.pr_number }}")

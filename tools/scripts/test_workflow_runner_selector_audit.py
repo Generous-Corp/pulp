@@ -17,11 +17,29 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 import workflow_runner_selector_audit as audit
 
 WORKFLOWS = pathlib.Path(__file__).resolve().parents[2] / ".github" / "workflows"
+RETIRED_MACPRO_GUARD = "!contains(vars.{variable}, 'pulp-host-macpro')"
 
 
 def check(condition: bool, message: str) -> None:
     if not condition:
         raise AssertionError(message)
+
+
+def _runs_on_blocks(text: str) -> list[str]:
+    """Return each runs-on YAML value, including folded continuations."""
+    lines = text.splitlines()
+    blocks: list[str] = []
+    for index, line in enumerate(lines):
+        if "runs-on:" not in line:
+            continue
+        indent = len(line) - len(line.lstrip())
+        block = [line]
+        for continuation in lines[index + 1 :]:
+            if continuation.strip() and len(continuation) - len(continuation.lstrip()) <= indent:
+                break
+            block.append(continuation)
+        blocks.append("\n".join(block))
+    return blocks
 
 
 def test_flags_the_live_unwrapped_selector() -> int:
@@ -175,6 +193,52 @@ def test_repository_workflows_are_clean() -> int:
         "repository workflows have unparsed runner selectors:\n  "
         + "\n  ".join(offender.describe() for offender in offenders),
     )
+    return 1
+
+
+def test_repository_workflows_ignore_retired_macpro_selectors() -> int:
+    """A stale GitHub variable must never route a job to powered-off macpro."""
+    direct_consumers = {
+        "examples-validation.yml": ["PULP_LOCAL_LINUX_RUNS_ON_JSON"],
+        "release-cli.yml": [
+            "PULP_RELEASE_CONTROL_LINUX_RUNS_ON_JSON",
+            "PULP_LOCAL_LINUX_RUNS_ON_JSON",
+        ],
+        "sign-and-release.yml": [
+            "PULP_RELEASE_CONTROL_LINUX_RUNS_ON_JSON",
+            "PULP_LOCAL_LINUX_RUNS_ON_JSON",
+        ],
+        "version-skill-check.yml": [
+            "PULP_LOCAL_LINUX_RUNS_ON_JSON",
+            "PULP_AUTO_LINUX_RUNS_ON_JSON",
+        ],
+        "vellum-freeze-check.yml": ["PULP_AUTO_LINUX_RUNS_ON_JSON"],
+    }
+    for filename, variables in direct_consumers.items():
+        blocks = _runs_on_blocks((WORKFLOWS / filename).read_text(encoding="utf-8"))
+        for variable in variables:
+            matching = [block for block in blocks if f"vars.{variable}" in block]
+            check(matching, f"{filename} no longer reads {variable} from runs-on")
+            guard = RETIRED_MACPRO_GUARD.format(variable=variable)
+            check(
+                all(guard in block for block in matching),
+                f"{filename} routes {variable} without the retired-macpro guard",
+            )
+
+    build = (WORKFLOWS / "build.yml").read_text(encoding="utf-8")
+    for variable, env_name in (
+        ("PULP_LOCAL_LINUX_RUNS_ON_JSON", "CONFIGURED_LINUX_RUNNER_SELECTOR_JSON"),
+        ("PULP_AUTO_LINUX_RUNS_ON_JSON", "AUTOMATIC_LINUX_RUNNER_SELECTOR_JSON"),
+    ):
+        line = next(
+            (candidate for candidate in build.splitlines() if f"{env_name}:" in candidate),
+            "",
+        )
+        check(line, f"build.yml lost {env_name}")
+        check(
+            RETIRED_MACPRO_GUARD.format(variable=variable) in line,
+            f"build.yml routes {variable} without the retired-macpro guard",
+        )
     return 1
 
 

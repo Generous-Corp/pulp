@@ -112,6 +112,15 @@ web list a wasm-safe definition, as `isolated_plugin_slot_web.cpp` does for
 `is_isolated_plugin_slot`, and add the symbol to the closure selftest in
 `tools/scripts/test_sample_region_compat_baseline.py`.
 
+**A new serializer source joins the web list too.** `graph_serializer.cpp` is
+compiled into that same curated profile, so splitting it into a new
+`graph_serializer_*.cpp` (persisted sample-region validation lives in
+`graph_serializer_regions.cpp`) needs the new file in `pulp-host`, in
+`PulpSampleRegionWebSources.cmake`, and in the `COMPAT_INPUTS` of
+`tools/scripts/sample_region_compat_baseline.py` with its two
+`test/ctest_script_inputs` JSON copies. Missing it from the web list builds
+natively and fails only at `wasm-ld`.
+
 **Recover a terminal isolated node by republishing, never by re-preparing.**
 An isolated graph refuses a second eager `prepare()`, `begin_swap_edit()` and
 prepared topology edits, so `recover_isolated_graph_node()` publishes the fresh
@@ -1178,6 +1187,14 @@ save/reopen render proof beside the legacy caller-owned route controls.
   the domain gate that needs the private `CompiledGraph` in `prepare()`.
   `ExecutionSnapshot::export_prepared_description` still validates the same
   record separately.
+  The admission gates that run before the candidate compiles (stale base,
+  spectral and MIDI-output refusals, baseline removal, preflight, and the
+  processor, plugin and custom lifecycle checks that also prepare instances
+  minted inside the edit) live in `admission_result_` in
+  `core/host/src/signal_graph_prepared_edit_admission.cpp`. It acquires the
+  candidate lock into the caller's `std::optional<GraphMutationLock>` so the
+  lock stays held through compile and runtime adoption; a new gate belongs
+  there, not back in `prepare()`.
   `set_live_dsp_telemetry_enabled()` is a control-thread operation serialized
   by the graph mutation lock: a prepared commit re-seeds its snapshot from the
   owner's authoritative desired toggle immediately before publication. Do not

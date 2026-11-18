@@ -202,12 +202,13 @@ jobs:
           # so none of the operator's routing inputs applies to it.
           REQUESTED_PROVIDER: ${{ inputs.pr_number == '' && inputs.runner_provider || vars.PULP_DEFAULT_RUNNER_PROVIDER || 'github-hosted' }}
           # Keep the configured selector distinct from the selector authorized
-          # for this event. PULP_AUTO_LINUX_RUNS_ON_JSON configures the
-          # restricted automatic x64 Mac Pro Proxmox pool:
+          # for this event. PULP_AUTO_LINUX_RUNS_ON_JSON was the selector for
+          # the restricted automatic x64 Mac Pro Proxmox pool. The retired
+          # macpro value is ignored below until a replacement pool is proven:
           #      ["self-hosted","Linux","X64","pulp-build-linux-x64",
           #       "pulp-host-macpro","pulp-auto-linux-x64"].
-          # PULP_LOCAL_LINUX_RUNS_ON_JSON remains the five-label operator and
-          # release selector; keeping it separate prevents workflows outside
+          # PULP_LOCAL_LINUX_RUNS_ON_JSON remains the operator and release
+          # selector; keeping it separate prevents workflows outside
           # the restricted group from targeting an ineligible runner. A
           # workflow_dispatch input overrides that operator selector.
           # Same-repository pull_request and protected merge_group events may
@@ -230,10 +231,12 @@ jobs:
           # variable PULP_ALLOW_HOSTED_WINDOWS=1 (which also covers a push).
           WORKFLOW_DISPATCH_ALLOW_HOSTED_WINDOWS: ${{ inputs.allow_hosted_windows }}
           ALLOW_HOSTED_WINDOWS_VAR: ${{ vars.PULP_ALLOW_HOSTED_WINDOWS || '' }}
-          CONFIGURED_LINUX_RUNNER_SELECTOR_JSON: ${{ vars.PULP_LOCAL_LINUX_RUNS_ON_JSON || '' }}
-          AUTOMATIC_LINUX_RUNNER_SELECTOR_JSON: ${{ vars.PULP_AUTO_LINUX_RUNS_ON_JSON || '' }}
+          # macpro is retired. Ignore stale repository selectors until the
+          # settings are removed so a required job falls back to hosted Linux.
+          CONFIGURED_LINUX_RUNNER_SELECTOR_JSON: ${{ !contains(vars.PULP_LOCAL_LINUX_RUNS_ON_JSON, 'pulp-host-macpro') && vars.PULP_LOCAL_LINUX_RUNS_ON_JSON || '' }}
+          AUTOMATIC_LINUX_RUNNER_SELECTOR_JSON: ${{ !contains(vars.PULP_AUTO_LINUX_RUNS_ON_JSON, 'pulp-host-macpro') && vars.PULP_AUTO_LINUX_RUNS_ON_JSON || '' }}
           WORKFLOW_REF: ${{ github.workflow_ref }}
-          EXPLICIT_LINUX_RUNNER_SELECTOR_JSON: ${{ inputs.pr_number == '' && (inputs.linux_runner_selector_json || (github.event_name == 'workflow_dispatch' && vars.PULP_LOCAL_LINUX_RUNS_ON_JSON)) || '' }}
+          EXPLICIT_LINUX_RUNNER_SELECTOR_JSON: ${{ inputs.pr_number == '' && (inputs.linux_runner_selector_json || (github.event_name == 'workflow_dispatch' && !contains(vars.PULP_LOCAL_LINUX_RUNS_ON_JSON, 'pulp-host-macpro') && vars.PULP_LOCAL_LINUX_RUNS_ON_JSON)) || '' }}
           EXPLICIT_WINDOWS_RUNNER_SELECTOR_JSON: ${{ inputs.pr_number == '' && inputs.windows_runner_selector_json || '' }}
           # The self-hosted Windows x64 lane a dispatch's Windows leg takes by
           # default (see the Windows note in the resolver below).
@@ -877,19 +880,26 @@ jobs:
               # input gets, so a foreign-pool label never reaches runs-on.
               sys.path.insert(0, str(WORKSPACE / "tools" / "scripts"))
               import windows_runner_selector
-              try:
-                  lane_selector = windows_runner_selector.resolve(
-                      os.environ.get("LOCAL_WINDOWS_X64_RUNS_ON_JSON", "").strip()
-                      or json.dumps(windows_runner_selector.DEFAULT_SELF_HOSTED)
-                  )
-              except windows_runner_selector.SelectorError as exc:
-                  sys.exit(
-                      "PULP_LOCAL_WINDOWS_X64_RUNS_ON_JSON refused: " + str(exc)
-                  )
-              if lane_selector.startswith("["):
-                  os.environ["EXPLICIT_WINDOWS_RUNNER_SELECTOR_JSON"] = lane_selector
-              else:
+              lane_raw = os.environ.get("LOCAL_WINDOWS_X64_RUNS_ON_JSON", "").strip()
+              retired_macpro_lane = "pulp-host-macpro" in lane_raw.casefold()
+              if retired_macpro_lane:
+                  # macpro is retired. Treat its stale repository selector as
+                  # an opt-in to the hosted Windows fallback until settings
+                  # cleanup removes it.
                   os.environ["WORKFLOW_DISPATCH_ALLOW_HOSTED_WINDOWS"] = "true"
+              else:
+                  try:
+                      lane_selector = windows_runner_selector.resolve(
+                          lane_raw or json.dumps(windows_runner_selector.DEFAULT_SELF_HOSTED)
+                      )
+                  except windows_runner_selector.SelectorError as exc:
+                      sys.exit(
+                          "PULP_LOCAL_WINDOWS_X64_RUNS_ON_JSON refused: " + str(exc)
+                      )
+                  if lane_selector.startswith("["):
+                      os.environ["EXPLICIT_WINDOWS_RUNNER_SELECTOR_JSON"] = lane_selector
+                  else:
+                      os.environ["WORKFLOW_DISPATCH_ALLOW_HOSTED_WINDOWS"] = "true"
           windows_runs_on = run([
               "--target-name", "Windows (x64)",
               "--mode", "provider",
@@ -3527,10 +3537,17 @@ jobs:
         # check red so the queue cannot admit a head already known to fail.
         # Ordinary pull-request runs keep the fast tier as their gate because
         # the full step is skipped for them.
+        # A push to main runs this leg to publish the Linux and Windows caches
+        # (the save steps above). Its full test run had no reader and failed
+        # 127 of 127 times in a week (about 46 of each 65 minutes), and the
+        # merge group already runs the suite on the exact commit that lands.
+        # Set the repository variable PULP_PUSH_LINUX_TESTS to 1 to run it on
+        # push again.
         if: >-
           runner.os != 'Windows'
           && (github.event_name != 'pull_request'
               || steps.pr_suite.outputs.suite == 'full')
+          && (github.event_name != 'push' || vars.PULP_PUSH_LINUX_TESTS == '1')
           && matrix.lane != 'contract' && steps.clean_merge.outputs.lane != 'clean-merge'
         continue-on-error: ${{ github.event_name == 'pull_request' && steps.pr_suite.outputs.suite != 'full' }}
         shell: bash
@@ -3804,10 +3821,29 @@ jobs:
       # On a push to main, hand the same measurement to a2t-headroom-issue
       # below, which keeps the one tracking issue. Only the Linux leg runs the
       # full suite on a push, and only it uploads, so the artifact name is unique.
+      # With the push test run off (PULP_PUSH_LINUX_TESTS unset), the full suite
+      # no longer produces that measurement on a push, so run only the
+      # pr-guard tests that hold the headroom guard. Advisory: it feeds the
+      # tracking issue and never decides the job's result.
+      - name: Measure A2T scope-history headroom (push without the full suite)
+        id: a2t_push_measure
+        if: >-
+          github.event_name == 'push' && github.ref == 'refs/heads/main'
+          && runner.os == 'Linux' && vars.PULP_PUSH_LINUX_TESTS != '1'
+        continue-on-error: true
+        shell: bash
+        env:
+          PULP_A2T_HEADROOM_OUT: ${{ runner.temp }}/a2t-scope-headroom.json
+        run: |
+          set -euo pipefail
+          ctest --test-dir "$PULP_BUILD_DIR" --output-on-failure -C Release \
+            -L '^pr-guard$' --no-tests=ignore --timeout 300 -j4
+
       - name: Upload A2T scope-history headroom
         if: >-
           always() && github.event_name == 'push' && github.ref == 'refs/heads/main'
-          && runner.os == 'Linux' && steps.ctest.outcome != 'skipped'
+          && runner.os == 'Linux'
+          && (steps.ctest.outcome != 'skipped' || steps.a2t_push_measure.outcome != 'skipped')
         continue-on-error: true
         uses: actions/upload-artifact@v7.0.2
         with:
