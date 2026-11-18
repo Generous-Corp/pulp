@@ -41,6 +41,16 @@
       "note": "SignalGraph runtime and mutation contract; node, connection, and custom registration declarations must remain outside this header"
     },
     {
+      "path": "core/host/src/graph_serializer.cpp",
+      "max_loc": 3995,
+      "note": "GraphSerializer public entry points, document shape, save and load; persisted sample-region validation and later split concerns belong in focused graph_serializer_*.cpp units"
+    },
+    {
+      "path": "core/host/src/graph_serializer_regions.cpp",
+      "max_loc": 456,
+      "note": "Persisted sample-region metadata, parser-shape and topology validation for serializer loads; reads the graph through public queries only"
+    },
+    {
       "path": "core/host/src/signal_graph_prepared_topology_edit.cpp",
       "max_loc": 2931,
       "note": "Prepared-topology transaction lifecycle; prepared-description capture and other prepare() phases belong in focused signal_graph_prepared_*.cpp units"

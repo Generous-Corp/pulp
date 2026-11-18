@@ -112,6 +112,15 @@ web list a wasm-safe definition, as `isolated_plugin_slot_web.cpp` does for
 `is_isolated_plugin_slot`, and add the symbol to the closure selftest in
 `tools/scripts/test_sample_region_compat_baseline.py`.
 
+**A new serializer source joins the web list too.** `graph_serializer.cpp` is
+compiled into that same curated profile, so splitting it into a new
+`graph_serializer_*.cpp` (persisted sample-region validation lives in
+`graph_serializer_regions.cpp`) needs the new file in `pulp-host`, in
+`PulpSampleRegionWebSources.cmake`, and in the `COMPAT_INPUTS` of
+`tools/scripts/sample_region_compat_baseline.py` with its two
+`test/ctest_script_inputs` JSON copies. Missing it from the web list builds
+natively and fails only at `wasm-ld`.
+
 **Recover a terminal isolated node by republishing, never by re-preparing.**
 An isolated graph refuses a second eager `prepare()`, `begin_swap_edit()` and
 prepared topology edits, so `recover_isolated_graph_node()` publishes the fresh
