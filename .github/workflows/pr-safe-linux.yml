@@ -48,11 +48,11 @@ jobs:
           MERGE_SHA: ${{ inputs.merge_sha }}
           EVENT_SHA: ${{ github.sha }}
           SELECTOR_JSON: ${{ inputs.runner_selector_json }}
-          CONFIGURED_SELECTOR_JSON: ${{ vars.PULP_PR_SAFE_LINUX_RUNS_ON_JSON || '' }}
+          CONFIGURED_SELECTOR_JSON: ${{ !contains(vars.PULP_PR_SAFE_LINUX_RUNS_ON_JSON, 'pulp-host-macpro') && vars.PULP_PR_SAFE_LINUX_RUNS_ON_JSON || '' }}
           LEASE_UNTIL: ${{ vars.PULP_PR_SAFE_LINUX_LEASE_UNTIL || '' }}
           ROUTE_ENABLED: ${{ vars.PULP_PR_SAFE_LINUX_REUSABLE_ENABLED || 'false' }}
           ROUTE_KIND: ${{ inputs.route_kind }}
-          TRUSTED_SELECTOR_JSON: ${{ vars.PULP_AUTO_LINUX_RUNS_ON_JSON || '' }}
+          TRUSTED_SELECTOR_JSON: ${{ !contains(vars.PULP_AUTO_LINUX_RUNS_ON_JSON, 'pulp-host-macpro') && vars.PULP_AUTO_LINUX_RUNS_ON_JSON || '' }}
           TRUSTED_LEASE_UNTIL: ${{ vars.PULP_LOCAL_LINUX_LEASE_UNTIL || '' }}
         run: |
           set -euo pipefail
