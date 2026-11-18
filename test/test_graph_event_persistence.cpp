@@ -704,5 +704,5 @@ TEST_CASE("a voice template cannot declare an event connection",
     CHECK(from_saved_subgraph_document(control.graph, document, templates).ok());
     // The writer refuses a bank whose voice holds an event connection.
     SubgraphVoiceBank bank{{"chain", "test.event-chain", 1}, {expansion.instance}};
-    CHECK(to_saved_subgraph_document(source.graph, {}, std::span(&bank, 1)).empty());
+    CHECK(to_saved_subgraph_document(source.graph, {}, std::span(&bank, 1), {}).empty());
 }

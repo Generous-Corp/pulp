@@ -112,11 +112,13 @@ std::string to_saved_subgraph_document(
 /// count is outside 1..kMaxSubgraphVoices or differs from its voices, a voice
 /// does not carry its derived identity, index and the declared template, a
 /// voice holds an event connection, two banks share an identity, or a voice
-/// shares an identity or a node with any other instance.
+/// shares an identity or a node with any other instance. The editor layout
+/// is required (pass `{}` for none) so a three-argument call stays unambiguous
+/// with the overload above.
 std::string to_saved_subgraph_document(
     const SignalGraph& graph, std::span<const SubgraphInstance> subgraphs,
     std::span<const SubgraphVoiceBank> voice_banks,
-    const std::unordered_map<NodeId, std::pair<float, float>>& editor_layout = {});
+    const std::unordered_map<NodeId, std::pair<float, float>>& editor_layout);
 
 struct SubgraphDocumentLoad {
     GraphSerializer::LoadResult load;

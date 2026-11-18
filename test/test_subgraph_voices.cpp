@@ -76,7 +76,7 @@ void build_rig(VoiceRig& rig) {
         REQUIRE(rig.graph.connect(rig.input, 0, voice.ports.at("input").node, 0));
         REQUIRE(rig.graph.connect(voice.ports.at("output").node, 0, rig.output, 0));
     }
-    rig.document = to_saved_subgraph_document(rig.graph, {}, std::span(&rig.bank, 1));
+    rig.document = to_saved_subgraph_document(rig.graph, {}, std::span(&rig.bank, 1), {});
     REQUIRE_FALSE(rig.document.empty());
 }
 
@@ -285,7 +285,7 @@ TEST_CASE("voice bank round-trips through the v7 document with an audio render a
     }
     // Every voice renders: the fixed oracle sums one distinct bit per voice.
     CHECK(render_ones(restored) == kBankSum);
-    CHECK(to_saved_subgraph_document(restored, loaded.subgraphs, loaded.voice_banks) ==
+    CHECK(to_saved_subgraph_document(restored, loaded.subgraphs, loaded.voice_banks, {}) ==
           rig.document);
 
     // Restored handles are live: editing one voice changes only its bit.
@@ -299,7 +299,7 @@ TEST_CASE("voice bank round-trips through the v7 document with an audio render a
     auto plain = instantiate_subgraph(rig.graph, voice_template(), "solo", 9);
     REQUIRE(plain);
     const auto mixed = to_saved_subgraph_document(rig.graph, std::span(&plain.instance, 1),
-                                                  std::span(&rig.bank, 1));
+                                                  std::span(&rig.bank, 1), {});
     REQUIRE_FALSE(mixed.empty());
     SignalGraph both;
     const auto mixed_load = from_saved_subgraph_document(both, mixed, voice_templates());
@@ -349,6 +349,9 @@ TEST_CASE("documents without voice declarations load unchanged and v6 cannot car
 
     // A v7 document written without banks has no declaration section.
     const auto v7 = to_saved_subgraph_document(rig.graph, {});
+    // The original three-argument form (an explicit empty layout) still resolves
+    // to the plain overload rather than becoming ambiguous with the voice-bank one.
+    CHECK(to_saved_subgraph_document(rig.graph, {}, {}) == v7);
     REQUIRE_FALSE(v7.empty());
     CHECK_FALSE(choc::json::parse(v7).hasObjectMember("voice_declarations"));
 }
@@ -486,7 +489,7 @@ TEST_CASE("planted voice declaration refusals leave the graph untouched",
         SignalGraph graph;
         auto expansion = instantiate_subgraph_voices(graph, with_extra, "pad", 2);
         REQUIRE(expansion);
-        const auto document = to_saved_subgraph_document(graph, {}, std::span(&expansion.bank, 1));
+        const auto document = to_saved_subgraph_document(graph, {}, std::span(&expansion.bank, 1), {});
         REQUIRE_FALSE(document.empty());
         const auto shortened = edit_records(document, [](choc::value::Value& r) {
             auto copy = choc::value::createEmptyArray();
@@ -512,7 +515,7 @@ TEST_CASE("voice bank writer refuses banks a restore would refuse", "[subgraph][
     build_rig(rig);
     const auto write = [&](const std::vector<SubgraphVoiceBank>& banks,
                            const std::vector<SubgraphInstance>& plain = {}) {
-        return to_saved_subgraph_document(rig.graph, plain, banks);
+        return to_saved_subgraph_document(rig.graph, plain, banks, {});
     };
     CHECK_FALSE(write({rig.bank}).empty()); // positive control
 
@@ -550,7 +553,7 @@ TEST_CASE("voice banks diff and undo by authored identity", "[subgraph][voices][
     SignalGraph restored;
     const auto loaded = from_saved_subgraph_document(restored, rig.document, voice_templates());
     REQUIRE(loaded.ok());
-    const auto resaved = to_saved_subgraph_document(restored, {}, loaded.voice_banks);
+    const auto resaved = to_saved_subgraph_document(restored, {}, loaded.voice_banks, {});
     const auto same = diff_graph_documents(rig.document, resaved);
     INFO(same.detail);
     REQUIRE(same.ok());
@@ -562,7 +565,7 @@ TEST_CASE("voice banks diff and undo by authored identity", "[subgraph][voices][
     state.parameters.at("gain") = 1.5f;
     REQUIRE(restore_subgraph_state(restored, voice, state));
     const auto edited =
-        diff_graph_documents(resaved, to_saved_subgraph_document(restored, {}, loaded.voice_banks));
+        diff_graph_documents(resaved, to_saved_subgraph_document(restored, {}, loaded.voice_banks, {}));
     REQUIRE(edited.ok());
     REQUIRE(edited.nodes_changed.size() == 1);
     CHECK(edited.nodes_changed[0].identity == restored.node(voice.nodes[0])->authored_id.str());
@@ -577,7 +580,7 @@ TEST_CASE("voice banks diff and undo by authored identity", "[subgraph][voices][
     REQUIRE(lead);
     REQUIRE(history.commit(checkpoint, rig.graph, "add lead voices").ok());
     const std::array banks{rig.bank, lead.bank};
-    const auto grown = to_saved_subgraph_document(rig.graph, {}, banks);
+    const auto grown = to_saved_subgraph_document(rig.graph, {}, banks, {});
     REQUIRE_FALSE(grown.empty());
     const auto diff = diff_graph_documents(rig.document, grown);
     REQUIRE(diff.ok());
