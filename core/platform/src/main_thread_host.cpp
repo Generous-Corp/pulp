@@ -18,6 +18,7 @@
 #include <algorithm>
 #include <atomic>
 #include <deque>
+#include <map>
 #include <mutex>
 #include <utility>
 #include <vector>
@@ -77,6 +78,14 @@ struct MainThreadScopeState : std::enable_shared_from_this<MainThreadScopeState>
     // Touched only on the UI thread.
     std::vector<MainThreadTimerState*> timers;
     std::vector<std::pair<std::uint64_t, std::function<void()>>> teardowns;
+    // Descriptor watches an editor asked for: watch id -> host registration and
+    // callback. Touched only on the UI thread.
+    struct Watch {
+        std::uint64_t host_id = 0;
+        std::shared_ptr<std::function<void()>> fn;
+    };
+    std::map<std::uint64_t, Watch> watches;
+    std::uint64_t next_watch_id = 1;
     std::uint64_t next_teardown_id = 1;
     bool tearing_down = false;
 
@@ -217,6 +226,11 @@ struct MainThreadTimerState : std::enable_shared_from_this<MainThreadTimerState>
 
 void MainThreadScopeState::release_host_resources() {
     HostRunLoop* loop = binding ? binding->loop : nullptr;
+    auto owned_watches = std::move(watches);
+    watches.clear();
+    if (loop != nullptr)
+        for (auto& entry : owned_watches)
+            loop->remove_fd(entry.second.host_id);
     if (loop != nullptr) {
         if (fd_id != 0)
             loop->remove_fd(fd_id);
@@ -401,6 +415,48 @@ void MainThreadScope::remove_teardown(std::uint64_t id) {
             return;
         }
     }
+}
+
+MainThreadScope::FdWatch MainThreadScope::watch_fd(int fd, std::function<void()> readable) {
+    FdWatch watch;
+    HostRunLoop* loop = state_->binding ? state_->binding->loop : nullptr;
+    {
+        std::lock_guard<std::mutex> lock(state_->mutex);
+        if (!state_->accepting)
+            return watch;
+    }
+    if (loop == nullptr || fd < 0 || !readable)
+        return watch;
+    const std::uint64_t id = state_->next_watch_id++;
+    std::weak_ptr<detail::MainThreadScopeState> weak = state_;
+    auto fn = std::make_shared<std::function<void()>>(std::move(readable));
+    const std::uint64_t host_id = loop->add_fd(fd, [weak, id] {
+        auto state = weak.lock();
+        if (!state)
+            return;
+        auto it = state->watches.find(id);
+        if (it == state->watches.end())
+            return;
+        // Hold the callback: it may stop its own watch.
+        auto fn = it->second.fn;
+        run_contained(*fn);
+    });
+    if (host_id == 0)
+        return watch;
+    state_->watches[id] = {host_id, std::move(fn)};
+    watch.release_ = [weak, id] {
+        auto state = weak.lock();
+        if (!state)
+            return;
+        auto it = state->watches.find(id);
+        if (it == state->watches.end())
+            return;
+        const auto host = it->second.host_id;
+        state->watches.erase(it);
+        if (state->binding && state->binding->loop != nullptr)
+            state->binding->loop->remove_fd(host);
+    };
+    return watch;
 }
 
 bool MainThreadScope::post(std::function<void()> fn) {

@@ -155,6 +155,52 @@ class MainThreadScope {
 
     Handle handle() const;
 
+    /// A descriptor watch made by watch_fd(). Destroying or reset()ting it stops
+    /// the watch; so does destroying the scope, or withdrawing the host loop,
+    /// first, after which the handle is inert. Main thread only.
+    class FdWatch {
+      public:
+        FdWatch() = default;
+        ~FdWatch() {
+            reset();
+        }
+        FdWatch(const FdWatch&) = delete;
+        FdWatch& operator=(const FdWatch&) = delete;
+        FdWatch(FdWatch&& other) noexcept : release_(std::move(other.release_)) {
+            other.release_ = nullptr;
+        }
+        FdWatch& operator=(FdWatch&& other) noexcept {
+            if (this != &other) {
+                reset();
+                release_ = std::move(other.release_);
+                other.release_ = nullptr;
+            }
+            return *this;
+        }
+        explicit operator bool() const {
+            return static_cast<bool>(release_);
+        }
+        void reset() {
+            if (auto release = std::move(release_)) {
+                release_ = nullptr;
+                release();
+            }
+        }
+
+      private:
+        friend class MainThreadScope;
+        std::function<void()> release_;
+    };
+
+    /// Call `readable` on the main thread while `fd` is readable, through the
+    /// host's own run loop (so an editor's descriptor, such as
+    /// GlSurface::event_fd(), needs no polling timer). The callback may stop its
+    /// own watch. Returns an empty handle when the scope takes no work, the host
+    /// loop cannot watch descriptors, or on Apple platforms (where the main
+    /// run loop is used directly and a descriptor is not offered). Main thread
+    /// only.
+    FdWatch watch_fd(int fd, std::function<void()> readable);
+
     /// Register `fn` to run on the main thread while this scope is being
     /// destroyed, after its posts and timers have stopped. Lets a dialog or
     /// menu opened on behalf of the scope close itself and drop its completion.

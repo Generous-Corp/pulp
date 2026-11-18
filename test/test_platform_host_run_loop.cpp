@@ -11,6 +11,7 @@
 // Not built on Apple platforms, which run MainThreadScope on the main run loop.
 
 #include <poll.h>
+#include <unistd.h>
 
 #include <algorithm>
 #include <atomic>
@@ -486,4 +487,83 @@ TEST_CASE("a host that cannot watch descriptors is polled on its own timer",
     REQUIRE(ran == 0);
     host.loop.advance(milliseconds(10));
     REQUIRE(ran == 1);
+}
+
+TEST_CASE("an editor can watch its own descriptor through the host loop",
+          "[platform][main-thread][host-run-loop]") {
+    Registered host;
+    MainThreadScope scope;
+    int fds[2];
+    REQUIRE(::pipe(fds) == 0);
+    const std::size_t baseline = host.loop.fds(); // the scope's own wake pipe
+    int calls = 0;
+    {
+        auto watch = scope.watch_fd(fds[0], [&] {
+            ++calls;
+            char sink[8];
+            (void)!::read(fds[0], sink, sizeof sink);
+        });
+        REQUIRE(watch);
+        REQUIRE(host.loop.fds() == baseline + 1);
+        host.loop.poll_fds();
+        REQUIRE(calls == 0); // nothing readable yet
+        (void)!::write(fds[1], "x", 1);
+        host.loop.poll_fds();
+        REQUIRE(calls == 1);
+        // Stopping the watch removes the host's registration.
+        watch.reset();
+        REQUIRE_FALSE(watch);
+        REQUIRE(host.loop.fds() == baseline);
+        (void)!::write(fds[1], "x", 1);
+        host.loop.poll_fds();
+        REQUIRE(calls == 1);
+    }
+
+    // A callback may stop its own watch.
+    MainThreadScope::FdWatch self;
+    int self_calls = 0;
+    self = scope.watch_fd(fds[0], [&] {
+        ++self_calls;
+        char sink[8];
+        (void)!::read(fds[0], sink, sizeof sink);
+        self.reset();
+    });
+    (void)!::write(fds[1], "x", 1);
+    host.loop.poll_fds();
+    REQUIRE(self_calls == 1);
+    REQUIRE(host.loop.fds() == baseline);
+
+    // Destroying the scope with a watch live removes it; the handle is inert.
+    auto scope2 = std::make_unique<MainThreadScope>();
+    auto outlived = scope2->watch_fd(fds[0], [] {});
+    REQUIRE(outlived);
+    scope2.reset();
+    REQUIRE(host.loop.fds() == baseline);
+    outlived.reset(); // no effect, no crash
+
+    // A host that cannot watch descriptors, or a refused descriptor, gives an
+    // empty handle.
+    REQUIRE_FALSE(scope.watch_fd(-1, [] {}));
+    host.loop.watch_fds = false;
+    REQUIRE_FALSE(scope.watch_fd(fds[0], [] {}));
+    host.loop.watch_fds = true;
+    ::close(fds[0]);
+    ::close(fds[1]);
+}
+
+TEST_CASE("withdrawing the host loop stops a descriptor watch",
+          "[platform][main-thread][host-run-loop]") {
+    auto host = std::make_unique<Registered>();
+    MainThreadScope scope;
+    int fds[2];
+    REQUIRE(::pipe(fds) == 0);
+    auto watch = scope.watch_fd(fds[0], [] {});
+    REQUIRE(watch);
+    REQUIRE(unregister_host_run_loop(host->token));
+    host->token = 0;
+    REQUIRE(host->loop.fds() == 0);
+    watch.reset(); // inert
+    REQUIRE_FALSE(scope.watch_fd(fds[0], [] {}));
+    ::close(fds[0]);
+    ::close(fds[1]);
 }

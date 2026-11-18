@@ -216,6 +216,10 @@ void MainThreadScope::remove_teardown(std::uint64_t id) {
     }
 }
 
+MainThreadScope::FdWatch MainThreadScope::watch_fd(int, std::function<void()>) {
+    return {};
+}
+
 bool MainThreadScope::post(std::function<void()> fn) {
     return state_->post(std::move(fn));
 }
