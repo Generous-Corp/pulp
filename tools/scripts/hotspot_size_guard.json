@@ -57,13 +57,18 @@
     },
     {
       "path": "core/host/src/signal_graph_prepared_topology_edit.cpp",
-      "max_loc": 2931,
+      "max_loc": 2773,
       "note": "Prepared-topology transaction lifecycle; prepared-description capture and other prepare() phases belong in focused signal_graph_prepared_*.cpp units"
     },
     {
       "path": "core/host/src/signal_graph_prepared_description_capture.cpp",
       "max_loc": 672,
       "note": "Prepared-description capture from one compiled serial routed snapshot, cross-checked against the authored candidate"
+    },
+    {
+      "path": "core/host/src/signal_graph_prepared_edit_admission.cpp",
+      "max_loc": 198,
+      "note": "Prepared-topology admission gates and new-instance lifecycle preparation run before the candidate compiles"
     },
     {
       "path": "core/host/src/timeline_graph_binding.cpp",

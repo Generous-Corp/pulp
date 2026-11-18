@@ -3537,10 +3537,17 @@ jobs:
         # check red so the queue cannot admit a head already known to fail.
         # Ordinary pull-request runs keep the fast tier as their gate because
         # the full step is skipped for them.
+        # A push to main runs this leg to publish the Linux and Windows caches
+        # (the save steps above). Its full test run had no reader and failed
+        # 127 of 127 times in a week (about 46 of each 65 minutes), and the
+        # merge group already runs the suite on the exact commit that lands.
+        # Set the repository variable PULP_PUSH_LINUX_TESTS to 1 to run it on
+        # push again.
         if: >-
           runner.os != 'Windows'
           && (github.event_name != 'pull_request'
               || steps.pr_suite.outputs.suite == 'full')
+          && (github.event_name != 'push' || vars.PULP_PUSH_LINUX_TESTS == '1')
           && matrix.lane != 'contract' && steps.clean_merge.outputs.lane != 'clean-merge'
         continue-on-error: ${{ github.event_name == 'pull_request' && steps.pr_suite.outputs.suite != 'full' }}
         shell: bash
@@ -3814,10 +3821,29 @@ jobs:
       # On a push to main, hand the same measurement to a2t-headroom-issue
       # below, which keeps the one tracking issue. Only the Linux leg runs the
       # full suite on a push, and only it uploads, so the artifact name is unique.
+      # With the push test run off (PULP_PUSH_LINUX_TESTS unset), the full suite
+      # no longer produces that measurement on a push, so run only the
+      # pr-guard tests that hold the headroom guard. Advisory: it feeds the
+      # tracking issue and never decides the job's result.
+      - name: Measure A2T scope-history headroom (push without the full suite)
+        id: a2t_push_measure
+        if: >-
+          github.event_name == 'push' && github.ref == 'refs/heads/main'
+          && runner.os == 'Linux' && vars.PULP_PUSH_LINUX_TESTS != '1'
+        continue-on-error: true
+        shell: bash
+        env:
+          PULP_A2T_HEADROOM_OUT: ${{ runner.temp }}/a2t-scope-headroom.json
+        run: |
+          set -euo pipefail
+          ctest --test-dir "$PULP_BUILD_DIR" --output-on-failure -C Release \
+            -L '^pr-guard$' --no-tests=ignore --timeout 300 -j4
+
       - name: Upload A2T scope-history headroom
         if: >-
           always() && github.event_name == 'push' && github.ref == 'refs/heads/main'
-          && runner.os == 'Linux' && steps.ctest.outcome != 'skipped'
+          && runner.os == 'Linux'
+          && (steps.ctest.outcome != 'skipped' || steps.a2t_push_measure.outcome != 'skipped')
         continue-on-error: true
         uses: actions/upload-artifact@v7.0.2
         with:

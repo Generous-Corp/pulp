@@ -1127,6 +1127,17 @@ baked in, not installed per job.
      `ccache remote storage: read-write` and a hit rate near the cacheable
      count. The Build step needs a compiling `main`.
 
+## A push to main builds Linux for the caches and does not test it
+
+The push run of `build.yml` exists to publish the Linux and Windows ccache and
+FetchContent caches; only a default-branch run writes a cache every pull request
+can restore. Its `Test (non-Windows)` step took about 46 of each 65 minutes and
+failed on every run for a week (tracked in the `PARKED/linux` issue), and the
+merge group already runs the suite on the exact commit that lands. A push
+therefore skips that step. Set the repository variable `PULP_PUSH_LINUX_TESTS`
+to `1` to run it on push again; pull requests, merge groups and manual
+dispatches are not affected by the variable.
+
 ## Windows runs nightly, not per merge
 
 Windows is billed at **2x** on GitHub-hosted runners and **gates nothing** — no
