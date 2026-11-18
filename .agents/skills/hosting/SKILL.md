@@ -3574,6 +3574,10 @@ across loops; round it like the adapters do). The AU "transport state
 changed" flags fire on play/stop too, so never map them to `discontinuity`.
 Convert AUv3 event times with `au_event_block_time()`, not the adapter's
 `au_event_block_offset()`, which clamps out-of-block times into the block.
+`au_event_block_time()` delegates its range rule to the adapter's
+`format::admit_au_event_time()`, so the host and an AU v3 adapter refuse the
+same times (including an in-block offset past `INT32_MAX`). Change the rule in
+`EventTimeAdmission`, never by adding a range check on the host side.
 
 LV2 enters through `clock_from_lv2()`. LV2 has no steady counter at all, so
 the clock is always counter-free: a skipped `run()` is indistinguishable from
