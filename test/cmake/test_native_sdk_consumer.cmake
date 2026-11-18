@@ -29,6 +29,15 @@ if(NOT _install_result EQUAL 0)
         "${_install_output}\n${_install_error}")
 endif()
 
+if(NOT CMAKE_HOST_WIN32)
+    foreach(_staged lib/libpulp-native.a include/pulp/native/gl_surface.hpp
+                    include/pulp/native/input.hpp)
+        if(NOT EXISTS "${_prefix}/${_staged}")
+            message(FATAL_ERROR "The staged SDK is missing ${_staged}")
+        endif()
+    endforeach()
+endif()
+
 file(WRITE "${_source}/CMakeLists.txt" [=[
 cmake_minimum_required(VERSION 3.24)
 project(PulpNativeSdkConsumer LANGUAGES CXX)
@@ -40,6 +49,7 @@ add_executable(consumer main.cpp)
 target_link_libraries(consumer PRIVATE Pulp::native)
 ]=])
 
+if(CMAKE_HOST_SYSTEM_NAME STREQUAL "Darwin")
 file(WRITE "${_source}/main.cpp" [=[
 #include <pulp/native/frame_pump.hpp>
 #include <pulp/native/input.hpp>
@@ -70,6 +80,42 @@ int main() {
     return 0;
 }
 ]=])
+else()
+# Linux: the surface has no Metal or frame pump. The consumer links the key
+# routing rule and GlSurface, the two parts every platform builds.
+file(WRITE "${_source}/main.cpp" [=[
+#include <pulp/native/gl_surface.hpp>
+#include <pulp/native/input.hpp>
+
+// This external project sees only the staged SDK prefix.
+int main() {
+    using namespace pulp::native;
+
+    KeyEvent space;
+    space.key = Key::space;
+    if (key_name(space.key) != "space")
+        return 1;
+    if (route_key(space, false) != KeyRoute::host ||
+        route_key(space, true) != KeyRoute::client_first)
+        return 2;
+    if (!is_software_renderer("llvmpipe (LLVM 15.0.7, 256 bits)") ||
+        is_software_renderer("NVIDIA GeForce RTX 4090"))
+        return 3;
+    const std::vector<GlContextRequest> list{{4, 6, GlProfile::core, 0},
+                                             {3, 3, GlProfile::core, 0}};
+    const auto honoured = first_honoured_request(list, 3, 3, GlProfile::core);
+    if (!honoured || *honoured != 1)
+        return 4;
+    // Linking GlSurface itself: a null window surface is a valid answer where
+    // the backend is unavailable, never a crash.
+    auto surface = GlSurface::create();
+    if (surface && surface->attached())
+        return 5;
+    return 0;
+}
+]=])
+endif()
+
 
 set(_consumer_configure_args
     -S "${_source}"

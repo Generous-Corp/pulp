@@ -1,10 +1,12 @@
 # pulp-native: native surfaces for an editor that brings its own renderer. On
 # macOS a child NSView backed by a CAMetalLayer, plus an offscreen OpenGL
-# surface for tests and capture; on Windows a child window with a WGL context. It links Pulp's platform layer and system
+# surface for tests and capture; on Windows a child window with a WGL context;
+# on Linux the shared input and surface types (the windowed backend is
+# separate). It links Pulp's platform layer and system
 # frameworks only: no view, canvas, render or GPU-runtime target, and no Skia,
 # Dawn, Vellum or RmlUi.
 
-add_library(pulp-native STATIC src/gl_surface.cpp)
+add_library(pulp-native STATIC src/gl_surface.cpp src/input.cpp)
 if(APPLE)
     target_sources(pulp-native PRIVATE
         src/frame_pump_mac.cpp
@@ -14,6 +16,8 @@ if(APPLE)
         src/surface_input_mac.mm)
 elseif(WIN32)
     target_sources(pulp-native PRIVATE src/gl_surface_win32.cpp)
+else()
+    target_sources(pulp-native PRIVATE src/gl_surface_none.cpp)
 endif()
 add_library(pulp::native ALIAS pulp-native)
 

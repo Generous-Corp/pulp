@@ -9,6 +9,12 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
      release's bullet block. See docs/guides/versioning.md § Release pipeline
      for the full end-to-end flow. -->
 
+<a id="v11600"></a>
+## [1.160.0] - 2026-11-18
+
+- release/version bump ([#12525](https://github.com/Generous-Corp/pulp/pull/12525))
+- graph/s7 spectral history 20261117 ([#12514](https://github.com/Generous-Corp/pulp/pull/12514))
+
 <a id="v11590"></a>
 ## [1.159.0] - 2026-11-18
 
@@ -13273,6 +13279,7 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/Generous-Corp/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/Generous-Corp/pulp/pull/2))
 
+[1.160.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.160.0
 [1.159.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.159.0
 [1.158.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.158.0
 [1.156.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.156.0

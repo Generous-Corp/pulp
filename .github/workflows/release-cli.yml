@@ -1194,6 +1194,7 @@ jobs:
             -DPULP_NODE_RUNTIME_EXECUTABLE="${PULP_NODE_RUNTIME_EXECUTABLE:-}" \
             $INSPECTOR \
             $REQUIRE_GPU \
+            -DPULP_ENABLE_PULP_NATIVE=ON \
             -DPULP_BUILD_WEBVIEW=ON
           # Build everything the SDK install step needs. This is a full
           # second build on Linux, but it's required to keep the CLI
@@ -1300,6 +1301,12 @@ jobs:
           fi
           test -f sdk-staging/lib/libpulp-view.a
           test -f sdk-staging/lib/libpulp-view-core.a
+          # The native component ships on every desktop platform (a backfill
+          # of an older tag predates it).
+          if [ -z "$SOURCE_REF" ]; then
+            test -f sdk-staging/lib/libpulp-native.a
+            test -f sdk-staging/include/pulp/native/gl_surface.hpp
+          fi
           python3 - <<'PY'
           import os
           from pathlib import Path

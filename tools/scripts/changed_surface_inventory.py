@@ -17,6 +17,7 @@ projection through ``tools/scripts/affected_targets.py``.
 
 from __future__ import annotations
 
+import functools
 import hashlib
 import json
 import math
@@ -665,6 +666,13 @@ def expand_literal_selection(
     return expanded
 
 
+class CTestTests(list):
+    """The ``tests`` array of a ctest listing, carrying the document's call-stack
+    graph so a caller can ask which CMake file registered a test."""
+
+    backtrace_graph: Any = None
+
+
 def load_ctest_json(build_dir: Path) -> list[dict[str, Any]]:
     result = subprocess.run(
         ["ctest", "--test-dir", str(build_dir), "--show-only=json-v1"],
@@ -676,7 +684,9 @@ def load_ctest_json(build_dir: Path) -> list[dict[str, Any]]:
     tests = payload.get("tests")
     if not isinstance(tests, list):
         raise InventoryError("CTest JSON has no tests array")
-    return tests
+    listing = CTestTests(tests)
+    listing.backtrace_graph = payload.get("backtraceGraph")
+    return listing
 
 
 def source_root_for_build(build_dir: Path) -> Path:
@@ -722,6 +732,10 @@ class Target:
     sources: list[str]
     dependencies: list[str] = field(default_factory=list)
     artifacts: list[str] = field(default_factory=list)
+    # Every CMake file on the call stack that defined the target (absolute,
+    # normalized): the file holding add_executable and the files that
+    # include() or call into it.
+    definition_files: frozenset[str] = frozenset()
 
     @property
     def is_test(self) -> bool:
@@ -752,6 +766,9 @@ class CTestEntry:
     name: str
     command: list[str]
     properties: dict[str, Any]
+    # Every CMake file on the call stack that registered the test (absolute,
+    # normalized). Empty for a Catch2 case ctest reads from a discovery file.
+    registered_files: frozenset[str] = frozenset()
 
 
 # A test names a file in more forms than a bare argument: a CMake script takes
@@ -914,6 +931,29 @@ def codemodel_reply_mtime(build_dir: Path) -> float | None:
         return None
 
 
+def backtrace_files(graph: Any, index: Any, root: str = "") -> frozenset[str]:
+    """The files on the call stack a file-API or ctest ``backtrace`` index names.
+
+    Both CMake JSON documents share one shape: ``nodes`` (``file`` index,
+    ``parent`` index) and ``files``. A stack runs from the add_executable or
+    add_test call outward through every include() and function call.
+    """
+    if not isinstance(graph, dict) or not isinstance(index, int):
+        return frozenset()
+    nodes, files = graph.get("nodes") or [], graph.get("files") or []
+    found: set[str] = set()
+    seen: set[int] = set()
+    while isinstance(index, int) and 0 <= index < len(nodes) and index not in seen:
+        seen.add(index)
+        node = nodes[index]
+        slot = node.get("file")
+        if isinstance(slot, int) and 0 <= slot < len(files) and isinstance(files[slot], str):
+            # The file API records paths relative to the source root; ctest, absolute.
+            found.add(os.path.normpath(os.path.join(root, files[slot])))
+        index = node.get("parent")
+    return frozenset(found)
+
+
 def load_codemodel_targets(build_dir: Path) -> CodeModel:
     """Parse the file-API reply into a name-keyed target graph.
 
@@ -973,6 +1013,7 @@ def load_codemodel_targets(build_dir: Path) -> CodeModel:
             sources=[os.path.normpath(s["path"]) for s in raw.get("sources", [])],
             dependencies=deps,
             artifacts=artifacts,
+            definition_files=backtrace_files(raw.get("backtraceGraph"), raw.get("backtrace"), source_root),
         )
     return CodeModel(targets=targets, source_root=source_root, build_root=build_root)
 
@@ -1200,7 +1241,8 @@ def header_owners(build_dir: Path, model: CodeModel, headers: set[str]) -> dict[
 # ── ctest inventory for projection ──
 
 
-def projection_ctest_entries(tests: Iterable[dict[str, Any]]) -> list[CTestEntry]:
+def projection_ctest_entries(tests: Iterable[dict[str, Any]],
+                             graph: Any = None) -> list[CTestEntry]:
     """The authoritative corpus (same name/label exclusions as the exact-head
     plan) as lightweight entries; malformed registrations are skipped rather
     than refused, because a build command must not fail on inventory shape."""
@@ -1219,13 +1261,15 @@ def projection_ctest_entries(tests: Iterable[dict[str, Any]]) -> list[CTestEntry
             name=test.get("name", ""),
             command=[str(c) for c in (test.get("command") or [])],
             properties=props,
+            registered_files=backtrace_files(graph, test.get("backtrace")),
         ))
     return entries
 
 
 def load_projection_ctest_entries(build_dir: Path) -> list[CTestEntry] | None:
     try:
-        return projection_ctest_entries(load_ctest_json(build_dir))
+        tests = load_ctest_json(build_dir)
+        return projection_ctest_entries(tests, getattr(tests, "backtrace_graph", None))
     except (OSError, subprocess.CalledProcessError, json.JSONDecodeError, InventoryError):
         return None
 
@@ -1302,6 +1346,360 @@ def test_dependents(name: str, rev: dict[str, set[str]], model: CodeModel) -> se
     return {d for d in rev.get(name, set()) if d in model.targets and model.targets[d].is_test}
 
 
+# ── test registration fragments ──
+#
+# A change to a CMake file is global by default: it may alter any target. The
+# files under test/cmake/ are mostly test registrations, and CMake records, in
+# both the file-API target records and the ctest listing, the call stack that
+# defined each target and registered each test. A registration file that only
+# defines its own targets and tests therefore selects exactly those, plus what
+# depends on the targets it defines. Anything the call stacks cannot show stays
+# global: a file that defines a function or macro another file calls, sets a
+# variable another file reads, or touches directory, cache or global state.
+
+REGISTRATION_FRAGMENT_RE = re.compile(r"^test/cmake/(?:fragments/)?[^/]+\.cmake$")
+# The aggregator that include()s every fragment: it sits on every fragment's
+# call stack, so a change to it reaches all of them.
+SHARED_FRAGMENT_NAMES = frozenset({"fragments.cmake"})
+_CMAKE_COMMAND_NAME = r"[^\s()#\"\[\]\\;]+"
+_CMAKE_BRACKET_OPEN = re.compile(r"\[(=*)\[")
+_CMAKE_UNQUOTED_END = frozenset(' \t\r\n\f\v()#"')
+
+# A fragment is local only when every command in it is a pure registration
+# call from this explicit list. Variables, loops, conditionals, functions,
+# includes, properties of other targets and every project command not listed
+# can change state a sibling fragment sees (a foreach variable even survives
+# endforeach in the including scope), so each one makes the fragment global.
+_CMAKE_LOCAL_COMMANDS = frozenset({
+    "add_executable", "add_library", "add_test", "pulp_add_test_suite",
+    "pulp_dsp_series_catalog_suite", "pulp_dsp_series_signal_suite",
+    "catch_discover_tests", "message", "set_tests_properties",
+})
+# Test properties that only describe the test they are set on. FIXTURES_*,
+# DEPENDS, RESOURCE_LOCK, RUN_SERIAL, DISABLED and the like decide which other
+# tests CTest runs or when, and an unknown name is assumed to be one of them.
+_CMAKE_SAFE_TEST_PROPERTIES = frozenset({
+    "LABELS", "TIMEOUT", "ENVIRONMENT", "WORKING_DIRECTORY", "SKIP_RETURN_CODE",
+    "WILL_FAIL", "PASS_REGULAR_EXPRESSION", "FAIL_REGULAR_EXPRESSION",
+})
+# message() modes that cannot stop configure or change its outcome.
+_CMAKE_SAFE_MESSAGE_MODES = frozenset({
+    "STATUS", "VERBOSE", "DEBUG", "TRACE", "NOTICE",
+    "CHECK_START", "CHECK_PASS", "CHECK_FAIL",
+})
+_CMAKE_ADD_TEST_KEYWORDS = frozenset({
+    "NAME", "COMMAND", "CONFIGURATIONS", "WORKING_DIRECTORY", "COMMAND_EXPAND_LISTS",
+})
+_CMAKE_SUITE_KEYWORDS = frozenset({
+    "NO_PCH", "MAY_BE_EMPTY", "TIMEOUT", "TEST_SPEC", "TEST_PREFIX", "GROUP", "SOURCES",
+    "LIBRARIES", "INCLUDE_DIRS", "COMPILE_DEFINITIONS", "PROPERTIES", "DISCOVERY_ARGS", "LABELS",
+})
+_CMAKE_DISCOVER_KEYWORDS = frozenset({
+    "SKIP_IS_FAILURE", "FAIL_IF_EMPTY", "TEST_PREFIX", "TEST_SUFFIX", "WORKING_DIRECTORY",
+    "TEST_LIST", "REPORTER", "OUTPUT_DIR", "OUTPUT_PREFIX", "OUTPUT_SUFFIX", "DISCOVERY_MODE",
+    "TEST_SPEC", "EXTRA_ARGS", "PROPERTIES", "LABELS", "DL_PATHS", "DL_FRAMEWORK_PATHS",
+})
+
+
+class _CMakeSyntaxError(ValueError):
+    """CMake text this lexer cannot read with certainty."""
+
+
+def _cmake_skip_comment(text: str, index: int) -> int:
+    """Index after the comment starting at text[index] == '#'."""
+    bracket = _CMAKE_BRACKET_OPEN.match(text, index + 1)
+    if bracket:
+        close = "]" + bracket.group(1) + "]"
+        end = text.find(close, bracket.end())
+        if end < 0:
+            raise _CMakeSyntaxError("unterminated bracket comment")
+        return end + len(close)
+    end = text.find("\n", index)
+    return len(text) if end < 0 else end
+
+
+@functools.lru_cache(maxsize=1024)
+def _cmake_commands(text: str) -> list[tuple[str, list[str]]]:
+    """Lex CMake text into (lower-case command, arguments) invocations.
+
+    Comments are dropped only where CMake itself would drop them, quoted and
+    bracket arguments are returned without their delimiters, and any text the
+    lexer cannot read with certainty (an unterminated string, a stray token, an
+    apostrophe in an unquoted argument) raises _CMakeSyntaxError so callers
+    treat the file as shared."""
+    commands: list[tuple[str, list[str]]] = []
+    length = len(text)
+    index = 0
+    while index < length:
+        char = text[index]
+        if char.isspace():
+            index += 1
+            continue
+        if char == "#":
+            index = _cmake_skip_comment(text, index)
+            continue
+        name = re.compile(_CMAKE_COMMAND_NAME).match(text, index)
+        if not name:
+            raise _CMakeSyntaxError(f"unexpected {char!r}")
+        index = name.end()
+        while index < length and text[index].isspace():
+            index += 1
+        if index >= length or text[index] != "(":
+            raise _CMakeSyntaxError(f"{name.group(0)} is not followed by arguments")
+        index += 1
+        depth = 1
+        args: list[str] = []
+        while depth:
+            if index >= length:
+                raise _CMakeSyntaxError("unterminated command")
+            char = text[index]
+            if char.isspace() or char == ";":
+                index += 1
+            elif char == "#":
+                index = _cmake_skip_comment(text, index)
+            elif char == "(":
+                depth += 1
+                args.append("(")
+                index += 1
+            elif char == ")":
+                depth -= 1
+                args.append(")")
+                index += 1
+            elif char == '"':
+                index += 1
+                start = index
+                while index < length and text[index] != '"':
+                    index += 2 if text[index] == "\\" else 1
+                if index >= length:
+                    raise _CMakeSyntaxError("unterminated quoted argument")
+                args.append(text[start:index])
+                index += 1
+            elif char == "[" and _CMAKE_BRACKET_OPEN.match(text, index):
+                bracket = _CMAKE_BRACKET_OPEN.match(text, index)
+                close = "]" + bracket.group(1) + "]"
+                end = text.find(close, bracket.end())
+                if end < 0:
+                    raise _CMakeSyntaxError("unterminated bracket argument")
+                args.append(text[bracket.end():end])
+                index = end + len(close)
+            else:
+                start = index
+                while index < length and text[index] not in _CMAKE_UNQUOTED_END:
+                    if text[index] == "'":
+                        raise _CMakeSyntaxError("apostrophe in unquoted argument")
+                    index += 2 if text[index] == "\\" else 1
+                if index == start:
+                    raise _CMakeSyntaxError("unreadable argument")
+                args.append(text[start:index])
+        args.pop()  # the closing parenthesis
+        commands.append((name.group(0).lower(), args))
+    return commands
+
+
+_CMAKE_TEXT_SUFFIXES = (".cmake", ".cmake.in", "CMakeLists.txt")
+def _is_cmake_text_path(rel: str) -> bool:
+    return rel.startswith("test/") and rel.endswith(_CMAKE_TEXT_SUFFIXES)
+
+
+def _test_cmake_texts(source_root: str, ref: str | None = None) -> dict[str, str]:
+    """Text of every CMake file under test/, by relative path."""
+    root = Path(source_root)
+    texts: dict[str, str] = {}
+    if ref is not None:
+        try:
+            listed = subprocess.run(
+                ["git", "ls-tree", "-r", "--name-only", ref], cwd=source_root,
+                capture_output=True, text=True, encoding="utf-8", check=True,
+            ).stdout.splitlines()
+            wanted = [rel for rel in listed if _is_cmake_text_path(rel)]
+            batch = subprocess.run(
+                ["git", "cat-file", "--batch"], cwd=source_root, check=True, capture_output=True,
+                input="".join(f"{ref}:{rel}\n" for rel in wanted).encode("utf-8"),
+            ).stdout
+        except (OSError, subprocess.CalledProcessError):
+            return {}
+        position = 0
+        for rel in wanted:
+            end = batch.index(b"\n", position)
+            header = batch[position:end].split()
+            if len(header) != 3 or header[1] != b"blob":
+                position = end + 1  # "<object> missing"
+                continue
+            size = int(header[2])
+            texts[rel] = batch[end + 1:end + 1 + size].decode("utf-8", errors="replace")
+            position = end + 1 + size + 1
+        return texts
+    for dirpath, _dirnames, filenames in os.walk(root / "test"):
+        reldir = os.path.relpath(dirpath, root).replace(os.sep, "/")
+        for name in filenames:
+            rel = name if reldir == "." else f"{reldir}/{name}"
+            if not _is_cmake_text_path(rel):
+                continue
+            try:
+                texts[rel] = (root / rel).read_text(encoding="utf-8", errors="replace")
+            except OSError:
+                continue
+    return texts
+
+
+def _shared_fragment_reason_current(rel: str, texts: dict[str, str]) -> str | None:
+    """Why a registration file cannot be treated as owning only its own tests,
+    or None when it is nothing but pure registration calls."""
+    text = texts.get(rel)
+    if text is None:
+        return "unreadable"
+    if os.path.basename(rel) in SHARED_FRAGMENT_NAMES:
+        return "aggregates every fragment"
+    try:
+        invocations = _cmake_commands(text)
+    except _CMakeSyntaxError as error:
+        return f"CMake syntax not readable with certainty ({error})"
+    unknown = sorted({name for name, _args in invocations} - _CMAKE_LOCAL_COMMANDS)
+    if unknown:
+        return f"uses {unknown[0]}(), which is not a pure registration command"
+    # An expanded argument can carry any option (message(${MODE}) becoming
+    # FATAL_ERROR, add_executable(x ${OPTS}) becoming IMPORTED GLOBAL), so a
+    # focused fragment names everything literally: no ${...}, $ENV{...},
+    # $CACHE{...}, generator expression or @VAR@ anywhere.
+    for name, args in invocations:
+        if any("$" in arg or re.search(r"@\w+@", arg) for arg in args):
+            return f"{name}() expands a variable, environment value or generator expression"
+    owned_tests: set[str] = set()
+    for name, args in invocations:
+        reason = _registration_call_reason(name, args)
+        if reason is not None:
+            return reason
+        if name == "add_test" and len(args) > 1 and args[0].upper() == "NAME":
+            owned_tests.add(args[1])
+    for name, args in invocations:
+        if name != "set_tests_properties":
+            continue
+        end = next((i for i, arg in enumerate(args) if arg.upper() == "PROPERTIES"), len(args))
+        if end == 0 or any(arg not in owned_tests for arg in args[:end]):
+            return "sets properties of a test this file does not register"
+        reason = _test_property_reason(args[end + 1:])
+        if reason is not None:
+            return reason
+    return None
+
+
+def _test_property_reason(pairs: list[str]) -> str | None:
+    """Why a `name value ...` property list may affect more than its own test."""
+    if len(pairs) % 2:
+        return "test properties are not name/value pairs"
+    for name in pairs[0::2]:
+        if name not in _CMAKE_SAFE_TEST_PROPERTIES:
+            return f"sets test property {name}, which can change what else runs"
+    return None
+
+
+def _keyword_regions(args: list[str], keywords: frozenset[str]) -> dict[str, list[str]]:
+    """Arguments after each keyword, up to the next keyword."""
+    regions: dict[str, list[str]] = {}
+    current: list[str] | None = None
+    for arg in args:
+        if arg in keywords:
+            current = regions.setdefault(arg, [])
+        elif current is not None:
+            current.append(arg)
+    return regions
+
+
+def _registration_call_reason(name: str, args: list[str]) -> str | None:
+    """Why an allowlisted call's options reach beyond its own target or test."""
+    upper = {arg.upper() for arg in args[1:]}
+    if name == "add_executable":
+        if upper & {"IMPORTED", "ALIAS", "GLOBAL"}:
+            return "declares an imported or alias target other files can name"
+    elif name == "add_library":
+        if upper & {"IMPORTED", "ALIAS", "GLOBAL"} or not (upper & {"STATIC", "SHARED"}):
+            return "declares an imported, alias, object or interface library"
+    elif name == "add_test":
+        if not args or args[0] != "NAME":
+            return "uses the legacy add_test signature"
+        if set(args) & {"CONFIGURATIONS", "COMMAND_EXPAND_LISTS"}:
+            return "add_test options change when or how the test is expanded"
+    elif name == "message":
+        mode = args[0] if args else ""
+        if re.fullmatch(r"[A-Z][A-Z_]*", mode) and mode not in _CMAKE_SAFE_MESSAGE_MODES:
+            return f"message({mode}) can stop or change the configure"
+    elif name == "pulp_add_test_suite":
+        regions = _keyword_regions(args, _CMAKE_SUITE_KEYWORDS)
+        if set(args) & {"GROUP", "MAY_BE_EMPTY", "DISCOVERY_ARGS"}:
+            return "adds to a shared test group or passes raw discovery arguments"
+        return _test_property_reason(regions.get("PROPERTIES", []))
+    elif name == "catch_discover_tests":
+        regions = _keyword_regions(args[1:], _CMAKE_DISCOVER_KEYWORDS)
+        if "TEST_LIST" in regions:
+            return "writes the discovered test list to a variable"
+        return _test_property_reason(regions.get("PROPERTIES", []))
+    return None
+
+
+def shared_fragment_reason(rel: str, texts: dict[str, str],
+                           base_texts: dict[str, str] | None = None) -> str | None:
+    """Return a shared-state reason for either side of the changed file.
+
+    A removal can be unsafe even when the current file looks local, so inspect
+    the merge-base text as well whenever it is available.
+    """
+    reason = _shared_fragment_reason_current(rel, texts)
+    if reason is not None:
+        return reason
+    if base_texts is not None and rel in base_texts:
+        reason = _shared_fragment_reason_current(rel, base_texts)
+        if reason is not None:
+            return f"base version {reason}"
+    return None
+
+
+def fragment_projection(files: Iterable[str], model: "CodeModel",
+                        inventory: list["CTestEntry"],
+                        index: dict[str, set[str]],
+                        base_texts: dict[str, str] | None = None
+                        ) -> dict[str, tuple[set[str], set[str]]]:
+    """Changed CMake files whose reach is fully known: path -> (tests, targets).
+
+    A file absent from the result is global."""
+    texts: dict[str, str] | None = None
+    rev: dict[str, set[str]] | None = None
+    result: dict[str, tuple[set[str], set[str]]] = {}
+    for rel in files:
+        if not REGISTRATION_FRAGMENT_RE.match(rel):
+            continue
+        absolute = os.path.normpath(os.path.join(model.source_root, rel))
+        registered = [e for e in inventory if absolute in e.registered_files]
+        # CTest allows several registrations under one name and a name filter
+        # runs every one, so each same-name registration's owners count too.
+        names = {e.name for e in registered}
+        same_name = [e for e in inventory if e.name in names]
+        defined = {t.name for t in model.targets.values() if absolute in t.definition_files}
+        scripted = {e.name for e in inventory if absolute in command_path_refs(e.command)}
+        if texts is None:
+            texts = _test_cmake_texts(model.source_root)
+        if shared_fragment_reason(rel, texts, base_texts) is not None:
+            continue
+        if not registered and not defined:
+            if scripted:  # a `cmake -P` script: only the tests that run it read it
+                result[rel] = (scripted, set().union(*(
+                    command_owners(e.command, index) | declared_targets(e)
+                    for e in inventory if e.name in scripted)))
+            continue
+        if rev is None:
+            rev = reverse_dependencies(model)
+        targets = set(defined)
+        pending = list(defined)
+        while pending:  # whatever links a target this file defines is rebuilt with it
+            for dependent in rev.get(pending.pop(), ()):
+                if dependent not in targets:
+                    targets.add(dependent)
+                    pending.append(dependent)
+        for entry in same_name + [e for e in inventory if e.name in scripted and e not in same_name]:
+            targets |= command_owners(entry.command, index) | declared_targets(entry)
+        result[rel] = (names | scripted, targets)
+    return result
+
+
 def family_projection(families: Iterable[dict[str, Any]], changed: Iterable[str]
                       ) -> tuple[set[str], set[str]]:
     """Tests and build targets the Shipyard policy families declare for the
@@ -1350,7 +1748,8 @@ def project_affected(model: CodeModel, changed: list[str], deleted: list[str],
                      deps_db: dict[str, set[str]] | None, inventory: list[CTestEntry] | None,
                      threshold: float = DEFAULT_PROJECTION_THRESHOLD,
                      stale_build_system: list[str] | None = None,
-                     families: Iterable[dict[str, Any]] = ()) -> Selection:
+                     families: Iterable[dict[str, Any]] = (),
+                     base_texts: dict[str, str] | None = None) -> Selection:
     """Map the diff to a Selection.
 
     ``deps_db`` is the header -> targets map from :func:`header_owners` (None
@@ -1368,6 +1767,23 @@ def project_affected(model: CodeModel, changed: list[str], deleted: list[str],
         build_system = [f for f in changed + deleted if is_build_system_file(f)]
     else:
         build_system = list(stale_build_system)
+    # A registration fragment that provably reaches only its own tests and
+    # targets is not a build-system change. Without an inventory nothing can
+    # prove that, so the caller's staleness verdict stands.
+    # A fragment newer than the codemodel reply (or of unknown age) is not in
+    # the recorded call stacks, so its projection would read obsolete state.
+    fragments: dict[str, tuple[set[str], set[str]]] = {}
+    if inventory is not None:
+        stale_set = set(build_system)
+        fragments = fragment_projection(
+            [f for f in changed if is_build_system_file(f) and f not in stale_set], model,
+            inventory, artifact_index(model), base_texts)
+    # A registration fragment projection did not accept (shared, or unprovable)
+    # stays a build-system change even when the codemodel already reflects it.
+    build_system = build_system + [
+        f for f in changed if f not in build_system and f not in fragments
+        and REGISTRATION_FRAGMENT_RE.match(f) and is_build_system_file(f)]
+    build_system = [f for f in build_system if f not in fragments]
     if build_system:
         return all_selection(f"build system changed: {build_system[0]}", changed, total,
                              total_tests, threshold)
@@ -1387,7 +1803,13 @@ def project_affected(model: CodeModel, changed: list[str], deleted: list[str],
     unmapped: list[str] = []
     resolved = 0
     file_selected_tests: set[str] = set()
+    fragment_selected_tests: set[str] = set()
     for rel in changed:
+        if rel in fragments:
+            resolved += 1
+            fragment_selected_tests |= fragments[rel][0]
+            selected |= fragments[rel][1]
+            continue
         ext = os.path.splitext(rel)[1]
         owners = set(source_owners.get(rel, ()))
         if not owners and deps_db is not None:
@@ -1444,7 +1866,8 @@ def project_affected(model: CodeModel, changed: list[str], deleted: list[str],
                 by_test_target.setdefault(owner, set()).add(entry.name)
             if any(ref in changed_abs for ref in refs):
                 file_selected_tests.add(entry.name)
-        tests: set[str] = set(file_selected_tests) | (family_tests & known_names)
+        tests: set[str] = (set(file_selected_tests) | (family_tests & known_names)
+                           | (fragment_selected_tests & known_names))
         for name in selected:
             tests |= by_test_target.get(name, set())
         tests, fixture_targets = follow_fixtures(tests, inventory, index)
@@ -1500,8 +1923,9 @@ def project_working_diff(build_dir: Path, source_root: Path | None, base: str,
     headers = {f for f in changed if os.path.splitext(f)[1] in HEADER_EXTENSIONS}
     deps_db = header_owners(build_dir, model, headers)
     inventory = load_projection_ctest_entries(build_dir) if with_tests else None
+    base_texts = _test_cmake_texts(str(root), base)
     return project_affected(model, changed, deleted, deps_db, inventory, threshold, stale,
-                            families)
+                            families, base_texts)
 
 
 # ── Configuration-neutral registration projection ──
