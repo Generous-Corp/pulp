@@ -251,6 +251,14 @@ authenticated rootless `gh`. The job account receives neither client nor token.
 
 ## The Linux x64 lanes run on macpro (Proxmox)
 
+> **Retired 2026-11-18.** macpro is powered off and out of CI. Its pool had been
+> wedged since 2026-11-07 on a golden that carried a runner version GitHub
+> deprecated, and it produced no green Linux job in the 28 days before. x64
+> Linux and Windows run on GitHub-hosted runners. `.shipyard/config.toml` lists
+> the host as `active = false`. Nothing was deleted on the host; the revive
+> steps are in the fleet handbook (`docs/ssh.md`, "Retired hosts"). The rest of
+> this section describes the pool as it was and as it would run again.
+
 Ephemeral x86_64 Proxmox VMs run on **macpro** — a Late-2013 Mac Pro
 (Xeon E5-1650 v2, 6c/12t, 31 GB) repurposed as a Linux CI host. The
 repository-scoped pool retains its existing operator-dispatch behavior and five

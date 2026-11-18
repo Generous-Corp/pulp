@@ -2211,13 +2211,19 @@ tools/scripts/release_routing.sh github linux-arm64      # -> revert, next tag
 local pool is down, `github <leg>` is a full revert in one command.
 
 The lightweight resolver jobs for `release-cli.yml` and
-`sign-and-release.yml` may use the always-on trusted MacPro Linux/X64 pool
+`sign-and-release.yml` historically used the trusted MacPro Linux/X64 pool
 without moving artifact builds or publication there. Their selector priority is
 `PULP_RELEASE_CONTROL_LINUX_RUNS_ON_JSON`, then the existing
 `PULP_LOCAL_LINUX_RUNS_ON_JSON`, then `ubuntu-latest`. Keep this routing limited
 to tag-push or maintainer-dispatch workflows, and keep resolver policy checkouts
 pinned to the repository default branch; never expose the persistent pool to
 `pull_request` or `merge_group` code through this fallback.
+
+**Retired MacPro selectors fall back to hosted Linux.** The MacPro pool was
+retired and powered off on 2026-11-18. Until the repository variables are
+removed, both resolver workflows ignore selector JSON containing
+`pulp-host-macpro` and use `ubuntu-latest`; do not restore that label without a
+fresh host and runner readiness check.
 
 **Release class labels are opt-in (`PULP_RELEASE_CLASS_TOKENS`).** Exactly `1` or
 `true` appends `pulp-release-tagged` (release-cli darwin legs, sign-and-release)

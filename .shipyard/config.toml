@@ -30,9 +30,12 @@ platforms = ["macos", "linux", "windows"]
 # registered. Shipyard matches these by label subset, so JIT/ephemeral runner
 # names remain disposable. `active = false` records planned inventory without
 # claiming capacity or raising an availability alert.
+# macpro was retired from CI and powered off on 2026-11-18. It stays listed as
+# inventory. To bring it back, remove `active = false` and restore
+# `min_online = 2`.
 [runner.fleet.expected_host.macpro]
 labels = ["self-hosted", "Linux", "X64", "pulp-host-macpro"]
-min_online = 2
+active = false
 
 [runner.fleet.expected_host.macmini]
 labels = ["self-hosted", "macOS", "X64", "pulp-intel-native", "pulp-host-macmini"]
