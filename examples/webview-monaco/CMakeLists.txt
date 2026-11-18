@@ -4,7 +4,7 @@ set(PULP_MONACO_BUNDLE_DIR "" CACHE PATH
 if(PULP_BUILD_WEBVIEW AND NOT PULP_IOS)
     if(PULP_MONACO_BUNDLE_DIR AND EXISTS "${PULP_MONACO_BUNDLE_DIR}/index.html")
         add_executable(pulp-webview-monaco main.cpp)
-        target_link_libraries(pulp-webview-monaco PRIVATE pulp::view)
+        target_link_libraries(pulp-webview-monaco PRIVATE pulp::view pulp::view-webview)
         target_compile_features(pulp-webview-monaco PRIVATE cxx_std_20)
         target_compile_definitions(pulp-webview-monaco PRIVATE
             PULP_MONACO_BUNDLE_DIR="${PULP_MONACO_BUNDLE_DIR}"
