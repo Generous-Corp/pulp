@@ -403,6 +403,68 @@ TEST_CASE("the document diff and edit history track the event connection by auth
           key);
 }
 
+TEST_CASE("the document diff keeps event connection records that differ only by kind",
+          "[graph-events][persistence][history]") {
+    EventGraph source;
+    build(source);
+    const auto document = GraphSerializer::to_saved_document(source.graph);
+    const auto producer = authored(source.graph, source.producer);
+    const auto consumer = authored(source.graph, source.consumer);
+    const auto both = with_events(document, {event_record(producer, consumer, 0, 0, 1),
+                                             event_record(producer, consumer, 0, 0, 2)});
+    const auto second_only = with_events(document, {event_record(producer, consumer, 0, 0, 2)});
+    // Inspection admits both documents, so the diff is what has to tell
+    // them apart.
+    REQUIRE(GraphSerializer::inspect_document(both).ok());
+    REQUIRE(GraphSerializer::inspect_document(second_only).ok());
+
+    const auto diff = diff_graph_documents(both, second_only);
+    REQUIRE(diff.ok());
+    CHECK_FALSE(diff.equal());
+    CHECK(diff.before_digest != diff.after_digest);
+    // Records on one endpoint pair are paired in sorted order: the first
+    // changed kind and the second is gone.
+    const auto key = producer + "[0] => " + consumer + "[0]";
+    CHECK(diff.event_connections_changed == std::vector<std::string>{key});
+    CHECK(diff.event_connections_removed == std::vector<std::string>{key + " #2"});
+    CHECK(diff.event_connections_added.empty());
+    // Record order is not a difference.
+    const auto swapped = with_events(document, {event_record(producer, consumer, 0, 0, 2),
+                                                event_record(producer, consumer, 0, 0, 1)});
+    CHECK(diff_graph_documents(both, swapped).equal());
+    // Positive control: a kind change on a single record is still one change.
+    const auto changed = diff_graph_documents(
+        with_events(document, {event_record(producer, consumer, 0, 0, 1)}), second_only);
+    CHECK(changed.event_connections_changed.size() == 1);
+    CHECK(changed.event_connections_added.empty());
+    CHECK(changed.event_connections_removed.empty());
+}
+
+TEST_CASE("an event connection edited outside the history is named in the Diverged detail",
+          "[graph-events][persistence][history]") {
+    EventGraph source;
+    build(source, false);
+    GraphEditHistory history;
+    auto checkpoint = GraphEditHistory::checkpoint(source.graph);
+    REQUIRE(source.graph.connect_graph_event({source.producer, source.consumer}) ==
+            GraphEventBindingResult::Accepted);
+    REQUIRE(history.commit(std::move(checkpoint), source.graph, "connect event").ok());
+    REQUIRE(history.undo(source.graph).ok());
+    REQUIRE_FALSE(source.graph.graph_event_edge().has_value());
+
+    // Reconnecting outside the history leaves only the event connection
+    // different from what redo expects.
+    REQUIRE(source.graph.connect_graph_event({source.producer, source.consumer}) ==
+            GraphEventBindingResult::Accepted);
+    const auto outside = GraphSerializer::to_saved_document(source.graph);
+    const auto step = history.redo(source.graph);
+    REQUIRE(step.code == GraphHistoryCode::Diverged);
+    INFO(step.detail);
+    CHECK(contains(step.detail, "0 node, 0 connection, 1 event connection, 0 spectral asset and "
+                                "0 section differences"));
+    CHECK(GraphSerializer::to_saved_document(source.graph) == outside);
+}
+
 // ── Subgraph templates ─────────────────────────────────────────────────────
 
 namespace {

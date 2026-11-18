@@ -554,6 +554,17 @@ pulp_add_test_suite(pulp-test-uia-mapping GROUP pulp-test-group-view-host
     LIBRARIES pulp::view)
 pulp_add_test_suite(pulp-test-atspi-mapping GROUP pulp-test-group-view-host
     LIBRARIES pulp::view)
+# The Linux backends' platform-independent helpers (UTF-8 text offsets, XDND
+# reply validation and pointer tracking, /proc/meminfo classification, AT-SPI
+# component geometry). They have no platform dependency, so they run everywhere.
+pulp_add_test_suite(pulp-test-linux-pure-helpers
+    LIBRARIES pulp::view pulp::platform)
+# The Avahi and libnotify backends against fake libraries. The test includes the
+# backend sources to reach their internals, so it is built where they are.
+if(UNIX AND NOT APPLE AND NOT ANDROID)
+    pulp_add_test_suite(pulp-test-linux-backends
+        LIBRARIES pulp::events pulp::platform)
+endif()
 # ARIA role token -> View::AccessRole (shared by the JS bridge).
 pulp_add_test_suite(pulp-test-aria-roles GROUP pulp-test-group-view-host
     LIBRARIES pulp::view)

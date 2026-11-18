@@ -3097,6 +3097,11 @@ tresult PLUGIN_API PulpVst3Processor::process(ProcessData& data) {
                                      timing_discontinuity_pending_.load(std::memory_order_acquire),
                                      timing_block_skipped_);
     ctx.timing.refused_events = event_admission_.refused;
+    // A reset owed by an earlier block's refused event reaches the Processor
+    // in this block; this block's own refusals are owed to the next one. The
+    // flag survives a block the Processor does not observe.
+    const bool refusal_reset = refused_event_reset_pending_;
+    refused_event_reset_pending_ = refusal_reset || event_admission_.refused != 0;
 
     // Prove no state restore is installing underneath this block. setState may
     // arrive on the main thread while the host keeps calling process() —
@@ -3138,6 +3143,10 @@ tresult PLUGIN_API PulpVst3Processor::process(ProcessData& data) {
     // buffer to the processor for the duration of this process() call. Events
     // stay sample-ordered because midi_in_ was just sorted. Mirrors the CLAP
     // adapter's set_mpe_input contract; clears per block, allocation-free.
+    if (refusal_reset && !warming_render_path_) {
+        mpe_.reset();
+        ctx.reset_requested = true;
+    }
     const bool mpe_ok = mpe_.run(*processor_, midi_in_);
     if (!mpe_ok) {
         midi_in_.clear();
@@ -3174,6 +3183,7 @@ tresult PLUGIN_API PulpVst3Processor::process(ProcessData& data) {
         // is a skip the next block must acknowledge.
         timing_discontinuity_pending_.store(false, std::memory_order_release);
         timing_block_skipped_ = num_samples < original_num_samples;
+        refused_event_reset_pending_ = event_admission_.refused != 0;
     }
     // VST3 puts the obligation to declare output silence on the plugin, and a
     // host is free to propagate its input silenceFlags into the output buffers

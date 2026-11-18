@@ -285,9 +285,12 @@ std::optional<GraphDocumentDiffCode> read_document(std::string_view json, Docume
         }
     }
     // Inspection admits event_connections only in a v7 document, whose
-    // endpoints are already authored identities, and refuses a repeated
-    // record, so each key names one record.
+    // endpoints are already authored identities, and refuses only an exact
+    // repeat, so two records may share endpoints and ports and differ by
+    // kind. Like parallel connections, those are told apart by their sorted
+    // attributes, so no record overwrites another and order is no change.
     if (root.hasObjectMember("event_connections") && root["event_connections"].isArray()) {
+        std::map<std::string, std::vector<std::string>> grouped;
         const auto& events = root["event_connections"];
         for (std::uint32_t i = 0; i < events.size(); ++i) {
             const auto& e = events[i];
@@ -295,8 +298,13 @@ std::optional<GraphDocumentDiffCode> read_document(std::string_view json, Docume
                              std::to_string(node_id_of(e["source_port"])) + "] => " +
                              std::string(e["consumer"].getString()) + "[" +
                              std::to_string(node_id_of(e["destination_port"])) + "]";
-            view.event_connections[key] =
-                "{\"kind\":" + std::to_string(node_id_of(e["kind"])) + "}";
+            grouped[key].push_back("{\"kind\":" + std::to_string(node_id_of(e["kind"])) + "}");
+        }
+        for (auto& [key, attributes] : grouped) {
+            std::sort(attributes.begin(), attributes.end());
+            for (std::size_t i = 0; i < attributes.size(); ++i)
+                view.event_connections.emplace(i == 0 ? key : key + " #" + std::to_string(i + 1),
+                                               std::move(attributes[i]));
         }
     }
     // Spectral asset rows are keyed by their content-addressed id. The diff
@@ -639,15 +647,23 @@ GraphHistoryResult GraphEditHistory::step(SignalGraph& graph, const GraphLoadOpt
     }
     if (!divergence.equal()) {
         result.code = GraphHistoryCode::Diverged;
+        const auto count = [](const auto&... lists) {
+            return std::to_string((lists.size() + ...));
+        };
         result.detail =
             "the graph was edited outside this history (" +
-            std::to_string(divergence.nodes_added.size() + divergence.nodes_removed.size() +
-                           divergence.nodes_changed.size()) +
-            " node and " +
-            std::to_string(divergence.connections_added.size() +
-                           divergence.connections_removed.size() +
-                           divergence.connections_changed.size()) +
-            " connection differences); commit that edit first or clear the history";
+            count(divergence.nodes_added, divergence.nodes_removed, divergence.nodes_changed) +
+            " node, " +
+            count(divergence.connections_added, divergence.connections_removed,
+                  divergence.connections_changed) +
+            " connection, " +
+            count(divergence.event_connections_added, divergence.event_connections_removed,
+                  divergence.event_connections_changed) +
+            " event connection, " +
+            count(divergence.spectral_assets_added, divergence.spectral_assets_removed,
+                  divergence.spectral_assets_changed) +
+            " spectral asset and " + count(divergence.sections_changed) +
+            " section differences); commit that edit first or clear the history";
         return result;
     }
     const auto inspection = GraphSerializer::inspect_document(target.document);
