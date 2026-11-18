@@ -11,6 +11,7 @@
 #define WIN32_LEAN_AND_MEAN
 #define NOMINMAX
 #include <windows.h>
+#include <sddl.h>
 
 namespace pulp::platform {
 
@@ -39,10 +40,20 @@ struct DuplexChannel {
                       GetCurrentProcessId(), static_cast<unsigned long long>(ticks.QuadPart),
                       counter.fetch_add(1, std::memory_order_relaxed));
         constexpr DWORD buffer_bytes = 64 * 1024;
+        // Protected DACL granting access to the owner only, so no other local
+        // principal can open the pipe in the window before the client below
+        // connects. Failing to build it fails the channel closed.
+        SECURITY_ATTRIBUTES owner_only{};
+        owner_only.nLength = sizeof(owner_only);
+        owner_only.bInheritHandle = FALSE;
+        if (!ConvertStringSecurityDescriptorToSecurityDescriptorW(
+                L"D:P(A;;GA;;;OW)", SDDL_REVISION_1, &owner_only.lpSecurityDescriptor, nullptr))
+            return false;
         parent = CreateNamedPipeW(
             name, PIPE_ACCESS_DUPLEX | FILE_FLAG_FIRST_PIPE_INSTANCE | FILE_FLAG_OVERLAPPED,
             PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_WAIT | PIPE_REJECT_REMOTE_CLIENTS, 1,
-            buffer_bytes, buffer_bytes, 0, nullptr);
+            buffer_bytes, buffer_bytes, 0, &owner_only);
+        LocalFree(owner_only.lpSecurityDescriptor);
         if (parent == INVALID_HANDLE_VALUE)
             return false;
         // The client end is created non-inheritable, so nothing launched from

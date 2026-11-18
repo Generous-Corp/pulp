@@ -32,9 +32,11 @@ bool begin_file_drag(void* native_view, const FileDragRequest& request) {
     // satisfied, native_view (the HWND) is unused: DoDragDrop tracks the live
     // mouse itself and needs no source window.
     const HRESULT oi = OleInitialize(nullptr);
-    const bool did_init = (oi == S_OK || oi == S_FALSE);
+    // RPC_E_CHANGED_MODE means this thread is in a multi-threaded apartment,
+    // where DoDragDrop cannot run; refuse rather than attempt it.
+    if (!pulp::platform::win_text::sta_init_usable(oi)) return false;
     const bool ok = win_drag::win_run_file_drag(request);
-    if (did_init) OleUninitialize();
+    OleUninitialize();
     return ok;
 }
 

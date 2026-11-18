@@ -427,6 +427,31 @@ TEST_CASE("run honors working directory",
     REQUIRE_FALSE(ec);
 }
 
+TEST_CASE("run honors a non-ASCII working directory",
+          "[child_process][edge][unicode]") {
+    // UTF-8 spelling of "pulp-cp-<e acute><CJK>"; ProcessOptions strings are UTF-8.
+    const std::string name = "pulp-cp-\xC3\xA9\xE4\xB8\xAD";
+    const auto u8 = std::u8string(name.begin(), name.end());
+    const auto dir = std::filesystem::temp_directory_path() / std::filesystem::path(u8);
+    std::error_code ec;
+    std::filesystem::remove_all(dir, ec);
+    std::filesystem::create_directories(dir);
+
+    ProcessOptions opts;
+    opts.timeout_ms = 5000;
+    opts.working_directory = std::string(dir.u8string().begin(), dir.u8string().end());
+
+#ifdef _WIN32
+    auto r = ChildProcess::run("cmd", {"/c", "type nul > marker.txt"}, opts);
+#else
+    auto r = ChildProcess::run("/usr/bin/touch", {"marker.txt"}, opts);
+#endif
+
+    REQUIRE(r.exit_code == 0);
+    REQUIRE(std::filesystem::exists(dir / "marker.txt"));
+    std::filesystem::remove_all(dir, ec);
+}
+
 TEST_CASE("output capture respects max byte limits",
           "[child_process][edge][issue-640]") {
     ProcessOptions opts;
