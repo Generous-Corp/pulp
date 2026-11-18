@@ -3,6 +3,8 @@
  "record": {
   "entry": "tools/scripts/test_rust_cli_build_edge_check.py",
   "inputs": [
+   "experimental/pulp-rs",
+   "experimental/pulp-rs/CMakeLists.txt",
    "tools/scripts/rust_cli_build_edge_check.py",
    "tools/scripts/test_rust_cli_build_edge_check.py"
   ],
