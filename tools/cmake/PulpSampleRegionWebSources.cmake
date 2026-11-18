@@ -21,6 +21,7 @@ function(pulp_sample_region_web_sources ROOT OUT)
         "${ROOT}/core/runtime/src/base64.cpp"
         "${ROOT}/core/host/src/signal_graph_process.cpp"
         "${ROOT}/core/host/src/trigger_graph.cpp"
+        "${ROOT}/core/host/src/signal_graph_compile_routed.cpp"
         "${ROOT}/core/host/src/signal_graph_prepare.cpp"
         "${ROOT}/core/host/src/signal_graph_diagnostics.cpp"
         "${ROOT}/core/host/src/signal_graph_prepared_topology_edit.cpp"

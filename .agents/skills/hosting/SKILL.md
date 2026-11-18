@@ -1099,7 +1099,10 @@ save/reopen render proof beside the legacy caller-owned route controls.
   executor/pool/scratch); only the ring mediates against the consumer.
 - **Anticipation splice (`set_anticipation_enabled`, default OFF; runs on the
   canonical executor path).** When enabled + the routed snapshot is eligible + the
-  graph has an eligible latent interior, `compile_` builds an `AnticipationLane` +
+  graph has an eligible latent interior, `compile_` (through
+  `build_routed_for_snapshot_` in `core/host/src/signal_graph_compile_routed.cpp`,
+  which also builds the serial/parallel routed snapshots and picks the PDC
+  domain) builds an `AnticipationLane` +
   a `skip_mask` over the routed plan (the interior nodes) + a prefill map (each
   lane output channel → the interior boundary-source's `exec_pool` output slot).
   The host drives `pump_anticipation()` from ONE background thread (the producer);
