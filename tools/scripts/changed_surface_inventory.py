@@ -1365,26 +1365,15 @@ _CMAKE_COMMAND_NAME = r"[^\s()#\"\[\]\\;]+"
 _CMAKE_BRACKET_OPEN = re.compile(r"\[(=*)\[")
 _CMAKE_UNQUOTED_END = frozenset(' \t\r\n\f\v()#"')
 
-# Commands that only describe the registration owned by this file. Anything
-# else is conservatively treated as shared: an unrecognized command may be a
-# project macro that mutates a target, directory, or cache outside its stack,
-# and list() or cmake_parse_arguments() can rewrite a variable a later fragment
-# reads, while cmake_minimum_required() resets policy for the whole directory.
-# break(), continue() and return() act on the enclosing scope or loop of the
-# including file, so they are not local either.
+# A fragment is local only when every command in it is a pure registration
+# call from this explicit list. Variables, loops, conditionals, functions,
+# includes, properties of other targets and every project command not listed
+# can change state a sibling fragment sees (a foreach variable even survives
+# endforeach in the including scope), so each one makes the fragment global.
 _CMAKE_LOCAL_COMMANDS = frozenset({
     "add_executable", "add_library", "add_test", "pulp_add_test_suite",
     "pulp_add_test_group", "pulp_dsp_series_catalog_suite", "pulp_dsp_series_signal_suite",
-    "catch_discover_tests", "message", "set", "unset", "function", "macro",
-    "endfunction", "endmacro",
-    "if", "elseif", "else", "endif", "foreach", "endforeach", "while", "endwhile",
-})
-_CMAKE_GLOBAL_COMMANDS = frozenset({
-    "include", "configure_file", "file", "execute_process", "add_subdirectory",
-    "include_directories", "add_compile_options", "add_compile_definitions", "add_definitions",
-    "link_libraries", "link_directories", "option", "set_property", "set_tests_properties",
-    "set_target_properties", "set_source_files_properties", "add_custom_command",
-    "add_custom_target",
+    "catch_discover_tests", "message", "set_tests_properties",
 })
 
 
@@ -1483,39 +1472,13 @@ def _cmake_commands(text: str) -> list[tuple[str, list[str]]]:
     return commands
 
 
-def _cmake_scoped_set(args: list[str]) -> bool:
-    """Whether set/unset changes state outside this registration fragment."""
-    if not args:
-        return False
-    first = args[0]
-    upper = first.upper()
-    options = {arg.upper() for arg in args[1:]}
-    return (
-        upper.startswith("CMAKE_")
-        or upper.startswith("ENV{")
-        or "${" in first
-        or "@" in first
-        or "CACHE" in options
-        or "PARENT_SCOPE" in options
-    )
-
-
 _CMAKE_TEXT_SUFFIXES = (".cmake", ".cmake.in", "CMakeLists.txt")
-_CMAKE_TEXT_SKIP_DIRS = frozenset({"external", ".git", "node_modules"})
-
-
 def _is_cmake_text_path(rel: str) -> bool:
-    parts = rel.split("/")
-    if parts[0] in _CMAKE_TEXT_SKIP_DIRS or parts[0].startswith("build"):
-        return False
-    return rel.endswith(_CMAKE_TEXT_SUFFIXES)
+    return rel.startswith("test/") and rel.endswith(_CMAKE_TEXT_SUFFIXES)
 
 
 def _test_cmake_texts(source_root: str, ref: str | None = None) -> dict[str, str]:
-    """Text of every CMake file in the repository (vendored, build and git
-    directories excluded), by relative path. A registration macro or function
-    outside test/ can read or write the same variables a fragment sets, so the
-    shared-state analysis must see all of it."""
+    """Text of every CMake file under test/, by relative path."""
     root = Path(source_root)
     texts: dict[str, str] = {}
     if ref is not None:
@@ -1542,11 +1505,8 @@ def _test_cmake_texts(source_root: str, ref: str | None = None) -> dict[str, str
             texts[rel] = batch[end + 1:end + 1 + size].decode("utf-8", errors="replace")
             position = end + 1 + size + 1
         return texts
-    for dirpath, dirnames, filenames in os.walk(root):
+    for dirpath, _dirnames, filenames in os.walk(root / "test"):
         reldir = os.path.relpath(dirpath, root).replace(os.sep, "/")
-        dirnames[:] = [d for d in dirnames
-                       if d not in {".git", "node_modules"}
-                       and not (reldir == "." and (d == "external" or d.startswith("build")))]
         for name in filenames:
             rel = name if reldir == "." else f"{reldir}/{name}"
             if not _is_cmake_text_path(rel):
@@ -1560,7 +1520,7 @@ def _test_cmake_texts(source_root: str, ref: str | None = None) -> dict[str, str
 
 def _shared_fragment_reason_current(rel: str, texts: dict[str, str]) -> str | None:
     """Why a registration file cannot be treated as owning only its own tests,
-    or None when nothing outside its own call stacks can depend on it."""
+    or None when it is nothing but pure registration calls."""
     text = texts.get(rel)
     if text is None:
         return "unreadable"
@@ -1570,52 +1530,22 @@ def _shared_fragment_reason_current(rel: str, texts: dict[str, str]) -> str | No
         invocations = _cmake_commands(text)
     except _CMakeSyntaxError as error:
         return f"CMake syntax not readable with certainty ({error})"
-    # Other files are searched as raw text (comments included): a false match
-    # only widens the selection, and a file this lexer cannot read must not be
-    # able to hide a dependency.
-    other_text = [body for name, body in texts.items() if name != rel]
-    commands = {name for name, _args in invocations}
-    if any(name in _CMAKE_GLOBAL_COMMANDS or name.startswith("target_")
-           for name in commands):
-        return "touches directory, cache or global state"
-    if any(name in {"set", "unset"} and _cmake_scoped_set(args)
-           for name, args in invocations):
-        return "touches directory, cache or global state"
-    if any(name in {"add_executable", "add_library"}
-           and {arg.upper() for arg in args[1:]} & {"IMPORTED", "ALIAS", "GLOBAL"}
-           for name, args in invocations):
-        return "declares an imported or alias target other files can name"
-    unknown = sorted(commands - _CMAKE_LOCAL_COMMANDS)
+    unknown = sorted({name for name, _args in invocations} - _CMAKE_LOCAL_COMMANDS)
     if unknown:
-        return f"uses unrecognized CMake command {unknown[0]}"
-    defined = {
-        args[0].lower()
-        for name, args in invocations
-        if name in {"function", "macro"} and args
-    }
-    for name in defined:
-        call = re.compile(r"(?<![\w.-])" + re.escape(name) + r"\s*\(", re.IGNORECASE)
-        if any(call.search(body) for body in other_text):
-            return f"defines {name}(), called from another file"
-    # set() and unset() both change a variable the other files share the
-    # directory scope with, so either one is checked against every other file,
-    # including a name another file assembles from a prefix or suffix.
-    written_variables = {
-        args[0]
-        for name, args in invocations
-        if name in {"set", "unset"} and args
-    }
-    tails: set[str] = set()
-    heads: set[str] = set()
-    for body in other_text:
-        tails.update(re.findall(r"\$\{[^}\n]*\}(_[A-Za-z0-9_]+)", body))
-        heads.update(re.findall(r"([A-Za-z0-9_]+_)\$\{", body))
-    for name in written_variables:
-        word = re.compile(r"(?<![A-Za-z0-9_])" + re.escape(name) + r"(?![A-Za-z0-9_])")
-        if (any(word.search(body) for body in other_text)
-                or any(name.endswith(tail) for tail in tails)
-                or any(name.startswith(head) for head in heads)):
-            return f"sets {name}, read by another file"
+        return f"uses {unknown[0]}(), which is not a pure registration command"
+    owned_tests: set[str] = set()
+    for name, args in invocations:
+        upper = [arg.upper() for arg in args[1:]]
+        if name in {"add_executable", "add_library"} and set(upper) & {"IMPORTED", "ALIAS", "GLOBAL"}:
+            return "declares an imported or alias target other files can name"
+        if name == "add_test" and len(args) > 1 and args[0].upper() == "NAME":
+            owned_tests.add(args[1])
+    for name, args in invocations:
+        if name != "set_tests_properties":
+            continue
+        end = next((i for i, arg in enumerate(args) if arg.upper() == "PROPERTIES"), len(args))
+        if end == 0 or any(arg not in owned_tests for arg in args[:end]):
+            return "sets properties of a test this file does not register"
     return None
 
 

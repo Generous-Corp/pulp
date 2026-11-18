@@ -769,7 +769,7 @@ class RegistrationFragments(unittest.TestCase):
         })
         self.fx.touch("test/cmake/knob_tests.cmake",
                       "add_executable(pulp-test-knob test/test_knob.cpp)\nunset(KNOB_UNREAD)\n")
-        self.assertEqual(self.fx.select(["test/cmake/knob_tests.cmake"]).mode, "focused")
+        self.assertEqual(self.fx.select(["test/cmake/knob_tests.cmake"]).mode, "all")
 
     def test_comment_markers_inside_arguments_do_not_hide_commands(self) -> None:
         self._assert_all({
@@ -853,6 +853,37 @@ class RegistrationFragments(unittest.TestCase):
                                   self.fx.inventory + [duplicate], 1.0, [])
         self.assertEqual(sel.mode, "focused")
         self.assertIn("pulp-test-label", sel.targets)
+
+    def test_a_foreach_loop_variable_stays_global(self) -> None:
+        # A foreach variable keeps its last value in the including scope after endforeach.
+        self.fx.touch("test/cmake/label_tests.cmake", "message(${item})\n")
+        self._assert_all({
+            "foreach": "foreach(item a b)\n  message(${item})\nendforeach()\n",
+            "foreach-in-lists": "foreach(item IN LISTS names)\nendforeach()\n",
+            "while": "while(FALSE)\nendwhile()\n",
+            "if": "if(TRUE)\n  message(STATUS x)\nendif()\n",
+        })
+
+    def test_only_pure_registration_commands_stay_local(self) -> None:
+        self.fx.touch(
+            "test/cmake/knob_tests.cmake",
+            "add_executable(pulp-test-knob test/test_knob.cpp)\n"
+            "add_test(NAME knob COMMAND pulp-test-knob)\n"
+            "set_tests_properties(knob PROPERTIES TIMEOUT 5)\n")
+        self.assertEqual(self.fx.select(["test/cmake/knob_tests.cmake"]).mode, "focused")
+        self._assert_all({
+            "foreign-test-properties": "set_tests_properties(\"Label wraps\" PROPERTIES TIMEOUT 5)\n",
+            "empty-test-list": "set_tests_properties(PROPERTIES TIMEOUT 5)\n",
+            "mixed-owned-and-foreign":
+                "add_test(NAME knob COMMAND x)\nset_tests_properties(knob other PROPERTIES TIMEOUT 5)\n",
+            "variable": "set(LOCAL_ONLY x)\n",
+            "function": "function(f)\nendfunction()\n",
+            "include": "include(x.cmake)\n",
+            "list": "list(APPEND X a)\n",
+            "unset": "unset(X)\n",
+            "unlisted-project-command": "pulp_test_data(knob data)\n",
+            "namespaced": "project::register()\n",
+        })
 
     def test_scope_flow_commands_stay_global(self) -> None:
         for name, text in {
