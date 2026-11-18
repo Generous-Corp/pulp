@@ -1099,10 +1099,7 @@ save/reopen render proof beside the legacy caller-owned route controls.
   executor/pool/scratch); only the ring mediates against the consumer.
 - **Anticipation splice (`set_anticipation_enabled`, default OFF; runs on the
   canonical executor path).** When enabled + the routed snapshot is eligible + the
-  graph has an eligible latent interior, `compile_` (through
-  `build_routed_for_snapshot_` in `core/host/src/signal_graph_compile_routed.cpp`,
-  which also builds the serial/parallel routed snapshots and picks the PDC
-  domain) builds an `AnticipationLane` +
+  graph has an eligible latent interior, `compile_` builds an `AnticipationLane` +
   a `skip_mask` over the routed plan (the interior nodes) + a prefill map (each
   lane output channel → the interior boundary-source's `exec_pool` output slot).
   The host drives `pump_anticipation()` from ONE background thread (the producer);
@@ -3732,6 +3729,19 @@ A Custom member's state is checked by creating a probe instance, calling
 `load_state` and destroying it; a stateless type (no `create` or no
 `load_state`) must carry empty state. The writer applies the same check, so it
 returns an empty string for a member whose live state its type refuses.
+
+Fixed-count voice templates (`instantiate_subgraph_voices`, also in
+`subgraph_persistence.hpp`) expand one template as 1..`kMaxSubgraphVoices`
+voices whose instance identities are derived (`<declaration>.voice.<k>`, index
+k). Each voice saves as an ordinary `subgraphs` record plus one
+`voice_declarations` entry, and restores into
+`SubgraphDocumentLoad::voice_banks`, never into `subgraphs`; pass the banks to
+the four-argument `to_saved_subgraph_document` overload or a re-save drops the
+declaration. Watch out: a graph binds one event edge, so a template that
+declares `event_edge` (itself or in a child) is refused as a voice template
+even for one voice. The declaration is not the `VoiceBankBinding` runtime: no
+allocator state, token, epoch, pedal hold or tail is persisted, and the plain
+`from_saved_document` reader ignores the declaration as it ignores records.
 
 Saved identity strictness: `inspect_document`, `diff_graph_documents` and
 `from_saved_document` rebuild each node's identity string from its saved record

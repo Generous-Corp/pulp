@@ -15,6 +15,7 @@
 #include <clap/ext/state.h>
 #include <clap/ext/tail.h>
 #include <cmath>
+#include <cstdlib>
 #include <cstring>
 #include <filesystem>
 #include <limits>
@@ -261,6 +262,13 @@ int run(int argc, char** argv) {
     // mapping name (POSIX) even when the vendor's factory never returns.
     hello.process_id = channel.process_id();
     hello.result = 1;
+#if defined(PULP_CLAP_WORKER_TEST_HELLO_DELAY)
+    // Test-only build: holds the hello reply for PULP_G9_HELLO_DELAY_MS so the
+    // parent's per-exchange launch budget is exercised by a real process. The
+    // installed worker never compiles this.
+    if (const char* delay = std::getenv("PULP_G9_HELLO_DELAY_MS"))
+        std::this_thread::sleep_for(std::chrono::milliseconds(std::atoi(delay)));
+#endif
     if (!channel.send(hello, deadline))
         return 71;
     host::PluginSelection selection{plugin_path, {"clap", descriptor}};

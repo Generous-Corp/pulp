@@ -301,7 +301,7 @@ if(APPLE AND NOT PULP_IOS)
         PROPERTIES RESOURCE_LOCK pulp_native_menu_tracking)
     target_link_libraries(pulp-test-platform-async-menu PRIVATE "-framework Cocoa")
 endif()
-if(TARGET pulp-native)
+if(APPLE AND TARGET pulp-native)
     # integrations/pulp-native: the Metal surface on the real system device in
     # offscreen windows (device, client-presented drawables, sizing, geometry
     # snapshots, two-phase and bounded teardown, several surfaces, visibility).
@@ -312,7 +312,7 @@ if(TARGET pulp-native)
         "-framework AppKit" "-framework Metal" "-framework QuartzCore")
     catch_discover_tests(pulp-test-native-metal-surface)
 endif()
-if(TARGET pulp-native)
+if(APPLE AND TARGET pulp-native)
     # integrations/pulp-native: FramePump on the real display link (no link
     # until started, rate cap, one-shot, off-screen pause, delivery thread,
     # no queued frames, start/stop churn).
@@ -331,7 +331,7 @@ if(TARGET pulp-native)
         pulp::native Catch2::Catch2WithMain "-framework AppKit")
     catch_discover_tests(pulp-test-native-input)
 endif()
-if(TARGET pulp-native)
+if(APPLE AND TARGET pulp-native)
     # integrations/pulp-native: GlSurface on its offscreen backend (CGL):
     # request fall-through, client-thread context binding, draw and read back,
     # independent surfaces, and two-phase teardown.
@@ -340,7 +340,7 @@ if(TARGET pulp-native)
         pulp::native Catch2::Catch2WithMain "-framework OpenGL")
     catch_discover_tests(pulp-test-native-gl-surface-offscreen)
 endif()
-if(TARGET pulp-native)
+if(APPLE AND TARGET pulp-native)
     # integrations/pulp-native: input reaching the surface's view (pointer,
     # wheel, host-first keys, text and marked text, focus, cursors, drops).
     add_executable(pulp-test-native-surface-input test_native_surface_input.mm)
@@ -351,7 +351,8 @@ if(TARGET pulp-native)
 endif()
 if(TARGET pulp-native)
     # The installed SDK carries the native surface: an outside project finds
-    # Pulp with COMPONENTS native and links MetalSurface, FramePump and input.
+    # Pulp with COMPONENTS native and links MetalSurface, FramePump and input
+    # on macOS, and the input and GL surface parts elsewhere.
     add_test(NAME cmake-native-sdk-consumer
         COMMAND ${CMAKE_COMMAND}
             -DPULP_BUILD_DIR=${CMAKE_BINARY_DIR}

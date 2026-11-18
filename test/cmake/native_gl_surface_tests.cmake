@@ -11,3 +11,13 @@ if(WIN32 AND TARGET pulp-native)
         pulp::native Catch2::Catch2WithMain opengl32 user32 gdi32)
     catch_discover_tests(pulp-test-native-gl-surface-win32)
 endif()
+
+if(NOT APPLE AND TARGET pulp-native)
+    # The shared part of the package on every non-Apple platform: key names,
+    # key routing, GL request selection and the AppKit translation's
+    # "nothing translated" answers.
+    add_executable(pulp-test-native-input-core test_native_input_core.cpp)
+    target_link_libraries(pulp-test-native-input-core PRIVATE
+        pulp::native Catch2::Catch2WithMain)
+    catch_discover_tests(pulp-test-native-input-core)
+endif()

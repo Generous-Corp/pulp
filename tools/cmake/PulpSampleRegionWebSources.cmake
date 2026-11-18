@@ -21,7 +21,6 @@ function(pulp_sample_region_web_sources ROOT OUT)
         "${ROOT}/core/runtime/src/base64.cpp"
         "${ROOT}/core/host/src/signal_graph_process.cpp"
         "${ROOT}/core/host/src/trigger_graph.cpp"
-        "${ROOT}/core/host/src/signal_graph_compile_routed.cpp"
         "${ROOT}/core/host/src/signal_graph_prepare.cpp"
         "${ROOT}/core/host/src/signal_graph_diagnostics.cpp"
         "${ROOT}/core/host/src/signal_graph_prepared_topology_edit.cpp"
@@ -33,6 +32,11 @@ function(pulp_sample_region_web_sources ROOT OUT)
         # closure so wasm-ld sees the tracker methods it calls.
         "${ROOT}/core/midi/src/mpe_voice_tracker.cpp"
         "${ROOT}/core/host/src/graph_serializer.cpp"
+        # graph_serializer.cpp validates voice-template declarations through
+        # subgraph_voices.cpp, which instantiates templates via
+        # subgraph_persistence.cpp.
+        "${ROOT}/core/host/src/subgraph_voices.cpp"
+        "${ROOT}/core/host/src/subgraph_persistence.cpp"
         "${ROOT}/core/runtime/src/durable_file_replacement.cpp"
         "${ROOT}/core/host/src/processor_restore.cpp"
         "${ROOT}/core/host/src/anticipation_eligibility.cpp"
