@@ -2017,9 +2017,10 @@ void PulpVst3Processor::process_decode_input_parameters(ProcessData& data) {
                             // or an out-of-block sample offset.
                             const double norm = std::clamp(
                                 static_cast<double>(value), 0.0, 1.0);
-                            if (offset < 0 || offset >= data.numSamples) {
-                                continue;  // outside [0, numSamples): drop
-                            }
+                            // Outside the rendered frames: refused and
+                            // counted, never clamped.
+                            if (!event_admission_.admit(offset))
+                                continue;
                             midi::MidiEvent me;
                             if (decoded.controller == detail::kVst3CtrlPitchBend) {
                                 // Normalized 0..1 → 14-bit pitch bend
@@ -2540,6 +2541,19 @@ void PulpVst3Processor::process_decode_input_events(ProcessData& data) {
         for (int32 i = 0; i < event_count; ++i) {
             Event evt;
             if (data.inputEvents->getEvent(i, evt) == kResultOk) {
+                // Every event decoded below carries a block offset. One
+                // outside the rendered frames is refused and counted, never
+                // clamped. Note expression is admitted only when it can be
+                // routed (MPE on), and SysEx only when it carries a payload,
+                // so an event that is ignored anyway is not counted.
+                const bool timed_event =
+                    evt.type == Event::kNoteOnEvent || evt.type == Event::kNoteOffEvent ||
+                    evt.type == Event::kPolyPressureEvent ||
+                    (evt.type == Event::kNoteExpressionValueEvent && mpe_.enabled) ||
+                    (evt.type == Event::kDataEvent && evt.data.type == DataEvent::kMidiSysEx &&
+                     evt.data.bytes && evt.data.size > 0);
+                if (timed_event && !event_admission_.admit(evt.sampleOffset))
+                    continue;
                 if (evt.type == Event::kNoteOnEvent) {
                     const auto channel =
                         static_cast<uint8_t>(evt.noteOn.channel);
@@ -2857,6 +2871,9 @@ tresult PLUGIN_API PulpVst3Processor::process(ProcessData& data) {
     // back as clean silence rather than garbage.
     const int32 original_num_samples = num_samples;
     num_samples = clamp_block_to_prepared_max(num_samples, max_block_size_);
+    // Event times are admitted against the frames the Processor renders, so
+    // an event in the unrendered tail of an oversized host block is refused.
+    event_admission_ = pulp::format::EventTimeAdmission{num_samples};
     if (!process_validate_layout(data, host_f64, original_num_samples)) {
         if (!warming_render_path_)
             timing_block_skipped_ = true;
@@ -3079,6 +3096,7 @@ tresult PLUGIN_API PulpVst3Processor::process(ProcessData& data) {
     auto ctx = build_process_context(data, processSetup, num_samples, playhead_prev_,
                                      timing_discontinuity_pending_.load(std::memory_order_acquire),
                                      timing_block_skipped_);
+    ctx.timing.refused_events = event_admission_.refused;
 
     // Prove no state restore is installing underneath this block. setState may
     // arrive on the main thread while the host keeps calling process() —
