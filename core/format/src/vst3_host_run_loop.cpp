@@ -11,16 +11,20 @@ using namespace Steinberg;
 // unregisterTimer, so reference counting is not theirs to drive.
 class HostRunLoop::Timer final : public Linux::ITimerHandler {
   public:
-    Timer(HostRunLoop& owner, std::function<void()> tick) : owner_(owner), tick_(std::move(tick)) {}
+    Timer(std::shared_ptr<Shared> shared, std::function<void()> tick)
+        : shared_(std::move(shared)), tick_(std::move(tick)) {}
 
     void PLUGIN_API onTimer() override {
-        // Copy first: the tick may remove this timer, and with it `tick_`.
+        // The tick may remove this timer or destroy the whole loop, and with
+        // them `tick_` and `this`: hold what is needed on the stack, and touch
+        // nothing of this object after collect().
+        auto shared = shared_;
         auto tick = tick_;
-        ++owner_.callbacks_running_;
+        ++shared->callbacks_running;
         if (tick)
             tick();
-        --owner_.callbacks_running_;
-        owner_.collect();
+        --shared->callbacks_running;
+        shared->collect();
     }
 
     tresult PLUGIN_API queryInterface(const TUID iid, void** obj) override {
@@ -42,22 +46,23 @@ class HostRunLoop::Timer final : public Linux::ITimerHandler {
     }
 
   private:
-    HostRunLoop& owner_;
+    std::shared_ptr<Shared> shared_;
     std::function<void()> tick_;
 };
 
 class HostRunLoop::Watch final : public Linux::IEventHandler {
   public:
-    Watch(HostRunLoop& owner, std::function<void()> readable)
-        : owner_(owner), readable_(std::move(readable)) {}
+    Watch(std::shared_ptr<Shared> shared, std::function<void()> readable)
+        : shared_(std::move(shared)), readable_(std::move(readable)) {}
 
     void PLUGIN_API onFDIsSet(Linux::FileDescriptor) override {
+        auto shared = shared_;
         auto readable = readable_;
-        ++owner_.callbacks_running_;
+        ++shared->callbacks_running;
         if (readable)
             readable();
-        --owner_.callbacks_running_;
-        owner_.collect();
+        --shared->callbacks_running;
+        shared->collect();
     }
 
     tresult PLUGIN_API queryInterface(const TUID iid, void** obj) override {
@@ -79,7 +84,7 @@ class HostRunLoop::Watch final : public Linux::IEventHandler {
     }
 
   private:
-    HostRunLoop& owner_;
+    std::shared_ptr<Shared> shared_;
     std::function<void()> readable_;
 };
 
@@ -91,14 +96,22 @@ HostRunLoop::HostRunLoop(Linux::IRunLoop* run_loop) : loop_(run_loop) {
 HostRunLoop::~HostRunLoop() {
     // The platform layer removes everything it added before it lets go of us;
     // anything left is withdrawn here so the host keeps no pointer into us.
-    for (auto& entry : timers_)
+    // This may run from inside a host callback (a tick that destroyed the view):
+    // the handlers move to the shared state, which frees them once no callback
+    // is running.
+    for (auto& entry : timers_) {
         loop_->unregisterTimer(entry.second.get());
-    for (auto& entry : watches_)
+        shared_->retired_timers.push_back(std::move(entry.second));
+    }
+    for (auto& entry : watches_) {
         loop_->unregisterEventHandler(entry.second.get());
+        shared_->retired_watches.push_back(std::move(entry.second));
+    }
     timers_.clear();
     watches_.clear();
     if (loop_ != nullptr)
         loop_->release();
+    shared_->collect();
 }
 
 std::unique_ptr<HostRunLoop> HostRunLoop::from_frame(IPlugFrame* frame) {
@@ -117,17 +130,23 @@ bool HostRunLoop::on_ui_thread() const {
     return std::this_thread::get_id() == ui_;
 }
 
-void HostRunLoop::collect() {
-    if (callbacks_running_ == 0) {
-        retired_timers_.clear();
-        retired_watches_.clear();
+HostRunLoop::Shared::Shared() = default;
+HostRunLoop::Shared::~Shared() = default;
+
+void HostRunLoop::Shared::collect() {
+    if (callbacks_running == 0) {
+        // Move out first: freeing a handler must not re-enter this list.
+        auto timers = std::move(retired_timers);
+        auto watches = std::move(retired_watches);
+        retired_timers.clear();
+        retired_watches.clear();
     }
 }
 
 std::uint64_t HostRunLoop::add_timer(std::chrono::milliseconds period, std::function<void()> tick) {
     if (loop_ == nullptr || !tick)
         return 0;
-    auto timer = std::make_unique<Timer>(*this, std::move(tick));
+    auto timer = std::make_unique<Timer>(shared_, std::move(tick));
     const auto ms = static_cast<Linux::TimerInterval>(std::max<long long>(1, period.count()));
     if (loop_->registerTimer(timer.get(), ms) != kResultTrue)
         return 0;
@@ -141,15 +160,15 @@ void HostRunLoop::remove_timer(std::uint64_t id) {
     if (it == timers_.end())
         return;
     loop_->unregisterTimer(it->second.get());
-    retired_timers_.push_back(std::move(it->second));
+    shared_->retired_timers.push_back(std::move(it->second));
     timers_.erase(it);
-    collect();
+    shared_->collect();
 }
 
 std::uint64_t HostRunLoop::add_fd(int fd, std::function<void()> readable) {
     if (loop_ == nullptr || !readable)
         return 0;
-    auto watch = std::make_unique<Watch>(*this, std::move(readable));
+    auto watch = std::make_unique<Watch>(shared_, std::move(readable));
     if (loop_->registerEventHandler(watch.get(), fd) != kResultTrue)
         return 0;
     const auto id = next_id_++;
@@ -162,9 +181,9 @@ void HostRunLoop::remove_fd(std::uint64_t id) {
     if (it == watches_.end())
         return;
     loop_->unregisterEventHandler(it->second.get());
-    retired_watches_.push_back(std::move(it->second));
+    shared_->retired_watches.push_back(std::move(it->second));
     watches_.erase(it);
-    collect();
+    shared_->collect();
 }
 
 } // namespace pulp::format::vst3

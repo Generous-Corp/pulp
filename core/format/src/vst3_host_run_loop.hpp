@@ -38,18 +38,25 @@ class HostRunLoop final : public platform::HostRunLoop {
     class Timer;
     class Watch;
 
-    // Unregistered handlers are kept until no host callback is running, so one
-    // that removes itself from inside its own callback is not freed under it.
-    void collect();
+    // State shared with every handler, so a host callback that destroys the
+    // loop (through its tick) still finds it alive when the callback returns.
+    // Unregistered handlers are kept here until no host callback is running, so
+    // one that removes itself from inside its own callback is not freed under it.
+    struct Shared {
+        Shared();
+        ~Shared();
+        int callbacks_running = 0;
+        std::vector<std::unique_ptr<Timer>> retired_timers;
+        std::vector<std::unique_ptr<Watch>> retired_watches;
+        void collect();
+    };
 
     Steinberg::Linux::IRunLoop* loop_ = nullptr;
     std::thread::id ui_ = std::this_thread::get_id();
     std::uint64_t next_id_ = 1;
-    int callbacks_running_ = 0;
+    std::shared_ptr<Shared> shared_ = std::make_shared<Shared>();
     std::map<std::uint64_t, std::unique_ptr<Timer>> timers_;
     std::map<std::uint64_t, std::unique_ptr<Watch>> watches_;
-    std::vector<std::unique_ptr<Timer>> retired_timers_;
-    std::vector<std::unique_ptr<Watch>> retired_watches_;
 };
 
 } // namespace pulp::format::vst3

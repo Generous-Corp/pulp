@@ -9,7 +9,9 @@
 #include <chrono>
 #include <cstdint>
 #include <memory>
+#include <mutex>
 #include <utility>
+#include <vector>
 
 #if defined(__APPLE__)
 #include <pulp/platform/main_thread.hpp>
@@ -102,6 +104,8 @@ struct MainThreadTimer::Impl {
     }
 
     void stop() {
+        if (platform::is_main_thread())
+            drain_deferred();
         if (chain) {
             chain->running = false;
             chain->tick = nullptr;
@@ -117,16 +121,47 @@ struct MainThreadTimer::Impl {
                 // Not the UI thread: the host's loop may only be touched
                 // there, so the UI thread does the teardown.
                 auto handle = owned->scope->handle();
-                handle.post([owned]() mutable {
+                const bool posted = handle.post([owned]() mutable {
                     owned->timer.reset();
                     owned->scope.reset();
                 });
+                if (!posted)
+                    defer_teardown(std::move(owned));
             }
+        }
+    }
+
+    // The loop was withdrawn before the UI thread could tear this down. Keep
+    // the state, untouched, until a later call on the UI thread destroys it:
+    // nothing is destroyed on the caller's thread.
+    static std::mutex& deferred_mutex() {
+        static std::mutex* m = new std::mutex;
+        return *m;
+    }
+    static std::vector<std::shared_ptr<Hosted>>& deferred() {
+        static auto* v = new std::vector<std::shared_ptr<Hosted>>;
+        return *v;
+    }
+    static void defer_teardown(std::shared_ptr<Hosted> owned) {
+        std::lock_guard<std::mutex> lock(deferred_mutex());
+        deferred().push_back(std::move(owned));
+    }
+    static void drain_deferred() {
+        std::vector<std::shared_ptr<Hosted>> take;
+        {
+            std::lock_guard<std::mutex> lock(deferred_mutex());
+            take.swap(deferred());
+        }
+        for (auto& h : take) {
+            h->timer.reset();
+            h->scope.reset();
         }
     }
 
     bool start(int interval_ms, std::function<void()> fn) {
         stop();
+        if (platform::is_main_thread())
+            drain_deferred();
         if (platform::main_thread_supported() && platform::is_main_thread()) {
             auto state = std::make_shared<Hosted>();
             state->live = std::make_shared<std::atomic<bool>>(true);
