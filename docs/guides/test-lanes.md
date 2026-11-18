@@ -25,6 +25,11 @@ start, the sanitizer and coverage lanes included, routes it to the lane's
 GitHub-hosted fallback. See [local-ci.md](local-ci.md) for the rule and its
 lint.
 
+The retired MacPro Linux pool is also excluded from workflow routing. If the
+legacy `PULP_LOCAL_LINUX_RUNS_ON_JSON` or `PULP_AUTO_LINUX_RUNS_ON_JSON`
+setting still contains `pulp-host-macpro`, the workflow uses hosted Linux until
+the setting is removed and a replacement pool is proven.
+
 The required gate is **serialized on self-hosted macOS runners** and takes
 about 40 min (median 39.8 min of wall-clock over 45 sampled `pull_request`
 runs). Keeping it
