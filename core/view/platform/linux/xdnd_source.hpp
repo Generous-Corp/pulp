@@ -191,6 +191,10 @@ inline bool run_drag_source(Display* display, int screen, const std::vector<std:
             send(target, xa_XdndPosition, static_cast<long>(source), 0, (rx << 16) | (ry & 0xFFFF),
                  static_cast<long>(CurrentTime), static_cast<long>(xa_XdndActionCopy));
     };
+    // Send the initial enter/position even when the pointer is stationary at
+    // drag start. Waiting for a movement event would leave a target unaware
+    // until the pointer moved, so releasing in place could never drop.
+    follow(last.x, last.y);
     // Returns true when the drag is over without a drop (no accepting target).
     auto released = [&]() {
         if (target != None && accepted) {

@@ -648,7 +648,7 @@ struct AtspiProvider {
         if (m == "GetCharacterAtOffset") {
             int off = 0;
             ctx.args().read_int32(off);
-            ctx.reply().append_int32(static_cast<int>(atspi_text::code_point_at(text, off)));
+            ctx.reply().append_uint32(atspi_text::code_point_at(text, off));
             return true;
         }
         if (m == "GetNSelections") {

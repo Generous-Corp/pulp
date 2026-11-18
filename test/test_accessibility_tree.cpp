@@ -74,6 +74,21 @@ private:
     std::string text_;
 };
 
+class TextViewProbe : public View, public AccessibilityTextInterface {
+  public:
+    explicit TextViewProbe(std::string text) : text_(std::move(text)) {}
+
+    std::string get_text() const override {
+        return text_;
+    }
+    void set_text(std::string_view text) override {
+        text_ = std::string(text);
+    }
+
+  private:
+    std::string text_;
+};
+
 class TableProbe : public AccessibilityTableInterface {
 public:
     int get_row_count() const override { return 3; }
@@ -393,6 +408,7 @@ constexpr const char* kRootPath = "/org/a11y/atspi/accessible/root";
 constexpr const char* kIfaceAccessible = "org.a11y.atspi.Accessible";
 constexpr const char* kIfaceComponent  = "org.a11y.atspi.Component";
 constexpr const char* kIfaceValue      = "org.a11y.atspi.Value";
+constexpr const char* kIfaceText = "org.a11y.atspi.Text";
 constexpr const char* kIfaceProperties = "org.freedesktop.DBus.Properties";
 
 // One node read back over the wire from an Accessible object.
@@ -630,6 +646,55 @@ TEST_CASE("Linux AT-SPI exports a per-widget Accessible + Component tree",
     // assertion).
     REQUIRE(gain_raw->bounds().width == 200);
     REQUIRE(panel_raw->access_role() == View::AccessRole::group);
+
+    shutdown_accessibility(handle);
+}
+
+TEST_CASE("Linux AT-SPI Text.GetCharacterAtOffset uses the uint32 wire type",
+          "[view][accessibility][atspi][linux]") {
+    if (!DBus::library_available()) {
+        SKIP("libdbus not available");
+    }
+    {
+        DBus probe;
+        if (!probe.connect_session()) {
+            SKIP("no session bus (run under dbus-run-session)");
+        }
+    }
+
+    Probe root;
+    auto text = std::make_unique<TextViewProbe>("a"
+                                                "\xF0\x9F\x98\x80"
+                                                "b");
+    text->set_access_role(View::AccessRole::text_field);
+    text->set_access_label("Text");
+    root.add_child(std::move(text));
+
+    std::string server_name;
+    void* handle = init_accessibility_on_session_bus_for_test(root, &server_name);
+    if (!handle) {
+        SKIP("could not export on session bus");
+    }
+
+    WireNode root_node;
+    REQUIRE(run_client_call(handle, [&] { return read_node(server_name, kRootPath, root_node); }));
+    REQUIRE(root_node.child_paths.size() == 1);
+    const std::string text_path = root_node.child_paths.front();
+
+    unsigned code_point = 0;
+    const bool got_code_point = run_client_call(handle, [&] {
+        DBus client;
+        if (!client.connect_session())
+            return false;
+        bool read_uint = false;
+        const bool called = client.call_method(
+            server_name, text_path, kIfaceText, "GetCharacterAtOffset",
+            [](DBus::Writer& w) { w.append_int32(1); },
+            [&](DBus::Reader& r) { read_uint = r.read_uint32(code_point); });
+        return called && read_uint;
+    });
+    REQUIRE(got_code_point);
+    REQUIRE(code_point == 0x1F600u);
 
     shutdown_accessibility(handle);
 }
