@@ -1552,6 +1552,16 @@ add_test(NAME cmake-control-shipping-fresh-stamp
 set_tests_properties(cmake-control-shipping-fresh-stamp PROPERTIES
     LABELS "cmake;control;ship" TIMEOUT 60)
 
+if(APPLE)
+    add_test(NAME cmake-control-shipping-paren-name
+        COMMAND ${CMAKE_COMMAND}
+            -DPULP_SOURCE_DIR=${CMAKE_SOURCE_DIR}
+            -DFIXTURE_DIR=${CMAKE_CURRENT_BINARY_DIR}/control-shipping-paren-name
+            -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/test_control_shipping_paren_name.cmake)
+    set_tests_properties(cmake-control-shipping-paren-name PROPERTIES
+        LABELS "cmake;control;ship" TIMEOUT 60)
+endif()
+
 add_test(NAME cmake-pulp-add-sparkle
     COMMAND ${CMAKE_COMMAND}
         -DPULP_SOURCE_DIR=${CMAKE_SOURCE_DIR}
