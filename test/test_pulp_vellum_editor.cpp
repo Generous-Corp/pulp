@@ -42,6 +42,9 @@ class Processor final : public pulp::format::Processor {
     }
     void define_parameters(pulp::state::StateStore&) override {}
     void prepare(const pulp::format::PrepareContext&) override {}
+    void process(pulp::audio::BufferView<float>&, const pulp::audio::BufferView<const float>&,
+                 pulp::midi::MidiBuffer&, pulp::midi::MidiBuffer&,
+                 const pulp::format::ProcessContext&) override {}
 };
 
 class TestView final : public ::vellum::view::View {
