@@ -47,7 +47,7 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
-BASELINE = Path(__file__).with_name("clock_in_tests_baseline.json")
+BASELINE = ROOT / "tools/scripts/clock_in_tests_baseline.json"
 
 _CLOCK = re.compile(
     r"\b(?:datetime\.(?:now|today|utcnow)|date\.today|time\.(?:time|time_ns|localtime))\s*\("

@@ -33,7 +33,7 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
-CONFIG = Path(__file__).with_name("date_sensitive_selftests.json")
+CONFIG = ROOT / "tools/scripts/date_sensitive_selftests.json"
 TIMEOUT_S = 120
 
 
