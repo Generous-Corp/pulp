@@ -204,6 +204,9 @@ class SignalGraph::PreparedTopologyEdit {
                                             std::optional<GraphMutationLock>& candidate_lock,
                                             std::shared_ptr<CompiledGraph>& old_keepalive,
                                             bool& dimensions_changed);
+    static std::optional<Result> adopt_live_runtime_state_(const CompiledGraph* old,
+                                                           CompiledGraph* next,
+                                                           bool dimensions_changed);
     PreparedDescriptionResult build_prepared_description_(double sample_rate,
                                                           int max_block_size) const;
 

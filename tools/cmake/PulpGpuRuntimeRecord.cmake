@@ -75,7 +75,7 @@ function(pulp_find_gpu_runtime_package version dir out_error)
         endif()
     elseif(NOT VellumGpuRuntime_HAS_DEVICE OR
            (DEFINED VellumGpuRuntime_Device_FOUND AND NOT VellumGpuRuntime_Device_FOUND) OR
-           NOT TARGET VellumGpuRuntime::Dawn)
+           (NOT TARGET VellumGpuRuntime::Dawn AND NOT TARGET gpu-runtime-dawn))
         set(_error
             "the VellumGpuRuntime package in ${dir} has no usable device library: it was "
             "built without one, or GPU_RUNTIME_SKIA_DIR ('${GPU_RUNTIME_SKIA_DIR}') does not "
