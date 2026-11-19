@@ -3,10 +3,10 @@
 ## Source
 - **Repository:** https://github.com/danielraffel/skia-builder (fork of olilarkin/skia-builder)
 - **Release:** chrome/m158
-- **Release URL:** https://github.com/danielraffel/skia-builder/releases/tag/chrome%2Fm158
-- **Downloaded:** 2026-11-01
+- **Release URL:** https://github.com/danielraffel/skia-builder/releases/tag/chrome%2Fm158-attested.1
+- **Downloaded:** 2026-11-19
 - **Skia branch:** chrome/m158 (Skia Graphite + Dawn)
-- **skia-builder ref:** `312f05e24a5d5a45d4a3e70ca70ff3ccff1b4d97`
+- **skia-builder ref:** `1b97010d2f025b4331a9c0db9481c440d1f33042`
 
 The fork tracks `olilarkin/skia-builder`'s tag pattern and additionally
 publishes iOS device, iOS simulator, visionOS device, visionOS simulator,
@@ -192,9 +192,9 @@ Or run: `./tools/build-skia.sh <platform>` to build from source.
 | `skia-build-ios-simulator-arm64-x86_64-gpu-release.zip` | `e446cbfa3302026ce055dd9eae980f466cac89f8f9ad50b07e5b2aa4989d1488` |
 | `skia-build-linux-arm64-gpu-release.zip` | `053833562a4ec4eeb97d71515fdf437cad7b6e8d668ca7e7d8b486f65528aaf9` |
 | `skia-build-linux-x64-gpu-release.zip` | `74c31d020cd18f1f9e544b1d8440bcc293e82982e50a9777a3940d84e2ccd666` |
-| `manifest-key-mac-arm64--skia-build-mac-universal-gpu-release.zip` | `dca73c0eee5b0f6d129fe357d0754f7165c6b436051e0de947aeedd3e1bde250` |
-| `skia-build-mac-universal-gpu-release.zip` | `dca73c0eee5b0f6d129fe357d0754f7165c6b436051e0de947aeedd3e1bde250` |
-| `manifest-key-mac-x86_64--skia-build-mac-universal-gpu-release.zip` | `dca73c0eee5b0f6d129fe357d0754f7165c6b436051e0de947aeedd3e1bde250` |
+| `manifest-key-mac-arm64--skia-build-mac-universal-gpu-release.zip` | `1779c7d1ba5c73a0d6a1f33b77fbf30774bbd9f7542c1c42cc5129f57e99fbd4` |
+| `skia-build-mac-universal-gpu-release.zip` | `1779c7d1ba5c73a0d6a1f33b77fbf30774bbd9f7542c1c42cc5129f57e99fbd4` |
+| `manifest-key-mac-x86_64--skia-build-mac-universal-gpu-release.zip` | `1779c7d1ba5c73a0d6a1f33b77fbf30774bbd9f7542c1c42cc5129f57e99fbd4` |
 | `skia-build-wasm-wasm32-gpu-release.zip` | `a3382b3a53d13780667f7db9d9969c42d531451e55de35faaadf4e62f64ce357` |
 | `skia-build-win-arm64-gpu-release.zip` | `d2586d3ae1d3a1103aa87dda5afecfed2ced7be82d0276f6b9a15fd034d9a5c7` |
 | `skia-build-win-x64-gpu-release.zip` | `a23b3fc4f75eda3420ec7de70cbc68307be6f4fed37d004f43e9bb1ea81e5854` |
