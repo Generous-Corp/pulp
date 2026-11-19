@@ -457,7 +457,7 @@ TEST_CASE("the context is made on the client thread and honours a request",
         Display* render_display = glXGetCurrentDisplay();
         glXQueryDrawable(render_display, drawable, GLX_FBCONFIG_ID, &drawable_config);
         query_status = glXQueryContext(render_display, glXGetCurrentContext(), GLX_FBCONFIG_ID,
-                                      &context_config);
+                                       &context_config);
         report = gl.report();
         glClearColor(0.2f, 0.4f, 0.6f, 1.0f);
         glClear(GL_COLOR_BUFFER_BIT);
