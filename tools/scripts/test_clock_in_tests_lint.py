@@ -59,7 +59,7 @@ class FlaggedTest(unittest.TestCase):
     def test_shipped_baseline_covers_whole_tree(self):
         self.assertEqual(subprocess.run(
             [sys.executable, str(HERE / "clock_in_tests_lint.py"), "--all"],
-            capture_output=True, text=True).returncode, 0)
+            capture_output=True, text=True, encoding="utf-8").returncode, 0)
 
 
 class DiffScopeTest(unittest.TestCase):
@@ -74,9 +74,9 @@ class DiffScopeTest(unittest.TestCase):
             git("config", "user.name", "t")
             (repo / "tools").mkdir()
             f = repo / "tools" / "test_a.py"
-            f.write_text("old = time.time()\n")
+            f.write_text("old = time.time()\n", encoding="utf-8")
             git("add", "."); git("commit", "-qm", "base")
-            f.write_text("old = time.time()\nnew = datetime.now()\n")
+            f.write_text("old = time.time()\nnew = datetime.now()\n", encoding="utf-8")
             git("commit", "-qam", "plant")
             lint.ROOT = repo
             try:

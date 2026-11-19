@@ -45,7 +45,7 @@ def run_matrix(tests: list[str], zones: list[str], root: Path = ROOT) -> dict[st
             env = dict(os.environ, TZ=zone)
             proc = subprocess.run(
                 [sys.executable, str(root / rel)], cwd=root, env=env,
-                capture_output=True, text=True, timeout=TIMEOUT_S,
+                capture_output=True, text=True, encoding="utf-8", timeout=TIMEOUT_S,
             )
             results[rel][zone] = proc.returncode
             if proc.returncode != 0:

@@ -36,7 +36,7 @@ class MatrixTest(unittest.TestCase):
     def _run(self, source: str, name: str) -> dict:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            (root / name).write_text(source)
+            (root / name).write_text(source, encoding="utf-8")
             return matrix.run_matrix([name], ZONES, root)
 
     def test_clock_dependent_fixture_is_detected(self):
@@ -59,11 +59,11 @@ class MatrixTest(unittest.TestCase):
             cfg = Path(tmp) / "c.json"
             cfg.write_text(json.dumps({
                 "zones": ["UTC"], "tests": [],
-                "pending": [{"path": "does/not/exist.py", "reason": "r"}]}))
+                "pending": [{"path": "does/not/exist.py", "reason": "r"}]}), encoding="utf-8")
             self.assertEqual(matrix.main(["--config", str(cfg)]), 0)
 
     def test_shipped_config_is_well_formed(self):
-        config = json.loads(matrix.CONFIG.read_text())
+        config = json.loads(matrix.CONFIG.read_text(encoding="utf-8"))
         self.assertEqual(config["zones"], ZONES)
         for entry in config["tests"] + config["pending"]:
             self.assertTrue((matrix.ROOT / entry["path"]).is_file(), entry)

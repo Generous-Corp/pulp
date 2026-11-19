@@ -92,7 +92,7 @@ def scan_lines(rel: str, lines: list[tuple[int, str]], baseline=None) -> list[st
 
 def _git(args: list[str]) -> str:
     return subprocess.run(
-        ["git", "-C", str(ROOT), *args], check=True, capture_output=True, text=True
+        ["git", "-C", str(ROOT), *args], check=True, capture_output=True, text=True, encoding="utf-8"
     ).stdout
 
 
