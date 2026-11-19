@@ -126,6 +126,32 @@ print(json.dumps({'data': {'repository': result}}))
         result = self.run_check(["repair-claim: lane-a until"])
         self.assertEqual(result.returncode, 1, result.stderr)
 
+    def test_annotated_expired_claim_passes(self):
+        for timestamp in ["2000-01-02T03:04Z", "2000-01-02T03:04:05Z",
+                          "2000-01-02 03:04 UTC"]:
+            for explanation in [" (repairing HOLD)", " investigating a failure"]:
+                with self.subTest(timestamp=timestamp, explanation=explanation):
+                    result = self.run_check([
+                        f"repair-claim: lane-a until {timestamp}{explanation}"])
+                    self.assertEqual(result.returncode, 0, result.stderr)
+                    self.assertNotIn("could not read", result.stderr)
+
+    def test_annotated_future_claim_refuses_with_actual_expiry(self):
+        result = self.run_check([
+            "repair-claim: lane-a until 2099-01-02T03:04Z (repairing HOLD)"])
+        self.assertEqual(result.returncode, 1, result.stderr)
+        self.assertIn("until 2099-01-02T03:04:00Z", result.stderr)
+
+    def test_malformed_annotated_expiry_stays_live(self):
+        for timestamp in ["2000-XX-02T03:04Z", "2000-01-02T03:04Zgarbage",
+                          "2000-01-02T03:04UTCextra", "2000-13-02T03:04Z",
+                          "2000-01-02T03:04", ""]:
+            with self.subTest(timestamp=timestamp):
+                result = self.run_check([
+                    f"repair-claim: lane-a until {timestamp} (repairing HOLD)"])
+                self.assertEqual(result.returncode, 1, result.stderr)
+                self.assertIn("until 9999-12-31T23:59:59Z", result.stderr)
+
     def test_release_in_other_pr_does_not_clear_claim(self):
         result = self.run_check([], prs=[
             {"number": 41, "comments": ["repair-claim-released:"]},

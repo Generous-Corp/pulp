@@ -1178,7 +1178,9 @@ never from the check run alone.
   and refuses while another actor's `repair-claim:` is
   live. Named releases remove only that ID (single-label and slash-separated
   IDs use the same grammar); only a bare release clears all claims. An
-  unreadable expiry remains live until released or corrected. Name your own
+  unreadable expiry remains live until released or corrected. A whitespace-separated
+  explanation after a valid UTC timestamp does not extend its expiry; malformed
+  timestamp tokens still count as live. Name your own
   claim with `PULP_REPAIR_CLAIM_ID`. A failed read warns and
   allows. With `PULP_AGENT_OWNER` set, it also refuses a push from an active
   worktree whose lineage owner is someone else

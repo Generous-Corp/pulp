@@ -129,8 +129,10 @@ def check_pr(repo: str, pr: dict, own: str | None) -> int:
             if kind == "claim":
                 try:
                     until = match.group("until").strip()
-                    timestamp = re.fullmatch(
-                        r"(\d{4}-\d\d-\d\d)[T ](\d\d:\d\d(?::\d\d)?)\s*(?:Z|UTC)",
+                    # An explanation may follow a complete timestamp, separated by
+                    # whitespace. Do not accept a valid prefix of a malformed token.
+                    timestamp = re.match(
+                        r"(\d{4}-\d\d-\d\d)[T ](\d\d:\d\d(?::\d\d)?)\s*(?:Z|UTC)(?=\s|$)",
                         until,
                     )
                     if not timestamp:
