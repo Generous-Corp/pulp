@@ -1140,12 +1140,19 @@ fi
 # correct, and together they read as a missing test rather than a missing lane.
 # Whole-tree rather than diff-scoped: the condition is a property of a target's
 # whole registration set, which can live in a file this push never touched.
+# The same script also rejects a registration that raises TIMEOUT above the
+# gate's 120s default without a gate-excluded label, and (with --runtime-base)
+# a newly added test whose local timing data shows it over 30s unlabelled.
 if [ -f "$LABEL_EXCLUSION" ]; then
     echo "" >&2
     echo "▸ ctest label-exclusion guard (a suite must reach the gate or coverage)" >&2
-    if ! "$PYTHON" "$LABEL_EXCLUSION"; then
-        fail=1
-    fi
+    label_exclusion_rc=0
+    "$PYTHON" "$LABEL_EXCLUSION" --runtime-base "$BASE" || label_exclusion_rc=$?
+    case $label_exclusion_rc in
+        0) ;;
+        3) echo "[ctest-label-exclusion] NOT CHECKED: slow-test runtime of changed registrations (no local CTest timing data); the static label and TIMEOUT checks passed" >>"$not_checked_log" ;;
+        *) fail=1 ;;
+    esac
 fi
 
 
