@@ -4,8 +4,7 @@
   "entry": "tools/scripts/date_sensitive_selftests_tz_matrix.py",
   "inputs": [
    "tools/scripts/date_sensitive_selftests.json",
-   "tools/scripts/date_sensitive_selftests_tz_matrix.py",
-   "tools/import-validation/test_source_contracts.py"
+   "tools/scripts/date_sensitive_selftests_tz_matrix.py"
   ],
   "kind": "python"
  }
