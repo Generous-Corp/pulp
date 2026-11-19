@@ -606,12 +606,13 @@ int cmd_create(const std::vector<std::string>& args) {
                                                     "View\n"
                                                     ")"
                                               : ""},
-        {"VELLUM_FIND_LINE",
-         ui == "vellum" ? "find_package(Vellum CONFIG REQUIRED)" : ""},
+        {"VELLUM_FIND_LINE", ui == "vellum" ? "find_package(Vellum CONFIG REQUIRED)" : ""},
         {"VELLUM_HELPER_LINE",
          ui == "vellum"
              ? "if(DEFINED PULP_ROOT_DIR)\n"
-               "    include(\"${PULP_ROOT_DIR}/integrations/pulp-vellum/cmake/PulpVellumEditorPackage.cmake\")\n"
+               "    "
+               "include(\"${PULP_ROOT_DIR}/integrations/pulp-vellum/cmake/"
+               "PulpVellumEditorPackage.cmake\")\n"
                "else()\n"
                "    include(\"${PULP_SDK_DIR}/lib/cmake/Pulp/PulpVellumEditorPackage.cmake\")\n"
                "endif()"
@@ -689,9 +690,8 @@ int cmd_create(const std::vector<std::string>& args) {
 
     if (ui == "vellum") {
         const auto cmake_template = cmake_template_dir / "CMakeLists.txt.template";
-        const bool has_view_templates =
-            fs::exists(source_template_dir / "view.hpp.template") &&
-            fs::exists(source_template_dir / "view.cpp.template");
+        const bool has_view_templates = fs::exists(source_template_dir / "view.hpp.template") &&
+                                        fs::exists(source_template_dir / "view.cpp.template");
         if (!fs::exists(cmake_template) ||
             read_file_contents(cmake_template).find("{{UI_LINE}}") == std::string::npos ||
             !has_view_templates) {
