@@ -17,9 +17,19 @@
 ///   framebuffer object of a fixed size. On macOS it uses CGL, for tests and
 ///   offline capture only (OpenGL is deprecated there; editors use
 ///   `MetalSurface`).
-/// - `create`: a child window of the host's window: WGL on Windows. It is
-///   null where no windowed backend exists (macOS, and X11 until that backend
-///   lands).
+/// - `create`: a child window of the host's window: WGL on Windows, GLX on X11
+///   (Linux). It is null where no windowed backend exists (macOS, and a Linux
+///   build without the X11 and GL development files).
+///
+/// X11:
+/// - The surface owns one connection to the X server for its window and its
+///   events, and the context uses a second one opened on the client's render
+///   thread, so the two threads never share a connection.
+/// - Nothing follows the host window, and no input arrives, until something
+///   calls `dispatch_events()` on the UI thread: from the editor's idle tick,
+///   or when `event_fd()` becomes readable (a host run loop's fd handler). The
+///   surface starts no thread of its own.
+/// - X errors raised by a window that vanished are contained, never fatal.
 ///
 /// Threading:
 /// - Construction, `attach`, `detach`, `invalidate`, the setters and
@@ -97,6 +107,10 @@ struct GlSurfaceOptions {
     DrawableSizing sizing = DrawableSizing::automatic;
     /// 0 swaps immediately; 1 waits for vertical blank.
     int swap_interval = 1;
+    /// The display scale the host passes (the scale it set on its own
+    /// window), or 0 to detect it: the window's DPI on Windows, `Xft.dpi` over
+    /// 96 on X11.
+    double scale = 0.0;
 };
 
 /// The index of the first request a context of version `major.minor` with
@@ -198,6 +212,27 @@ class GlSurface {
 
     /// The context the client renders with.
     GlContext& context() noexcept;
+
+    /// Where input goes (X11; elsewhere the handler is kept and never called).
+    /// Unset members drop their events. UI thread.
+    void set_input_handler(InputHandler handler);
+    /// What the client holds the keyboard for. With `none` the surface never
+    /// takes keyboard focus, so the host keeps every key; otherwise it takes
+    /// focus and offers keys to the handler first (`route_key`), forwarding a
+    /// declined one to the host window. UI thread.
+    void set_keyboard_focus(KeyboardFocus focus);
+    /// Replace the display scale (the host changed it). 0 returns to the
+    /// options' value or detection. Emits `geometry_changed` when attached.
+    /// UI thread.
+    void set_scale(double scale);
+
+    /// A file descriptor that becomes readable when `dispatch_events()` has
+    /// work, for a host run loop (VST3 `IRunLoop`, CLAP posix-fd-support); -1
+    /// where the backend has no event source. Valid while attached.
+    int event_fd() const noexcept;
+    /// Process pending window-system events: follow the host window's size,
+    /// deliver input and emit surface events. Never blocks. UI thread.
+    void dispatch_events();
 
     /// The latest consistent size snapshot. Any thread.
     SurfaceGeometry geometry() const;

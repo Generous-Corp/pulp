@@ -24,6 +24,7 @@ target_sources(pulp-host PRIVATE
     src/processor_signal_graph_binding.cpp
     src/processor_restore.cpp
     src/trigger_graph.cpp
+    src/signal_graph_compile_nodes.cpp
     src/signal_graph_compile_routed.cpp
     src/signal_graph_prepare.cpp
     src/signal_graph_reference_walk.cpp
@@ -40,6 +41,7 @@ target_sources(pulp-host PRIVATE
     src/graph_serializer.cpp
     src/graph_serializer_regions.cpp
     src/graph_serializer_plugin_resolver.cpp
+    src/graph_serializer_save.cpp
     src/graph_patch.cpp
     src/graph_patch_constructors.cpp
     src/graph_file_reload.cpp
