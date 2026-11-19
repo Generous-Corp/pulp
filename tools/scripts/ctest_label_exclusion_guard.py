@@ -392,13 +392,25 @@ def scan_timeouts(path: Path) -> list[TimeoutRegistration]:
         if command == "add_test":
             if args[0] != "NAME" or len(args) < 2:
                 continue
-            name = _unquote(args[1])
+            names = [_unquote(args[1])]
+        elif command == "set_tests_properties":
+            # CMake applies the properties to every test named before
+            # PROPERTIES, not only the first.
+            names = []
+            for tok in args:
+                if tok == "PROPERTIES":
+                    break
+                names.append(_unquote(tok))
+            if not names:
+                continue
         else:
-            name = _unquote(args[0])
+            names = [_unquote(args[0])]
         labels, unresolved = _extract_labels(args)
-        found.append(TimeoutRegistration(
-            path, lineno, command, name, _timeout_value(args, budgets),
-            labels, unresolved, tuple(args)))
+        timeout = _timeout_value(args, budgets)
+        for name in names:
+            found.append(TimeoutRegistration(
+                path, lineno, command, name, timeout,
+                labels, unresolved, tuple(args)))
     return found
 
 

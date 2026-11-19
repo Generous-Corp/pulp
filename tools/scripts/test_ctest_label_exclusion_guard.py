@@ -280,6 +280,11 @@ class LongTimeoutTest(unittest.TestCase):
             "set_tests_properties(slow-thing PROPERTIES TIMEOUT 300)\n"),
             ["slow-thing"])
 
+    def test_set_tests_properties_flags_every_listed_name(self):
+        self.assertEqual(long_timeouts(
+            "set_tests_properties(old-one new-one PROPERTIES TIMEOUT 300)\n"),
+            ["old-one", "new-one"])
+
     def test_suite_timeout_without_label_is_flagged(self):
         self.assertEqual(long_timeouts(
             "pulp_add_test_suite(pulp-test-fft SOURCES a.cpp TIMEOUT 600)\n"),
