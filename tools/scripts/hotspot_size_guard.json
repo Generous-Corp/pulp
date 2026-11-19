@@ -72,7 +72,7 @@
     },
     {
       "path": "core/host/src/signal_graph_prepare.cpp",
-      "max_loc": 1305,
+      "max_loc": 1158,
       "note": "SignalGraph compile/prepare lifecycle; compile_ phases belong in focused signal_graph_compile_*.cpp units"
     },
     {
