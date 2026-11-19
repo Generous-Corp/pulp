@@ -17,18 +17,18 @@ class BundleVellumSdkTests(unittest.TestCase):
         self.root = Path(self.tmp.name)
         self.integration = self.root / "integrations"
         (self.integration / "pulp-vellum").mkdir(parents=True)
-        (self.integration / "pulp-vellum" / "bridge.hpp").write_text("bridge\n")
+        (self.integration / "pulp-vellum" / "bridge.hpp").write_text("bridge\n", encoding="utf-8")
         source = self.root / "source"
         (source / "sdk" / "share" / "doc" / "Vellum").mkdir(parents=True)
         (source / "sdk" / "lib").mkdir()
-        (source / "sdk" / "share" / "doc" / "Vellum" / "NOTICE.md").write_text("Vellum notice\n")
+        (source / "sdk" / "share" / "doc" / "Vellum" / "NOTICE.md").write_text("Vellum notice\n", encoding="utf-8")
         (source / "sdk" / "lib" / "libvellum-gpu.dylib").write_bytes(b"gpu")
         self.archive = self.root / "vellum-sdk-0.2.0-darwin-arm64.tar.gz"
         with tarfile.open(self.archive, "w:gz") as tar:
             tar.add(source / "sdk", arcname="sdk")
         digest = hashlib.sha256(self.archive.read_bytes()).hexdigest()
         self.lock = self.root / "pulp.lock"
-        self.lock.write_text(json.dumps({"vellum": {"tag": "v0.2.0", "sdk_digest": digest}}))
+        self.lock.write_text(json.dumps({"vellum": {"tag": "v0.2.0", "sdk_digest": digest}}), encoding="utf-8")
 
     def tearDown(self):
         self.tmp.cleanup()
@@ -39,7 +39,7 @@ class BundleVellumSdkTests(unittest.TestCase):
                                archive=self.archive, archive_dir=None, integrations=self.integration)
         self.assertTrue((staged / "sdk" / "lib" / "libvellum-gpu.dylib").is_file())
         self.assertTrue((prefix / "share/pulp/integrations/pulp-vellum/bridge.hpp").is_file())
-        self.assertIn("## Vellum SDK", (prefix / "NOTICE.md").read_text())
+        self.assertIn("## Vellum SDK", (prefix / "NOTICE.md").read_text(encoding="utf-8"))
 
     def test_changed_archive_fails_closed(self):
         self.archive.write_bytes(self.archive.read_bytes() + b"changed")
@@ -48,7 +48,7 @@ class BundleVellumSdkTests(unittest.TestCase):
                           archive=self.archive, archive_dir=None, integrations=self.integration)
 
     def test_missing_archive_names_lock_digest(self):
-        digest = json.loads(self.lock.read_text())["vellum"]["sdk_digest"]
+        digest = json.loads(self.lock.read_text(encoding="utf-8"))["vellum"]["sdk_digest"]
         with self.assertRaisesRegex(FileNotFoundError, "vellum.sdk_digest"):
             bundle.bundle(lock_path=self.lock, prefix=self.root / "prefix", platform="darwin-arm64",
                           archive=None, archive_dir=self.root / "missing", integrations=self.integration)
@@ -91,11 +91,11 @@ class BundleVellumSdkTests(unittest.TestCase):
         prefix.mkdir()
         staged = self.root / "staged"
         (staged / "sdk/share/doc/Vellum").mkdir(parents=True)
-        (staged / "sdk/share/doc/Vellum/NOTICE.md").write_text("Vellum notice\n")
+        (staged / "sdk/share/doc/Vellum/NOTICE.md").write_text("Vellum notice\n", encoding="utf-8")
         bundle._merge_notice(prefix, staged)
-        first = (prefix / "NOTICE.md").read_text()
+        first = (prefix / "NOTICE.md").read_text(encoding="utf-8")
         bundle._merge_notice(prefix, staged)
-        self.assertEqual(first, (prefix / "NOTICE.md").read_text())
+        self.assertEqual(first, (prefix / "NOTICE.md").read_text(encoding="utf-8"))
 
 
 if __name__ == "__main__":
