@@ -31,6 +31,7 @@ class FlaggedTest(unittest.TestCase):
         for expr in (
             "datetime.now()", "dt.datetime.now(tz)", "datetime.today()", "datetime.utcnow()",  # clock-ok: fixture text
             "date.today()", "time.time()", "time.time_ns()", "time.localtime()",  # clock-ok: fixture text
+            "time . time()", "datetime . now()", "date . today()",  # clock-ok: fixture text
         ):
             with self.subTest(expr=expr):
                 self.assertEqual(len(scan(f"x = {expr}")), 1)

@@ -53,7 +53,7 @@ ROOT = Path(__file__).resolve().parents[2]
 BASELINE = ROOT / "tools/scripts/clock_in_tests_baseline.json"
 
 _CLOCK = re.compile(
-    r"\b(?:datetime\.(?:now|today|utcnow)|date\.today|time\.(?:time|time_ns|localtime))\s*\("
+    r"\b(?:datetime\s*\.\s*(?:now|today|utcnow)|date\s*\.\s*today|time\s*\.\s*(?:time|time_ns|localtime))\s*\("
 )
 _MARKER = re.compile(r"clock-ok:\s*\S")
 

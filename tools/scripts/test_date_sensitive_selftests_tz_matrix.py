@@ -85,6 +85,12 @@ class MatrixTest(unittest.TestCase):
         errors = matrix.validate_config(ZONES, ["tools/import-validation/test_source_contracts.py"], ["../noop.py"])
         self.assertTrue(any("untrusted" in error for error in errors), errors)
 
+    def test_duplicate_execution_keys_fail_closed(self):
+        errors = matrix.validate_config(ZONES + ["UTC"], ["tools/import-validation/test_source_contracts.py"], [])
+        self.assertTrue(any("zones must not" in error for error in errors), errors)
+        errors = matrix.validate_config(ZONES, ["tools/import-validation/test_source_contracts.py"], ["tools/import-validation/test_source_contracts.py"])
+        self.assertTrue(any("duplicate execution" in error for error in errors), errors)
+
     def test_empty_zones_fail_closed(self):
         with tempfile.TemporaryDirectory() as tmp:
             cfg = Path(tmp) / "c.json"

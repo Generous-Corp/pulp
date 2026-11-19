@@ -51,8 +51,13 @@ def validate_config(zones: list[str], tests: list[str], pending: list[str] | Non
         errors.append("tests must contain at least one active selftest")
     if any(not isinstance(zone, str) or not zone for zone in zones):
         errors.append("zones must contain non-empty strings")
+    if len(zones) != len(set(zones)):
+        errors.append("zones must not contain duplicates")
     if set(zones) != REQUIRED_ZONES:
         errors.append("zones must be exactly Pacific/Kiritimati, Pacific/Pago_Pago and UTC")
+    all_paths = tests + pending
+    if len(all_paths) != len(set(all_paths)):
+        errors.append("tests and pending must not contain duplicate execution paths")
     for label, paths in (("tests", tests), ("pending", pending)):
         for path in paths:
             if (not isinstance(path, str) or Path(path).is_absolute()
