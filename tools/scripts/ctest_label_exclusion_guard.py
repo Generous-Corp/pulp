@@ -55,7 +55,9 @@ Usage::
     ctest_label_exclusion_guard.py --policy P --allowlist A
 
 Exit status: 0 when every suite reaches an enforced lane or is accounted for in
-the ledger, 1 otherwise.
+the ledger, 1 otherwise. With ``--runtime-base``, 3 when the static checks
+passed but the runtime check found no timing data to read (NOT CHECKED, which
+callers report separately from a pass).
 """
 
 from __future__ import annotations
@@ -81,9 +83,9 @@ POLICY_VAR = "PULP_COVERAGE_CTEST_LABEL_EXCLUDE"
 SCAN_DIR = Path("test/cmake")
 
 # Frozen backlog: suites already in this state when the guard landed. Freezing
-# the population rather than repairing it in one change is deliberate — whether
+# the population rather than repairing it in one change is deliberate, whether
 # a given suite can be split is a per-suite judgement, and a `~[slow]` spec that
-# matches no case discovers nothing — but every entry carries a reason, so the
+# matches no case discovers nothing, but every entry carries a reason, so the
 # backlog is a countable ledger rather than a weakened rule. An entry whose
 # target is no longer blind is an error, not a leftover.
 ALLOWLIST_FILE = Path("tools/scripts/ctest_label_exclusion_guard.json")
@@ -214,12 +216,9 @@ def _extract_labels(args: list[str]) -> tuple[list[str], bool]:
     return labels, unresolved
 
 
-def scan_file(path: Path) -> list[Registration]:
-    """Extract every Catch2 suite registration in one CMake manifest."""
-    text = strip_comments(path.read_text(encoding="utf-8", errors="replace"))
-    found: list[Registration] = []
-    for m in _COMMAND_RE.finditer(text):
-        command = m.group(1)
+def _iter_calls(text: str, command_re: re.Pattern[str]):
+    """Yield ``(command, args, lineno)`` for each balanced call matching the regex."""
+    for m in command_re.finditer(text):
         depth = 1
         i = m.end()
         in_quote = False
@@ -247,9 +246,16 @@ def scan_file(path: Path) -> list[Registration]:
         args = _split_args(text[m.end():i])
         if not args:
             continue
+        yield m.group(1), args, text.count("\n", 0, m.start()) + 1
+
+
+def scan_file(path: Path) -> list[Registration]:
+    """Extract every Catch2 suite registration in one CMake manifest."""
+    text = strip_comments(path.read_text(encoding="utf-8", errors="replace"))
+    found: list[Registration] = []
+    for command, args, lineno in _iter_calls(text, _COMMAND_RE):
         target = _unquote(args[0])
         labels, unresolved = _extract_labels(args[1:])
-        lineno = text.count("\n", 0, m.start()) + 1
         found.append(Registration(path, lineno, command, target, labels, unresolved))
     return found
 
@@ -323,6 +329,507 @@ test/cmake/character_delay_tests.cmake, test/cmake/app_audio_host_tests.cmake.
 """
 
 
+# ---------------------------------------------------------------------------
+# Long-timeout rule: a raised TIMEOUT declares a long runtime.
+#
+# The required `macos` gate runs ctest with `--timeout 120`. A per-test TIMEOUT
+# property overrides that, so a registration that raises it above 120 is
+# announcing a test that can run for minutes on the merge-blocking lane, where a
+# slow case surfaces only as a timeout late in the run. A registration that
+# declares such a budget must also carry a label the gate excludes, or sit in
+# the ledger with a reason.
+# ---------------------------------------------------------------------------
+
+# The gate's own per-test default (`ctest --timeout 120` in build.yml).
+DEFAULT_TIMEOUT_S = 120
+
+# A newly added test measured above this many seconds needs an excluded label.
+RUNTIME_LIMIT_S = 30.0
+
+_TIMEOUT_CMD_RE = re.compile(
+    r"(?<![A-Za-z0-9_])(pulp_add_test_suite|catch_discover_tests|"
+    r"set_tests_properties|add_test)[ \t]*\(")
+_VAR_DEF_RE = re.compile(
+    r"(?<![A-Za-z0-9_])(set|pulp_scaled_test_timeout)[ \t]*\(")
+_VAR_USE_RE = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)\}")
+# Trailing set() keywords that are not part of the value.
+_SET_TRAILERS = ("PARENT_SCOPE", "CACHE")
+
+# Exit status when the static checks pass but the optional runtime check could
+# not run. Distinct from 0 so a caller reports NOT CHECKED instead of a pass.
+EXIT_NOT_CHECKED = 3
+
+
+def collect_variables(text: str) -> dict[str, str | None]:
+    """Values of the variables a manifest assigns with ``set`` or the timeout helper.
+
+    A variable assigned more than once with differing values (an ``if``/``else``
+    pair, say) maps to None: the scan cannot know which branch configure takes,
+    so it refuses to pick one. ``pulp_scaled_test_timeout`` is read as its
+    unscaled budget, which is what the gate's own default is compared against.
+    """
+    out: dict[str, str | None] = {}
+    for command, args, _ln in _iter_calls(text, _VAR_DEF_RE):
+        name = _unquote(args[0])
+        if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", name):
+            continue
+        values = args[1:]
+        if command == "pulp_scaled_test_timeout":
+            values = values[:1]
+        else:
+            for i, tok in enumerate(values):
+                if tok in _SET_TRAILERS:
+                    values = values[:i]
+                    break
+        value = ";".join(_unquote(v) for v in values)
+        if name in out and out[name] != value:
+            out[name] = None
+        else:
+            out[name] = value
+    return out
+
+
+def resolve_value(value: str, variables: dict[str, str | None],
+                  depth: int = 0) -> str | None:
+    """Expand ``${VAR}`` references transitively; None when any is unknown."""
+    if depth > 16:
+        return None
+    unknown = False
+
+    def sub(m: re.Match[str]) -> str:
+        nonlocal unknown
+        inner = variables.get(m.group(1))
+        if inner is None:
+            unknown = True
+            return ""
+        resolved = resolve_value(inner, variables, depth + 1)
+        if resolved is None:
+            unknown = True
+            return ""
+        return resolved
+
+    out = _VAR_USE_RE.sub(sub, value)
+    if unknown or "${" in out or "$ENV{" in out or "@" in out:
+        return None
+    return out
+
+
+class TimeoutRegistration:
+    """One registration (or property assignment) that may declare a TIMEOUT."""
+
+    def __init__(self, path: Path, lineno: int, command: str, name: str,
+                 timeout: int | None, labels: list[str],
+                 labels_unresolved: bool, sig: tuple[str, ...],
+                 timeout_unresolved: bool = False) -> None:
+        self.path = path
+        self.lineno = lineno
+        self.command = command
+        self.name = name
+        self.timeout = timeout
+        # True when a TIMEOUT keyword is present but its value could not be
+        # read. Such a budget may exceed the gate default at configure time,
+        # so it is treated as long until a label or the ledger says otherwise.
+        self.timeout_unresolved = timeout_unresolved
+        self.labels = labels
+        self.labels_unresolved = labels_unresolved
+        self.sig = sig
+        self.why = ""
+
+
+def _timeout_value(args: list[str], variables: dict[str, str | None]
+                   ) -> tuple[int | None, bool]:
+    """(declared TIMEOUT in seconds, unresolved) for one call's arguments."""
+    for i, tok in enumerate(args):
+        if tok != "TIMEOUT" or i + 1 >= len(args):
+            continue
+        value = resolve_value(_unquote(args[i + 1]), variables)
+        if value is not None and value.strip().isdigit():
+            return int(value.strip()), False
+        return None, True
+    return None, False
+
+
+def _resolved_labels(args: list[str], variables: dict[str, str | None]
+                     ) -> tuple[list[str], bool]:
+    """Every label reachable from a LABELS keyword, expanding variables."""
+    labels: list[str] = []
+    unresolved = False
+    i = 0
+    while i < len(args):
+        if args[i] != "LABELS":
+            i += 1
+            continue
+        i += 1
+        while i < len(args) and not _KEYWORD_RE.match(args[i]):
+            value = resolve_value(_unquote(args[i]), variables)
+            if value is None:
+                unresolved = True
+            else:
+                labels.extend(p.strip() for p in value.split(";") if p.strip())
+            i += 1
+    return labels, unresolved
+
+
+def scan_timeouts(path: Path) -> list[TimeoutRegistration]:
+    """Extract every registration of a manifest with its declared TIMEOUT."""
+    text = strip_comments(path.read_text(encoding="utf-8", errors="replace"))
+    variables = collect_variables(text)
+    found: list[TimeoutRegistration] = []
+    for command, args, lineno in _iter_calls(text, _TIMEOUT_CMD_RE):
+        if command == "add_test":
+            if args[0] != "NAME" or len(args) < 2:
+                continue
+            names = [_unquote(args[1])]
+        elif command == "set_tests_properties":
+            # CMake applies the properties to every test named before
+            # PROPERTIES, not only the first.
+            names = []
+            for tok in args:
+                if tok == "PROPERTIES":
+                    break
+                names.append(_unquote(tok))
+            if not names:
+                continue
+        else:
+            names = [_unquote(args[0])]
+        labels, unresolved = _resolved_labels(args, variables)
+        timeout, timeout_unresolved = _timeout_value(args, variables)
+        for name in names:
+            found.append(TimeoutRegistration(
+                path, lineno, command, name, timeout,
+                labels, unresolved, tuple(args),
+                timeout_unresolved=timeout_unresolved))
+    return found
+
+
+def find_unlabelled_long_timeouts(
+    regs: list[TimeoutRegistration], excluded: list[str],
+    default: int = DEFAULT_TIMEOUT_S,
+) -> list[TimeoutRegistration]:
+    """Registrations that raise TIMEOUT (or may) without a gate-excluded label.
+
+    Fails closed on what the scan cannot read: a TIMEOUT whose value does not
+    resolve counts as long, and a LABELS value that does not resolve cannot
+    supply the excluded label. Either needs a resolved excluded label or a
+    ``timeout_allow`` entry.
+
+    Properties of a plain ctest name are aggregated across its
+    ``set_tests_properties`` calls, so ``TIMEOUT`` in one call and ``LABELS
+    slow`` in another pass (labels are unioned, which matches the common
+    shape; a later call that replaces LABELS is not modelled). A suite
+    registration (``pulp_add_test_suite`` / ``catch_discover_tests``) is its
+    own ctest population and is never aggregated with a sibling of the same
+    target. ``set_property(TEST ...)`` is not read, so a label assigned only
+    that way is not credited.
+    """
+    excluded_set = set(excluded)
+    prop_labels: dict[str, set[str]] = {}
+    prop_unresolved: dict[str, bool] = {}
+    for r in regs:
+        if r.command == "set_tests_properties":
+            prop_labels.setdefault(r.name, set()).update(r.labels)
+            prop_unresolved[r.name] = prop_unresolved.get(r.name, False) \
+                or r.labels_unresolved
+    out: list[TimeoutRegistration] = []
+    for r in regs:
+        if r.command == "add_test":
+            continue
+        long = r.timeout_unresolved or (r.timeout is not None and r.timeout > default)
+        if not long:
+            continue
+        if r.command == "set_tests_properties":
+            labels = prop_labels.get(r.name, set())
+            labels_unresolved = prop_unresolved.get(r.name, False)
+        else:
+            labels, labels_unresolved = set(r.labels), r.labels_unresolved
+        if labels & excluded_set:
+            continue
+        reasons = []
+        if r.timeout_unresolved:
+            reasons.append("TIMEOUT value unresolved")
+        if labels_unresolved:
+            reasons.append("LABELS value unresolved")
+        r.why = "; ".join(reasons)
+        out.append(r)
+    return out
+
+
+def read_timeout_allowlist(path: Path) -> dict[str, str]:
+    """Load the long-timeout ledger as name -> reason."""
+    if not path.is_file():
+        return {}
+    data = json.loads(path.read_text(encoding="utf-8"))
+    out: dict[str, str] = {}
+    for entry in data.get("timeout_allow", []):
+        target = entry.get("target", "")
+        reason = entry.get("reason", "").strip()
+        if not target:
+            raise ValueError(f"{path}: a timeout_allow entry has no target.")
+        if not reason:
+            raise ValueError(f"{path}: timeout_allow entry {target!r} has no reason.")
+        out[target] = reason
+    return out
+
+
+def _check_long_timeouts(regs: list[TimeoutRegistration], excluded: list[str],
+                         allowed: dict[str, str]) -> int:
+    all_long = find_unlabelled_long_timeouts(regs, excluded)
+    long_names = {r.name for r in all_long}
+    new = [r for r in all_long if r.name not in allowed]
+    scanned = {r.name for r in regs}
+    stale = sorted(n for n in allowed if n in scanned and n not in long_names)
+    if stale:
+        print("ctest_label_exclusion_guard: FAIL — stale timeout_allow entries in "
+              f"{ALLOWLIST_FILE}; these registrations no longer raise TIMEOUT "
+              "unlabelled:", file=sys.stderr)
+        for n in stale:
+            print(f"  {n}", file=sys.stderr)
+        print("\nDelete each line above so the ledger cannot cover a future "
+              "regression.", file=sys.stderr)
+        return 1
+    if new:
+        print(f"ctest_label_exclusion_guard: FAIL — {len(new)} registration(s) "
+              f"raise TIMEOUT above the gate default of {DEFAULT_TIMEOUT_S}s "
+              f"without a label the required gate excludes:", file=sys.stderr)
+        for r in new:
+            budget = "unresolved" if r.timeout_unresolved else str(r.timeout)
+            why = f" ({r.why}, so it fails closed)" if r.why else ""
+            print(f"  {r.name} — TIMEOUT {budget} — {r.command} — "
+                  f"{r.path}:{r.lineno}{why}", file=sys.stderr)
+        print(
+            f"\nThe required `macos` gate runs ctest with `--timeout "
+            f"{DEFAULT_TIMEOUT_S}`; a per-test TIMEOUT property overrides it, so "
+            f"a raised budget is a test that may run for minutes on the "
+            f"merge-blocking lane. Either keep the test under the default "
+            f"(shrink the fixture), or label it `slow` so the gate excludes it "
+            f"and the nightly runs it, e.g. `LABELS slow`. For a Catch2 suite "
+            f"keep the fast cases on the enforced lane with the TEST_SPEC split "
+            f"described for the label-exclusion rule. A TIMEOUT or LABELS value "
+            f"the scan cannot resolve (a variable assigned in another file or "
+            f"in two differing branches) fails closed: use a literal or a single "
+            f"`set()` in the same manifest. A deliberate exception "
+            f"goes in `timeout_allow` in {ALLOWLIST_FILE} with a reason.",
+            file=sys.stderr)
+        return 1
+    print(f"ctest_label_exclusion_guard: OK — {len(regs)} registration(s) "
+          f"scanned for TIMEOUT > {DEFAULT_TIMEOUT_S}s; "
+          f"{len(all_long)} unlabelled, all accounted for in {ALLOWLIST_FILE}.")
+    return 0
+
+
+# ---------------------------------------------------------------------------
+# Optional runtime check: measured cost of newly added registrations.
+# ---------------------------------------------------------------------------
+
+_TESTING_RE = re.compile(r"^\d+/\d+ Testing: (.+?)\s*$")
+_ELAPSED_RE = re.compile(r'^"(.+)" time elapsed: (\d+):(\d+):(\d+)')
+_JUNIT_RE = re.compile(r'<testcase\b[^>]*?\bname="([^"]*)"[^>]*?\btime="([0-9.eE+-]+)"')
+
+
+def parse_last_test_log(text: str) -> dict[str, float]:
+    """Seconds per test from CTest's ``LastTest.log`` (whole-second resolution)."""
+    out: dict[str, float] = {}
+    for line in text.splitlines():
+        m = _ELAPSED_RE.match(line)
+        if m:
+            h, mi, sec = int(m.group(2)), int(m.group(3)), int(m.group(4))
+            out[m.group(1)] = float(h * 3600 + mi * 60 + sec)
+    return out
+
+
+def parse_junit_times(text: str) -> dict[str, float]:
+    return {m.group(1): float(m.group(2)) for m in _JUNIT_RE.finditer(text)}
+
+
+def _runtime_sigs(text: str) -> dict[tuple[str, ...], tuple[str, str]]:
+    """Registration signature -> (kind, name): ``add_test`` names and suite targets."""
+    out: dict[tuple[str, ...], tuple[str, str]] = {}
+    stripped = strip_comments(text)
+    for command, args, _ln in _iter_calls(stripped, _TIMEOUT_CMD_RE):
+        if command == "set_tests_properties":
+            continue
+        if command == "add_test":
+            if args[0] != "NAME" or len(args) < 2:
+                continue
+            out[(command, *args)] = ("test", _unquote(args[1]))
+        else:
+            out[(command, *args)] = ("target", _unquote(args[0]))
+    return out
+
+
+def changed_runtime_names(old: str, new: str) -> list[str]:
+    """Names (tests and suite targets) whose registration is new or edited."""
+    before = _runtime_sigs(old)
+    return sorted({name for sig, (_k, name) in _runtime_sigs(new).items()
+                   if sig not in before})
+
+
+def names_for_targets(targets: list[str], inventory: list[dict]
+                      ) -> tuple[list[str], dict[str, list[str]]]:
+    names: list[str] = []
+    labels: dict[str, list[str]] = {}
+    wanted = set(targets)
+    for entry in inventory:
+        if entry.get("exe") in wanted:
+            names.append(entry["name"])
+            labels[entry["name"]] = list(entry.get("labels", []))
+    return names, labels
+
+
+def runtime_violations(changed_names: list[str], times: dict[str, float],
+                       labels: dict[str, list[str]], excluded: list[str],
+                       limit: float) -> list[tuple[str, float]]:
+    excluded_set = set(excluded)
+    out = []
+    for name in changed_names:
+        took = times.get(name)
+        if took is not None and took > limit \
+                and not (set(labels.get(name, [])) & excluded_set):
+            out.append((name, took))
+    return out
+
+
+def _ctest_inventory(build_dir: Path) -> list[dict] | None:
+    import subprocess
+    try:
+        res = subprocess.run(
+            ["ctest", "--test-dir", str(build_dir), "--show-only=json-v1"],
+            capture_output=True, text=True, encoding="utf-8",
+            timeout=120, check=False)
+        data = json.loads(res.stdout)
+    except (OSError, subprocess.SubprocessError, json.JSONDecodeError):
+        return None
+    inv = []
+    for t in data.get("tests", []):
+        cmd = t.get("command") or [""]
+        labels: list[str] = []
+        for prop in t.get("properties", []):
+            if prop.get("name") == "LABELS":
+                value = prop.get("value", [])
+                labels = value if isinstance(value, list) else [value]
+        inv.append({"name": t["name"], "exe": Path(cmd[0]).name, "labels": labels})
+    return inv
+
+
+def _git(*argv: str) -> str | None:
+    import subprocess
+    res = subprocess.run(["git", "-C", str(REPO_ROOT), *argv],
+                         capture_output=True, text=True,
+                         encoding="utf-8", check=False)
+    return res.stdout if res.returncode == 0 else None
+
+
+def _check_runtime(base: str, build_dir: Path, timing: Path | None,
+                   excluded: list[str]) -> int:
+    def skip(why: str) -> int:
+        print(f"ctest_label_exclusion_guard: SKIPPED runtime check — {why}. "
+              "Slow-test runtime NOT CHECKED (a skip is not a pass; exit "
+              f"{EXIT_NOT_CHECKED}).",
+              file=sys.stderr)
+        return EXIT_NOT_CHECKED
+
+    log = timing or (build_dir / "Testing" / "Temporary" / "LastTest.log")
+    if not log.is_file():
+        return skip(f"no timing data at {log}")
+    body = log.read_text(encoding="utf-8", errors="replace")
+    times = parse_junit_times(body) if log.suffix == ".xml" \
+        else parse_last_test_log(body)
+    if not times:
+        return skip(f"{log} holds no per-test timings")
+    changed_files = _git("diff", "--name-only", base, "--", str(SCAN_DIR))
+    if changed_files is None:
+        return skip(f"cannot diff against {base}")
+    changed: list[str] = []
+    for rel in changed_files.split():
+        new_path = REPO_ROOT / rel
+        new = new_path.read_text(encoding="utf-8", errors="replace") \
+            if new_path.is_file() else ""
+        old = _git("show", f"{base}:{rel}") or ""
+        changed.extend(changed_runtime_names(old, new))
+    if not changed:
+        print("ctest_label_exclusion_guard: runtime check OK — no registration "
+              f"changed against {base}.")
+        return 0
+    inventory = _ctest_inventory(build_dir)
+    names, labels = list(changed), {}
+    if inventory is not None:
+        extra, labels = names_for_targets(changed, inventory)
+        names += extra
+        for entry in inventory:
+            labels.setdefault(entry["name"], list(entry["labels"]))
+    bad = runtime_violations(names, times, labels, excluded, RUNTIME_LIMIT_S)
+    if bad:
+        print(f"ctest_label_exclusion_guard: FAIL — {len(bad)} newly registered "
+              f"test(s) took over {RUNTIME_LIMIT_S:.0f}s without a label the "
+              "required gate excludes:", file=sys.stderr)
+        for name, took in bad:
+            print(f"  {name} — {took:.0f}s", file=sys.stderr)
+        print("\nShrink the fixture or label the test `slow` (see the "
+              "long-timeout rule above).", file=sys.stderr)
+        return 1
+    print(f"ctest_label_exclusion_guard: runtime check OK — "
+          f"{len(names)} changed test(s) checked against {log}.")
+    return 0
+
+
+def _check_label_blind(registrations: list[Registration], targets: list[Path],
+                       excluded: list[str], allowed: dict[str, str]) -> int:
+    all_blind = find_blind_targets(registrations, excluded)
+    blind_names = {t for t, _r, _h in all_blind}
+    blind = [b for b in all_blind if b[0] not in allowed]
+
+    # A frozen entry whose suite is no longer blind is a dead exemption. Left
+    # alone it rots into cover for a future regression on the same target, which
+    # is the failure shape this guard exists to catch, so it is an error with a
+    # one-line fix rather than a warning nobody reads.
+    scanned_targets = {r.target for r in registrations}
+    stale = sorted(
+        t for t in allowed
+        if t in scanned_targets and t not in blind_names)
+    if stale and not blind:
+        print("ctest_label_exclusion_guard: FAIL — stale entries in "
+              f"{ALLOWLIST_FILE}; these suites now reach an enforced lane:",
+              file=sys.stderr)
+        for t in stale:
+            print(f"  {t}", file=sys.stderr)
+        print("\nDelete each line above. The exemption no longer describes "
+              "anything, and leaving it in place would silently cover a future "
+              "regression that re-blinds the same suite.", file=sys.stderr)
+        return 1
+
+    if blind:
+        print(f"ctest_label_exclusion_guard: FAIL — {len(blind)} Catch2 suite(s) "
+              f"registered ONLY behind an excluded ctest label:", file=sys.stderr)
+        for target, regs, hits in blind:
+            where = ", ".join(
+                f"{r.path.relative_to(REPO_ROOT) if r.path.is_absolute() else r.path}"
+                f":{r.lineno}" for r in regs)
+            print(f"  {target} — label(s) {', '.join(hits)} — {where}",
+                  file=sys.stderr)
+        first_target, _regs, first_hits = blind[0]
+        print(
+            f"\nThe excluded-label list is {'|'.join(excluded)}, read from "
+            f"{POLICY_FILE}. A suite whose EVERY registration carries one of "
+            f"those labels runs in neither of the two lanes that gate a PR: the "
+            f"required `macos` gate applies the list with `-LE`, and the "
+            f"diff-coverage lane applies it with `--label-exclude`. So the "
+            f"suite's cases are enforced by nothing, and the lines they cover "
+            f"report as uncovered — the coverage gate calls the change untested "
+            f"while the required gate never runs the tests that test it. Both "
+            f"readings are correct, and together they read as a missing test "
+            f"rather than a missing lane."
+            + _FIX.format(target=first_target, label=first_hits[0]),
+            file=sys.stderr)
+        return 1
+
+    frozen = len([t for t in allowed if t in blind_names])
+    print(f"ctest_label_exclusion_guard: OK — {len(registrations)} Catch2 suite "
+          f"registration(s) across {len(targets)} manifest(s); "
+          f"{len(all_blind)} label-blind, all {frozen} accounted for in "
+          f"{ALLOWLIST_FILE}.")
+    return 0
+
+
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description=(
@@ -352,6 +859,24 @@ def _build_parser() -> argparse.ArgumentParser:
         "--no-allowlist",
         action="store_true",
         help="ignore the frozen backlog and report every blind suite",
+    )
+    parser.add_argument(
+        "--runtime-base",
+        metavar="REF",
+        help="also check the measured runtime of registrations changed against "
+             "REF, from the local build's CTest timing data (skips loudly when "
+             "none exists)",
+    )
+    parser.add_argument(
+        "--build-dir",
+        type=Path,
+        default=REPO_ROOT / "build",
+        help="build tree holding Testing/Temporary/LastTest.log (default: build)",
+    )
+    parser.add_argument(
+        "--timing",
+        type=Path,
+        help="explicit LastTest.log or ctest JUnit XML instead of the build tree's",
     )
     parser.add_argument(
         "targets",
@@ -425,60 +950,26 @@ def main(argv: list[str] | None = None) -> int:
         )
         return 1
 
-    all_blind = find_blind_targets(registrations, excluded)
-    blind_names = {t for t, _r, _h in all_blind}
-    blind = [b for b in all_blind if b[0] not in allowed]
+    rc = _check_label_blind(registrations, targets, excluded, allowed)
 
-    # A frozen entry whose suite is no longer blind is a dead exemption. Left
-    # alone it rots into cover for a future regression on the same target, which
-    # is the failure shape this guard exists to catch — so it is an error with a
-    # one-line fix rather than a warning nobody reads.
-    scanned_targets = {r.target for r in registrations}
-    stale = sorted(
-        t for t in allowed
-        if t in scanned_targets and t not in blind_names)
-    if stale and not blind:
-        print("ctest_label_exclusion_guard: FAIL — stale entries in "
-              f"{ALLOWLIST_FILE}; these suites now reach an enforced lane:",
-              file=sys.stderr)
-        for t in stale:
-            print(f"  {t}", file=sys.stderr)
-        print("\nDelete each line above. The exemption no longer describes "
-              "anything, and leaving it in place would silently cover a future "
-              "regression that re-blinds the same suite.", file=sys.stderr)
-        return 1
+    timeout_allowed: dict[str, str] = {}
+    if not args.no_allowlist:
+        try:
+            timeout_allowed = read_timeout_allowlist(args.allowlist)
+        except (ValueError, json.JSONDecodeError) as exc:
+            print(f"ctest_label_exclusion_guard: FAIL — {exc}", file=sys.stderr)
+            return 1
+    timeout_regs: list[TimeoutRegistration] = []
+    for path in targets:
+        timeout_regs.extend(scan_timeouts(path))
+    rc = max(rc, _check_long_timeouts(timeout_regs, excluded, timeout_allowed))
 
-    if blind:
-        print(f"ctest_label_exclusion_guard: FAIL — {len(blind)} Catch2 suite(s) "
-              f"registered ONLY behind an excluded ctest label:", file=sys.stderr)
-        for target, regs, hits in blind:
-            where = ", ".join(
-                f"{r.path.relative_to(REPO_ROOT) if r.path.is_absolute() else r.path}"
-                f":{r.lineno}" for r in regs)
-            print(f"  {target} — label(s) {', '.join(hits)} — {where}",
-                  file=sys.stderr)
-        first_target, _regs, first_hits = blind[0]
-        print(
-            f"\nThe excluded-label list is {'|'.join(excluded)}, read from "
-            f"{POLICY_FILE}. A suite whose EVERY registration carries one of "
-            f"those labels runs in neither of the two lanes that gate a PR: the "
-            f"required `macos` gate applies the list with `-LE`, and the "
-            f"diff-coverage lane applies it with `--label-exclude`. So the "
-            f"suite's cases are enforced by nothing, and the lines they cover "
-            f"report as uncovered — the coverage gate calls the change untested "
-            f"while the required gate never runs the tests that test it. Both "
-            f"readings are correct, and together they read as a missing test "
-            f"rather than a missing lane."
-            + _FIX.format(target=first_target, label=first_hits[0]),
-            file=sys.stderr)
-        return 1
-
-    frozen = len([t for t in allowed if t in blind_names])
-    print(f"ctest_label_exclusion_guard: OK — {len(registrations)} Catch2 suite "
-          f"registration(s) across {len(targets)} manifest(s); "
-          f"{len(all_blind)} label-blind, all {frozen} accounted for in "
-          f"{ALLOWLIST_FILE}.")
-    return 0
+    # A static failure outranks a runtime skip: NOT CHECKED is reported only
+    # when everything that did run passed.
+    if args.runtime_base and rc == 0:
+        rc = _check_runtime(args.runtime_base, args.build_dir,
+                            args.timing, excluded)
+    return rc
 
 
 if __name__ == "__main__":
