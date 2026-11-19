@@ -82,6 +82,8 @@ GATE_DIR = "build-gate"
 TEST = "script-test-inputs-drift"
 LANE_TEST = "source-selftest-lane-contract"
 FAMILIES_TEST = "changed-surface-script-families-drift"
+# The families checker exits 77 when it skipped (no usable build); see changed_surface_script_families.py.
+SKIP_EXIT = 77
 CENSUS_TEST = "consumption-census-drift"
 CENSUS_SCRIPT = Path("tools/scripts/consumption_census.py")
 CENSUS_FILE = "docs/status/consumption-profiles.json"
@@ -355,7 +357,8 @@ def check_families_static(root: Path, base: str) -> int:
     return rc if rc in (0, 1) else 2
 
 
-def families_unverified(families_paths: list[str], static_rc: int, why: str) -> int:
+def families_unverified(families_paths: list[str], static_rc: int, why: str,
+                        skipped: bool = False) -> int:
     """The configured families check did not run. A change to a surface it
     blocks fails here rather than one CI round trip later; any other change
     keeps the check NOT CHECKED."""
@@ -372,6 +375,13 @@ def families_unverified(families_paths: list[str], static_rc: int, why: str) -> 
     say("  Verify it before pushing, from any configured Ninja build (configure only, no compile):")
     say("    tools/scripts/gates.sh origin/main          # configures one when none is usable")
     say("    PULP_GATES_BUILD_DIR=<configured dir> tools/scripts/gates.sh origin/main")
+    if skipped:
+        say("  The check skipped because the build is missing a prerequisite; it needs all of:")
+        say("    a gate-profile configure:   cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release "
+            "-DPULP_BUILD_EXAMPLES=OFF")
+        say("    the CMake file-API query:   mkdir -p build/.cmake/api/v1/query && "
+            "touch build/.cmake/api/v1/query/codemodel-v2   (then reconfigure)")
+        say("    the jsx-runtime packages:   (cd tools/import-design/jsx-runtime && npm ci)")
     say("  and on drift regenerate and commit the file (any fleet host, gate hosts included):")
     say("    python3 tools/scripts/changed_surface_script_families.py --configure-only --write")
     say("    git add .shipyard/changed-surface-families.toml")
@@ -411,8 +421,15 @@ def check_families(root: Path, build: Path, shown: str, base: str,
                          "python3 tools/scripts/changed_surface_script_families.py --configure-only --write"))
         say("    git add .shipyard/changed-surface-families.toml")
         return 1
-    return families_unverified(families_paths, static_rc,
-                               f"changed_surface_script_families.py --check exited {rc} on {shown}")
+    why = f"changed_surface_script_families.py --check exited {rc} on {shown}"
+    if rc == SKIP_EXIT:
+        # The checker names its own reason one line above; carry it into the failing line
+        # so the cause is not a bare exit code.
+        reason = next((ln.split("SKIP:", 1)[1].strip() for ln in reversed(out.splitlines())
+                       if "SKIP:" in ln), "")
+        if reason:
+            why += f"; checker says: {reason}"
+    return families_unverified(families_paths, static_rc, why, skipped=rc == SKIP_EXIT)
 
 
 if __name__ == "__main__":
