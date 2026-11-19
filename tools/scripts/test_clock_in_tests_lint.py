@@ -48,6 +48,18 @@ class FlaggedTest(unittest.TestCase):
         lines = [(1, "value = time."), (2, "    time()")]
         self.assertEqual(len(lint.scan_lines(TEST_FILE, lines, NO_BASELINE, added_numbers={2})), 1)  # clock-ok: fixture text
 
+    def test_comments_between_qualifier_and_selector_are_flagged(self):
+        source = "value = (time  # qualifier\n    .time())"
+        self.assertEqual(len(scan(source)), 1)  # clock-ok: fixture text
+
+    def test_parenthesized_qualifier_is_flagged(self):
+        self.assertEqual(len(scan("value = (time).time()")), 1)  # clock-ok: fixture text
+
+    def test_malformed_source_fails_closed(self):
+        findings = scan("value = time.time()\nvalue = (")
+        self.assertEqual(len(findings), 1)  # clock-ok: fixture text
+        self.assertIn("could not tokenize", findings[0])  # clock-ok: fixture text
+
     def test_marker_inside_multiline_string_does_not_bypass_lint(self):
         source = 's = """start\n"""\nvalue = time.time()\ntail = """# clock-ok: fake\nend"""'
         self.assertEqual(len(scan(source)), 1)  # clock-ok: fixture text

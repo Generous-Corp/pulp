@@ -93,7 +93,7 @@ def _clock_tokens(source: str):
     try:
         tokens = list(tokenize.generate_tokens(io.StringIO(source).readline))
     except (tokenize.TokenError, IndentationError, SyntaxError):
-        return []
+        return None
     methods = {
         "datetime": {"now", "today", "utcnow"},
         "date": {"today"},
@@ -104,12 +104,16 @@ def _clock_tokens(source: str):
         if token.type != tokenize.NAME or token.string not in methods:
             continue
         cursor = index + 1
-        while cursor < len(tokens) and tokens[cursor].type in (tokenize.NL, tokenize.NEWLINE, tokenize.INDENT, tokenize.DEDENT):
+        while cursor < len(tokens) and tokens[cursor].type in (tokenize.NL, tokenize.NEWLINE, tokenize.INDENT, tokenize.DEDENT, tokenize.COMMENT):
             cursor += 1
+        if cursor < len(tokens) and tokens[cursor].string == ")":
+            cursor += 1
+            while cursor < len(tokens) and tokens[cursor].type in (tokenize.NL, tokenize.NEWLINE, tokenize.INDENT, tokenize.DEDENT, tokenize.COMMENT):
+                cursor += 1
         if cursor >= len(tokens) or tokens[cursor].string != ".":
             continue
         cursor += 1
-        while cursor < len(tokens) and tokens[cursor].type in (tokenize.NL, tokenize.NEWLINE, tokenize.INDENT, tokenize.DEDENT):
+        while cursor < len(tokens) and tokens[cursor].type in (tokenize.NL, tokenize.NEWLINE, tokenize.INDENT, tokenize.DEDENT, tokenize.COMMENT):
             cursor += 1
         if cursor >= len(tokens) or tokens[cursor].type != tokenize.NAME or tokens[cursor].string not in methods[token.string]:
             continue
@@ -138,7 +142,10 @@ def scan_lines(rel: str, lines: list[tuple[int, str]], baseline=None, *, consume
                 marker_lines.add(token.start[0])
     except (tokenize.TokenError, IndentationError, SyntaxError):
         pass
-    for start, end in _clock_tokens(source):
+    spans = _clock_tokens(source)
+    if spans is None:
+        return [f"{rel}:1: could not tokenize source while checking clock reads"]
+    for start, end in spans:
         span_indexes = range(start - 1, min(end, len(logical_records)))
         span_numbers = {logical_records[index][0] for index in span_indexes}
         if added_numbers is not None and not (span_numbers & added_numbers):
@@ -214,14 +221,23 @@ def added_lines(base: str, head: str | None) -> dict[str, list[tuple[int, str]]]
     return result
 
 
-def tracked_lines() -> dict[str, list[tuple[int, str]]]:
+def tracked_lines(ref: str | None = None) -> dict[str, list[tuple[int, str]]]:
     result: dict[str, list[tuple[int, str]]] = {}
     for rel in _git(["ls-files", "-z", "tools"]).split("\0"):
         if not rel:
             continue
-        if in_scope(rel) and (ROOT / rel).is_file():
-            text = (ROOT / rel).read_text(encoding="utf-8", errors="replace")
-            result[rel] = list(enumerate(text.splitlines(), 1))
+        if not in_scope(rel):
+            continue
+        if ref is None:
+            if not (ROOT / rel).is_file():
+                continue
+            text = (ROOT / rel).read_bytes().decode("utf-8", errors="replace")
+        else:
+            try:
+                text = _git(["show", f"{ref}:{rel}"])
+            except subprocess.CalledProcessError:
+                continue
+        result[rel] = list(enumerate(text.split("\n"), 1))
     return result
 
 
@@ -249,7 +265,7 @@ def main(argv: list[str]) -> int:
         added_by_file: dict[str, set[int]] = {}
     else:
         added = added_lines(args.base, args.head)
-        all_tracked = tracked_lines()
+        all_tracked = tracked_lines(args.head or "HEAD")
         source = {rel: all_tracked.get(rel, lines) for rel, lines in added.items()}
         added_by_file = {rel: {number for number, _ in lines} for rel, lines in added.items()}
     baseline = load_base_baseline(args.base) if not args.all else load_baseline()
