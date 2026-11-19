@@ -38,6 +38,8 @@ function(pulp_sample_region_web_sources ROOT OUT)
         "${ROOT}/core/host/src/graph_serializer_regions.cpp"
         # Plugin node resolution; the web variant leaves plugin nodes unresolved.
         "${ROOT}/core/host/src/graph_serializer_plugin_resolver.cpp"
+        # The save path: writer selection, saved-identity documents and file writes.
+        "${ROOT}/core/host/src/graph_serializer_save.cpp"
         # graph_serializer.cpp validates voice-template declarations through
         # subgraph_voices.cpp, which instantiates templates via
         # subgraph_persistence.cpp.

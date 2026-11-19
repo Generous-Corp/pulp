@@ -38,6 +38,7 @@ target_sources(pulp-host PRIVATE
     src/graph_serializer.cpp
     src/graph_serializer_regions.cpp
     src/graph_serializer_plugin_resolver.cpp
+    src/graph_serializer_save.cpp
     src/graph_patch.cpp
     src/graph_patch_constructors.cpp
     src/graph_file_reload.cpp
