@@ -53,6 +53,53 @@ function(_pulp_binary_contains bytes_var marker out_var)
     endif()
 endfunction()
 
+# `otool -L` for `path`. Apple's otool reads a trailing "(...)" in a path as
+# archive-member syntax (`lib.a(member.o)`), so for an artifact named like
+# "My Synth (Beta)" it looks for "My Synth " and fails. Such a path is handed
+# to otool through a plain-named symlink (a copy where links are refused) in
+# `work_dir`; nm and lipo take the real path. Sets <out>, <result> and <err>.
+function(_pulp_otool_dependencies path work_dir out result err)
+    set(_scan_path "${path}")
+    set(_scan_link "")
+    get_filename_component(_leaf "${path}" NAME)
+    if(_leaf MATCHES "\\(")
+        file(MAKE_DIRECTORY "${work_dir}")
+        string(MD5 _id "${path}")
+        set(_scan_link "${work_dir}/otool-scan-${_id}.bin")
+        file(REMOVE "${_scan_link}")
+        file(CREATE_LINK "${path}" "${_scan_link}" SYMBOLIC RESULT _link_rc)
+        if(NOT _link_rc EQUAL 0)
+            file(COPY_FILE "${path}" "${_scan_link}")
+        endif()
+        set(_scan_path "${_scan_link}")
+    endif()
+    execute_process(COMMAND "${_pulp_otool}" -L "${_scan_path}"
+        RESULT_VARIABLE _rc OUTPUT_VARIABLE _out ERROR_VARIABLE _err)
+    if(_scan_link)
+        file(REMOVE "${_scan_link}")
+    endif()
+    set(${out} "${_out}" PARENT_SCOPE)
+    set(${result} "${_rc}" PARENT_SCOPE)
+    set(${err} "${_err}" PARENT_SCOPE)
+endfunction()
+
+# Dependency scan for tests: -DPULP_CONTROL_OTOOL_SELFTEST=<path>
+# -DPULP_CONTROL_OTOOL_WORKDIR=<dir> prints otool -L's output for the path (so
+# a parenthesised name can be checked without a full scan) and stops.
+if(DEFINED PULP_CONTROL_OTOOL_SELFTEST)
+    find_program(_pulp_otool NAMES otool)
+    if(NOT _pulp_otool)
+        message(FATAL_ERROR "otool is not available")
+    endif()
+    _pulp_otool_dependencies("${PULP_CONTROL_OTOOL_SELFTEST}" "${PULP_CONTROL_OTOOL_WORKDIR}"
+        _selftest_out _selftest_rc _selftest_err)
+    if(NOT _selftest_rc EQUAL 0)
+        message(FATAL_ERROR "otool dependency scan failed: ${_selftest_err}")
+    endif()
+    message(STATUS "otool dependency scan ok:\n${_selftest_out}")
+    return()
+endif()
+
 # Admission check for a single marker, for tests: run the scanner with
 # -DPULP_CONTROL_MARKER_SELFTEST=<marker> and it applies the rule
 # _pulp_binary_contains enforces, then stops without reading any artifact.
@@ -280,9 +327,13 @@ if(APPLE)
     find_program(_pulp_nm NAMES nm llvm-nm)
     find_program(_pulp_lipo NAMES lipo)
     if(_pulp_otool)
-        execute_process(COMMAND "${_pulp_otool}" -L "${ARTIFACT}"
-            RESULT_VARIABLE _dependency_result OUTPUT_VARIABLE _dependency_output
-            ERROR_VARIABLE _dependency_error)
+        if(DEFINED REPORT)
+            get_filename_component(_otool_work_dir "${REPORT}" DIRECTORY)
+        else()
+            set(_otool_work_dir "${CMAKE_CURRENT_BINARY_DIR}")
+        endif()
+        _pulp_otool_dependencies("${ARTIFACT}" "${_otool_work_dir}"
+            _dependency_output _dependency_result _dependency_error)
         if(NOT _dependency_result EQUAL 0)
             message(FATAL_ERROR "otool dependency scan failed: ${_dependency_error}")
         endif()
