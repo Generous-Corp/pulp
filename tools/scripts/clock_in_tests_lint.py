@@ -86,15 +86,21 @@ def load_baseline(path: Path = BASELINE) -> tuple[dict[str, str], set[tuple[str,
     return files, lines
 
 
-def scan_lines(rel: str, lines: list[tuple[int, str]], baseline=None) -> list[str]:
+def scan_lines(rel: str, lines: list[tuple[int, str]], baseline=None, *, consume_baseline: bool = False) -> list[str]:
     _, entries = baseline if baseline is not None else load_baseline()
+    remaining = set(entries)
     out = []
     for number, text in lines:
         # Patch records are LF-delimited, but Python also treats CR as a
         # source newline. Scan each logical source segment so a comment before
         # an embedded CR cannot hide an executable clock read.
         for logical in text.replace("\r", "\n").split("\n"):
-            if flagged(logical) and (rel, logical.strip()) not in entries:
+            key = (rel, logical.strip())
+            exempt = key in (remaining if consume_baseline else entries)
+            if flagged(logical) and exempt:
+                if consume_baseline:
+                    remaining.remove(key)
+            elif flagged(logical):
                 out.append(f"{rel}:{number}: reads the real clock: {logical.strip()}")
     return out
 
@@ -183,7 +189,7 @@ def main(argv: list[str]) -> int:
     source = tracked_lines() if args.all else added_lines(args.base, args.head)
     baseline = load_base_baseline(args.base) if not args.all else load_baseline()
     for rel, lines in sorted(source.items()):
-        found.extend(scan_lines(rel, lines, baseline))
+        found.extend(scan_lines(rel, lines, baseline, consume_baseline=not args.all))
     if found:
         print("\n".join(found), file=sys.stderr)
         print(

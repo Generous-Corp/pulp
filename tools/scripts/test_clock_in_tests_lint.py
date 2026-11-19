@@ -142,6 +142,11 @@ class DiffScopeTest(unittest.TestCase):
                 lint.ROOT = old_root
             self.assertEqual(added["tools/test_a.py"], [(2, "new = time.time()")])  # clock-ok: fixture text
 
+    def test_duplicate_added_baseline_line_is_not_exempted_twice(self):
+        base = ({}, {(TEST_FILE, "x = date.today()")})
+        lines = [(1, "x = date.today()"), (2, "x = date.today()")]  # clock-ok: fixture text
+        self.assertEqual(len(lint.scan_lines(TEST_FILE, lines, base, consume_baseline=True)), 1)
+
     def test_head_only_baseline_cannot_exempt_new_clock_read(self):
         with tempfile.TemporaryDirectory() as tmp:
             repo = Path(tmp)
