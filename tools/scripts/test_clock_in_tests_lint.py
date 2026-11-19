@@ -68,6 +68,17 @@ class FlaggedTest(unittest.TestCase):
 class DiffScopeTest(unittest.TestCase):
     """End to end on a scratch repo: only added lines are judged."""
 
+    def test_quoted_destination_header_is_scanned(self):
+        original = lint._git
+        calls = iter(["base\n", '+++ "b/tools/x/test_thing space.py"\n@@ -1,0 +1,1 @@\n+x = time.time()\n'])  # clock-ok: fixture text
+        lint._git = lambda _args: next(calls)
+        try:
+            self.assertEqual(lint.added_lines("base", "HEAD"), {
+                "tools/x/test_thing space.py": [(1, "x = time.time()")]  # clock-ok: fixture text
+            })
+        finally:
+            lint._git = original
+
     def test_planted_line_fails_and_existing_line_does_not(self):
         with tempfile.TemporaryDirectory() as tmp:
             repo = Path(tmp)

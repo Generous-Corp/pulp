@@ -40,6 +40,7 @@ Exit status: 0 clean, 1 a flagged line.
 from __future__ import annotations
 
 import argparse
+import ast
 import io
 import json
 import re
@@ -113,7 +114,7 @@ def _git(args: list[str]) -> str:
 
 def added_lines(base: str, head: str | None) -> dict[str, list[tuple[int, str]]]:
     merge_base = _git(["merge-base", base, head or "HEAD"]).strip()
-    cmd = ["diff", "-U0", "--no-color", "--no-renames", "--diff-filter=AM", merge_base]
+    cmd = ["-c", "core.quotePath=false", "-c", "diff.noprefix=false", "-c", "diff.mnemonicPrefix=false", "diff", "-U0", "--no-color", "--no-renames", "--diff-filter=AM", "--src-prefix=a/", "--dst-prefix=b/", merge_base]
     if head:
         cmd.append(head)
     result: dict[str, list[tuple[int, str]]] = {}
@@ -124,8 +125,18 @@ def added_lines(base: str, head: str | None) -> dict[str, list[tuple[int, str]]]
         if raw.startswith("diff --git "):
             current = None
             in_hunk = False
-        elif not in_hunk and raw.startswith("+++ b/"):
-            current = raw[6:]
+        elif not in_hunk and raw.startswith("+++ "):
+            payload = raw[4:]
+            if payload.startswith("b/"):
+                current = payload[2:]
+            elif payload.startswith('"'):
+                try:
+                    decoded = ast.literal_eval(payload)
+                except (SyntaxError, ValueError):
+                    decoded = ""
+                current = decoded[2:] if decoded.startswith("b/") else None
+            else:
+                current = None
         elif raw.startswith("@@"):
             in_hunk = True
             number = int(re.search(r"\+(\d+)", raw).group(1))

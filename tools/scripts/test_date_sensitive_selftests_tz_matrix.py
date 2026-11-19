@@ -54,6 +54,14 @@ class MatrixTest(unittest.TestCase):
         self.assertEqual(results["UTC"], 0)
         self.assertNotEqual(results["Pacific/Kiritimati"], 0)
 
+    def test_valid_temp_config_runs_from_config_root(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "pin.py").write_text(PINNED, encoding="utf-8")
+            cfg = root / "c.json"
+            cfg.write_text(json.dumps({"zones": ZONES, "tests": [{"path": "pin.py", "reason": "fixture"}], "pending": []}), encoding="utf-8")
+            self.assertEqual(matrix.main(["--config", str(cfg)]), 0)
+
     def test_pending_only_configuration_fails_closed(self):
         with tempfile.TemporaryDirectory() as tmp:
             cfg = Path(tmp) / "c.json"

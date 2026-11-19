@@ -94,7 +94,9 @@ def main(argv: list[str]) -> int:
         tests += pending
     elif pending:
         print("pending (not run): " + ", ".join(pending))
-    bad = failures(run_matrix(tests, zones))
+    configured_root = args.config.resolve()
+    root = ROOT if configured_root.is_relative_to(ROOT.resolve()) else configured_root.parent
+    bad = failures(run_matrix(tests, zones, root))
     if bad:
         print("date-sensitive selftests disagree across zones:\n  " + "\n  ".join(bad), file=sys.stderr)
         print("A result that depends on the zone depends on the real clock; pin the date.", file=sys.stderr)
