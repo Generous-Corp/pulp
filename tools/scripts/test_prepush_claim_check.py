@@ -224,7 +224,7 @@ prepush_claim_check_final
         # local repository. Unrelated expensive gates are absent in the fixture.
         repo = self.dir / "owner-repo"
         remote = self.dir / "destination.git"
-        (repo / "tools/scripts").mkdir(parents=True)
+        (repo / "tools" / "scripts").mkdir(parents=True)
         (repo / ".githooks").mkdir()
         source = ROOT / "worktree_lineage.sh"
         target = repo / "tools/scripts/worktree_lineage.sh"
