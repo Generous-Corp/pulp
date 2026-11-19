@@ -164,7 +164,13 @@ def _open_locks(build_dir: Path) -> list[tuple[Path, BinaryIO]]:
     try:
         opened.append(_open_lock_in_root(build_dir, root))
     except OSError as exc:
-        if exc.errno not in {errno.EACCES, errno.EPERM, errno.EROFS}:
+        # _ensure_lock_root raises PermissionError with errno None for a
+        # foreign-owned root; that is a permission condition too.
+        if not isinstance(exc, PermissionError) and exc.errno not in {
+            errno.EACCES,
+            errno.EPERM,
+            errno.EROFS,
+        }:
             raise
         print(
             f"[build-dir-lock] {root} is not writable; using {fallback}",

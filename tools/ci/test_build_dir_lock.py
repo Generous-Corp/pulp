@@ -220,6 +220,23 @@ class BuildDirLockTest(unittest.TestCase):
                 opened = build_dir_lock._open_locks(base / "build")
             self.assertEqual(opened, [fallback_open])
 
+    def test_foreign_owned_default_root_uses_fallback(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            base = Path(directory)
+            fallback_open = (base / "fallback" / "lock", object())
+            env = {k: v for k, v in os.environ.items() if k != build_dir_lock.LOCK_ROOT_ENV}
+            with mock.patch.dict("os.environ", env, clear=True), mock.patch.object(
+                build_dir_lock, "lock_root", return_value=base / "default"
+            ), mock.patch.object(
+                build_dir_lock, "fallback_lock_root", return_value=base / "fallback"
+            ), mock.patch.object(
+                build_dir_lock,
+                "_open_lock_in_root",
+                side_effect=[fallback_open, PermissionError("root is not owned by this user")],
+            ):
+                opened = build_dir_lock._open_locks(base / "build")
+            self.assertEqual(opened, [fallback_open])
+
     def test_nonblocking_lock_io_error_is_not_reported_as_busy(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             with self.lock_root(Path(directory) / "state"), mock.patch.object(
