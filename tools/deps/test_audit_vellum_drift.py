@@ -253,6 +253,135 @@ class GpuRuntimePinTests(unittest.TestCase):
         self.assertEqual(audit.gpu_runtime_pin_agreement([], self.root), [])
 
 
+    # Each pin assertion, with the real command removed and a fake one placed
+    # where the real one would count. "bare" is the control: the fake as real
+    # code must satisfy the assertion, so the hidden forms fail only because
+    # they are hidden.
+    REAL_DECLARE = ("    FetchContent_Declare(\n"
+                    "        vellum_gpu_runtime\n"
+                    "        GIT_REPOSITORY https://github.com/Generous-Corp/vellum.git\n"
+                    "        GIT_TAG ${PULP_GPU_RUNTIME_COMMIT}\n"
+                    "        SOURCE_SUBDIR gpu-runtime\n"
+                    "    )\n")
+    MAKE_AVAILABLE = "FetchContent_MakeAvailable(vellum_gpu_runtime)\n"
+    PIN_CASES = {
+        "include": (
+            'include("${CMAKE_CURRENT_LIST_DIR}/PulpVellumLock.cmake")\n', "",
+            "set(PULP_GPU_RUNTIME_PREFIX",
+            'include("${CMAKE_CURRENT_LIST_DIR}/PulpVellumLock.cmake")',
+            "does not include PulpVellumLock.cmake"),
+        "declare": (
+            REAL_DECLARE, "", "    set(GPU_RUNTIME_SKIA_DIR \"${SKIA_DIR}\" CACHE",
+            "FetchContent_Declare(vellum_gpu_runtime GIT_REPOSITORY "
+            "https://github.com/Generous-Corp/vellum.git GIT_TAG ${PULP_GPU_RUNTIME_COMMIT} "
+            "SOURCE_SUBDIR gpu-runtime)",
+            "declare FetchContent vellum_gpu_runtime exactly once"),
+        "version check": (
+            "if(NOT _pulp_gpu_runtime_version STREQUAL PULP_GPU_RUNTIME_VERSION)",
+            'if(NOT _pulp_gpu_runtime_version STREQUAL "0.0.0")',
+            "    get_directory_property(_pulp_gpu_runtime_version",
+            "if(NOT _pulp_gpu_runtime_version STREQUAL PULP_GPU_RUNTIME_VERSION)\n"
+            "message(FATAL_ERROR stop)\nendif()",
+            "check on the fetched source"),
+        "prefix package": (
+            "pulp_find_gpu_runtime_package(${PULP_GPU_RUNTIME_VERSION}",
+            "pulp_find_gpu_runtime_package(0.0.0",
+            "    set(GPU_RUNTIME_SKIA_DIR \"${SKIA_DIR}\")",
+            "pulp_find_gpu_runtime_package(${PULP_GPU_RUNTIME_VERSION} p e)",
+            "prefix package"),
+    }
+
+    @staticmethod
+    def hidden_forms(fake: str) -> dict[str, str | None]:
+        commented = "\n".join("# " + line for line in fake.splitlines())
+        escaped = fake.replace('"', '\\"')
+        return {
+            "bare": None,
+            "line comment": commented,
+            "bracket comment": f"#[[\n{fake}\n]]",
+            "bracket comment with equals": f"#[==[\n{fake}\n]==]",
+            "quoted argument": f'set(_pulp_doc "\n{escaped}\n")',
+            "bracket argument": f"set(_pulp_doc [=[\n{fake}\n]=])",
+            "constant-false branch": f"if(FALSE)\n{fake}\nendif()",
+            "function body": f"function(_pulp_never_called)\n{fake}\nendfunction()",
+        }
+
+    def test_fake_pins_in_comments_strings_brackets_and_dead_code_do_not_count(self) -> None:
+        original = (ROOT / self.GPU).read_text(encoding="utf-8")
+        for assertion, (real, replacement, before, fake, fragment) in self.PIN_CASES.items():
+            self.assertIn(real, original)
+            self.assertIn(before, original)
+            for form, hidden in self.hidden_forms(fake).items():
+                with self.subTest(assertion=assertion, form=form):
+                    text = original.replace(real, replacement, 1)
+                    text = text.replace(before, f"{hidden or fake}\n{before}", 1)
+                    (self.root / self.GPU).write_text(text, encoding="utf-8")
+                    found = self.problems()
+                    if hidden is None:
+                        self.assertEqual(found, [])
+                    else:
+                        self.assertTrue(any(fragment in problem for problem in found), found)
+
+    def test_a_top_level_return_before_the_include_fails(self) -> None:
+        self.edit(self.GPU, 'include("${CMAKE_CURRENT_LIST_DIR}/PulpVellumLock.cmake")',
+                  'return()\ninclude("${CMAKE_CURRENT_LIST_DIR}/PulpVellumLock.cmake")')
+        self.assertFlags("does not include PulpVellumLock.cmake")
+
+    def test_a_declaration_before_the_include_fails(self) -> None:
+        self.edit(self.GPU, 'include("${CMAKE_CURRENT_LIST_DIR}/PulpVellumLock.cmake")\n', "")
+        self.edit(self.GPU, "include(FetchContent)",
+                  'include(FetchContent)\ninclude("${CMAKE_CURRENT_LIST_DIR}/PulpVellumLock.cmake")')
+        self.assertFlags("does not include PulpVellumLock.cmake at top level")
+
+    def test_a_git_tag_in_a_bracket_argument_does_not_expand(self) -> None:
+        self.edit(self.GPU, "GIT_TAG ${PULP_GPU_RUNTIME_COMMIT}", "GIT_TAG [[${PULP_GPU_RUNTIME_COMMIT}]]")
+        self.assertFlags("GIT_TAG must be exactly")
+
+    def test_a_declaration_that_takes_its_source_elsewhere_fails(self) -> None:
+        self.edit(self.GPU, "SOURCE_SUBDIR gpu-runtime", "SOURCE_SUBDIR gpu-runtime\n        SOURCE_DIR /x")
+        self.assertFlags("takes its source from SOURCE_DIR")
+
+    def test_a_version_check_that_does_not_stop_configure_fails(self) -> None:
+        self.edit(self.GPU, "        message(FATAL_ERROR\n            \"Pulp: gpu-runtime at",
+                  "        message(WARNING\n            \"Pulp: gpu-runtime at")
+        self.assertFlags("check on the fetched source")
+
+    def test_pin_writes_are_found_by_command_not_text(self) -> None:
+        other = self.root / "tools/cmake/Other.cmake"
+        other.write_text('set(_doc "set(PULP_GPU_RUNTIME_COMMIT x)")\n'
+                         "set(_doc [[string(REPLACE a b PULP_GPU_RUNTIME_VERSION x)]])\n"
+                         "# set(PULP_VELLUM_sha x)\n", encoding="utf-8")
+        self.assertEqual(self.problems(), [])
+        for write in ('string(REPLACE a b PULP_GPU_RUNTIME_COMMIT "${PULP_GPU_RUNTIME_COMMIT}")',
+                      "unset(PULP_GPU_RUNTIME_VERSION)",
+                      'set("PULP_GPU_RUNTIME_COMMIT" x)',
+                      "set([[PULP_GPU_RUNTIME_VERSION]] x)",
+                      "set(PULP_VELLUM_sha 0)",
+                      "function(f)\nset(PULP_GPU_RUNTIME_COMMIT x PARENT_SCOPE)\nendfunction()"):
+            with self.subTest(write=write):
+                other.write_text(write + "\n", encoding="utf-8")
+                self.assertTrue(any("Other.cmake sets" in p for p in self.problems()), write)
+
+    def test_the_lock_reader_must_set_the_pin_after_reading_the_lock(self) -> None:
+        line = 'set(PULP_GPU_RUNTIME_COMMIT "${PULP_VELLUM_sha}")\n'
+        self.edit(self.LOCK, line, "")
+        self.edit(self.LOCK, "foreach(_field tag sha", line + "foreach(_field tag sha")
+        self.assertFlags("must set PULP_GPU_RUNTIME_COMMIT exactly once")
+
+    def test_the_lock_reader_may_not_overwrite_a_lock_field(self) -> None:
+        self.edit(self.LOCK, "unset(_pulp_vellum_lock)", "set(PULP_VELLUM_sha 0)\nunset(_pulp_vellum_lock)")
+        self.assertFlags("writes PULP_VELLUM_sha")
+
+    def test_redefining_a_relied_on_command_fails(self) -> None:
+        (self.root / "tools/cmake/Other.cmake").write_text(
+            "macro(FetchContent_Declare)\nendmacro()\n", encoding="utf-8")
+        self.assertFlags("redefines FetchContent_Declare()")
+
+    def test_unparseable_cmake_fails_closed(self) -> None:
+        self.edit(self.GPU, "SOURCE_SUBDIR gpu-runtime", 'SOURCE_SUBDIR "gpu-runtime')
+        self.assertFlags("cannot parse")
+
+
 class VellumDriftTests(unittest.TestCase):
     def test_match_passes_and_reads_the_pinned_commit(self) -> None:
         read = reader(vellum_module())
@@ -365,12 +494,98 @@ class VellumDriftTests(unittest.TestCase):
     def test_pulp_lock_agreement_reads_the_real_lock_and_catches_drift(self) -> None:
         import json
         real = json.loads((ROOT / "tools/deps/manifest.json").read_text(encoding="utf-8"))["dependencies"]
-        self.assertEqual(audit.pulp_lock_agreement(real), [])
+
+        def offline(*_args):
+            raise audit.VellumPinUnavailable("offline")
+
+        self.assertEqual([p for p in audit.pulp_lock_agreement(real, read_bytes=offline)
+                          if "cannot be checked: offline" not in p], [])
         stale = [{**dep, "upstream": {**dep.get("upstream", {}), "commit": "0" * 40}}
                  if dep.get("name") == audit.GPU_RUNTIME_ENTRY else dep for dep in real]
-        self.assertTrue(any("pulp.lock pins" in p for p in audit.pulp_lock_agreement(stale)))
+        self.assertTrue(any("pulp.lock pins" in p for p in audit.pulp_lock_agreement(stale, read_bytes=offline)))
         self.assertTrue(any("no " + audit.GPU_RUNTIME_ENTRY in p
-                            for p in audit.pulp_lock_agreement([])))
+                            for p in audit.pulp_lock_agreement([], read_bytes=offline)))
+
+
+LOCK_BYTES = b'{"schema": "gpu-runtime.renderer-lock.v1",\r\n "milestone": "chrome/m158"}\n'
+
+
+class RendererLockDigestTests(unittest.TestCase):
+    """pulp.lock's render_toolchain.lock_digest is sha256 of the renderer lock's bytes."""
+
+    def setUp(self) -> None:
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        self.root = Path(temporary.name)
+        import json
+        self.lock = json.loads((ROOT / "pulp.lock").read_text(encoding="utf-8"))
+        self.sha = self.lock["vellum"]["sha"]
+        self.manifest = json.loads(
+            (ROOT / "tools/deps/manifest.json").read_text(encoding="utf-8"))["dependencies"]
+
+    def write_lock(self, digest: str) -> None:
+        import json
+        self.lock["render_toolchain"]["lock_digest"] = digest
+        (self.root / "pulp.lock").write_text(json.dumps(self.lock), encoding="utf-8")
+
+    def reader(self, data: bytes = LOCK_BYTES):
+        calls = []
+
+        def read(repository: str, commit: str, path: str) -> bytes:
+            calls.append((repository, commit, path))
+            return data
+
+        read.calls = calls
+        return read
+
+    def test_the_matching_digest_passes_and_reads_at_the_lock_sha(self) -> None:
+        import hashlib
+        self.write_lock(hashlib.sha256(LOCK_BYTES).hexdigest())
+        read = self.reader()
+        self.assertEqual(audit.pulp_lock_agreement(self.manifest, self.root, read), [])
+        self.assertEqual(read.calls, [("https://github.com/Generous-Corp/vellum", self.sha,
+                                       "gpu-runtime/renderer-lock.json")])
+
+    def test_a_stale_digest_fails(self) -> None:
+        self.write_lock("0" * 64)
+        problems = audit.pulp_lock_agreement(self.manifest, self.root, self.reader())
+        self.assertTrue(any("render_toolchain.lock_digest is " + "0" * 64 in p
+                            and "hashes to" in p for p in problems), problems)
+
+    def test_an_unreadable_renderer_lock_fails_closed(self) -> None:
+        self.write_lock("0" * 64)
+
+        def unavailable(*_args):
+            raise audit.VellumPinUnavailable("offline")
+
+        problems = audit.pulp_lock_agreement(self.manifest, self.root, unavailable)
+        self.assertTrue(any("cannot be checked: offline" in p for p in problems), problems)
+
+    def test_the_drift_check_must_read_the_lock_commit(self) -> None:
+        import hashlib
+        self.write_lock(hashlib.sha256(LOCK_BYTES).hexdigest())
+        moved = [{**dep, audit.VELLUM_DRIFT_FIELD: {**dep[audit.VELLUM_DRIFT_FIELD], "commit": "e" * 40}}
+                 if dep.get("name") == "Skia" else dep for dep in self.manifest]
+        problems = audit.pulp_lock_agreement(moved, self.root, self.reader())
+        self.assertTrue(any("must be the same commit" in p for p in problems), problems)
+
+    def test_a_checkout_is_hashed_byte_for_byte_at_the_pinned_commit(self) -> None:
+        import hashlib
+        with tempfile.TemporaryDirectory() as td:
+            git = ["git", "-C", td, "-c", "user.email=t@example.invalid", "-c", "user.name=t",
+                   "-c", "core.autocrlf=false"]
+            subprocess.run([*git, "init", "-q"], check=True)
+            path = Path(td) / "gpu-runtime" / "renderer-lock.json"
+            path.parent.mkdir()
+            path.write_bytes(LOCK_BYTES)
+            subprocess.run([*git, "add", "gpu-runtime"], check=True)
+            subprocess.run([*git, "commit", "-q", "-m", "lock"], check=True)
+            commit = subprocess.run([*git, "rev-parse", "HEAD"], check=True, capture_output=True,
+                                    text=True, encoding="utf-8").stdout.strip()
+            path.write_bytes(b"{}\n")  # the worktree drifts; only the commit counts
+            with mock.patch.dict(os.environ, {audit.VELLUM_CHECKOUT_ENV: td}):
+                data = audit.read_vellum_pin_bytes("unused", commit, "gpu-runtime/renderer-lock.json")
+        self.assertEqual(hashlib.sha256(data).hexdigest(), hashlib.sha256(LOCK_BYTES).hexdigest())
 
 
 if __name__ == "__main__":

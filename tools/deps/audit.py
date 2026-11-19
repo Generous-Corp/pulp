@@ -45,6 +45,7 @@ from __future__ import annotations
 
 import argparse
 import functools
+import hashlib
 import json
 import os
 import re
@@ -56,6 +57,7 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
 
+import cmake_commands
 from pulp_lock import load as load_pulp_lock, validate as validate_pulp_lock
 
 
@@ -1072,26 +1074,27 @@ class VellumPinUnavailable(RuntimeError):
     """Vellum's pinned renderer module could not be read at the pinned commit."""
 
 
-def read_vellum_pin_source(repository: str, commit: str, path: str) -> str:
-    """Vellum's renderer module at `commit`, from a local checkout or GitHub.
+def read_vellum_pin_bytes(repository: str, commit: str, path: str) -> bytes:
+    """The exact bytes of Vellum's `path` at `commit`, from a local checkout or GitHub.
 
     A checkout named by PULP_VELLUM_CHECKOUT is read with `git show`, so the
     override still compares the pinned commit rather than whatever that checkout
-    has on disk.
+    has on disk. Bytes, not text, so a digest over them matches the file.
     """
     checkout = os.environ.get(VELLUM_CHECKOUT_ENV)
     if checkout:
         try:
             result = subprocess.run(
                 ["git", "-C", checkout, "show", f"{commit}:{path}"],
-                capture_output=True, text=True, encoding="utf-8", timeout=30, check=False,
+                capture_output=True, timeout=30, check=False,
             )
         except (OSError, subprocess.SubprocessError) as error:
             raise VellumPinUnavailable(f"git show in {checkout} failed: {error}") from error
         if result.returncode != 0:
+            stderr = result.stderr.decode("utf-8", errors="replace").strip()
             raise VellumPinUnavailable(
                 f"{VELLUM_CHECKOUT_ENV}={checkout} cannot show {commit}:{path}: "
-                f"{result.stderr.strip() or 'git exited ' + str(result.returncode)}")
+                f"{stderr or 'git exited ' + str(result.returncode)}")
         return result.stdout
     match = GITHUB_REPO_RE.search(repository)
     if not match:
@@ -1100,9 +1103,18 @@ def read_vellum_pin_source(repository: str, commit: str, path: str) -> str:
     url = f"https://raw.githubusercontent.com/{owner}/{name}/{commit}/{path}"
     try:
         with urllib.request.urlopen(url, timeout=30) as response:
-            return response.read().decode("utf-8")
-    except (urllib.error.URLError, OSError, UnicodeDecodeError) as error:
+            return response.read()
+    except (urllib.error.URLError, OSError) as error:
         raise VellumPinUnavailable(f"cannot read {url}: {error}") from error
+
+
+def read_vellum_pin_source(repository: str, commit: str, path: str) -> str:
+    """Vellum's renderer module or lock at `commit`, as text (see read_vellum_pin_bytes)."""
+    data = read_vellum_pin_bytes(repository, commit, path)
+    try:
+        return data.decode("utf-8")
+    except UnicodeDecodeError as error:
+        raise VellumPinUnavailable(f"{path} at {commit} is not UTF-8: {error}") from error
 
 
 def vellum_renderer_drift(manifest: list[dict], read_source=None) -> tuple[str, list[str]]:
@@ -1195,127 +1207,232 @@ def vellum_renderer_drift(manifest: list[dict], read_source=None) -> tuple[str, 
 GPU_RUNTIME_PIN_FILE = "tools/cmake/PulpGpuRuntime.cmake"
 GPU_RUNTIME_LOCK_READER = "tools/cmake/PulpVellumLock.cmake"
 GPU_RUNTIME_PIN_VARS = ("PULP_GPU_RUNTIME_COMMIT", "PULP_GPU_RUNTIME_VERSION")
-GPU_RUNTIME_SET_RE = re.compile(r"\bset\(\s*(PULP_GPU_RUNTIME_(?:COMMIT|VERSION))\b\s*([^\s)]*)", re.I)
-GPU_RUNTIME_DECLARE_RE = re.compile(r"\bFetchContent_Declare\(", re.I)
-GPU_RUNTIME_LOCK_INCLUDE_RE = re.compile(r'\binclude\(\s*"?[^")]*PulpVellumLock\.cmake"?\s*\)', re.I)
-GPU_RUNTIME_VERSION_CHECK_RE = re.compile(
-    r'\bif\(\s*NOT\s+\S+\s+STREQUAL\s+"?(?:\$\{PULP_GPU_RUNTIME_VERSION\}|PULP_GPU_RUNTIME_VERSION)"?\s*\)')
-GPU_RUNTIME_PREFIX_VERSION_RE = re.compile(
-    r'\bpulp_find_gpu_runtime_package\(\s*"?\$\{PULP_GPU_RUNTIME_VERSION\}"?[\s)]')
+# The lock fields the pin is derived from. The reader sets them in one foreach
+# over the lock's fields; nothing may write them by name.
+GPU_RUNTIME_LOCK_VARS = ("PULP_VELLUM_sha", "PULP_VELLUM_tag")
+GPU_RUNTIME_DYNAMIC_PREFIXES = ("PULP_GPU_RUNTIME_${", "PULP_VELLUM_${")
+GPU_RUNTIME_LOCK_INCLUDE = "${CMAKE_CURRENT_LIST_DIR}/PulpVellumLock.cmake"
+GPU_RUNTIME_COMMIT_REF = "${PULP_GPU_RUNTIME_COMMIT}"
+GPU_RUNTIME_VERSION_REF = "${PULP_GPU_RUNTIME_VERSION}"
+# Commands that read a variable name without writing it.
+CMAKE_READ_ONLY_COMMANDS = {"if", "elseif", "while", "message"}
+# Commands the assertions below rely on; a function() or macro() of the same
+# name would replace them.
+GPU_RUNTIME_RELIED_COMMANDS = {
+    "include", "set", "string", "foreach", "message", "return",
+    "fetchcontent_declare", "fetchcontent_makeavailable",
+}
+# FetchContent_Declare options that would take the source from somewhere other
+# than the pinned git commit.
+GPU_RUNTIME_SOURCE_OVERRIDES = {
+    "URL", "SOURCE_DIR", "DOWNLOAD_COMMAND", "SVN_REPOSITORY", "HG_REPOSITORY",
+    "CVS_REPOSITORY",
+}
 
 
-def strip_cmake_comments(text: str) -> str:
-    """Drop CMake line and bracket comments outside double-quoted strings.
+def _expands(argument: cmake_commands.Argument, value: str) -> bool:
+    """`argument` is `value` after CMake reads it: bracket arguments never expand ${}."""
+    return argument.value == value and (argument.kind != cmake_commands.BRACKET or "${" not in value)
 
-    Bracket comments (``#[[...]]`` and ``#[=[...]=]``) can span lines, so a
-    line-at-a-time scrub would leave fake FetchContent and lock-reader calls
-    visible to the audit. Preserve newlines from removed comments so reports
-    still point at the original source lines.
+
+def _pin_writes(command: cmake_commands.Command) -> list[str]:
+    """The protected names `command` writes: arguments naming them, in any quoting.
+
+    set("NAME" v) and set([[NAME]] v) write NAME just as set(NAME v) does.
     """
-    output: list[str] = []
-    index = 0
-    quoted = False
-    length = len(text)
-    while index < length:
-        char = text[index]
-        if char == '"' and (index == 0 or text[index - 1] != "\\"):
-            quoted = not quoted
-            output.append(char)
-            index += 1
-            continue
-        if not quoted and char == "#":
-            bracket = re.match(r"#(\[=*)\[", text[index:])
-            if bracket:
-                marker = bracket.group(1)
-                closing = "]" + "=" * marker.count("=") + "]"
-                start = index + len(bracket.group(0))
-                end = text.find(closing, start)
-                if end < 0:
-                    end = length
-                output.extend("\n" for value in text[start:end] if value == "\n")
-                index = min(length, end + len(closing)) if end < length else length
-                continue
-            end = text.find("\n", index)
-            if end < 0:
-                break
-            output.append("\n")
-            index = end + 1
-            continue
-        output.append(char)
-        index += 1
-    return "".join(output)
+    if command.name in CMAKE_READ_ONLY_COMMANDS:
+        return []
+    names = []
+    for argument in command.arguments:
+        if argument.value in GPU_RUNTIME_PIN_VARS or argument.value in GPU_RUNTIME_LOCK_VARS:
+            names.append(argument.value)
+        elif argument.value.startswith(GPU_RUNTIME_DYNAMIC_PREFIXES):
+            names.append(argument.value)
+    return names
 
 
-def cmake_declare_blocks(text: str) -> list[list[str]]:
-    """The whitespace-separated arguments of every FetchContent_Declare(...) call."""
-    blocks = []
-    for match in GPU_RUNTIME_DECLARE_RE.finditer(text):
-        depth, index, quoted = 1, match.end(), False
-        while index < len(text) and depth:
-            char = text[index]
-            if char == '"' and text[index - 1] != "\\":
-                quoted = not quoted
-            elif not quoted and char == "(":
-                depth += 1
-            elif not quoted and char == ")":
-                depth -= 1
-            index += 1
-        blocks.append(re.findall(r'"[^"]*"|[^\s()]+', text[match.end():index - 1]))
-    return blocks
+def _parse_cmake(root: Path, rel: str) -> tuple[list, list] | str:
+    """(all invocations, executable invocations) of `rel`, or the reason it cannot be read."""
+    try:
+        text = (root / rel).read_text(encoding="utf-8")
+        return cmake_commands.tokenize(text), cmake_commands.executable_commands(text)
+    except OSError as error:
+        return f"cannot read {rel}: {error}"
+    except cmake_commands.CMakeSyntaxError as error:
+        return f"cannot parse {rel} as CMake, so its pin cannot be checked: {error}"
+
+
+def _lock_reader_problems(every: list, live: list) -> list[str]:
+    """The lock reader writes the pin exactly once each, from the lock, after reading it."""
+    rel = GPU_RUNTIME_LOCK_READER
+    problems: list[str] = []
+    openers = {command.opens: command for command in live if command.opens is not None}
+    allowed: set[tuple[int, str]] = set()
+
+    field_sets = []
+    for command in live:
+        if (command.name == "set" and len(command.arguments) == 2
+                and _expands(command.arguments[0], "PULP_VELLUM_${_field}")
+                and len(command.blocks) == 1):
+            loop = openers.get(command.blocks[0][0])
+            if (loop is not None and loop.name == "foreach" and loop.values()[:1] == ["_field"]
+                    and {"sha", "tag"} <= set(loop.values()[1:])):
+                field_sets.append(command)
+    if len(field_sets) != 1:
+        problems.append(f"{rel} must set PULP_VELLUM_<field> from the lock in one top-level "
+                        f"foreach(_field ...) over sha and tag (found {len(field_sets)})")
+        lock_read_line = None
+    else:
+        lock_read_line = field_sets[0].line
+        allowed.add((field_sets[0].line, field_sets[0].name))
+
+    expected = {"PULP_GPU_RUNTIME_COMMIT": "${PULP_VELLUM_sha}",
+                "PULP_GPU_RUNTIME_VERSION": "${PULP_VELLUM_tag}"}
+    for name, value in expected.items():
+        sets = [command for command in live
+                if command.name == "set" and command.arguments
+                and command.arguments[0].value == name]
+        good = [command for command in sets
+                if not command.blocks and len(command.arguments) == 2
+                and _expands(command.arguments[1], value)
+                and (lock_read_line is None or command.line > lock_read_line)]
+        if len(sets) != 1 or len(good) != 1:
+            found = [command.values()[1:] for command in sets]
+            problems.append(f"{rel} must set {name} exactly once, at top level after reading "
+                            f"the lock, from {value} (found {found or 'no set()'})")
+        for command in good:
+            allowed.add((command.line, command.name))
+    # The one rewrite of the version: strip the tag's leading v.
+    for command in live:
+        if (command.name == "string" and not command.blocks
+                and command.values() == ["REGEX", "REPLACE", "^v", "",
+                                         "PULP_GPU_RUNTIME_VERSION", GPU_RUNTIME_VERSION_REF]
+                and command.arguments[5].kind != cmake_commands.BRACKET):
+            allowed.add((command.line, command.name))
+
+    for command in every:
+        if (command.line, command.name) in allowed:
+            continue
+        for name in _pin_writes(command):
+            problems.append(f"{rel}:{command.line} writes {name} with {command.name}(); the "
+                            "reader may only set the pin from the lock, once")
+    return problems
 
 
 def gpu_runtime_cmake_problems(root: Path, source: str) -> list[str]:
     """Assert the build fetches and version-checks gpu-runtime from pulp.lock.
 
-    Checked on the CMake itself, comments ignored: the FetchContent GIT_TAG is
-    ${PULP_GPU_RUNTIME_COMMIT}, only the lock reader sets the commit and version
-    (from the lock's sha and tag), and both the source build and the prefix
-    package compare against PULP_GPU_RUNTIME_VERSION.
+    The assertions are made on executable CMake commands from
+    tools/deps/cmake_commands.py, never on raw text: a command that appears
+    only in a comment, a quoted argument, a bracket argument, a function or
+    macro body, or a branch a constant condition rules out does not count.
+
+    - `source` includes ${CMAKE_CURRENT_LIST_DIR}/PulpVellumLock.cmake at top
+      level, before the fetch;
+    - it declares FetchContent vellum_gpu_runtime exactly once, with GIT_TAG
+      exactly ${PULP_GPU_RUNTIME_COMMIT} and no option that takes the source
+      from elsewhere;
+    - in the same branch, after the declaration, an
+      `if(NOT <fetched version> STREQUAL PULP_GPU_RUNTIME_VERSION)` stops
+      configure with message(FATAL_ERROR);
+    - the prefix package is found by ${PULP_GPU_RUNTIME_VERSION};
+    - only the lock reader writes PULP_GPU_RUNTIME_COMMIT/VERSION (and the
+      PULP_VELLUM_sha/tag fields they come from), once each, from the lock;
+    - no function() or macro() replaces a command these assertions rely on.
+
+    The write scan covers tools/cmake/*.cmake and the root CMakeLists.txt. It
+    cannot see a write through an indirect name (set(${name} ...)) or code
+    generated at configure time.
     """
     problems: list[str] = []
-    try:
-        text = strip_cmake_comments((root / source).read_text(encoding="utf-8"))
-    except OSError as error:
-        return [f"cannot read {source}: {error}"]
-    if not GPU_RUNTIME_LOCK_INCLUDE_RE.search(text):
-        problems.append(f"{source} does not include PulpVellumLock.cmake, so the pin is not read from pulp.lock")
-    declares = [block for block in cmake_declare_blocks(text)
-                if block and block[0].lower() == "vellum_gpu_runtime"]
-    if len(declares) != 1:
+    parsed = _parse_cmake(root, source)
+    if isinstance(parsed, str):
+        return [parsed]
+    _, live = parsed
+
+    includes = [command for command in live
+                if command.name == "include" and not command.blocks
+                and len(command.arguments) == 1
+                and _expands(command.arguments[0], GPU_RUNTIME_LOCK_INCLUDE)]
+    if not includes:
+        problems.append(f"{source} does not include PulpVellumLock.cmake at top level, so the "
+                        "pin is not read from pulp.lock")
+
+    declares = [command for command in live
+                if command.name == "fetchcontent_declare" and command.arguments
+                and command.arguments[0].value.lower() == "vellum_gpu_runtime"]
+    declare = declares[0] if len(declares) == 1 else None
+    if declare is None:
         problems.append(f"{source} must declare FetchContent vellum_gpu_runtime exactly once "
                         f"(found {len(declares)})")
     else:
-        tags = [declares[0][i + 1] for i, arg in enumerate(declares[0][:-1]) if arg == "GIT_TAG"]
-        if tags != ["${PULP_GPU_RUNTIME_COMMIT}"] and tags != ['"${PULP_GPU_RUNTIME_COMMIT}"']:
+        args = declare.arguments
+        tags = [args[i + 1] for i in range(1, len(args) - 1) if args[i].value == "GIT_TAG"]
+        if args and args[-1].value == "GIT_TAG":
+            tags.append(cmake_commands.Argument("", cmake_commands.UNQUOTED))
+        if len(tags) != 1 or not _expands(tags[0], GPU_RUNTIME_COMMIT_REF):
+            found = [tag.value for tag in tags] or "no GIT_TAG"
             problems.append(f"{source}: the vellum_gpu_runtime FetchContent GIT_TAG must be exactly "
-                            f"${{PULP_GPU_RUNTIME_COMMIT}} (found {tags or 'no GIT_TAG'})")
-    if not GPU_RUNTIME_VERSION_CHECK_RE.search(text):
+                            f"${{PULP_GPU_RUNTIME_COMMIT}} (found {found})")
+        overrides = sorted({arg.value for arg in args[1:]} & GPU_RUNTIME_SOURCE_OVERRIDES)
+        if overrides:
+            problems.append(f"{source}: the vellum_gpu_runtime FetchContent declaration takes its "
+                            f"source from {', '.join(overrides)}, not the pinned commit")
+        if includes and min(command.line for command in includes) > declare.line:
+            problems.append(f"{source} declares vellum_gpu_runtime before it includes "
+                            "PulpVellumLock.cmake, so the pin is still unset")
+
+    checks = []
+    for command in live:
+        values = command.values()
+        if (command.name == "if" and len(values) == 4 and values[0] == "NOT"
+                and values[2] == "STREQUAL"
+                and command.arguments[0].kind == cmake_commands.UNQUOTED
+                and command.arguments[2].kind == cmake_commands.UNQUOTED
+                and (_expands(command.arguments[3], GPU_RUNTIME_VERSION_REF)
+                     or (values[3] == "PULP_GPU_RUNTIME_VERSION"
+                         and command.arguments[3].kind == cmake_commands.UNQUOTED))
+                and declare is not None and command.blocks == declare.blocks
+                and command.line > declare.line):
+            fatal = [inner for inner in live if inner.name == "message"
+                     and inner.values()[:1] == ["FATAL_ERROR"]
+                     and (command.opens, 0) in inner.blocks]
+            if fatal:
+                checks.append(command)
+    if not checks:
         problems.append(f"{source} has no `if(NOT <fetched version> STREQUAL PULP_GPU_RUNTIME_VERSION)` "
-                        "check on the fetched source")
-    if not GPU_RUNTIME_PREFIX_VERSION_RE.search(text):
+                        "check on the fetched source that stops configure with message(FATAL_ERROR)")
+
+    finds = [command for command in live
+             if command.name == "pulp_find_gpu_runtime_package" and command.arguments
+             and _expands(command.arguments[0], GPU_RUNTIME_VERSION_REF)]
+    if not finds:
         problems.append(f"{source} does not find the prefix package by ${{PULP_GPU_RUNTIME_VERSION}}")
 
-    sets: dict[str, list[str]] = {name: [] for name in GPU_RUNTIME_PIN_VARS}
     candidates = sorted((root / "tools/cmake").glob("*.cmake"))
     if (root / "CMakeLists.txt").is_file():
         candidates.append(root / "CMakeLists.txt")
     for path in candidates:
         rel = path.relative_to(root).as_posix()
-        try:
-            body = strip_cmake_comments(path.read_text(encoding="utf-8"))
-        except OSError as error:
-            problems.append(f"cannot read {rel}: {error}")
+        parsed = _parse_cmake(root, rel)
+        if isinstance(parsed, str):
+            problems.append(parsed)
             continue
-        for name, value in GPU_RUNTIME_SET_RE.findall(body):
-            if rel == GPU_RUNTIME_LOCK_READER:
-                sets[name.upper()].append(value.strip('"'))
-            else:
-                problems.append(f"{rel} sets {name}; only {GPU_RUNTIME_LOCK_READER} may, from pulp.lock")
-    expected = {"PULP_GPU_RUNTIME_COMMIT": "${PULP_VELLUM_sha}", "PULP_GPU_RUNTIME_VERSION": "${PULP_VELLUM_tag}"}
-    for name, values in sets.items():
-        if values != [expected[name]]:
-            problems.append(f"{GPU_RUNTIME_LOCK_READER} must set {name} exactly once, from "
-                            f"{expected[name]} (found {values or 'no set()'})")
+        every, executable = parsed
+        for command in every:
+            if (command.name in ("function", "macro") and command.arguments
+                    and command.arguments[0].value.lower() in GPU_RUNTIME_RELIED_COMMANDS):
+                problems.append(f"{rel}:{command.line} redefines {command.arguments[0].value}() "
+                                "with " + command.name + "(), which the gpu-runtime pin relies on")
+        if rel == GPU_RUNTIME_LOCK_READER:
+            problems.extend(_lock_reader_problems(every, executable))
+            continue
+        for command in every:
+            for name in _pin_writes(command):
+                problems.append(f"{rel} sets {name} (line {command.line}, {command.name}()); only "
+                                f"{GPU_RUNTIME_LOCK_READER} may, from pulp.lock")
+    if not (root / GPU_RUNTIME_LOCK_READER).is_file():
+        problems.append(f"{GPU_RUNTIME_LOCK_READER} is missing, so nothing sets the pin from pulp.lock")
     return problems
 
 
@@ -1325,17 +1442,20 @@ def gpu_runtime_pin_agreement(manifest: list[dict], root: Path = ROOT) -> list[s
     tools/cmake/PulpGpuRuntime.cmake is what configure reads and the manifest
     is what the audit and DEPENDENCIES.md read; pulp_lock_agreement ties the
     manifest to pulp.lock. This asserts the CMake side of that chain on the
-    CMake text, so an edit that fetches an unpinned commit or skips the
-    lock-derived version check fails here.
+    commands CMake executes, so an edit that fetches an unpinned commit or
+    skips the lock-derived version check fails here.
     """
     entry = next((dep for dep in manifest if dep.get("name") == GPU_RUNTIME_ENTRY), None)
     if entry is None:
         # Nothing to agree with is only fine while nothing is fetched.
-        try:
-            text = strip_cmake_comments((root / GPU_RUNTIME_PIN_FILE).read_text(encoding="utf-8"))
-        except OSError:
+        if not (root / GPU_RUNTIME_PIN_FILE).is_file():
             return []
-        if any(block and block[0].lower() == "vellum_gpu_runtime" for block in cmake_declare_blocks(text)):
+        parsed = _parse_cmake(root, GPU_RUNTIME_PIN_FILE)
+        if isinstance(parsed, str):
+            return [parsed]
+        if any(command.name == "fetchcontent_declare" and command.arguments
+               and command.arguments[0].value.lower() == "vellum_gpu_runtime"
+               for command in parsed[0]):
             return [f"{GPU_RUNTIME_PIN_FILE} fetches gpu-runtime, but the manifest has no "
                     f"{GPU_RUNTIME_ENTRY} entry"]
         return []
@@ -1345,8 +1465,46 @@ def gpu_runtime_pin_agreement(manifest: list[dict], root: Path = ROOT) -> list[s
     return gpu_runtime_cmake_problems(root, sources[0])
 
 
-def pulp_lock_agreement(manifest: list[dict], root: Path = ROOT) -> list[str]:
-    """Validate pulp.lock and ensure the legacy gpu-runtime pin is derived from it."""
+def renderer_lock_digest_problems(lock: dict, manifest: list[dict], read_bytes=None) -> list[str]:
+    """pulp.lock's render_toolchain.lock_digest is sha256 of gpu-runtime's renderer lock.
+
+    The digest is taken over the exact bytes of the file the Skia entry's
+    vellum_renderer_drift_check names (gpu-runtime/renderer-lock.json), read at
+    pulp.lock's vellum.sha from raw.githubusercontent.com or, when
+    PULP_VELLUM_CHECKOUT is set, with `git show` in that checkout. An
+    unreadable lock fails closed, as the drift check does.
+    """
+    digest = (lock.get("render_toolchain") or {}).get("lock_digest")
+    sha = (lock.get("vellum") or {}).get("sha")
+    if not isinstance(digest, str) or not isinstance(sha, str) or not FULL_SHA_RE.fullmatch(sha):
+        return []  # pulp_lock.validate already reports the malformed field
+    skia = next((dep for dep in manifest if dep.get("name") == "Skia"), None)
+    spec = (skia or {}).get(VELLUM_DRIFT_FIELD)
+    if not isinstance(spec, dict):
+        return [f"render_toolchain.lock_digest cannot be checked: the Skia entry has no "
+                f"{VELLUM_DRIFT_FIELD} naming gpu-runtime's renderer lock"]
+    repository, path, commit = spec.get("repository"), spec.get("path"), spec.get("commit")
+    if (not isinstance(repository, str) or not isinstance(path, str)
+            or not path.endswith(".json") or path.startswith("/") or ".." in Path(path).parts):
+        return [f"render_toolchain.lock_digest cannot be checked: Skia {VELLUM_DRIFT_FIELD} "
+                f"does not name a repository-relative renderer lock (path {path!r})"]
+    problems = []
+    if not isinstance(commit, str) or commit.lower() != sha:
+        problems.append(f"Skia {VELLUM_DRIFT_FIELD} reads the renderer lock at {commit}, but "
+                        f"pulp.lock pins Vellum {sha}; they must be the same commit")
+    try:
+        data = (read_bytes or read_vellum_pin_bytes)(repository, sha, path)
+    except VellumPinUnavailable as error:
+        return [*problems, f"render_toolchain.lock_digest cannot be checked: {error}"]
+    actual = hashlib.sha256(data).hexdigest()
+    if actual != digest:
+        problems.append(f"render_toolchain.lock_digest is {digest}, but {path} at Vellum {sha} "
+                        f"hashes to {actual}")
+    return problems
+
+
+def pulp_lock_agreement(manifest: list[dict], root: Path = ROOT, read_bytes=None) -> list[str]:
+    """Validate pulp.lock, bind its renderer digest, and derive the legacy gpu-runtime pin from it."""
     try:
         lock = load_pulp_lock(root / "pulp.lock")
     except ValueError as exc:
@@ -1363,6 +1521,7 @@ def pulp_lock_agreement(manifest: list[dict], root: Path = ROOT) -> list[str]:
     version = str(entry.get("version", "")).split(" ", 1)[0]
     if version != str(vellum.get("tag", "")).removeprefix("v"):
         problems.append(f"manifest {GPU_RUNTIME_ENTRY} version is {version or 'missing'}, but pulp.lock pins {vellum.get('tag')}")
+    problems.extend(renderer_lock_digest_problems(lock, manifest, read_bytes))
     return problems
 
 

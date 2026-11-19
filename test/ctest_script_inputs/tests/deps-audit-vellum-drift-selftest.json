@@ -8,6 +8,7 @@
    "tools/cmake/PulpGpuRuntime.cmake",
    "tools/cmake/PulpVellumLock.cmake",
    "tools/deps/audit.py",
+   "tools/deps/cmake_commands.py",
    "tools/deps/manifest.json",
    "tools/deps/pulp_lock.py",
    "tools/deps/test_audit_vellum_drift.py",

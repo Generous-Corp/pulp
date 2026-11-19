@@ -11,7 +11,10 @@
 #                       ingests no Vellum SDK archive (the SDK consumer lane
 #                       deliberately tracks Vellum main), so it is enforced only
 #                       when a caller supplies PULP_VELLUM_SDK_ARCHIVE.
-#   render_toolchain    the renderer lock digest the gpu-runtime package carries.
+#   render_toolchain    lock_digest is sha256 of the exact bytes of
+#                       gpu-runtime/renderer-lock.json at vellum.sha. Configure only
+#                       checks its shape; tools/deps/audit.py --strict reads that file
+#                       at the pinned commit and fails unless the digest matches.
 set(PULP_VELLUM_LOCK_FILE "${CMAKE_CURRENT_LIST_DIR}/../../pulp.lock"
     CACHE FILEPATH "Pulp Vellum lock file")
 if(NOT EXISTS "${PULP_VELLUM_LOCK_FILE}")
