@@ -9,16 +9,27 @@ import io
 import json
 import tarfile
 import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
 
 import pulp_lock
 
+# Every repository file these tests read, named literally so the script-test
+# input scan (tools/scripts/script_test_inputs.py) selects this test when one
+# of them changes. pulp.lock sits at the repository root, which the scan does
+# not match as a literal, so ctest passes it on the command line instead.
+REPO = Path(__file__).resolve().parents[2]
+LOCK_FILE = Path(sys.argv[1]) if len(sys.argv) > 1 else pulp_lock.LOCK
+LOCK_READER = REPO / "tools/cmake/PulpVellumLock.cmake"
+GPU_RUNTIME_MODULE = REPO / "tools/cmake/PulpGpuRuntime.cmake"
+GPU_RUNTIME_RECORD = REPO / "tools/cmake/PulpGpuRuntimeRecord.cmake"
+
 
 class PulpLockTests(unittest.TestCase):
     def setUp(self) -> None:
-        self.lock = pulp_lock.load()
+        self.lock = pulp_lock.load(LOCK_FILE)
 
     def test_missing_field_fails_closed(self) -> None:
         lock = copy.deepcopy(self.lock)
@@ -37,7 +48,7 @@ class PulpLockTests(unittest.TestCase):
             lock_path.write_text(json.dumps(self.lock), encoding="utf-8")
             archive = root / "sdk.tar.gz"
             archive.write_bytes(b"deliberately wrong bytes")
-            reader = Path(__file__).parents[1] / "cmake" / "PulpVellumLock.cmake"
+            reader = LOCK_READER
             result = subprocess.run(
                 ["cmake", f"-DPULP_VELLUM_LOCK_FILE={lock_path}",
                  f"-DPULP_VELLUM_SDK_ARCHIVE={archive}", "-P", str(reader)],
@@ -55,7 +66,7 @@ class PulpLockTests(unittest.TestCase):
             lock["vellum"]["sdk_digest"] = hashlib.sha256(b"sdk bytes").hexdigest()
             lock_path = root / "pulp.lock"
             lock_path.write_text(json.dumps(lock), encoding="utf-8")
-            reader = Path(__file__).parents[1] / "cmake" / "PulpVellumLock.cmake"
+            reader = LOCK_READER
             result = subprocess.run(
                 ["cmake", f"-DPULP_VELLUM_LOCK_FILE={lock_path}",
                  f"-DPULP_VELLUM_SDK_ARCHIVE={archive}", "-P", str(reader)],
@@ -64,7 +75,7 @@ class PulpLockTests(unittest.TestCase):
 
 
 COMMIT = "d361ea5b855707391798b7315183d99b6cbe69b6"
-CMAKE_DIR = Path(__file__).parents[1] / "cmake"
+CMAKE_DIR = GPU_RUNTIME_MODULE.parent
 DRIVER = """cmake_minimum_required(VERSION 3.24)
 set(APPLE 1)
 set(PULP_SKIA_PROVIDES_DAWN ON)
@@ -111,7 +122,7 @@ class GpuRuntimePrefixTests(unittest.TestCase):
         result = subprocess.run(
             ["cmake", f"-DWORK={self.root}", f"-DPREFIX={self.prefix}",
              f"-DARCHIVE={archive if archive is not None else ''}",
-             f"-DMODULE={CMAKE_DIR / 'PulpGpuRuntime.cmake'}",
+             f"-DMODULE={GPU_RUNTIME_MODULE}",
              f"-DPULP_VELLUM_LOCK_FILE={self.lock_path}",
              "-DCMAKE_BINARY_DIR=" + str(self.root / "bin"),
              "-P", str(self.root / "driver.cmake")],
@@ -149,5 +160,16 @@ class GpuRuntimePrefixTests(unittest.TestCase):
         self.assertIn("holds lib/extra.cmake", self.run_module(self.archive))
 
 
+class RepositoryLockTests(unittest.TestCase):
+    def test_repository_lock_validates(self) -> None:
+        # The lock the build actually reads, not a temporary copy.
+        self.assertEqual(LOCK_FILE.resolve(), (REPO / "pulp.lock").resolve())
+        self.assertEqual(pulp_lock.validate(pulp_lock.load(LOCK_FILE)), [])
+
+    def test_named_inputs_exist(self) -> None:
+        for path in (LOCK_READER, GPU_RUNTIME_MODULE, GPU_RUNTIME_RECORD):
+            self.assertTrue(path.is_file(), path)
+
+
 if __name__ == "__main__":
-    unittest.main()
+    unittest.main(argv=sys.argv[:1])
