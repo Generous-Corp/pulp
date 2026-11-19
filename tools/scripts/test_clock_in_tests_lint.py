@@ -11,6 +11,8 @@ import unittest
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
+# Keep dynamic helper and baseline dependencies visible to script-test-inputs.
+DECLARED_SCRIPT_INPUTS = ("tools/scripts/clock_in_tests_lint.py", "tools/scripts/clock_in_tests_baseline.json")
 SPEC = importlib.util.spec_from_file_location("clock_in_tests_lint", HERE / "clock_in_tests_lint.py")
 lint = importlib.util.module_from_spec(SPEC)
 sys.modules[SPEC.name] = lint

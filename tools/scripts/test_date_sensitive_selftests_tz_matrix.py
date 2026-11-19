@@ -11,6 +11,8 @@ import unittest
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
+# Keep dynamic helper and shipped configuration dependencies visible to script-test-inputs.
+DECLARED_SCRIPT_INPUTS = ("tools/scripts/date_sensitive_selftests_tz_matrix.py", "tools/scripts/date_sensitive_selftests.json")
 SPEC = importlib.util.spec_from_file_location(
     "tz_matrix", HERE / "date_sensitive_selftests_tz_matrix.py")
 matrix = importlib.util.module_from_spec(SPEC)
