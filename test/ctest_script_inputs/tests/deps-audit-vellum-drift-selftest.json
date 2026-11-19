@@ -3,6 +3,7 @@
  "record": {
   "entry": "tools/deps/test_audit_vellum_drift.py",
   "inputs": [
+   "pulp.lock",
    "tools/ci/tart-provision.sh",
    "tools/cmake",
    "tools/cmake/PulpGpuRuntime.cmake",

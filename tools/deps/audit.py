@@ -1209,7 +1209,11 @@ GPU_RUNTIME_LOCK_READER = "tools/cmake/PulpVellumLock.cmake"
 GPU_RUNTIME_PIN_VARS = ("PULP_GPU_RUNTIME_COMMIT", "PULP_GPU_RUNTIME_VERSION")
 # The lock fields the pin is derived from. The reader sets them in one foreach
 # over the lock's fields; nothing may write them by name.
-GPU_RUNTIME_LOCK_VARS = ("PULP_VELLUM_sha", "PULP_VELLUM_tag")
+GPU_RUNTIME_LOCK_VARS = ("PULP_VELLUM_sha", "PULP_VELLUM_tag", "PULP_VELLUM_LOCK_FILE")
+# The reader's own chain from pulp.lock to those fields: the lock text, the
+# loop variable and the extracted value. Each has exactly one expected write.
+GPU_RUNTIME_READER_LOCALS = ("_pulp_vellum_lock", "_field", "_value")
+GPU_RUNTIME_LOCK_PATH = "${CMAKE_CURRENT_LIST_DIR}/../../pulp.lock"
 GPU_RUNTIME_DYNAMIC_PREFIXES = ("PULP_GPU_RUNTIME_${", "PULP_VELLUM_${")
 GPU_RUNTIME_LOCK_INCLUDE = "${CMAKE_CURRENT_LIST_DIR}/PulpVellumLock.cmake"
 GPU_RUNTIME_COMMIT_REF = "${PULP_GPU_RUNTIME_COMMIT}"
@@ -1276,6 +1280,75 @@ def _parse_cmake(root: Path, rel: str) -> tuple[list, list] | str:
         return f"cannot parse {rel} as CMake, so its pin cannot be checked: {error}"
 
 
+def _lock_chain_problems(every: list, live: list, field_set, openers: dict,
+                         allowed: set[tuple[int, str]]) -> list[str]:
+    """The PULP_VELLUM_<field> values are read out of pulp.lock and nothing else.
+
+    Expected, in order, each exactly once and live:
+      set(PULP_VELLUM_LOCK_FILE "${CMAKE_CURRENT_LIST_DIR}/../../pulp.lock" CACHE FILEPATH <doc>)
+      file(READ "${PULP_VELLUM_LOCK_FILE}" _pulp_vellum_lock)
+      foreach(_field ...)
+        string(JSON _value ERROR_VARIABLE _error GET "${_pulp_vellum_lock}" vellum ${_field})
+        set(PULP_VELLUM_${_field} "${_value}")
+    plus an optional unset(_pulp_vellum_lock) after the loop. Any other write
+    of those names fails. A -D or preset cache value for PULP_VELLUM_LOCK_FILE
+    is a developer override outside the tree.
+    """
+    rel = GPU_RUNTIME_LOCK_READER
+    problems: list[str] = []
+    if field_set is None:
+        return problems
+    loop = openers[field_set.blocks[0][0]]
+    if not _expands(field_set.arguments[1], "${_value}"):
+        problems.append(f"{rel}:{field_set.line} sets PULP_VELLUM_${{_field}} from "
+                        f"{field_set.arguments[1].value!r}, not ${{_value}} read from pulp.lock")
+
+    def one(label: str, matches: list) -> object | None:
+        if len(matches) != 1:
+            problems.append(f"{rel} must {label} exactly once (found {len(matches)})")
+            return None
+        allowed.add((matches[0].line, matches[0].name))
+        return matches[0]
+
+    lock_file = one(
+        f'set PULP_VELLUM_LOCK_FILE to "{GPU_RUNTIME_LOCK_PATH}" at top level before reading it',
+        [c for c in live if c.name == "set" and not c.blocks and len(c.arguments) == 5
+         and c.values()[0] == "PULP_VELLUM_LOCK_FILE"
+         and _expands(c.arguments[1], GPU_RUNTIME_LOCK_PATH)
+         and c.values()[2:4] == ["CACHE", "FILEPATH"]])
+    read = one(
+        'read the lock with file(READ "${PULP_VELLUM_LOCK_FILE}" _pulp_vellum_lock) at top level',
+        [c for c in live if c.name == "file" and not c.blocks
+         and c.values() == ["READ", "${PULP_VELLUM_LOCK_FILE}", "_pulp_vellum_lock"]
+         and c.arguments[1].kind != cmake_commands.BRACKET])
+    extract = one(
+        "extract each field with string(JSON _value ERROR_VARIABLE _error GET "
+        '"${_pulp_vellum_lock}" vellum ${_field}) in the field loop, before setting it',
+        [c for c in live if c.name == "string" and c.blocks == field_set.blocks
+         and c.line < field_set.line
+         and c.values() == ["JSON", "_value", "ERROR_VARIABLE", "_error", "GET",
+                            "${_pulp_vellum_lock}", "vellum", "${_field}"]
+         and c.arguments[5].kind != cmake_commands.BRACKET
+         and c.arguments[7].kind != cmake_commands.BRACKET])
+    allowed.add((loop.line, loop.name))
+    order = [c for c in (lock_file, read, loop, extract, field_set) if c is not None]
+    if [c.line for c in order] != sorted(c.line for c in order):
+        problems.append(f"{rel} must set the lock path, read the lock, then extract and set "
+                        "each field, in that order")
+    for command in live:
+        if (command.name == "unset" and not command.blocks
+                and command.values() == ["_pulp_vellum_lock"] and command.line > field_set.line):
+            allowed.add((command.line, command.name))
+    for command in every:
+        if (command.line, command.name) in allowed or command.name in CMAKE_READ_ONLY_COMMANDS:
+            continue
+        for name in GPU_RUNTIME_READER_LOCALS:
+            if name in command.values():
+                problems.append(f"{rel}:{command.line} writes {name} with {command.name}(); only "
+                                "the read of pulp.lock may")
+    return problems
+
+
 def _lock_reader_problems(every: list, live: list) -> list[str]:
     """The lock reader writes the pin exactly once each, from the lock, after reading it."""
     rel = GPU_RUNTIME_LOCK_READER
@@ -1299,6 +1372,9 @@ def _lock_reader_problems(every: list, live: list) -> list[str]:
     else:
         lock_read_line = field_sets[0].line
         allowed.add((field_sets[0].line, field_sets[0].name))
+
+    problems.extend(_lock_chain_problems(every, live, field_sets[0] if len(field_sets) == 1 else None,
+                                         openers, allowed))
 
     expected = {"PULP_GPU_RUNTIME_COMMIT": "${PULP_VELLUM_sha}",
                 "PULP_GPU_RUNTIME_VERSION": "${PULP_VELLUM_tag}"}
@@ -1445,7 +1521,7 @@ def gpu_runtime_cmake_problems(root: Path, source: str) -> list[str]:
                        and "_pulp_gpu_runtime_version" in inner.values()]
             fatal = [inner for inner in live if inner.name == "message"
                      and inner.values()[:1] == ["FATAL_ERROR"]
-                     and (command.opens, 0) in inner.blocks]
+                     and inner.blocks == (*command.blocks, (command.opens, 0))]
             if fatal and not between:
                 checks.append(command)
     if not checks:

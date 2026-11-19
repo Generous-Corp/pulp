@@ -15,6 +15,8 @@ from unittest import mock
 
 
 ROOT = Path(__file__).resolve().parents[2]
+# The repository lock; ctest passes it so the input record declares it.
+LOCK_FILE = Path(sys.argv[1]) if len(sys.argv) > 1 else ROOT / "pulp.lock"
 
 sys.path.insert(0, str(ROOT / "tools" / "deps"))
 import audit  # noqa: E402
@@ -429,6 +431,49 @@ class GpuRuntimePinTests(unittest.TestCase):
                   'include("${CMAKE_CURRENT_LIST_DIR}/PulpVellumLock.cmake")')
         self.assertFlags("does not include PulpVellumLock.cmake")
 
+    def test_the_lock_reader_must_take_each_field_from_pulp_lock(self) -> None:
+        read = 'file(READ "${PULP_VELLUM_LOCK_FILE}" _pulp_vellum_lock)'
+        extract = ('string(JSON _value ERROR_VARIABLE _error GET "${_pulp_vellum_lock}" '
+                   "vellum ${_field})")
+        path = '"${CMAKE_CURRENT_LIST_DIR}/../../pulp.lock"'
+        for old, new, fragment in (
+                (read, 'file(READ "${CMAKE_CURRENT_LIST_DIR}/other.lock" _pulp_vellum_lock)',
+                 "read the lock with file(READ"),
+                (extract, 'set(_value "0000000000000000000000000000000000000000")',
+                 "extract each field"),
+                (extract, extract.replace("vellum ${_field}", "vellum sha"), "extract each field"),
+                ('set(PULP_VELLUM_${_field} "${_value}")', 'set(PULP_VELLUM_${_field} "x")',
+                 "not ${_value} read from pulp.lock"),
+                (path, '"${CMAKE_CURRENT_LIST_DIR}/other.lock"', "set PULP_VELLUM_LOCK_FILE to"),
+                (read, read + '\nset(_pulp_vellum_lock "{}")', "writes _pulp_vellum_lock"),
+                (extract, extract + '\n    set(_value "x")', "writes _value"),
+                (extract, extract + '\n    string(REPLACE a b _value "${_value}")', "writes _value")):
+            with self.subTest(new=new):
+                self.setUp()
+                self.edit(self.LOCK, old, new)
+                self.assertFlags(fragment)
+
+    def test_the_lock_path_may_not_be_set_elsewhere(self) -> None:
+        (self.root / "tools/cmake/Other.cmake").write_text(
+            'set(PULP_VELLUM_LOCK_FILE "/tmp/other.lock" CACHE FILEPATH "" FORCE)\n',
+            encoding="utf-8")
+        self.assertFlags("Other.cmake sets PULP_VELLUM_LOCK_FILE")
+
+    def test_the_version_check_must_stop_configure_unconditionally(self) -> None:
+        self.edit(self.GPU, "        message(FATAL_ERROR\n            \"Pulp: gpu-runtime at",
+                  "        if(PULP_NEVER_SET)\n        message(FATAL_ERROR\n            "
+                  "\"Pulp: gpu-runtime at")
+        self.edit(self.GPU, "not the pinned ${PULP_GPU_RUNTIME_VERSION}\")",
+                  "not the pinned ${PULP_GPU_RUNTIME_VERSION}\")\n        endif()")
+        self.assertFlags("check on the fetched source")
+
+    def test_an_escaped_reference_is_not_the_pin(self) -> None:
+        for tag in ('"\\${PULP_GPU_RUNTIME_COMMIT}"', "\\${PULP_GPU_RUNTIME_COMMIT}"):
+            with self.subTest(tag=tag):
+                self.setUp()
+                self.edit(self.GPU, "GIT_TAG ${PULP_GPU_RUNTIME_COMMIT}", f"GIT_TAG {tag}")
+                self.assertFlags("GIT_TAG must be exactly")
+
     def test_pin_writes_are_found_by_command_not_text(self) -> None:
         other = self.root / "tools/cmake/Other.cmake"
         other.write_text('set(_doc "set(PULP_GPU_RUNTIME_COMMIT x)")\n'
@@ -603,7 +648,7 @@ class RendererLockDigestTests(unittest.TestCase):
         self.addCleanup(temporary.cleanup)
         self.root = Path(temporary.name)
         import json
-        self.lock = json.loads((ROOT / "pulp.lock").read_text(encoding="utf-8"))
+        self.lock = json.loads(LOCK_FILE.read_text(encoding="utf-8"))
         self.sha = self.lock["vellum"]["sha"]
         self.manifest = json.loads(
             (ROOT / "tools/deps/manifest.json").read_text(encoding="utf-8"))["dependencies"]
@@ -675,7 +720,7 @@ class RendererLockDigestTests(unittest.TestCase):
     def test_pulp_lock_renderer_digest_is_bound_to_exact_lock_bytes(self) -> None:
         import hashlib
         import json
-        lock = json.loads((ROOT / "pulp.lock").read_text(encoding="utf-8"))
+        lock = json.loads(LOCK_FILE.read_text(encoding="utf-8"))
         real = json.loads((ROOT / "tools/deps/manifest.json").read_text(encoding="utf-8"))["dependencies"]
         payload = b"renderer lock bytes"
         lock["render_toolchain"]["lock_digest"] = hashlib.sha256(payload).hexdigest()
@@ -687,4 +732,4 @@ class RendererLockDigestTests(unittest.TestCase):
 
 
 if __name__ == "__main__":
-    unittest.main()
+    unittest.main(argv=sys.argv[:1])

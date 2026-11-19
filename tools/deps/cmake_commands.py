@@ -130,8 +130,10 @@ class _Reader:
         if nxt == "":
             raise self.fail("backslash at end of file", start)
         self.index += 2
-        if nxt in "trn;":
+        if nxt in "trn;$":
             # Encoded escapes keep their spelling; CMake decodes them later.
+            # \$ stays escaped so a literal "\${X}" never reads as the
+            # expanding reference "${X}".
             return "\\" + nxt
         if nxt.isalnum():
             raise self.fail(f"invalid escape sequence \\{nxt}", start)

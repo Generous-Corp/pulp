@@ -62,6 +62,10 @@ class TokenizeTests(unittest.TestCase):
         (command,) = cc.tokenize('set(x a\\(b\\) "c\\\nd" "e\\"f" g\\;h)\n')
         self.assertEqual(command.values(), ["x", "a(b)", "cd", 'e"f', "g\\;h"])
 
+    def test_an_escaped_dollar_keeps_its_escape(self) -> None:
+        (command,) = cc.tokenize('set(x "\\${A}" \\${B} ${C})\n')
+        self.assertEqual(command.values(), ["x", "\\${A}", "\\${B}", "${C}"])
+
     def test_nested_parentheses_stay_in_one_command(self) -> None:
         (command,) = cc.tokenize("if((A OR B) AND (C))\n")
         self.assertEqual(command.name, "if")
