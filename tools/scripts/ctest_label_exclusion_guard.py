@@ -81,9 +81,9 @@ POLICY_VAR = "PULP_COVERAGE_CTEST_LABEL_EXCLUDE"
 SCAN_DIR = Path("test/cmake")
 
 # Frozen backlog: suites already in this state when the guard landed. Freezing
-# the population rather than repairing it in one change is deliberate — whether
+# the population rather than repairing it in one change is deliberate, whether
 # a given suite can be split is a per-suite judgement, and a `~[slow]` spec that
-# matches no case discovers nothing — but every entry carries a reason, so the
+# matches no case discovers nothing, but every entry carries a reason, so the
 # backlog is a countable ledger rather than a weakened rule. An entry whose
 # target is no longer blind is an error, not a leftover.
 ALLOWLIST_FILE = Path("tools/scripts/ctest_label_exclusion_guard.json")
@@ -634,7 +634,7 @@ def _check_label_blind(registrations: list[Registration], targets: list[Path],
 
     # A frozen entry whose suite is no longer blind is a dead exemption. Left
     # alone it rots into cover for a future regression on the same target, which
-    # is the failure shape this guard exists to catch — so it is an error with a
+    # is the failure shape this guard exists to catch, so it is an error with a
     # one-line fix rather than a warning nobody reads.
     scanned_targets = {r.target for r in registrations}
     stale = sorted(
