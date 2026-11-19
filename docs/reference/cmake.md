@@ -159,7 +159,7 @@ so they survive `install(EXPORT)`. The package target must exist when
 `pulp_add_plugin()` runs; a missing target or property stops configuration.
 
 With the optional Vellum integration enabled, include
-`tools/cmake/PulpVellumEditorPackage.cmake` and create a concrete package for
+`integrations/pulp-vellum/cmake/PulpVellumEditorPackage.cmake` and create a concrete package for
 the plug-in's root view type:
 
 ```cmake

@@ -30,7 +30,7 @@ on:
       - 'test/editor_host_slice/**'
       - 'integrations/pulp-vellum/**'
       - 'integrations/pulp-vellum-audio/**'
-      - 'tools/cmake/PulpVellumEditorPackage.cmake'
+      - 'integrations/pulp-vellum/cmake/PulpVellumEditorPackage.cmake'
       - 'test/test_pulp_vellum_editor.cpp'
       - 'test/test_pulp_vellum_audio.cpp'
       - 'test/cmake/test_pulp_vellum_editor_package.cmake'
