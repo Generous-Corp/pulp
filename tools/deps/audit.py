@@ -1190,56 +1190,132 @@ def vellum_renderer_drift(manifest: list[dict], read_source=None) -> tuple[str, 
     return ("mismatch" if problems else "match"), problems
 
 
-# The CMake file configure reads the gpu-runtime pin from.
+# The CMake file configure reads the gpu-runtime pin from, and the one file
+# allowed to set the pin: the reader of pulp.lock.
 GPU_RUNTIME_PIN_FILE = "tools/cmake/PulpGpuRuntime.cmake"
-GPU_RUNTIME_COMMIT_RE = re.compile(r'set\(\s*PULP_GPU_RUNTIME_COMMIT\s+"([0-9a-f]{40})"\s*\)')
-GPU_RUNTIME_VERSION_RE = re.compile(r'set\(\s*PULP_GPU_RUNTIME_VERSION\s+"([0-9]+\.[0-9]+\.[0-9]+)"\s*\)')
+GPU_RUNTIME_LOCK_READER = "tools/cmake/PulpVellumLock.cmake"
+GPU_RUNTIME_PIN_VARS = ("PULP_GPU_RUNTIME_COMMIT", "PULP_GPU_RUNTIME_VERSION")
+GPU_RUNTIME_SET_RE = re.compile(r"\bset\(\s*(PULP_GPU_RUNTIME_(?:COMMIT|VERSION))\b\s*([^\s)]*)", re.I)
+GPU_RUNTIME_DECLARE_RE = re.compile(r"\bFetchContent_Declare\(", re.I)
+GPU_RUNTIME_LOCK_INCLUDE_RE = re.compile(r'\binclude\(\s*"?[^")]*PulpVellumLock\.cmake"?\s*\)', re.I)
+GPU_RUNTIME_VERSION_CHECK_RE = re.compile(
+    r'\bif\(\s*NOT\s+\S+\s+STREQUAL\s+"?(?:\$\{PULP_GPU_RUNTIME_VERSION\}|PULP_GPU_RUNTIME_VERSION)"?\s*\)')
+GPU_RUNTIME_PREFIX_VERSION_RE = re.compile(
+    r'\bpulp_find_gpu_runtime_package\(\s*"?\$\{PULP_GPU_RUNTIME_VERSION\}"?[\s)]')
+
+
+def strip_cmake_comments(text: str) -> str:
+    """Drop `#` comments (outside double-quoted strings) so a commented-out line proves nothing."""
+    lines = []
+    for line in text.splitlines():
+        quoted = False
+        for index, char in enumerate(line):
+            if char == '"' and (index == 0 or line[index - 1] != "\\"):
+                quoted = not quoted
+            elif char == "#" and not quoted:
+                line = line[:index]
+                break
+        lines.append(line)
+    return "\n".join(lines)
+
+
+def cmake_declare_blocks(text: str) -> list[list[str]]:
+    """The whitespace-separated arguments of every FetchContent_Declare(...) call."""
+    blocks = []
+    for match in GPU_RUNTIME_DECLARE_RE.finditer(text):
+        depth, index, quoted = 1, match.end(), False
+        while index < len(text) and depth:
+            char = text[index]
+            if char == '"' and text[index - 1] != "\\":
+                quoted = not quoted
+            elif not quoted and char == "(":
+                depth += 1
+            elif not quoted and char == ")":
+                depth -= 1
+            index += 1
+        blocks.append(re.findall(r'"[^"]*"|[^\s()]+', text[match.end():index - 1]))
+    return blocks
+
+
+def gpu_runtime_cmake_problems(root: Path, source: str) -> list[str]:
+    """Assert the build fetches and version-checks gpu-runtime from pulp.lock.
+
+    Checked on the CMake itself, comments ignored: the FetchContent GIT_TAG is
+    ${PULP_GPU_RUNTIME_COMMIT}, only the lock reader sets the commit and version
+    (from the lock's sha and tag), and both the source build and the prefix
+    package compare against PULP_GPU_RUNTIME_VERSION.
+    """
+    problems: list[str] = []
+    try:
+        text = strip_cmake_comments((root / source).read_text(encoding="utf-8"))
+    except OSError as error:
+        return [f"cannot read {source}: {error}"]
+    if not GPU_RUNTIME_LOCK_INCLUDE_RE.search(text):
+        problems.append(f"{source} does not include PulpVellumLock.cmake, so the pin is not read from pulp.lock")
+    declares = [block for block in cmake_declare_blocks(text)
+                if block and block[0].lower() == "vellum_gpu_runtime"]
+    if len(declares) != 1:
+        problems.append(f"{source} must declare FetchContent vellum_gpu_runtime exactly once "
+                        f"(found {len(declares)})")
+    else:
+        tags = [declares[0][i + 1] for i, arg in enumerate(declares[0][:-1]) if arg == "GIT_TAG"]
+        if tags != ["${PULP_GPU_RUNTIME_COMMIT}"] and tags != ['"${PULP_GPU_RUNTIME_COMMIT}"']:
+            problems.append(f"{source}: the vellum_gpu_runtime FetchContent GIT_TAG must be exactly "
+                            f"${{PULP_GPU_RUNTIME_COMMIT}} (found {tags or 'no GIT_TAG'})")
+    if not GPU_RUNTIME_VERSION_CHECK_RE.search(text):
+        problems.append(f"{source} has no `if(NOT <fetched version> STREQUAL PULP_GPU_RUNTIME_VERSION)` "
+                        "check on the fetched source")
+    if not GPU_RUNTIME_PREFIX_VERSION_RE.search(text):
+        problems.append(f"{source} does not find the prefix package by ${{PULP_GPU_RUNTIME_VERSION}}")
+
+    sets: dict[str, list[str]] = {name: [] for name in GPU_RUNTIME_PIN_VARS}
+    candidates = sorted((root / "tools/cmake").glob("*.cmake"))
+    if (root / "CMakeLists.txt").is_file():
+        candidates.append(root / "CMakeLists.txt")
+    for path in candidates:
+        rel = path.relative_to(root).as_posix()
+        try:
+            body = strip_cmake_comments(path.read_text(encoding="utf-8"))
+        except OSError as error:
+            problems.append(f"cannot read {rel}: {error}")
+            continue
+        for name, value in GPU_RUNTIME_SET_RE.findall(body):
+            if rel == GPU_RUNTIME_LOCK_READER:
+                sets[name.upper()].append(value.strip('"'))
+            else:
+                problems.append(f"{rel} sets {name}; only {GPU_RUNTIME_LOCK_READER} may, from pulp.lock")
+    expected = {"PULP_GPU_RUNTIME_COMMIT": "${PULP_VELLUM_sha}", "PULP_GPU_RUNTIME_VERSION": "${PULP_VELLUM_tag}"}
+    for name, values in sets.items():
+        if values != [expected[name]]:
+            problems.append(f"{GPU_RUNTIME_LOCK_READER} must set {name} exactly once, from "
+                            f"{expected[name]} (found {values or 'no set()'})")
+    return problems
 
 
 def gpu_runtime_pin_agreement(manifest: list[dict], root: Path = ROOT) -> list[str]:
-    """The commit and version the build fetches must be the manifest's.
+    """The build must fetch and version-check gpu-runtime from pulp.lock.
 
-    tools/cmake/PulpGpuRuntime.cmake is what configure reads; the manifest is
-    what the audit, DEPENDENCIES.md and the renderer-lock check read. A pin
-    moved in one and not the other is refused.
+    tools/cmake/PulpGpuRuntime.cmake is what configure reads and the manifest
+    is what the audit and DEPENDENCIES.md read; pulp_lock_agreement ties the
+    manifest to pulp.lock. This asserts the CMake side of that chain on the
+    CMake text, so an edit that fetches an unpinned commit or skips the
+    lock-derived version check fails here.
     """
     entry = next((dep for dep in manifest if dep.get("name") == GPU_RUNTIME_ENTRY), None)
     if entry is None:
-        # Nothing to agree with is only fine while nothing is pinned.
+        # Nothing to agree with is only fine while nothing is fetched.
         try:
-            pinning = GPU_RUNTIME_COMMIT_RE.search(
-                (root / GPU_RUNTIME_PIN_FILE).read_text(encoding="utf-8"))
+            text = strip_cmake_comments((root / GPU_RUNTIME_PIN_FILE).read_text(encoding="utf-8"))
         except OSError:
-            pinning = None
-        if pinning:
-            return [f"{GPU_RUNTIME_PIN_FILE} fetches gpu-runtime at {pinning.group(1)}, but the "
-                    f"manifest has no {GPU_RUNTIME_ENTRY} entry"]
+            return []
+        if any(block and block[0].lower() == "vellum_gpu_runtime" for block in cmake_declare_blocks(text)):
+            return [f"{GPU_RUNTIME_PIN_FILE} fetches gpu-runtime, but the manifest has no "
+                    f"{GPU_RUNTIME_ENTRY} entry"]
         return []
     sources = entry.get("source_files") or []
     if len(sources) != 1:
         return [f"{GPU_RUNTIME_ENTRY} must name exactly one source file, the CMake pin"]
-    path = root / sources[0]
-    try:
-        text = path.read_text(encoding="utf-8")
-    except OSError as error:
-        return [f"{GPU_RUNTIME_ENTRY}: cannot read {sources[0]}: {error}"]
-    commits = GPU_RUNTIME_COMMIT_RE.findall(text)
-    versions = GPU_RUNTIME_VERSION_RE.findall(text)
-    if len(commits) != 1 or len(versions) != 1:
-        if "PulpVellumLock.cmake" in text:
-            return []
-        return [f"{sources[0]} must set PULP_GPU_RUNTIME_COMMIT and PULP_GPU_RUNTIME_VERSION once "
-                f"each (found {len(commits)} and {len(versions)})"]
-    problems = []
-    pinned = ((entry.get("upstream") or {}).get("commit") or "").lower()
-    if commits[0] != pinned:
-        problems.append(f"{sources[0]} fetches gpu-runtime at {commits[0]}, but the manifest "
-                        f"pins {pinned or 'nothing'}")
-    version = str(entry.get("version", "")).split(" ", 1)[0]
-    if versions[0] != version:
-        problems.append(f"{sources[0]} expects gpu-runtime {versions[0]}, but the manifest "
-                        f"names {version or 'nothing'}")
-    return problems
+    return gpu_runtime_cmake_problems(root, sources[0])
 
 
 def pulp_lock_agreement(manifest: list[dict], root: Path = ROOT) -> list[str]:
