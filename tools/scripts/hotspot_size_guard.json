@@ -67,8 +67,13 @@
     },
     {
       "path": "core/host/src/signal_graph_prepare.cpp",
-      "max_loc": 1664,
+      "max_loc": 1305,
       "note": "SignalGraph compile/prepare lifecycle; compile_ phases belong in focused signal_graph_compile_*.cpp units"
+    },
+    {
+      "path": "core/host/src/signal_graph_compile_nodes.cpp",
+      "max_loc": 397,
+      "note": "Per-node runtime, mailbox, custom-node and sample-region callback binding for one compiled snapshot"
     },
     {
       "path": "core/host/src/signal_graph_compile_routed.cpp",

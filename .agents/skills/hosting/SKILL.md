@@ -1000,7 +1000,10 @@ save/reopen render proof beside the legacy caller-owned route controls.
   `process(ProcessBuffers&, midi_in, midi_out, param_events, n, const
   format::ProcessContext&)` overload; a custom node's type sets
   `process_transport` (stateless) or `process_instance_transport` (stateful).
-  `compile_` resolves the capability ONCE into the cached, prepare-stable
+  `compile_` (in its per-node binding pass, `bind_executable_nodes_` in
+  `core/host/src/signal_graph_compile_nodes.cpp`, which also builds each node's
+  runtime, mailboxes and custom/sample-region callbacks) resolves the capability
+  ONCE into the cached, prepare-stable
   `GraphNode::transport_sensitive` (Plugin: from `slot->wants_transport()`;
   Custom: from a non-empty transport callback registration), resolved BEFORE the
   anticipation eligibility analysis. That ONE cached bit is read by BOTH the
