@@ -21,8 +21,8 @@
 set(PULP_GPU_RUNTIME_PREFIX "" CACHE PATH
     "An installed vellum-gpu-runtime package; empty builds the pinned source")
 # Pinned in tools/deps/manifest.json ("vellum-gpu-runtime"); keep them equal.
-set(PULP_GPU_RUNTIME_COMMIT "14bd4c5e430bc8da6b4204f1daa8a1bdbc6b7f3a")
-set(PULP_GPU_RUNTIME_VERSION "0.1.10")
+set(PULP_GPU_RUNTIME_COMMIT "d39723bcf69c208eee4835e3efa5ae45d603c5d5")
+set(PULP_GPU_RUNTIME_VERSION "0.2.1")
 
 # OFF builds Pulp's own device sources on macOS too, the layer every other
 # platform still uses; it keeps that mode compilable where it can gate.
