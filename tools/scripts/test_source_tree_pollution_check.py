@@ -221,6 +221,14 @@ class RootAllowlistTests(unittest.TestCase):
         result = self._run_root_allowlist()
         self.assertEqual(result.returncode, 0, msg=result.stderr)
 
+    def test_pulp_lock_is_allowlisted(self) -> None:
+        self._commit_allowlisted_only()
+        Path("pulp.lock").write_text("{}\n", encoding="utf-8")
+        subprocess.run(["git", "add", "pulp.lock"], check=True)
+        subprocess.run(["git", "commit", "-q", "-m", "add lock"], check=True)
+        result = self._run_root_allowlist()
+        self.assertEqual(result.returncode, 0, msg=result.stderr)
+
     def test_stray_top_level_file_blocks(self) -> None:
         self._commit_allowlisted_only()
         Path("screenshot.png").write_bytes(b"\x89PNG")

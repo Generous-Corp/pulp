@@ -97,6 +97,7 @@ ALLOWED_ROOT_PATHS = frozenset({
     "config.example.toml",
     "mise.toolchain.lock",
     "mkdocs.yml",
+    "pulp.lock",
     "requirements-docs.txt",
     "setup.ps1",
     "setup.sh",
