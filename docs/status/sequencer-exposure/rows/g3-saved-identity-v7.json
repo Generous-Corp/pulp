@@ -11,6 +11,7 @@
     "core/host/src/spectral_graph.cpp",
     "core/host/src/trigger_graph.cpp",
     "core/host/src/graph_serializer.cpp",
+    "core/host/src/graph_serializer_internal.hpp",
     "core/host/src/graph_serializer_test_access.hpp",
     "test/test_graph_saved_identity_v7.cpp",
     "docs/graph-program-status/G-3-v7-identity-design.md",
@@ -48,9 +49,14 @@
       ]
     },
     {
+      "path": "core/host/src/graph_serializer_internal.hpp",
+      "needles": [
+        "pulp.graph.saved-identity.v7"
+      ]
+    },
+    {
       "path": "core/host/src/graph_serializer.cpp",
       "needles": [
-        "pulp.graph.saved-identity.v7",
         "GraphSerializer::migrate_saved_document",
         "plan_authored_ids",
         "migrated_authored_id"
