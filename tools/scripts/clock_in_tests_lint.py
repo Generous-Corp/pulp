@@ -182,6 +182,22 @@ def _fstring_clock_spans(source: str) -> list[tuple[int, int]]:
     return spans
 
 
+def _baseline_lines(rel: str, lines: list[tuple[int, str]]) -> list[str]:
+    """Return one representative physical line for each complete clock span."""
+    logical_records: list[tuple[int, str]] = []
+    for number, text in lines:
+        for logical in text.replace("\r", "\n").split("\n"):
+            logical_records.append((number, logical))
+    source = "\n".join(text for _, text in logical_records)
+    spans = (_clock_tokens(source) or []) + _fstring_clock_spans(source)
+    entries: list[str] = []
+    for start, _ in sorted(spans):
+        index = start - 1
+        if 0 <= index < len(logical_records):
+            entries.append(logical_records[index][1].strip())
+    return entries
+
+
 def scan_lines(rel: str, lines: list[tuple[int, str]], baseline=None, *, consume_baseline: bool = False,
                added_numbers: set[int] | None = None) -> list[str]:
     _, entries = baseline if baseline is not None else load_baseline()
@@ -326,10 +342,9 @@ def main(argv: list[str]) -> int:
     if args.emit_baseline:
         entries = []
         for rel, lines in sorted(tracked_lines().items()):
-            for _, text in lines:
-                if flagged(text):
-                    entries.append({"path": rel, "line": text.strip(),
-                                    "reason": "existing use when the lint landed"})
+            for text in _baseline_lines(rel, lines):
+                entries.append({"path": rel, "line": text,
+                                "reason": "existing use when the lint landed"})
         print(json.dumps({"files": [], "lines": entries}, indent=2))
         return 0
 

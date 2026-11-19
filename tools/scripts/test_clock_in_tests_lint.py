@@ -423,6 +423,32 @@ class DiffScopeTest(unittest.TestCase):
                 lint.ROOT = old_root
             self.assertIn("tools/test_b.py", added)
 
+    def test_emit_baseline_covers_multiline_clock_span(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            git = lambda *a: subprocess.run(["git", "-C", tmp, *a], check=True, capture_output=True)
+            git("init", "-q", "-b", "main")
+            git("config", "user.email", "t@example.com")
+            git("config", "user.name", "t")
+            (repo / "tools" / "scripts").mkdir(parents=True)
+            (repo / "tools" / "test_multiline.py").write_text(
+                "value = (\n    time\n    .time()\n)\n", encoding="utf-8")
+            (repo / "tools" / "scripts" / "clock_in_tests_lint.py").write_text(
+                (HERE / "clock_in_tests_lint.py").read_text(encoding="utf-8"),
+                encoding="utf-8")
+            git("add", ".")
+            git("commit", "-qm", "base")
+            emitted = subprocess.run(
+                [sys.executable, str(repo / "tools/scripts/clock_in_tests_lint.py"), "--emit-baseline"],
+                cwd=repo, capture_output=True, text=True, encoding="utf-8")
+            self.assertEqual(emitted.returncode, 0, emitted.stdout + emitted.stderr)
+            baseline = repo / "tools/scripts/clock_in_tests_baseline.json"
+            baseline.write_text(emitted.stdout, encoding="utf-8")
+            result = subprocess.run(
+                [sys.executable, str(repo / "tools/scripts/clock_in_tests_lint.py"), "--all"],
+                cwd=repo, capture_output=True, text=True, encoding="utf-8")
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
 
 if __name__ == "__main__":
     unittest.main()
