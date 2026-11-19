@@ -7,6 +7,10 @@ the process that holds it: two builds racing into one tree corrupt each other's
 objects and double the host load, and relaunching a build that is still running
 elsewhere is the common way that happens.
 
+If the default lock root is not writable (a confined sandbox) the lock falls
+back to a per-user directory under the system temp dir; set
+``PULP_BUILD_DIR_LOCK_ROOT`` to an absolute path to choose the root explicitly.
+
 The lock is a kernel ``flock``, so it is released the moment its holder exits,
 however it exits; a holder that was killed cannot leave a stale lock behind.
 The ``.holder`` sidecar only describes who holds it, and is read only when the
@@ -18,6 +22,8 @@ that tree without deadlocking or refusing themselves.
 from __future__ import annotations
 
 import argparse
+import errno
+import getpass
 import hashlib
 import json
 import os
@@ -26,6 +32,7 @@ import socket
 import stat
 import subprocess
 import sys
+import tempfile
 import time
 from contextlib import contextmanager
 from pathlib import Path
@@ -96,6 +103,80 @@ def lock_root() -> Path:
     if state_home and Path(state_home).is_absolute():
         return Path(state_home) / "pulp" / "build-dir-locks"
     return Path.home() / ".local" / "state" / "pulp" / "build-dir-locks"
+
+
+def fallback_lock_root() -> Path:
+    """Per-user lock root under the system temp dir.
+
+    Used only when the default host-state root cannot be written (for example
+    a sandbox that confines writes to the workspace and temp directories).
+    """
+
+    geteuid = getattr(os, "geteuid", None)
+    if callable(geteuid):
+        identity = f"uid-{geteuid()}"
+    else:
+        identity = f"user-{getpass.getuser()}"
+    suffix = hashlib.sha256(identity.encode("utf-8")).hexdigest()[:16]
+    if os.name == "nt":
+        # Windows TEMP can be sandbox-specific; SystemRoot\Temp is host-wide.
+        temp_root = Path(os.environ.get("SystemRoot", r"C:\Windows")) / "Temp"
+    else:
+        # POSIX sandboxes may expose different TMPDIR values. /tmp is the
+        # host-wide location both ordinary and confined processes can reach.
+        temp_root = Path("/tmp")
+    return temp_root.resolve(strict=False) / f"pulp-build-dir-locks-{suffix}"
+
+
+def _open_lock_in_root(build_dir: Path, root: Path) -> tuple[Path, BinaryIO]:
+    _ensure_lock_root(root)
+    path = lock_path_for(build_dir, root)
+    return path, _open_lock_file(path)
+
+
+def _open_locks(build_dir: Path) -> list[tuple[Path, BinaryIO]]:
+    """Open the shared coordination lock before the durable host-state lock.
+
+    An explicit ``PULP_BUILD_DIR_LOCK_ROOT`` is never second-guessed. For the
+    default configuration, every process first opens the same per-user temp
+    lock, which is the one identity a confined process can reach. The durable
+    host-state lock is an additional record for ordinary processes, never the
+    first lock acquired.
+    """
+
+    explicit = bool(os.environ.get(LOCK_ROOT_ENV))
+    if explicit:
+        return [_open_lock_in_root(build_dir, lock_root())]
+
+    fallback = fallback_lock_root()
+    try:
+        opened = [_open_lock_in_root(build_dir, fallback)]
+    except OSError as exc:
+        if exc.errno not in {errno.EACCES, errno.EPERM, errno.EROFS}:
+            raise
+        raise PermissionError(
+            f"shared build-directory lock root is not writable: {fallback}"
+        ) from None
+
+    root = lock_root()
+    if root.resolve(strict=False) == fallback.resolve(strict=False):
+        return opened
+    try:
+        opened.append(_open_lock_in_root(build_dir, root))
+    except OSError as exc:
+        # _ensure_lock_root raises PermissionError with errno None for a
+        # foreign-owned root; that is a permission condition too.
+        if not isinstance(exc, PermissionError) and exc.errno not in {
+            errno.EACCES,
+            errno.EPERM,
+            errno.EROFS,
+        }:
+            raise
+        print(
+            f"[build-dir-lock] {root} is not writable; using {fallback}",
+            file=sys.stderr,
+        )
+    return opened
 
 
 def _ensure_lock_root(root: Path) -> None:
@@ -219,6 +300,40 @@ def _open_lock_file(lock_path: Path) -> BinaryIO:
         raise
 
 
+def _acquire_lock(lock_file: BinaryIO, *, wait: bool) -> None:
+    if os.name == "nt":
+        import msvcrt
+
+        if lock_file.seek(0, os.SEEK_END) == 0:
+            lock_file.write(b"\0")
+            lock_file.flush()
+        lock_file.seek(0)
+        try:
+            msvcrt.locking(lock_file.fileno(), msvcrt.LK_LOCK if wait else msvcrt.LK_NBLCK, 1)
+        except OSError as exc:
+            if wait or exc.errno not in {errno.EACCES, errno.EAGAIN, errno.EDEADLK}:
+                raise
+            raise BlockingIOError from exc
+        return
+
+    import fcntl
+
+    fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX | (0 if wait else fcntl.LOCK_NB))
+
+
+def _release_lock(lock_file: BinaryIO) -> None:
+    if os.name == "nt":
+        import msvcrt
+
+        lock_file.seek(0)
+        msvcrt.locking(lock_file.fileno(), msvcrt.LK_UNLCK, 1)
+        return
+
+    import fcntl
+
+    fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
+
+
 def _verify_lock_identity(lock_file: BinaryIO, canonical: bytes) -> None:
     marker = LOCK_MARKER_PREFIX + hashlib.sha512(canonical).hexdigest().encode("ascii") + b"\n"
     lock_file.seek(0)
@@ -248,57 +363,38 @@ def exclusive_build_dir(
     if held_by_ancestor(build_dir):
         yield
         return
-    root = lock_root()
-    _ensure_lock_root(root)
-    path = lock_path_for(build_dir, root)
+    opened = _open_locks(build_dir)
     previous_held = os.environ.get(HELD_ENV)
-    with _open_lock_file(path) as lock_file:
-        if os.name == "nt":
-            import msvcrt
-
-            if lock_file.seek(0, os.SEEK_END) == 0:
-                lock_file.write(b"\0")
-                lock_file.flush()
-            lock_file.seek(0)
+    acquired: list[tuple[Path, BinaryIO]] = []
+    try:
+        for path, lock_file in opened:
             try:
-                msvcrt.locking(
-                    lock_file.fileno(), msvcrt.LK_LOCK if wait else msvcrt.LK_NBLCK, 1
-                )
-            except OSError:
+                _acquire_lock(lock_file, wait=wait)
+            except BlockingIOError:
                 if wait:
                     raise
                 raise BuildDirBusy(Path(os.fsdecode(canonical)), read_holder(path)) from None
+            acquired.append((path, lock_file))
 
-            def unlock() -> None:
-                lock_file.seek(0)
-                msvcrt.locking(lock_file.fileno(), msvcrt.LK_UNLCK, 1)
-        else:
-            import fcntl
-
-            try:
-                fcntl.flock(
-                    lock_file.fileno(), fcntl.LOCK_EX | (0 if wait else fcntl.LOCK_NB)
-                )
-            except BlockingIOError:
-                raise BuildDirBusy(Path(os.fsdecode(canonical)), read_holder(path)) from None
-
-            def unlock() -> None:
-                fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
-
-        try:
+        for _, lock_file in acquired:
             _verify_lock_identity(lock_file, canonical)
+        for path, _ in acquired:
             _write_holder(path, build_dir, command)
-            os.environ[HELD_ENV] = os.pathsep.join(
-                [*_held_dirs(os.environ), os.fsdecode(canonical)]
-            )
-            yield
-        finally:
-            if previous_held is None:
-                os.environ.pop(HELD_ENV, None)
-            else:
-                os.environ[HELD_ENV] = previous_held
+        os.environ[HELD_ENV] = os.pathsep.join(
+            [*_held_dirs(os.environ), os.fsdecode(canonical)]
+        )
+        yield
+    finally:
+        if previous_held is None:
+            os.environ.pop(HELD_ENV, None)
+        else:
+            os.environ[HELD_ENV] = previous_held
+        for path, _ in acquired:
             _clear_holder(path)
-            unlock()
+        for _, lock_file in reversed(acquired):
+            _release_lock(lock_file)
+        for _, lock_file in opened:
+            lock_file.close()
 
 
 def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:

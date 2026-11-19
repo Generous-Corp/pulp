@@ -6060,6 +6060,44 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
+name = "script-readers-83b526637556"
+paths = ["tools/scripts/test_prepush_claim_check.py"]
+tests = [
+  "build-parallelism-guard",
+  "changed-surface-policy-inventory",
+  "changed-surface-policy-selftest",
+  "changed-surface-script-families-drift",
+  "changed-surface-script-families-selftest",
+  "changed-surface-shadow-plans-selftest",
+  "clean-worktree-planning-selftest",
+  "configure-only-selftest",
+  "flake-exoneration-selftest",
+  "gate-common-selftest",
+  "gpu-audio-provider-identity-selftest",
+  "gpu-dpr-runner-selftest",
+  "gpu-first-visible-acceptance-selftest",
+  "gpu-first-visible-campaign-selftest",
+  "gpu-first-visible-external-adapter-selftest",
+  "gpu-first-visible-role-producers-selftest",
+  "gpu-handoff-provenance-selftest",
+  "pr-head-affected-tests-selftest",
+  "pr-head-diff-scoped-registrations",
+  "prepush-claim-check",
+  "prepush-receipt",
+  "prepush-refresh-push",
+  "reuse-policy-replay-selftest",
+  "sample-region-compat-baseline-selftest",
+  "vellum-watch-preflight-selftest",
+  "wide-non-native-selftest",
+]
+build_targets = ["pulp-cli"]
+supported_build_types = [
+  "debug",
+  "release",
+]
+risk_class = "low"
+
+[[families]]
 name = "script-readers-134d80ed966b"
 paths = ["tools/scripts/test_prepush_format_gate.py"]
 tests = [
@@ -9103,6 +9141,7 @@ tests = [
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
   "prepush-cannot-measure",
+  "prepush-claim-check",
   "prepush-format-gate-wiring",
   "prepush-gate-output",
   "prepush-queue-rebase-hint",
@@ -9485,6 +9524,7 @@ paths = [
   "tools/scripts/test_prepare_logic_hostbench_au.py",
   "tools/scripts/test_prepare_node_runtime.py",
   "tools/scripts/test_prepush_affected_tests.py",
+  "tools/scripts/test_prepush_claim_check.py",
   "tools/scripts/test_prepush_format_gate.py",
   "tools/scripts/test_prepush_gate_output.py",
   "tools/scripts/test_prepush_queue_rebase_hint.py",
@@ -10112,6 +10152,7 @@ paths = [
   "tools/scripts/test_prepare_logic_hostbench_au.py",
   "tools/scripts/test_prepare_node_runtime.py",
   "tools/scripts/test_prepush_affected_tests.py",
+  "tools/scripts/test_prepush_claim_check.py",
   "tools/scripts/test_prepush_format_gate.py",
   "tools/scripts/test_prepush_gate_output.py",
   "tools/scripts/test_prepush_queue_rebase_hint.py",

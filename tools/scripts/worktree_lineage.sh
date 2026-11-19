@@ -15,6 +15,7 @@ usage() {
 Usage:
   worktree_lineage.sh mark --status STATUS [options]
   worktree_lineage.sh show [--branch BRANCH | --path PATH]
+  worktree_lineage.sh assert-owner [--path PATH] --owner LABEL
   worktree_lineage.sh list
   worktree_lineage.sh reconcile [--branch BRANCH] [--repo OWNER/REPO] [--dry-run]
 
@@ -362,6 +363,16 @@ case "${command_name}" in
     show)
         resolve_branch
         show_branch "${branch}"
+        ;;
+    assert-owner)
+        [[ -n "${owner}" ]] || die "assert-owner requires --owner"
+        resolve_branch
+        recorded_status="$(get_value Status)"
+        recorded_owner="$(get_value Owner)"
+        if [[ "${recorded_status}" == active && -n "${recorded_owner}" && "${recorded_owner}" != "${owner}" ]]; then
+            printf 'worktree_lineage: active owner %s (requested %s)\n' "${recorded_owner}" "${owner}" >&2
+            exit 3
+        fi
         ;;
     list)
         # Read the whole lineage table in a fixed number of git invocations. A

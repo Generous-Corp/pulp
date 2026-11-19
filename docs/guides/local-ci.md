@@ -2986,6 +2986,16 @@ unlock so queued waiters keep one inode. Tests may set the trusted, absolute
 `PULP_BUILD_DIR_LOCK_ROOT` override; production uses durable per-user
 application state with owner-only permissions (or the user's inherited profile
 ACL on Windows), rather than an OS-purgeable cache or runtime directory.
+Default-configured processes first acquire the shared
+`pulp-build-dir-locks-<user>` coordination lock under the system temp directory,
+then ordinary processes also take the durable host-state lock when it is writable.
+This keeps confined and ordinary processes on one lock identity; if the shared
+coordination root is unavailable, the build fails closed. An explicit
+`PULP_BUILD_DIR_LOCK_ROOT` uses only that root and is never replaced.
+Known limits: a sandbox with a private `/tmp` mount cannot share this lock
+(set `PULP_BUILD_DIR_LOCK_ROOT` to a path every participant sees), and wrappers
+from checkouts that predate this change take only the durable host-state lock,
+so serialization against them resumes once the checkout is updated.
 
 Interactive builds take the same lock without waiting. `tools/ci/governed-build.sh`
 runs every `cmake --build <dir>` under `build_dir_lock.py --no-wait`, which refuses a
