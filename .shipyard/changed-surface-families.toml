@@ -9023,6 +9023,7 @@ tests = [
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
   "prepush-cannot-measure",
+  "prepush-claim-check",
   "prepush-format-gate-wiring",
   "prepush-gate-output",
   "prepush-queue-rebase-hint",
