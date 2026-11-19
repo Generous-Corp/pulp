@@ -81,12 +81,35 @@ class DiffScopeTest(unittest.TestCase):
             git("add", "."); git("commit", "-qm", "base")
             f.write_text("old = time.time()\nnew = datetime.now()\n", encoding="utf-8")  # clock-ok: fixture text
             git("commit", "-qam", "plant")
+            old_root = lint.ROOT
             lint.ROOT = repo
             try:
                 added = lint.added_lines("HEAD~1", "HEAD")
             finally:
-                lint.ROOT = HERE.parents[1]
+                lint.ROOT = old_root
             self.assertEqual(added, {"tools/test_a.py": [(2, "new = datetime.now()")]})  # clock-ok: fixture text
+
+    def test_head_only_baseline_cannot_exempt_new_clock_read(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            git = lambda *a: subprocess.run(["git", "-C", tmp, *a], check=True, capture_output=True)
+            git("init", "-q", "-b", "main")
+            git("config", "user.email", "t@example.com")
+            git("config", "user.name", "t")
+            (repo / "tools" / "scripts").mkdir(parents=True)
+            (repo / "tools" / "test_a.py").write_text("old = 1\n", encoding="utf-8")
+            git("add", "."); git("commit", "-qm", "base")
+            (repo / "tools" / "test_a.py").write_text("old = 1\nnew = datetime.now()\n", encoding="utf-8")  # clock-ok: fixture text
+            (repo / "tools" / "scripts" / "clock_in_tests_baseline.json").write_text(
+                '{"files": [], "lines": [{"path": "tools/test_a.py", "line": "new = datetime.now()", "reason": "bad"}]}\n',  # clock-ok: fixture text
+                encoding="utf-8")
+            git("add", "."); git("commit", "-qm", "plant")
+            old_root = lint.ROOT
+            lint.ROOT = repo
+            try:
+                self.assertEqual(lint.main(["--base", "HEAD~1", "--head", "HEAD"]), 1)
+            finally:
+                lint.ROOT = old_root
 
 
 if __name__ == "__main__":

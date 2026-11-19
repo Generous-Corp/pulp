@@ -19,9 +19,9 @@ A line is accepted when it carries an inline marker naming why the read is safe:
 
 or when it matches an entry in the baseline ``clock_in_tests_baseline.json``
 (frozen existing uses, matched by file and stripped line text, each with a
-reason) or its file is listed under ``files`` with a reason. Only the diff is
-scanned, so the existing population never blocks a push; the baseline exists so
-an unrelated edit to a baselined line does not either.
+reason). Only the diff is scanned, so the existing population never blocks a
+push; the baseline exists so an unrelated edit to a baselined line does not
+either.
 
 Detection limits: the scan is textual. It does not follow an alias
 (``from time import time as now``) or a clock read hidden in a helper module,

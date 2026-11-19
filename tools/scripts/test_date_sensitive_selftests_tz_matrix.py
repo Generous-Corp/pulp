@@ -68,6 +68,12 @@ class MatrixTest(unittest.TestCase):
             cfg.write_text(json.dumps({"zones": [], "tests": [{"path": "x.py"}]}), encoding="utf-8")
             self.assertNotEqual(matrix.main(["--config", str(cfg)]), 0)
 
+    def test_utc_only_configuration_fails_closed(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cfg = Path(tmp) / "c.json"
+            cfg.write_text(json.dumps({"zones": ["UTC"], "tests": [{"path": "x.py"}]}), encoding="utf-8")
+            self.assertNotEqual(matrix.main(["--config", str(cfg)]), 0)
+
     def test_shipped_config_is_well_formed(self):
         config = json.loads(matrix.CONFIG.read_text(encoding="utf-8"))
         self.assertEqual(config["zones"], ZONES)
