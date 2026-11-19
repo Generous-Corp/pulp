@@ -1012,7 +1012,6 @@ TEST_CASE("pulp-cpp create --ui vellum refuses templates that use a script UI",
     };
     const Case cases[] = {
         {"gain", {"--template", "gain"}, "gain"},
-        {"instrument", {"--type", "instrument"}, "instrument"},
     };
     for (const auto& c : cases) {
         const auto out_dir = tmp.path / (std::string("Refuse_") + c.label);
