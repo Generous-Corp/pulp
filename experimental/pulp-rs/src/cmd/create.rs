@@ -500,6 +500,17 @@ pub fn scaffold(
         )));
     }
 
+    if args.ui == "vellum" {
+        let supports_ui = fs::read_to_string(cmake_template_dir.join("CMakeLists.txt.template"))
+            .map(|t| t.contains("{{UI_LINE}}"))
+            .unwrap_or(false);
+        if !supports_ui {
+            return Err(CliError::BadUsage(format!(
+                "--ui vellum is not available for the {template_key} template yet; it uses a script UI"
+            )));
+        }
+    }
+
     fs::create_dir_all(out_dir).map_err(|e| CliError::io(out_dir.to_path_buf(), e))?;
     if standalone_mode {
         writeln!(log, "Mode: standalone product project (default)").map_err(io)?;
@@ -867,6 +878,17 @@ mod tests {
     }
 
     #[test]
+    fn vellum_ui_is_refused_for_script_ui_templates() {
+        let td = tempfile::tempdir().unwrap();
+        let args = CreateArgs { name: "Gain".into(), ui: "vellum".into(), ..Default::default() };
+        write_minimal_effect_templates(td.path(), "processor {{LOWER_NAME}}\n");
+        let out = td.path().join("out");
+        let err = scaffold(&args, &out, &td.path().join("tools").join("templates"), None, "1.0.0", &mut Vec::new()).unwrap_err();
+        assert!(err.to_string().contains("--ui vellum is not available for the effect template yet; it uses a script UI"));
+        assert!(!out.exists());
+    }
+
+    #[test]
     fn class_name_camel_cases() {
         assert_eq!(to_class_name("my gain"), "MyGain");
         assert_eq!(to_class_name("my-gain-plus"), "MyGainPlus");
@@ -907,6 +929,11 @@ mod tests {
         let td = tempfile::tempdir().unwrap();
         let args = CreateArgs { name: "Gain".into(), ui: "vellum".into(), ..Default::default() };
         write_minimal_effect_templates(td.path(), "processor {{LOWER_NAME}}\n");
+        fs::write(
+            td.path().join("tools").join("templates").join("effect").join("CMakeLists.txt.template"),
+            "project({{CLASS_NAME}})\n{{UI_LINE}}\n",
+        )
+        .unwrap();
         let result = scaffold(&args, &td.path().join("out"), &td.path().join("tools").join("templates"), None, "1.0.0", &mut Vec::new());
         assert!(result.is_ok());
     }

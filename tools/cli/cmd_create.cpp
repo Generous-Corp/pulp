@@ -682,6 +682,16 @@ int cmd_create(const std::vector<std::string>& args) {
         }
     }
 
+    if (ui == "vellum") {
+        const auto cmake_template = cmake_template_dir / "CMakeLists.txt.template";
+        if (!fs::exists(cmake_template) ||
+            read_file_contents(cmake_template).find("{{UI_LINE}}") == std::string::npos) {
+            std::cerr << "Error: --ui vellum is not available for the " << template_key
+                      << " template yet; it uses a script UI\n";
+            return 1;
+        }
+    }
+
     fs::create_directories(out_dir);
     if (standalone_mode) {
         log("Mode: standalone product project (default)\n");

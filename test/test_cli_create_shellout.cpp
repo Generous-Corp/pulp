@@ -999,6 +999,38 @@ TEST_CASE("pulp-cpp create rejects unavailable and unknown --ui values",
     CHECK_FALSE(fs::exists(bogus_dir));
 }
 
+TEST_CASE("pulp-cpp create --ui vellum refuses templates that use a script UI",
+          "[cli][create][shellout][ui-mode]") {
+    if (!pulp_binary_exists()) {
+        SKIP("pulp binary not built");
+    }
+    TempDir tmp("pulp-create-ui-vellum-refuse");
+    struct Case {
+        const char* label;
+        std::vector<std::string> extra;
+        const char* template_name;
+    };
+    const Case cases[] = {
+        {"gain", {"--template", "gain"}, "gain"},
+        {"instrument", {"--type", "instrument"}, "instrument"},
+    };
+    for (const auto& c : cases) {
+        const auto out_dir = tmp.path / (std::string("Refuse_") + c.label);
+        std::vector<std::string> args = {"create", "VellumRefuse", "--ui", "vellum"};
+        args.insert(args.end(), c.extra.begin(), c.extra.end());
+        args.insert(args.end(), {"--output", native_path_string(out_dir), "--no-build", "--ci"});
+        auto r = run_create(args, source_root());
+        INFO(c.label);
+        INFO(r.stderr_output);
+        REQUIRE_FALSE(r.timed_out);
+        REQUIRE(r.exit_code != 0);
+        CHECK(r.stderr_output.find(std::string("--ui vellum is not available for the ") +
+                                   c.template_name + " template yet; it uses a script UI") !=
+              std::string::npos);
+        CHECK_FALSE(fs::exists(out_dir));
+    }
+}
+
 TEST_CASE("pulp-cpp create --ui vellum emits a Vellum editor package and configures",
           "[cli][create][shellout][ui-mode][configure]") {
 #if !defined(PULP_CATCH2_SOURCE_DIR)
