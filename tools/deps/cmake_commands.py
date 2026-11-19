@@ -14,7 +14,12 @@ additionally drops the ones CMake cannot run where they stand:
 - commands in an if/elseif/else branch that a constant condition rules out
   (``if(FALSE)``, ``if(NOT ON)``, an else after ``if(TRUE)``), and in a
   ``while()`` whose condition is constant false;
-- commands after a ``return()`` that is reached unconditionally.
+- commands after a ``return()`` that is not provably conditional. A return()
+  ends the file unless some enclosing if/elseif/else branch depends on a
+  non-constant condition; one inside ``if(TRUE)``, the else of ``if(FALSE)``,
+  a foreach(), a while() or a block() is taken to end the file. That errs
+  toward dropping commands, so an audit relying on them fails rather than
+  passes.
 
 What it still does not model: conditions on variables, commands generated at
 configure time (``cmake_language(EVAL)``, ``include()`` of a generated file),
@@ -272,6 +277,8 @@ class _Block:
     dead: bool  # this branch cannot run
     decided: bool = False  # an earlier if/elseif branch is constant true
     branch: int = 0
+    certain: bool = False  # this if/elseif/else branch is always taken
+    unknown: bool = False  # some branch so far has a non-constant condition
 
 
 def executable_commands(text: str) -> list[Command]:
@@ -296,9 +303,12 @@ def executable_commands(text: str) -> list[Command]:
             if name == "elseif":
                 condition = constant_condition(command.arguments)
                 block.dead = block.decided or condition is False
+                block.certain = not block.decided and not block.unknown and condition is True
                 block.decided = block.decided or condition is True
+                block.unknown = block.unknown or condition is None
             else:
                 block.dead = block.decided
+                block.certain = not block.decided and not block.unknown
                 block.decided = True
             continue
         if name in _CLOSERS:
@@ -312,16 +322,18 @@ def executable_commands(text: str) -> list[Command]:
                          next_id if name in _OPENERS else None)
         if not outer_dead and not any(block.kind in ("function", "macro") for block in stack):
             live.append(tagged)
-            if name == "return" and not stack:
+            if name == "return" and not any(block.kind == "if" and not block.certain
+                                            for block in stack):
                 returned = True
         if name in _OPENERS:
-            dead = False
-            decided = False
+            dead = decided = unknown = False
             if name in ("if", "while"):
                 condition = constant_condition(command.arguments)
                 dead = condition is False
                 decided = condition is True
-            stack.append(_Block(next_id, name, tagged, dead, decided))
+                unknown = condition is None
+            stack.append(_Block(next_id, name, tagged, dead, decided,
+                                certain=decided, unknown=unknown))
             next_id += 1
     if stack:
         raise CMakeSyntaxError(f"line {stack[-1].command.line}: {stack[-1].kind}() is never closed")

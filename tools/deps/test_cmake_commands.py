@@ -111,13 +111,39 @@ class ExecutableTests(unittest.TestCase):
                 self.assertIn("fetchcontent_declare", names(text))
                 self.assertNotIn("fetchcontent_declare", live(text))
 
+    def test_a_return_that_is_always_taken_ends_the_file(self) -> None:
+        for label, opener in {
+            "if(TRUE)": "if(TRUE)\nreturn()\nendif()",
+            "if(1)": "if(1)\nreturn()\nendif()",
+            "if(ON)": "if(ON)\nreturn()\nendif()",
+            "if(YES)": "if(YES)\nreturn()\nendif()",
+            "if(NOT FALSE)": "if(NOT FALSE)\nreturn()\nendif()",
+            "nested constant-true": "if(TRUE)\nif(Y)\nreturn()\nendif()\nendif()",
+            "else of if(FALSE)": "if(FALSE)\nset(x 1)\nelse()\nreturn()\nendif()",
+            "elseif(TRUE) after if(OFF)": "if(OFF)\nset(x 1)\nelseif(TRUE)\nreturn()\nendif()",
+            "foreach (not provably conditional)": "foreach(x a)\nreturn()\nendforeach()",
+            "block (not provably conditional)": "block()\nreturn()\nendblock()",
+        }.items():
+            with self.subTest(label):
+                self.assertNotIn("fetchcontent_declare", live(f"{opener}\n{FAKE}\n"))
+
+    def test_a_return_under_a_variable_condition_does_not_end_the_file(self) -> None:
+        for label, opener in {
+            "if(VAR)": "if(VAR)\nreturn()\nendif()",
+            "if(TRUE) then if(VAR)": "if(TRUE)\nif(VAR)\nreturn()\nendif()\nendif()",
+            "else of if(VAR)": "if(VAR)\nset(x 1)\nelse()\nreturn()\nendif()",
+            "elseif(TRUE) after if(VAR)": "if(VAR)\nset(x 1)\nelseif(TRUE)\nreturn()\nendif()",
+            "function body": "function(f)\nreturn()\nendfunction()",
+        }.items():
+            with self.subTest(label):
+                self.assertIn("fetchcontent_declare", live(f"{opener}\n{FAKE}\n"))
+
     def test_variable_conditions_stay_live(self) -> None:
         for label, text in {
             "if(VAR)": f"if(VAR)\n{FAKE}\nendif()\n",
             "else of a variable": f"if(VAR)\nset(x 1)\nelse()\n{FAKE}\nendif()\n",
             "if(${X})": f"if(${{X}})\n{FAKE}\nendif()\n",
             "else after if(FALSE)": f"if(FALSE)\nset(x 1)\nelse()\n{FAKE}\nendif()\n",
-            "conditional return": f"if(A)\nreturn()\nendif()\n{FAKE}\n",
             "foreach body": f"foreach(x a b)\n{FAKE}\nendforeach()\n",
         }.items():
             with self.subTest(label):

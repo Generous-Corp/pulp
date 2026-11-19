@@ -1222,12 +1222,25 @@ GPU_RUNTIME_RELIED_COMMANDS = {
     "include", "set", "string", "foreach", "message", "return",
     "fetchcontent_declare", "fetchcontent_makeavailable",
 }
-# FetchContent_Declare options that would take the source from somewhere other
-# than the pinned git commit.
-GPU_RUNTIME_SOURCE_OVERRIDES = {
-    "URL", "SOURCE_DIR", "DOWNLOAD_COMMAND", "SVN_REPOSITORY", "HG_REPOSITORY",
-    "CVS_REPOSITORY",
-}
+# The one source the declaration may name, and the only options it may carry.
+# Anything else (URL, URL_HASH, SOURCE_DIR, DOWNLOAD_COMMAND, SVN_*, HG_*,
+# CVS_*, PATCH_COMMAND, ...) could take or alter the source outside the pin.
+GPU_RUNTIME_REPOSITORY = "https://github.com/Generous-Corp/vellum.git"
+GPU_RUNTIME_DECLARE_OPTIONS = {"GIT_REPOSITORY", "GIT_TAG", "SOURCE_SUBDIR", "GIT_SHALLOW",
+                               "GIT_PROGRESS"}
+GPU_RUNTIME_DECLARE_FLAGS = {"EXCLUDE_FROM_ALL", "SYSTEM"}
+# Variables that make FetchContent use a source other than the declared one,
+# and the Pulp helpers that set FETCHCONTENT_SOURCE_DIR_<NAME> for the name
+# they are given. A developer's own -D or PULP_FETCHCONTENT_SOURCE_DIR_<NAME>
+# override is outside the tree and not audited here.
+GPU_RUNTIME_SOURCE_OVERRIDE_VARS = ("FETCHCONTENT_SOURCE_DIR_VELLUM_GPU_RUNTIME",
+                                    "FETCHCONTENT_FULLY_DISCONNECTED")
+GPU_RUNTIME_SOURCE_HELPERS = ("pulp_register_fetchcontent_source",
+                              "pulp_materialize_mutable_fetchcontent_source")
+# The fetched project's version, read back from its source tree.
+GPU_RUNTIME_FETCHED_VERSION = ("_pulp_gpu_runtime_version", "DIRECTORY",
+                               "${vellum_gpu_runtime_SOURCE_DIR}/gpu-runtime",
+                               "DEFINITION", "PROJECT_VERSION")
 
 
 def _expands(argument: cmake_commands.Argument, value: str) -> bool:
@@ -1244,7 +1257,8 @@ def _pin_writes(command: cmake_commands.Command) -> list[str]:
         return []
     names = []
     for argument in command.arguments:
-        if argument.value in GPU_RUNTIME_PIN_VARS or argument.value in GPU_RUNTIME_LOCK_VARS:
+        if (argument.value in GPU_RUNTIME_PIN_VARS or argument.value in GPU_RUNTIME_LOCK_VARS
+                or argument.value.upper() in GPU_RUNTIME_SOURCE_OVERRIDE_VARS):
             names.append(argument.value)
         elif argument.value.startswith(GPU_RUNTIME_DYNAMIC_PREFIXES):
             names.append(argument.value)
@@ -1374,34 +1388,70 @@ def gpu_runtime_cmake_problems(root: Path, source: str) -> list[str]:
             found = [tag.value for tag in tags] or "no GIT_TAG"
             problems.append(f"{source}: the vellum_gpu_runtime FetchContent GIT_TAG must be exactly "
                             f"${{PULP_GPU_RUNTIME_COMMIT}} (found {found})")
-        overrides = sorted({arg.value for arg in args[1:]} & GPU_RUNTIME_SOURCE_OVERRIDES)
-        if overrides:
-            problems.append(f"{source}: the vellum_gpu_runtime FetchContent declaration takes its "
-                            f"source from {', '.join(overrides)}, not the pinned commit")
+        repositories = [args[i + 1] for i in range(1, len(args) - 1)
+                        if args[i].value == "GIT_REPOSITORY"]
+        if len(repositories) != 1 or not _expands(repositories[0], GPU_RUNTIME_REPOSITORY):
+            found = [repository.value for repository in repositories] or "no GIT_REPOSITORY"
+            problems.append(f"{source}: the vellum_gpu_runtime FetchContent GIT_REPOSITORY must be "
+                            f"exactly {GPU_RUNTIME_REPOSITORY} (found {found})")
+        unexpected, index = [], 1
+        while index < len(args):
+            option = args[index].value
+            if option in GPU_RUNTIME_DECLARE_FLAGS:
+                index += 1
+            elif option in GPU_RUNTIME_DECLARE_OPTIONS and index + 1 < len(args):
+                index += 2
+            else:
+                unexpected.append(option)
+                index += 1
+        if unexpected:
+            problems.append(f"{source}: the vellum_gpu_runtime FetchContent declaration carries "
+                            f"{', '.join(unexpected)}, which could take its source from somewhere "
+                            "other than the pinned commit; only "
+                            f"{', '.join(sorted(GPU_RUNTIME_DECLARE_OPTIONS | GPU_RUNTIME_DECLARE_FLAGS))} "
+                            "are allowed")
         if includes and min(command.line for command in includes) > declare.line:
             problems.append(f"{source} declares vellum_gpu_runtime before it includes "
                             "PulpVellumLock.cmake, so the pin is still unset")
 
     checks = []
+    fetched = None
+    if declare is not None:
+        branch = [command for command in live if command.blocks == declare.blocks
+                  and command.line > declare.line]
+        made = [command for command in branch if command.name == "fetchcontent_makeavailable"
+                and command.values() == ["vellum_gpu_runtime"]]
+        reads = [command for command in branch if command.name == "get_directory_property"
+                 and tuple(command.values()) == GPU_RUNTIME_FETCHED_VERSION
+                 and command.arguments[2].kind != cmake_commands.BRACKET
+                 and made and command.line > made[0].line]
+        fetched = reads[-1] if reads else None
+    if fetched is None:
+        problems.append(f"{source} does not read the fetched gpu-runtime version with "
+                        "get_directory_property(_pulp_gpu_runtime_version DIRECTORY "
+                        "${vellum_gpu_runtime_SOURCE_DIR}/gpu-runtime DEFINITION PROJECT_VERSION) "
+                        "after FetchContent_MakeAvailable(vellum_gpu_runtime), in the fetch branch")
     for command in live:
         values = command.values()
-        if (command.name == "if" and len(values) == 4 and values[0] == "NOT"
-                and values[2] == "STREQUAL"
-                and command.arguments[0].kind == cmake_commands.UNQUOTED
-                and command.arguments[2].kind == cmake_commands.UNQUOTED
+        if (fetched is not None and command.name == "if" and len(values) == 4
+                and values[:3] == ["NOT", "_pulp_gpu_runtime_version", "STREQUAL"]
+                and all(arg.kind == cmake_commands.UNQUOTED for arg in command.arguments[:3])
                 and (_expands(command.arguments[3], GPU_RUNTIME_VERSION_REF)
                      or (values[3] == "PULP_GPU_RUNTIME_VERSION"
                          and command.arguments[3].kind == cmake_commands.UNQUOTED))
-                and declare is not None and command.blocks == declare.blocks
-                and command.line > declare.line):
+                and command.blocks == fetched.blocks and command.line > fetched.line):
+            between = [inner for inner in live if fetched.line < inner.line < command.line
+                       and inner.name not in CMAKE_READ_ONLY_COMMANDS
+                       and "_pulp_gpu_runtime_version" in inner.values()]
             fatal = [inner for inner in live if inner.name == "message"
                      and inner.values()[:1] == ["FATAL_ERROR"]
                      and (command.opens, 0) in inner.blocks]
-            if fatal:
+            if fatal and not between:
                 checks.append(command)
     if not checks:
-        problems.append(f"{source} has no `if(NOT <fetched version> STREQUAL PULP_GPU_RUNTIME_VERSION)` "
-                        "check on the fetched source that stops configure with message(FATAL_ERROR)")
+        problems.append(f"{source} has no `if(NOT _pulp_gpu_runtime_version STREQUAL PULP_GPU_RUNTIME_VERSION)` "
+                        "check on the fetched source, after reading its version, that stops "
+                        "configure with message(FATAL_ERROR)")
 
     finds = [command for command in live
              if command.name == "pulp_find_gpu_runtime_package" and command.arguments
@@ -1420,6 +1470,14 @@ def gpu_runtime_cmake_problems(root: Path, source: str) -> list[str]:
             continue
         every, executable = parsed
         for command in every:
+            if (command.name in GPU_RUNTIME_SOURCE_HELPERS and command.arguments
+                    and command.arguments[0].value.lower() == "vellum_gpu_runtime"):
+                problems.append(f"{rel}:{command.line} registers a FetchContent source for "
+                                f"vellum_gpu_runtime with {command.name}(), so it may not build "
+                                "from the pinned commit")
+            if command.name == "cmake_language" and "SET_DEPENDENCY_PROVIDER" in command.values():
+                problems.append(f"{rel}:{command.line} sets a dependency provider, which can "
+                                "replace the pinned gpu-runtime fetch")
             if (command.name in ("function", "macro") and command.arguments
                     and command.arguments[0].value.lower() in GPU_RUNTIME_RELIED_COMMANDS):
                 problems.append(f"{rel}:{command.line} redefines {command.arguments[0].value}() "

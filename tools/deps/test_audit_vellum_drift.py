@@ -288,7 +288,7 @@ class GpuRuntimePinTests(unittest.TestCase):
         "version check": (
             "if(NOT _pulp_gpu_runtime_version STREQUAL PULP_GPU_RUNTIME_VERSION)",
             'if(NOT _pulp_gpu_runtime_version STREQUAL "0.0.0")',
-            "    get_directory_property(_pulp_gpu_runtime_version",
+            '    if(NOT _pulp_gpu_runtime_version STREQUAL "0.0.0")',
             "if(NOT _pulp_gpu_runtime_version STREQUAL PULP_GPU_RUNTIME_VERSION)\n"
             "message(FATAL_ERROR stop)\nendif()",
             "check on the fetched source"),
@@ -319,7 +319,7 @@ class GpuRuntimePinTests(unittest.TestCase):
         original = (ROOT / self.GPU).read_text(encoding="utf-8")
         for assertion, (real, replacement, before, fake, fragment) in self.PIN_CASES.items():
             self.assertIn(real, original)
-            self.assertIn(before, original)
+            self.assertIn(before, original.replace(real, replacement, 1))
             for form, hidden in self.hidden_forms(fake).items():
                 with self.subTest(assertion=assertion, form=form):
                     text = original.replace(real, replacement, 1)
@@ -348,12 +348,86 @@ class GpuRuntimePinTests(unittest.TestCase):
 
     def test_a_declaration_that_takes_its_source_elsewhere_fails(self) -> None:
         self.edit(self.GPU, "SOURCE_SUBDIR gpu-runtime", "SOURCE_SUBDIR gpu-runtime\n        SOURCE_DIR /x")
-        self.assertFlags("takes its source from SOURCE_DIR")
+        self.assertFlags("carries SOURCE_DIR")
 
     def test_a_version_check_that_does_not_stop_configure_fails(self) -> None:
         self.edit(self.GPU, "        message(FATAL_ERROR\n            \"Pulp: gpu-runtime at",
                   "        message(WARNING\n            \"Pulp: gpu-runtime at")
         self.assertFlags("check on the fetched source")
+
+    def test_the_declaration_must_name_the_canonical_repository(self) -> None:
+        url = "https://github.com/Generous-Corp/vellum.git"
+        for replacement in ("https://github.com/someone/vellum.git", url + ".evil", ""):
+            with self.subTest(replacement=replacement):
+                self.setUp()
+                self.edit(self.GPU, f"GIT_REPOSITORY {url}",
+                          f"GIT_REPOSITORY {replacement}" if replacement else "")
+                self.assertFlags("GIT_REPOSITORY must be exactly")
+
+    def test_every_alternate_source_option_is_rejected(self) -> None:
+        for option in ("URL https://example.invalid/v.tgz", "URL_HASH SHA256=00",
+                       "SOURCE_DIR /x", "DOWNLOAD_COMMAND true", "SVN_REPOSITORY x",
+                       "SVN_REVISION 1", "HG_REPOSITORY x", "HG_TAG x", "CVS_REPOSITORY x",
+                       "CVS_MODULE x", "PATCH_COMMAND true", "UPDATE_COMMAND true"):
+            with self.subTest(option=option):
+                self.setUp()
+                self.edit(self.GPU, "SOURCE_SUBDIR gpu-runtime",
+                          f"SOURCE_SUBDIR gpu-runtime\n        {option}")
+                self.assertFlags(f"carries {option.split()[0]}")
+
+    def test_fetchcontent_source_overrides_set_in_cmake_fail(self) -> None:
+        other = self.root / "tools/cmake/Other.cmake"
+        for override, fragment in (
+                ("set(FETCHCONTENT_SOURCE_DIR_VELLUM_GPU_RUNTIME /x)", "sets FETCHCONTENT_SOURCE_DIR"),
+                ('set("FETCHCONTENT_SOURCE_DIR_VELLUM_GPU_RUNTIME" /x CACHE PATH "")',
+                 "sets FETCHCONTENT_SOURCE_DIR"),
+                ("set([[FETCHCONTENT_FULLY_DISCONNECTED]] ON)", "sets FETCHCONTENT_FULLY_DISCONNECTED"),
+                ("pulp_register_fetchcontent_source(vellum_gpu_runtime DIR x REF y)",
+                 "registers a FetchContent source for vellum_gpu_runtime"),
+                ("cmake_language(SET_DEPENDENCY_PROVIDER p SUPPORTED_METHODS "
+                 "FETCHCONTENT_MAKEAVAILABLE_SERIAL)", "sets a dependency provider")):
+            with self.subTest(override=override):
+                other.write_text(override + "\n", encoding="utf-8")
+                self.assertFlags(fragment)
+        other.write_text("pulp_register_fetchcontent_source(Catch2 DIR catch2 REF v3)\n"
+                         'set(_doc "set(FETCHCONTENT_SOURCE_DIR_VELLUM_GPU_RUNTIME /x)")\n',
+                         encoding="utf-8")
+        self.assertEqual(self.problems(), [])
+
+    def test_the_lock_include_must_be_the_exact_path(self) -> None:
+        real = 'include("${CMAKE_CURRENT_LIST_DIR}/PulpVellumLock.cmake")'
+        for replacement in ("include(PulpVellumLock.cmake)",
+                            'include("${CMAKE_CURRENT_LIST_DIR}/../x/PulpVellumLock.cmake")',
+                            'include("${CMAKE_CURRENT_LIST_DIR}/PulpVellumLock.cmake" OPTIONAL)',
+                            "include([[${CMAKE_CURRENT_LIST_DIR}/PulpVellumLock.cmake]])"):
+            with self.subTest(replacement=replacement):
+                self.setUp()
+                self.edit(self.GPU, real, replacement)
+                self.assertFlags("does not include PulpVellumLock.cmake")
+
+    def test_the_version_check_must_compare_the_fetched_version_with_the_pin(self) -> None:
+        check = "if(NOT _pulp_gpu_runtime_version STREQUAL PULP_GPU_RUNTIME_VERSION)"
+        read = 'DIRECTORY "${vellum_gpu_runtime_SOURCE_DIR}/gpu-runtime" DEFINITION PROJECT_VERSION)'
+        for old, new in (
+                (check, "if(NOT _other_version STREQUAL PULP_GPU_RUNTIME_VERSION)"),
+                (check, "if(NOT _pulp_gpu_runtime_version VERSION_GREATER PULP_GPU_RUNTIME_VERSION)"),
+                (check, "if(_pulp_gpu_runtime_version STREQUAL PULP_GPU_RUNTIME_VERSION)"),
+                (check, 'if(NOT _pulp_gpu_runtime_version STREQUAL "PULP_GPU_RUNTIME_VERSION")'),
+                (check, "if(NOT PULP_GPU_RUNTIME_VERSION STREQUAL PULP_GPU_RUNTIME_VERSION)"),
+                (read, 'DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}" DEFINITION PROJECT_VERSION)'),
+                (read, 'DIRECTORY "${vellum_gpu_runtime_SOURCE_DIR}/gpu-runtime" DEFINITION X)'),
+                (check, 'set(_pulp_gpu_runtime_version "${PULP_GPU_RUNTIME_VERSION}")\n    ' + check),
+                ("    FetchContent_MakeAvailable(vellum_gpu_runtime)\n", "")):
+            with self.subTest(new=new):
+                self.setUp()
+                self.edit(self.GPU, old, new)
+                self.assertFlags("check on the fetched source")
+
+    def test_a_constant_true_return_before_the_include_fails(self) -> None:
+        self.edit(self.GPU, 'include("${CMAKE_CURRENT_LIST_DIR}/PulpVellumLock.cmake")',
+                  'if(TRUE)\n  return()\nendif()\n'
+                  'include("${CMAKE_CURRENT_LIST_DIR}/PulpVellumLock.cmake")')
+        self.assertFlags("does not include PulpVellumLock.cmake")
 
     def test_pin_writes_are_found_by_command_not_text(self) -> None:
         other = self.root / "tools/cmake/Other.cmake"
@@ -365,6 +439,8 @@ class GpuRuntimePinTests(unittest.TestCase):
                       "unset(PULP_GPU_RUNTIME_VERSION)",
                       'set("PULP_GPU_RUNTIME_COMMIT" x)',
                       "set([[PULP_GPU_RUNTIME_VERSION]] x)",
+                      'set("PULP_VELLUM_tag" x)',
+                      "set([==[PULP_VELLUM_sha]==] x)",
                       "set(PULP_VELLUM_sha 0)",
                       "function(f)\nset(PULP_GPU_RUNTIME_COMMIT x PARENT_SCOPE)\nendfunction()"):
             with self.subTest(write=write):
