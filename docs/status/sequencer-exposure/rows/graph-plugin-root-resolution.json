@@ -6,15 +6,21 @@
  "claim_id": "e1546e8f-cbb8-4efc-99b8-44d588e6e6cc",
  "owned_paths": [
   "core/host/src/graph_serializer.cpp",
+  "core/host/src/graph_serializer_plugin_resolver.cpp",
   "docs/status/sequencer-exposure/rows/graph-plugin-root-resolution.json"
  ],
  "evidence": [
   {
    "path": "core/host/src/graph_serializer.cpp",
    "needles": [
-    "scan_mode",
-    "allow_unrooted_plugin_paths",
     "missing_plugins"
+   ]
+  },
+  {
+   "path": "core/host/src/graph_serializer_plugin_resolver.cpp",
+   "needles": [
+    "scan_mode",
+    "allow_unrooted_plugin_paths"
    ]
   }
  ],
