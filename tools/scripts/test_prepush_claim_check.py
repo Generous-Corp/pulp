@@ -16,7 +16,7 @@ class ClaimCheckTests(unittest.TestCase):
         self.tmp = tempfile.TemporaryDirectory()
         self.dir = Path(self.tmp.name)
         self.stub = self.dir / "gh"
-        self.stub.write_text("#!/bin/sh\ncat \"$PULP_CLAIM_JSON\"\n")
+        self.stub.write_text("#!/bin/sh\ncat \"$PULP_CLAIM_JSON\"\n", encoding="utf-8")
         self.stub.chmod(0o755)
 
     def tearDown(self):
@@ -25,13 +25,13 @@ class ClaimCheckTests(unittest.TestCase):
     def run_check(self, comments, *, own=None, pr=True):
         payload = {"data": {"repository": {"pullRequests": {"nodes": [] if not pr else [{"number": 42, "comments": {"nodes": [{"body": body} for body in comments]}}]}}}}
         data = self.dir / "response.json"
-        data.write_text(json.dumps(payload))
+        data.write_text(json.dumps(payload), encoding="utf-8")
         env = os.environ.copy()
         env.update(PULP_CLAIM_CHECK_GH=str(self.stub), PULP_CLAIM_JSON=str(data))
         command = ["python3", str(TOOL), "--repo", "OWNER/REPO", "--branch", "feature/test"]
         if own:
             command += ["--own-claim", own]
-        return subprocess.run(command, env=env, text=True, capture_output=True)
+        return subprocess.run(command, env=env, text=True, encoding="utf-8", capture_output=True)
 
     def test_live_foreign_claim_refuses(self):
         result = self.run_check(["repair-claim: lane-a until 2099-01-02T03:04Z"])
@@ -52,11 +52,11 @@ class ClaimCheckTests(unittest.TestCase):
 
     def test_read_failure_passes_with_warning(self):
         bad = self.dir / "bad"
-        bad.write_text("#!/bin/sh\necho unavailable >&2\nexit 7\n")
+        bad.write_text("#!/bin/sh\necho unavailable >&2\nexit 7\n", encoding="utf-8")
         bad.chmod(0o755)
         env = os.environ.copy()
         env["PULP_CLAIM_CHECK_GH"] = str(bad)
-        result = subprocess.run(["python3", str(TOOL), "--repo", "OWNER/REPO", "--branch", "feature/test"], env=env, text=True, capture_output=True)
+        result = subprocess.run(["python3", str(TOOL), "--repo", "OWNER/REPO", "--branch", "feature/test"], env=env, text=True, encoding="utf-8", capture_output=True)
         self.assertEqual(result.returncode, 0)
         self.assertIn("claim check could not read", result.stderr)
 
@@ -65,7 +65,7 @@ class ClaimCheckTests(unittest.TestCase):
         self.assertEqual(result.returncode, 1)
 
     def test_hook_checks_claims_on_every_allowed_push_path(self):
-        hook = (ROOT.parent.parent / ".githooks" / "pre-push").read_text()
+        hook = (ROOT.parent.parent / ".githooks" / "pre-push").read_text(encoding="utf-8")
         skip = hook.index('prepush_receipt_note skipped all-gates "PULP_SKIP_PREPUSH=1"')
         self.assertIn("prepush_claim_check_final", hook[skip:hook.index("exit 0", skip)])
         clean = hook.index('echo "[pre-push] gates clean." >&2')

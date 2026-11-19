@@ -36,7 +36,7 @@ def read_pr(repo: str, branch: str) -> dict | None:
     command = shlex.split(os.environ.get("PULP_CLAIM_CHECK_GH", "ghapp api graphql"))
     command += ["-f", f"query={query}", "-F", f"owner={owner}", "-F", f"name={name}", "-F", f"branch={branch}"]
     try:
-        result = subprocess.run(command, check=False, capture_output=True, text=True, timeout=15,
+        result = subprocess.run(command, check=False, capture_output=True, text=True, encoding="utf-8", timeout=15,
                                 env={**os.environ, "GH_REPO": repo})  # ghapp needs exact repo provenance
     except (OSError, subprocess.SubprocessError) as exc:
         raise RuntimeError(str(exc)) from exc
