@@ -512,6 +512,44 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
+name = "script-readers-3e9d699cd5b7"
+paths = ["tools/scripts/component_regression.py"]
+tests = [
+  "build-parallelism-guard",
+  "changed-surface-policy-inventory",
+  "changed-surface-policy-selftest",
+  "changed-surface-script-families-drift",
+  "changed-surface-script-families-selftest",
+  "changed-surface-shadow-plans-selftest",
+  "clean-worktree-planning-selftest",
+  "component-visual-regression",
+  "configure-only-selftest",
+  "flake-exoneration-selftest",
+  "gate-common-selftest",
+  "gpu-audio-provider-identity-selftest",
+  "gpu-dpr-runner-selftest",
+  "gpu-first-visible-acceptance-selftest",
+  "gpu-first-visible-campaign-selftest",
+  "gpu-first-visible-external-adapter-selftest",
+  "gpu-first-visible-role-producers-selftest",
+  "gpu-handoff-provenance-selftest",
+  "pr-head-affected-tests-selftest",
+  "pr-head-diff-scoped-registrations",
+  "prepush-receipt",
+  "prepush-refresh-push",
+  "reuse-policy-replay-selftest",
+  "sample-region-compat-baseline-selftest",
+  "vellum-watch-preflight-selftest",
+  "wide-non-native-selftest",
+]
+build_targets = ["pulp-cli"]
+supported_build_types = [
+  "debug",
+  "release",
+]
+risk_class = "low"
+
+[[families]]
 name = "script-readers-0fc7a4f4f2a4"
 paths = ["tools/scripts/convolver_crossover_check.py"]
 tests = [
@@ -759,6 +797,84 @@ tests = [
   "configure-only-selftest",
   "flake-exoneration-selftest",
   "format-header-view-boundary",
+  "gate-common-selftest",
+  "gpu-audio-provider-identity-selftest",
+  "gpu-dpr-runner-selftest",
+  "gpu-first-visible-acceptance-selftest",
+  "gpu-first-visible-campaign-selftest",
+  "gpu-first-visible-external-adapter-selftest",
+  "gpu-first-visible-role-producers-selftest",
+  "gpu-handoff-provenance-selftest",
+  "pr-head-affected-tests-selftest",
+  "pr-head-diff-scoped-registrations",
+  "prepush-receipt",
+  "prepush-refresh-push",
+  "reuse-policy-replay-selftest",
+  "sample-region-compat-baseline-selftest",
+  "vellum-watch-preflight-selftest",
+  "wide-non-native-selftest",
+]
+build_targets = ["pulp-cli"]
+supported_build_types = [
+  "debug",
+  "release",
+]
+risk_class = "low"
+
+[[families]]
+name = "script-readers-d5b8d60de729"
+paths = ["tools/scripts/gallery_regression.py"]
+tests = [
+  "build-parallelism-guard",
+  "changed-surface-policy-inventory",
+  "changed-surface-policy-selftest",
+  "changed-surface-script-families-drift",
+  "changed-surface-script-families-selftest",
+  "changed-surface-shadow-plans-selftest",
+  "clean-worktree-planning-selftest",
+  "configure-only-selftest",
+  "flake-exoneration-selftest",
+  "gallery-visual-regression",
+  "gate-common-selftest",
+  "gpu-audio-provider-identity-selftest",
+  "gpu-dpr-runner-selftest",
+  "gpu-first-visible-acceptance-selftest",
+  "gpu-first-visible-campaign-selftest",
+  "gpu-first-visible-external-adapter-selftest",
+  "gpu-first-visible-role-producers-selftest",
+  "gpu-handoff-provenance-selftest",
+  "pr-head-affected-tests-selftest",
+  "pr-head-diff-scoped-registrations",
+  "prepush-receipt",
+  "prepush-refresh-push",
+  "reuse-policy-replay-selftest",
+  "sample-region-compat-baseline-selftest",
+  "vellum-watch-preflight-selftest",
+  "wide-non-native-selftest",
+]
+build_targets = ["pulp-cli"]
+supported_build_types = [
+  "debug",
+  "release",
+]
+risk_class = "low"
+
+[[families]]
+name = "script-readers-ccac0e84a8c3"
+paths = ["tools/scripts/gallery_visual_diff.py"]
+tests = [
+  "build-parallelism-guard",
+  "changed-surface-policy-inventory",
+  "changed-surface-policy-selftest",
+  "changed-surface-script-families-drift",
+  "changed-surface-script-families-selftest",
+  "changed-surface-shadow-plans-selftest",
+  "clean-worktree-planning-selftest",
+  "component-visual-regression",
+  "configure-only-selftest",
+  "flake-exoneration-selftest",
+  "gallery-diff-selftest",
+  "gallery-visual-regression",
   "gate-common-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
@@ -1280,6 +1396,47 @@ tests = [
   "prepush-refresh-push",
   "raw-this-async-check",
   "raw-this-async-selftest",
+  "reuse-policy-replay-selftest",
+  "sample-region-compat-baseline-selftest",
+  "vellum-watch-preflight-selftest",
+  "wide-non-native-selftest",
+]
+build_targets = ["pulp-cli"]
+supported_build_types = [
+  "debug",
+  "release",
+]
+risk_class = "low"
+
+[[families]]
+name = "script-readers-aca8eb206f2c"
+paths = [
+  "tools/scripts/regen_agent_capability_after_merge.py",
+  "tools/scripts/test_regen_agent_capability_after_merge.py",
+]
+tests = [
+  "build-parallelism-guard",
+  "changed-surface-policy-inventory",
+  "changed-surface-policy-selftest",
+  "changed-surface-script-families-drift",
+  "changed-surface-script-families-selftest",
+  "changed-surface-shadow-plans-selftest",
+  "clean-worktree-planning-selftest",
+  "configure-only-selftest",
+  "flake-exoneration-selftest",
+  "gate-common-selftest",
+  "gpu-audio-provider-identity-selftest",
+  "gpu-dpr-runner-selftest",
+  "gpu-first-visible-acceptance-selftest",
+  "gpu-first-visible-campaign-selftest",
+  "gpu-first-visible-external-adapter-selftest",
+  "gpu-first-visible-role-producers-selftest",
+  "gpu-handoff-provenance-selftest",
+  "pr-head-affected-tests-selftest",
+  "pr-head-diff-scoped-registrations",
+  "prepush-receipt",
+  "prepush-refresh-push",
+  "regen-agent-capability-after-merge-selftest",
   "reuse-policy-replay-selftest",
   "sample-region-compat-baseline-selftest",
   "vellum-watch-preflight-selftest",
@@ -6206,47 +6363,6 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-aca8eb206f2c"
-paths = [
-  "tools/scripts/regen_agent_capability_after_merge.py",
-  "tools/scripts/test_regen_agent_capability_after_merge.py",
-]
-tests = [
-  "build-parallelism-guard",
-  "changed-surface-policy-inventory",
-  "changed-surface-policy-selftest",
-  "changed-surface-script-families-drift",
-  "changed-surface-script-families-selftest",
-  "changed-surface-shadow-plans-selftest",
-  "clean-worktree-planning-selftest",
-  "configure-only-selftest",
-  "flake-exoneration-selftest",
-  "gate-common-selftest",
-  "gpu-audio-provider-identity-selftest",
-  "gpu-dpr-runner-selftest",
-  "gpu-first-visible-acceptance-selftest",
-  "gpu-first-visible-campaign-selftest",
-  "gpu-first-visible-external-adapter-selftest",
-  "gpu-first-visible-role-producers-selftest",
-  "gpu-handoff-provenance-selftest",
-  "pr-head-affected-tests-selftest",
-  "pr-head-diff-scoped-registrations",
-  "prepush-receipt",
-  "prepush-refresh-push",
-  "regen-agent-capability-after-merge-selftest",
-  "reuse-policy-replay-selftest",
-  "sample-region-compat-baseline-selftest",
-  "vellum-watch-preflight-selftest",
-  "wide-non-native-selftest",
-]
-build_targets = ["pulp-cli"]
-supported_build_types = [
-  "debug",
-  "release",
-]
-risk_class = "low"
-
-[[families]]
 name = "script-readers-c0059aa3bfd1"
 paths = ["tools/scripts/test_relay_contract_check.py"]
 tests = [
@@ -9052,6 +9168,7 @@ paths = [
   "tools/scripts/check_visual_python_deps.py",
   "tools/scripts/ci_routing_digest.py",
   "tools/scripts/clean_worktree_planning.py",
+  "tools/scripts/component_regression.py",
   "tools/scripts/convolver_crossover_check.py",
   "tools/scripts/coverage_diff_comment.py",
   "tools/scripts/ctest_inventory_parity.py",
@@ -9083,6 +9200,8 @@ paths = [
   "tools/scripts/frontend_ir_tokens.py",
   "tools/scripts/frontend_ir_tweaks.py",
   "tools/scripts/frontend_ir_validation.py",
+  "tools/scripts/gallery_regression.py",
+  "tools/scripts/gallery_visual_diff.py",
   "tools/scripts/gate_python_imports_check.py",
   "tools/scripts/generate_sample_region_compat_inputs.py",
   "tools/scripts/github_app_jwt.py",
@@ -9674,6 +9793,7 @@ paths = [
   "tools/scripts/check_visual_python_deps.py",
   "tools/scripts/ci_routing_digest.py",
   "tools/scripts/clean_worktree_planning.py",
+  "tools/scripts/component_regression.py",
   "tools/scripts/convolver_crossover_check.py",
   "tools/scripts/coverage_diff_comment.py",
   "tools/scripts/ctest_inventory_parity.py",
@@ -9705,6 +9825,8 @@ paths = [
   "tools/scripts/frontend_ir_tokens.py",
   "tools/scripts/frontend_ir_tweaks.py",
   "tools/scripts/frontend_ir_validation.py",
+  "tools/scripts/gallery_regression.py",
+  "tools/scripts/gallery_visual_diff.py",
   "tools/scripts/gate_python_imports_check.py",
   "tools/scripts/generate_sample_region_compat_inputs.py",
   "tools/scripts/github_app_jwt.py",
