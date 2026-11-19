@@ -41,6 +41,8 @@
    "test/test_isolated_clap_protocol.cpp",
    "test/test_isolated_clap_worker.cpp",
    "test/test_isolated_clap_worker_windows.cpp",
+   "test/test_pulp_vellum_audio.cpp",
+   "test/test_pulp_vellum_editor.cpp",
    "test/test_pulp_vellum_param_bridge.cpp",
    "tools/ci/affected_tests_shadow.py",
    "tools/ci/always_run_names.py",
