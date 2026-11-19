@@ -1,0 +1,17 @@
+{
+ "name": "regen-agent-capability-after-merge-selftest",
+ "record": {
+  "entry": "tools/scripts/test_regen_agent_capability_after_merge.py",
+  "inputs": [
+   "core/host/include",
+   "docs/status/agent-capability-surface",
+   "docs/status/agent-capability-surface/headers",
+   "tools/agent-capabilities",
+   "tools/agent-capabilities/fingerprints",
+   "tools/scripts/agent_capability_manifest.py",
+   "tools/scripts/regen_agent_capability_after_merge.py",
+   "tools/scripts/test_regen_agent_capability_after_merge.py"
+  ],
+  "kind": "python"
+ }
+}

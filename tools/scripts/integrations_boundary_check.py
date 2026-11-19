@@ -18,14 +18,14 @@ from pathlib import Path
 # Targets and include roots the integration packages publish.
 FORBIDDEN = (
     (re.compile(r"integrations/"), "a path under integrations/"),
-    (re.compile(r"(?<![\w-])pulp::(?:native|rmlui-native|rmlui-native-metal|vellum)(?![\w-])"),
+    (re.compile(r"(?<![\w-])pulp::(?:native|rmlui-native|rmlui-native-metal|vellum|vellum-audio)(?![\w-])"),
      "an integration target alias"),
-    (re.compile(r"(?<![\w:-])pulp-(?:native|rmlui-native|rmlui-native-metal|vellum)(?![\w-])"),
+    (re.compile(r"(?<![\w:-])pulp-(?:native|rmlui-native|rmlui-native-metal|vellum|vellum-audio)(?![\w-])"),
      "an integration target"),
-    (re.compile(r"[<\"]pulp/(?:native|rmlui_native|vellum)/"), "an integration header"),
+    (re.compile(r"[<\"]pulp/(?:native|rmlui_native|vellum|vellum_audio)/"), "an integration header"),
     (re.compile(r"[<\"]vellum/"), "a Vellum header"),
     (re.compile(r"\bVellum(?:RmlUi)?::"), "a Vellum SDK target"),
-    (re.compile(r"\bPULP_ENABLE_(?:PULP_NATIVE|RMLUI_ADAPTER|PULP_VELLUM)\b"),
+    (re.compile(r"\bPULP_ENABLE_(?:PULP_NATIVE|RMLUI_ADAPTER|PULP_VELLUM(?:_AUDIO)?)\b"),
      "an integration build option"),
 )
 SCANNED_NAMES = ("CMakeLists.txt",)

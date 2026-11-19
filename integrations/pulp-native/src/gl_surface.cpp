@@ -200,6 +200,28 @@ void GlSurface::set_release_handler(std::function<void()> handler) {
     impl_->release_handler = std::move(handler);
 }
 
+void GlSurface::set_input_handler(InputHandler handler) {
+    impl_->input = std::move(handler);
+}
+
+void GlSurface::set_keyboard_focus(KeyboardFocus focus) {
+    impl_->keyboard_focus = focus;
+    impl_->apply_keyboard_focus();
+}
+
+void GlSurface::set_scale(double scale) {
+    impl_->scale_override = scale > 0.0 ? scale : 0.0;
+    impl_->apply_scale();
+}
+
+int GlSurface::event_fd() const noexcept {
+    return impl_->event_fd();
+}
+
+void GlSurface::dispatch_events() {
+    impl_->dispatch_events();
+}
+
 std::unique_ptr<GlSurface> GlSurface::create(const GlSurfaceOptions& options) {
     auto impl = make_windowed_gl_impl(options);
     if (!impl)
