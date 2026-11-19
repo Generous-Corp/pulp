@@ -214,6 +214,10 @@
       "reason": "pre-existing"
     },
     {
+      "target": "cmake-view-audio-sdk-consumer",
+      "reason": "pre-existing unresolved: LABELS comes through a variable the earlier scan skipped; it resolves to cmake;sdk;view;data-display with TIMEOUT 600"
+    },
+    {
       "target": "commit-bound-cmake-selftest",
       "reason": "pre-existing"
     },

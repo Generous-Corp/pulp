@@ -215,15 +215,24 @@ where a 125 s case surfaces only as a late timeout. `ctest_label_exclusion_guard
 `pulp_add_test_suite`, `catch_discover_tests` or `set_tests_properties`
 registration raises `TIMEOUT` above 120 without a label the gate excludes
 (`slow` in practice). Resolve it by shrinking the fixture or adding
-`LABELS slow`. Registrations that predate the rule are frozen under
-`timeout_allow` in `tools/scripts/ctest_label_exclusion_guard.json`; a stale
-entry fails the guard, so delete a line when its registration is fixed.
+`LABELS slow`. The check fails closed on values it cannot read: a `TIMEOUT` or
+`LABELS` value built from a variable is resolved through `set()` and
+`pulp_scaled_test_timeout()` calls in the same manifest, and one that still does
+not resolve (assigned in another file, or differently in two branches) counts
+as a long budget with no excluded label. Labels set in a separate
+`set_tests_properties` call on the same test name are combined with its
+`TIMEOUT`; `set_property(TEST ...)` is not read. Registrations that predate the
+rule are frozen under `timeout_allow` in
+`tools/scripts/ctest_label_exclusion_guard.json`; a stale entry fails the
+guard, so delete a line when its registration is fixed.
 
 With `--runtime-base REF` (gates and pre-push pass it) the guard also reads the
 local build's `Testing/Temporary/LastTest.log` and fails when a registration
 added or edited against `REF` ran over 30 s without such a label. With no timing
-data it prints a loud `SKIPPED ... NOT CHECKED` line and exits 0: a skip is not
-a pass, so run the suite locally before relying on it.
+data it prints a loud `SKIPPED ... NOT CHECKED` line and exits 3 once the static
+checks pass. `gates.sh` lists that under NOT CHECKED (a pass with an uncovered
+item, not a full pass) and pre-push prints it without blocking, so the runtime
+rule is enforced only where local timing data exists.
 
 ### Installed-SDK consumers on the macOS gate
 

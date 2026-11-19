@@ -1146,9 +1146,13 @@ fi
 if [ -f "$LABEL_EXCLUSION" ]; then
     echo "" >&2
     echo "▸ ctest label-exclusion guard (a suite must reach the gate or coverage)" >&2
-    if ! "$PYTHON" "$LABEL_EXCLUSION" --runtime-base "$BASE"; then
-        fail=1
-    fi
+    label_exclusion_rc=0
+    "$PYTHON" "$LABEL_EXCLUSION" --runtime-base "$BASE" || label_exclusion_rc=$?
+    case $label_exclusion_rc in
+        0) ;;
+        3) echo "[ctest-label-exclusion] NOT CHECKED: slow-test runtime of changed registrations (no local CTest timing data); the static label and TIMEOUT checks passed" >>"$not_checked_log" ;;
+        *) fail=1 ;;
+    esac
 fi
 
 

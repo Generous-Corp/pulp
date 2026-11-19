@@ -55,7 +55,9 @@ Usage::
     ctest_label_exclusion_guard.py --policy P --allowlist A
 
 Exit status: 0 when every suite reaches an enforced lane or is accounted for in
-the ledger, 1 otherwise.
+the ledger, 1 otherwise. With ``--runtime-base``, 3 when the static checks
+passed but the runtime check found no timing data to read (NOT CHECKED, which
+callers report separately from a pass).
 """
 
 from __future__ import annotations
@@ -347,10 +349,69 @@ RUNTIME_LIMIT_S = 30.0
 _TIMEOUT_CMD_RE = re.compile(
     r"(?<![A-Za-z0-9_])(pulp_add_test_suite|catch_discover_tests|"
     r"set_tests_properties|add_test)[ \t]*\(")
-_VAR_BUDGET_RE = re.compile(
-    r"(?<![A-Za-z0-9_])(?:pulp_scaled_test_timeout|set)[ \t]*\("
-    r"[ \t]*([A-Za-z_][A-Za-z0-9_]*)[ \t]+\"?([0-9]+)\"?[ \t]*\)")
-_VAR_REF_RE = re.compile(r"^\$\{([A-Za-z_][A-Za-z0-9_]*)\}$")
+_VAR_DEF_RE = re.compile(
+    r"(?<![A-Za-z0-9_])(set|pulp_scaled_test_timeout)[ \t]*\(")
+_VAR_USE_RE = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)\}")
+# Trailing set() keywords that are not part of the value.
+_SET_TRAILERS = ("PARENT_SCOPE", "CACHE")
+
+# Exit status when the static checks pass but the optional runtime check could
+# not run. Distinct from 0 so a caller reports NOT CHECKED instead of a pass.
+EXIT_NOT_CHECKED = 3
+
+
+def collect_variables(text: str) -> dict[str, str | None]:
+    """Values of the variables a manifest assigns with ``set`` or the timeout helper.
+
+    A variable assigned more than once with differing values (an ``if``/``else``
+    pair, say) maps to None: the scan cannot know which branch configure takes,
+    so it refuses to pick one. ``pulp_scaled_test_timeout`` is read as its
+    unscaled budget, which is what the gate's own default is compared against.
+    """
+    out: dict[str, str | None] = {}
+    for command, args, _ln in _iter_calls(text, _VAR_DEF_RE):
+        name = _unquote(args[0])
+        if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", name):
+            continue
+        values = args[1:]
+        if command == "pulp_scaled_test_timeout":
+            values = values[:1]
+        else:
+            for i, tok in enumerate(values):
+                if tok in _SET_TRAILERS:
+                    values = values[:i]
+                    break
+        value = ";".join(_unquote(v) for v in values)
+        if name in out and out[name] != value:
+            out[name] = None
+        else:
+            out[name] = value
+    return out
+
+
+def resolve_value(value: str, variables: dict[str, str | None],
+                  depth: int = 0) -> str | None:
+    """Expand ``${VAR}`` references transitively; None when any is unknown."""
+    if depth > 16:
+        return None
+    unknown = False
+
+    def sub(m: re.Match[str]) -> str:
+        nonlocal unknown
+        inner = variables.get(m.group(1))
+        if inner is None:
+            unknown = True
+            return ""
+        resolved = resolve_value(inner, variables, depth + 1)
+        if resolved is None:
+            unknown = True
+            return ""
+        return resolved
+
+    out = _VAR_USE_RE.sub(sub, value)
+    if unknown or "${" in out or "$ENV{" in out or "@" in out:
+        return None
+    return out
 
 
 class TimeoutRegistration:
@@ -358,35 +419,61 @@ class TimeoutRegistration:
 
     def __init__(self, path: Path, lineno: int, command: str, name: str,
                  timeout: int | None, labels: list[str],
-                 labels_unresolved: bool, sig: tuple[str, ...]) -> None:
+                 labels_unresolved: bool, sig: tuple[str, ...],
+                 timeout_unresolved: bool = False) -> None:
         self.path = path
         self.lineno = lineno
         self.command = command
         self.name = name
         self.timeout = timeout
+        # True when a TIMEOUT keyword is present but its value could not be
+        # read. Such a budget may exceed the gate default at configure time,
+        # so it is treated as long until a label or the ledger says otherwise.
+        self.timeout_unresolved = timeout_unresolved
         self.labels = labels
         self.labels_unresolved = labels_unresolved
         self.sig = sig
+        self.why = ""
 
 
-def _timeout_value(args: list[str], budgets: dict[str, int]) -> int | None:
+def _timeout_value(args: list[str], variables: dict[str, str | None]
+                   ) -> tuple[int | None, bool]:
+    """(declared TIMEOUT in seconds, unresolved) for one call's arguments."""
     for i, tok in enumerate(args):
         if tok != "TIMEOUT" or i + 1 >= len(args):
             continue
-        value = _unquote(args[i + 1])
-        if value.isdigit():
-            return int(value)
-        ref = _VAR_REF_RE.match(value)
-        if ref and ref.group(1) in budgets:
-            return budgets[ref.group(1)]
-        return None
-    return None
+        value = resolve_value(_unquote(args[i + 1]), variables)
+        if value is not None and value.strip().isdigit():
+            return int(value.strip()), False
+        return None, True
+    return None, False
+
+
+def _resolved_labels(args: list[str], variables: dict[str, str | None]
+                     ) -> tuple[list[str], bool]:
+    """Every label reachable from a LABELS keyword, expanding variables."""
+    labels: list[str] = []
+    unresolved = False
+    i = 0
+    while i < len(args):
+        if args[i] != "LABELS":
+            i += 1
+            continue
+        i += 1
+        while i < len(args) and not _KEYWORD_RE.match(args[i]):
+            value = resolve_value(_unquote(args[i]), variables)
+            if value is None:
+                unresolved = True
+            else:
+                labels.extend(p.strip() for p in value.split(";") if p.strip())
+            i += 1
+    return labels, unresolved
 
 
 def scan_timeouts(path: Path) -> list[TimeoutRegistration]:
     """Extract every registration of a manifest with its declared TIMEOUT."""
     text = strip_comments(path.read_text(encoding="utf-8", errors="replace"))
-    budgets = {m.group(1): int(m.group(2)) for m in _VAR_BUDGET_RE.finditer(text)}
+    variables = collect_variables(text)
     found: list[TimeoutRegistration] = []
     for command, args, lineno in _iter_calls(text, _TIMEOUT_CMD_RE):
         if command == "add_test":
@@ -405,12 +492,13 @@ def scan_timeouts(path: Path) -> list[TimeoutRegistration]:
                 continue
         else:
             names = [_unquote(args[0])]
-        labels, unresolved = _extract_labels(args)
-        timeout = _timeout_value(args, budgets)
+        labels, unresolved = _resolved_labels(args, variables)
+        timeout, timeout_unresolved = _timeout_value(args, variables)
         for name in names:
             found.append(TimeoutRegistration(
                 path, lineno, command, name, timeout,
-                labels, unresolved, tuple(args)))
+                labels, unresolved, tuple(args),
+                timeout_unresolved=timeout_unresolved))
     return found
 
 
@@ -418,12 +506,52 @@ def find_unlabelled_long_timeouts(
     regs: list[TimeoutRegistration], excluded: list[str],
     default: int = DEFAULT_TIMEOUT_S,
 ) -> list[TimeoutRegistration]:
+    """Registrations that raise TIMEOUT (or may) without a gate-excluded label.
+
+    Fails closed on what the scan cannot read: a TIMEOUT whose value does not
+    resolve counts as long, and a LABELS value that does not resolve cannot
+    supply the excluded label. Either needs a resolved excluded label or a
+    ``timeout_allow`` entry.
+
+    Properties of a plain ctest name are aggregated across its
+    ``set_tests_properties`` calls, so ``TIMEOUT`` in one call and ``LABELS
+    slow`` in another pass (labels are unioned, which matches the common
+    shape; a later call that replaces LABELS is not modelled). A suite
+    registration (``pulp_add_test_suite`` / ``catch_discover_tests``) is its
+    own ctest population and is never aggregated with a sibling of the same
+    target. ``set_property(TEST ...)`` is not read, so a label assigned only
+    that way is not credited.
+    """
     excluded_set = set(excluded)
-    return [r for r in regs
-            if r.command != "add_test"
-            and r.timeout is not None and r.timeout > default
-            and not r.labels_unresolved
-            and not (set(r.labels) & excluded_set)]
+    prop_labels: dict[str, set[str]] = {}
+    prop_unresolved: dict[str, bool] = {}
+    for r in regs:
+        if r.command == "set_tests_properties":
+            prop_labels.setdefault(r.name, set()).update(r.labels)
+            prop_unresolved[r.name] = prop_unresolved.get(r.name, False) \
+                or r.labels_unresolved
+    out: list[TimeoutRegistration] = []
+    for r in regs:
+        if r.command == "add_test":
+            continue
+        long = r.timeout_unresolved or (r.timeout is not None and r.timeout > default)
+        if not long:
+            continue
+        if r.command == "set_tests_properties":
+            labels = prop_labels.get(r.name, set())
+            labels_unresolved = prop_unresolved.get(r.name, False)
+        else:
+            labels, labels_unresolved = set(r.labels), r.labels_unresolved
+        if labels & excluded_set:
+            continue
+        reasons = []
+        if r.timeout_unresolved:
+            reasons.append("TIMEOUT value unresolved")
+        if labels_unresolved:
+            reasons.append("LABELS value unresolved")
+        r.why = "; ".join(reasons)
+        out.append(r)
+    return out
 
 
 def read_timeout_allowlist(path: Path) -> dict[str, str]:
@@ -464,8 +592,10 @@ def _check_long_timeouts(regs: list[TimeoutRegistration], excluded: list[str],
               f"raise TIMEOUT above the gate default of {DEFAULT_TIMEOUT_S}s "
               f"without a label the required gate excludes:", file=sys.stderr)
         for r in new:
-            print(f"  {r.name} — TIMEOUT {r.timeout} — {r.command} — "
-                  f"{r.path}:{r.lineno}", file=sys.stderr)
+            budget = "unresolved" if r.timeout_unresolved else str(r.timeout)
+            why = f" ({r.why}, so it fails closed)" if r.why else ""
+            print(f"  {r.name} — TIMEOUT {budget} — {r.command} — "
+                  f"{r.path}:{r.lineno}{why}", file=sys.stderr)
         print(
             f"\nThe required `macos` gate runs ctest with `--timeout "
             f"{DEFAULT_TIMEOUT_S}`; a per-test TIMEOUT property overrides it, so "
@@ -474,7 +604,10 @@ def _check_long_timeouts(regs: list[TimeoutRegistration], excluded: list[str],
             f"(shrink the fixture), or label it `slow` so the gate excludes it "
             f"and the nightly runs it, e.g. `LABELS slow`. For a Catch2 suite "
             f"keep the fast cases on the enforced lane with the TEST_SPEC split "
-            f"described for the label-exclusion rule. A deliberate exception "
+            f"described for the label-exclusion rule. A TIMEOUT or LABELS value "
+            f"the scan cannot resolve (a variable assigned in another file or "
+            f"in two differing branches) fails closed: use a literal or a single "
+            f"`set()` in the same manifest. A deliberate exception "
             f"goes in `timeout_allow` in {ALLOWLIST_FILE} with a reason.",
             file=sys.stderr)
         return 1
@@ -590,9 +723,10 @@ def _check_runtime(base: str, build_dir: Path, timing: Path | None,
                    excluded: list[str]) -> int:
     def skip(why: str) -> int:
         print(f"ctest_label_exclusion_guard: SKIPPED runtime check — {why}. "
-              "Slow-test runtime NOT CHECKED (a skip is not a pass).",
+              "Slow-test runtime NOT CHECKED (a skip is not a pass; exit "
+              f"{EXIT_NOT_CHECKED}).",
               file=sys.stderr)
-        return 0
+        return EXIT_NOT_CHECKED
 
     log = timing or (build_dir / "Testing" / "Temporary" / "LastTest.log")
     if not log.is_file():
@@ -830,9 +964,11 @@ def main(argv: list[str] | None = None) -> int:
         timeout_regs.extend(scan_timeouts(path))
     rc = max(rc, _check_long_timeouts(timeout_regs, excluded, timeout_allowed))
 
-    if args.runtime_base:
-        rc = max(rc, _check_runtime(args.runtime_base, args.build_dir,
-                                    args.timing, excluded))
+    # A static failure outranks a runtime skip: NOT CHECKED is reported only
+    # when everything that did run passed.
+    if args.runtime_base and rc == 0:
+        rc = _check_runtime(args.runtime_base, args.build_dir,
+                            args.timing, excluded)
     return rc
 
 

@@ -1084,6 +1084,7 @@ if [ -f "$LABEL_EXCLUSION" ]; then
     gate_rc=$?; case $gate_rc in
         0) ;;
         1) echo "[pre-push] ctest label-exclusion guard: a Catch2 suite reaches neither the required gate nor coverage, or a registration raises TIMEOUT above 120s without the slow label — run \`python3 tools/scripts/ctest_label_exclusion_guard.py\` for the target list." >&2; prepush_fail ;;
+        3) echo "[pre-push] ctest label-exclusion guard: static checks passed; slow-test runtime NOT CHECKED (no local CTest timing data)." >&2 ;;
         *) gate_could_not_run "ctest_label_exclusion_guard" "$gate_rc"; prepush_fail ;;
     esac
 fi

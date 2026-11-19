@@ -319,9 +319,71 @@ class LongTimeoutTest(unittest.TestCase):
             "pulp_add_test_suite(pulp-test-x SOURCES a.cpp)\n"
             "set_tests_properties(t PROPERTIES LABELS cmake)\n"), [])
 
-    def test_unresolvable_timeout_never_manufactures_a_failure(self):
+    def test_unresolved_timeout_variable_fails_closed(self):
+        # A budget the scan cannot read may resolve above the gate default at
+        # configure time, so it is flagged rather than passed.
         self.assertEqual(long_timeouts(
-            "set_tests_properties(t PROPERTIES TIMEOUT ${unknown_var})\n"), [])
+            "set_tests_properties(t PROPERTIES TIMEOUT ${LONG_TIMEOUT})\n"),
+            ["t"])
+
+    def test_unresolved_timeout_with_slow_label_passes(self):
+        self.assertEqual(long_timeouts(
+            "set_tests_properties(t PROPERTIES TIMEOUT ${LONG_TIMEOUT} "
+            "LABELS slow)\n"), [])
+
+    def test_timeout_variable_is_resolved_transitively(self):
+        self.assertEqual(long_timeouts(
+            "set(_base 600)\n"
+            'set(LONG_TIMEOUT "${_base}")\n'
+            "set_tests_properties(t PROPERTIES TIMEOUT ${LONG_TIMEOUT})\n"),
+            ["t"])
+
+    def test_transitive_short_timeout_is_a_clean_control(self):
+        self.assertEqual(long_timeouts(
+            "set(_base 60)\n"
+            "pulp_scaled_test_timeout(SHORT_TIMEOUT ${_base})\n"
+            "set_tests_properties(t PROPERTIES TIMEOUT ${SHORT_TIMEOUT})\n"), [])
+
+    def test_conflicting_timeout_definitions_fail_closed(self):
+        self.assertEqual(long_timeouts(
+            "if(APPLE)\n  set(_t 60)\nelse()\n  set(_t 600)\nendif()\n"
+            "set_tests_properties(t PROPERTIES TIMEOUT ${_t})\n"), ["t"])
+
+    def test_unresolved_labels_fail_closed(self):
+        self.assertEqual(long_timeouts(
+            "set_tests_properties(t PROPERTIES TIMEOUT 300 LABELS ${LABELS_VAR})\n"),
+            ["t"])
+
+    def test_labels_variable_resolving_to_slow_passes(self):
+        self.assertEqual(long_timeouts(
+            'set(_labels "cmake;slow")\n'
+            'set_tests_properties(t PROPERTIES TIMEOUT 300 LABELS "${_labels}")\n'),
+            [])
+
+    def test_labels_variable_resolving_to_no_excluded_label_is_flagged(self):
+        self.assertEqual(long_timeouts(
+            'set(_labels "cmake;sdk")\n'
+            'set_tests_properties(t PROPERTIES TIMEOUT 300 LABELS "${_labels}")\n'),
+            ["t"])
+
+    def test_labels_in_a_separate_call_are_aggregated(self):
+        self.assertEqual(long_timeouts(
+            "add_test(NAME t COMMAND foo)\n"
+            "set_tests_properties(t PROPERTIES TIMEOUT 300)\n"
+            "set_tests_properties(t PROPERTIES LABELS slow)\n"), [])
+
+    def test_separate_call_with_unrelated_label_does_not_rescue(self):
+        self.assertEqual(long_timeouts(
+            "set_tests_properties(t PROPERTIES TIMEOUT 300)\n"
+            "set_tests_properties(t PROPERTIES LABELS cmake)\n"), ["t"])
+
+    def test_suite_registrations_are_not_aggregated(self):
+        # Two registrations of one target are two distinct ctest populations:
+        # the slow-labelled sibling does not rescue the unlabelled long one.
+        self.assertEqual(long_timeouts(
+            "pulp_add_test_suite(pulp-test-x SOURCES a.cpp TIMEOUT 600)\n"
+            'catch_discover_tests(pulp-test-x TEST_SPEC "[slow]" LABELS slow)\n'),
+            ["pulp-test-x"])
 
     def test_unrelated_label_does_not_rescue(self):
         self.assertEqual(long_timeouts(
@@ -357,6 +419,20 @@ class TimeoutAllowlistTest(unittest.TestCase):
     def test_entry_without_reason_is_rejected(self):
         self.assertEqual(self._run(self.SLOW, {"allow": [], "timeout_allow": [
             {"target": "t", "reason": ""}]}), 1)
+
+    def test_unresolved_timeout_fails_main_unless_allowlisted(self):
+        cmake = ("pulp_add_test_suite(pulp-test-base SOURCES a.cpp)\n"
+                 "set_tests_properties(t PROPERTIES TIMEOUT ${LONG_TIMEOUT})\n")
+        self.assertEqual(self._run(cmake, None), 1)
+        self.assertEqual(self._run(cmake, {"allow": [], "timeout_allow": [
+            {"target": "t", "reason": "pre-existing unresolved"}]}), 0)
+
+    def test_unresolved_labels_fail_main_unless_allowlisted(self):
+        cmake = ("pulp_add_test_suite(pulp-test-base SOURCES a.cpp)\n"
+                 "set_tests_properties(t PROPERTIES TIMEOUT 300 LABELS ${L})\n")
+        self.assertEqual(self._run(cmake, None), 1)
+        self.assertEqual(self._run(cmake, {"allow": [], "timeout_allow": [
+            {"target": "t", "reason": "pre-existing unresolved"}]}), 0)
 
     def test_stale_entry_fails(self):
         clean = ("pulp_add_test_suite(pulp-test-base SOURCES a.cpp)\n"
@@ -448,9 +524,28 @@ class RuntimeCheckTest(unittest.TestCase):
         buf = io.StringIO()
         with tempfile.TemporaryDirectory() as d, contextlib.redirect_stderr(buf):
             rc = guard.main(["--runtime-base", "origin/main", "--build-dir", d])
-        self.assertEqual(rc, 0)
+        # Distinct from both pass (0) and fail (1): the callers report it as
+        # NOT CHECKED rather than folding it into a pass.
+        self.assertEqual(rc, guard.EXIT_NOT_CHECKED)
+        self.assertNotIn(rc, (0, 1))
         self.assertIn("SKIPPED", buf.getvalue())
         self.assertIn("NOT CHECKED", buf.getvalue())
+
+    def test_static_failure_outranks_a_runtime_skip(self):
+        import contextlib
+        import io
+        with tempfile.TemporaryDirectory() as d:
+            m = Path(d) / "x.cmake"
+            m.write_text("pulp_add_test_suite(pulp-test-base SOURCES a.cpp)\n"
+                         "set_tests_properties(t PROPERTIES TIMEOUT 300)\n",
+                         encoding="utf-8")
+            a = Path(d) / "allow.json"
+            a.write_text(json.dumps({"allow": []}), encoding="utf-8")
+            with contextlib.redirect_stderr(io.StringIO()):
+                rc = guard.main([str(m), "--allowlist", str(a),
+                                 "--runtime-base", "origin/main",
+                                 "--build-dir", d])
+        self.assertEqual(rc, 1)
 
 
 class ArgumentHandlingTest(unittest.TestCase):
