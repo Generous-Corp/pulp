@@ -46,6 +46,22 @@ class PulpLockTests(unittest.TestCase):
             self.assertNotEqual(result.returncode, 0)
             self.assertIn("digest mismatch", result.stderr)
 
+    def test_matching_digest_passes_cmake_reader(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            archive = root / "sdk.tar.gz"
+            archive.write_bytes(b"sdk bytes")
+            lock = copy.deepcopy(self.lock)
+            lock["vellum"]["sdk_digest"] = hashlib.sha256(b"sdk bytes").hexdigest()
+            lock_path = root / "pulp.lock"
+            lock_path.write_text(json.dumps(lock), encoding="utf-8")
+            reader = Path(__file__).parents[1] / "cmake" / "PulpVellumLock.cmake"
+            result = subprocess.run(
+                ["cmake", f"-DPULP_VELLUM_LOCK_FILE={lock_path}",
+                 f"-DPULP_VELLUM_SDK_ARCHIVE={archive}", "-P", str(reader)],
+                capture_output=True, text=True, encoding="utf-8", check=False)
+            self.assertEqual(result.returncode, 0, result.stderr)
+
 
 COMMIT = "d361ea5b855707391798b7315183d99b6cbe69b6"
 CMAKE_DIR = Path(__file__).parents[1] / "cmake"

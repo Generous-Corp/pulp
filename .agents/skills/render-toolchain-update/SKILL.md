@@ -631,3 +631,16 @@ and `NOTICE.md`. `python3 tools/deps/audit.py --strict` reports any disagreement
 between the lock and the manifest. A gpu-runtime release can rename its imported
 targets (0.2.0 exports `VellumGpuRuntime::Dawn`), so regenerate the consumption
 census after a bump.
+
+### What the lock's digests enforce
+
+`vellum.sha` pins the FetchContent source build of gpu-runtime; no archive is
+involved there, so the archive digests do not apply to it. `gpu_runtime_digest`
+covers a prebuilt package: `PULP_GPU_RUNTIME_PREFIX` also needs
+`PULP_GPU_RUNTIME_ARCHIVE` (the archive it was extracted from), and configure
+stops unless that archive hashes to the lock, the prefix's
+`gpu-runtime-artifact.json` equals the archive's, every file it lists hashes as
+recorded, and the prefix holds nothing else. The installed prefix carries no
+archive digest of its own, which is why the archive must be supplied. Pulp
+ingests no Vellum SDK archive (the SDK consumer lane tracks Vellum main), so
+`sdk_digest` is checked only when a caller passes `PULP_VELLUM_SDK_ARCHIVE`.
