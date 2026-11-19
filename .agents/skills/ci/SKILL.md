@@ -9353,7 +9353,12 @@ waiters), but it lives in owner-only per-user host state rather than beside the
 build directory, so exact-source verification never sees a lock artifact as a
 checkout mutation. Canonical path aliases share a lock; same-named build dirs in
 different worktrees use different full-digest identities. The absolute
-`PULP_BUILD_DIR_LOCK_ROOT` override is for trusted tests only.
+`PULP_BUILD_DIR_LOCK_ROOT` override is for trusted tests only. Default-configured
+processes first acquire the shared `pulp-build-dir-locks-<user>` coordination lock
+under the system temp dir, then ordinary processes also take the durable host-state
+lock when it is writable. This keeps confined and ordinary builds on one lock
+identity; if the shared coordination root is unavailable, the build fails closed.
+An explicit override uses only that root and is never replaced.
 
 `build.yml` excludes CTest labels matching `slow` on both `pull_request`
 events and `workflow_dispatch` because Shipyard PR validation dispatches

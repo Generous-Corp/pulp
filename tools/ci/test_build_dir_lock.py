@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import errno
 import os
 import stat
 import subprocess
@@ -165,12 +166,171 @@ class BuildDirLockTest(unittest.TestCase):
                         pass
                 self.assertEqual(victim.read_text(encoding="utf-8"), "do not touch")
 
+    @unittest.skipIf(sys.platform == "win32", "uses POSIX directory permissions")
+    @unittest.skipIf(hasattr(os, "geteuid") and os.geteuid() == 0, "root ignores modes")
+    def test_unwritable_default_root_falls_back_to_temp(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            base = Path(directory)
+            readonly = base / "readonly"
+            readonly.mkdir()
+            readonly.chmod(0o500)
+            tmp = base / "tmp"
+            tmp.mkdir()
+            try:
+                env = {k: v for k, v in os.environ.items() if k != build_dir_lock.LOCK_ROOT_ENV}
+                with mock.patch.dict("os.environ", env, clear=True), mock.patch.object(
+                    build_dir_lock, "lock_root", return_value=readonly / "locks"
+                ), mock.patch.object(
+                    build_dir_lock, "fallback_lock_root", return_value=tmp / "locks"
+                ):
+                    with build_dir_lock.exclusive_build_dir(base / "build"):
+                        pass
+                    fallback = build_dir_lock.fallback_lock_root()
+                    self.assertTrue(any(fallback.glob("build-dir-*.lock")))
+                    self.assertTrue(fallback.resolve().is_relative_to(tmp.resolve()))
+            finally:
+                readonly.chmod(0o700)
+
+    def test_explicit_root_is_not_replaced_by_fallback(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory) / "root"
+            with self.lock_root(root), mock.patch.object(
+                build_dir_lock, "_open_lock_in_root", side_effect=PermissionError("no")
+            ):
+                with self.assertRaises(PermissionError):
+                    with build_dir_lock.exclusive_build_dir(Path(directory) / "b"):
+                        pass
+
+    def test_read_only_default_root_uses_fallback(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            base = Path(directory)
+            fallback = base / "fallback"
+            default = base / "default"
+            fallback_open = (fallback / "lock", object())
+            env = {k: v for k, v in os.environ.items() if k != build_dir_lock.LOCK_ROOT_ENV}
+            with mock.patch.dict("os.environ", env, clear=True), mock.patch.object(
+                build_dir_lock, "lock_root", return_value=default
+            ), mock.patch.object(
+                build_dir_lock, "fallback_lock_root", return_value=fallback
+            ), mock.patch.object(
+                build_dir_lock,
+                "_open_lock_in_root",
+                side_effect=[fallback_open, OSError(errno.EROFS, "read-only")],
+            ):
+                opened = build_dir_lock._open_locks(base / "build")
+            self.assertEqual(opened, [fallback_open])
+
+    def test_foreign_owned_default_root_uses_fallback(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            base = Path(directory)
+            fallback_open = (base / "fallback" / "lock", object())
+            env = {k: v for k, v in os.environ.items() if k != build_dir_lock.LOCK_ROOT_ENV}
+            with mock.patch.dict("os.environ", env, clear=True), mock.patch.object(
+                build_dir_lock, "lock_root", return_value=base / "default"
+            ), mock.patch.object(
+                build_dir_lock, "fallback_lock_root", return_value=base / "fallback"
+            ), mock.patch.object(
+                build_dir_lock,
+                "_open_lock_in_root",
+                side_effect=[fallback_open, PermissionError("root is not owned by this user")],
+            ):
+                opened = build_dir_lock._open_locks(base / "build")
+            self.assertEqual(opened, [fallback_open])
+
+    def test_nonblocking_lock_io_error_is_not_reported_as_busy(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            with self.lock_root(Path(directory) / "state"), mock.patch.object(
+                build_dir_lock, "_acquire_lock", side_effect=OSError(errno.EIO, "I/O error")
+            ):
+                with self.assertRaises(OSError):
+                    with build_dir_lock.exclusive_build_dir(Path(directory) / "build", wait=False):
+                        pass
+
+    @unittest.skipIf(sys.platform == "win32", "timing probe uses POSIX permissions")
+    @unittest.skipIf(hasattr(os, "geteuid") and os.geteuid() == 0, "root ignores modes")
+    def test_confined_fallback_contender_cannot_bypass_ordinary_holder(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            base = Path(directory)
+            ordinary_root = base / "ordinary-state"
+            readonly = base / "readonly"
+            readonly.mkdir()
+            readonly.chmod(0o500)
+            tmp_ordinary = base / "tmp-ordinary"
+            tmp_confined = base / "tmp-confined"
+            tmp_ordinary.mkdir()
+            tmp_confined.mkdir()
+            build = base / "build"
+            events = base / "events.txt"
+            module_dir = str(Path(build_dir_lock.__file__).resolve().parent)
+            worker = """import pathlib,sys,time
+sys.path.insert(0,sys.argv[4])
+import build_dir_lock
+build_dir_lock.lock_root=lambda: pathlib.Path(sys.argv[2])
+if sys.argv[5] == 'ordinary':
+    real_acquire = build_dir_lock._acquire_lock
+    count = [0]
+    def pause_after_coordination(lock_file, *, wait):
+        real_acquire(lock_file, wait=wait)
+        count[0] += 1
+        if count[0] == 1:
+            pathlib.Path(sys.argv[6]).write_text('ready')
+            time.sleep(1)
+    build_dir_lock._acquire_lock = pause_after_coordination
+child = \"import pathlib,sys,time; p=pathlib.Path(sys.argv[1]); p.open('a').write(sys.argv[2]+'-start\\\\n'); time.sleep(1); p.open('a').write(sys.argv[2]+'-end\\\\n')\"
+sys.exit(build_dir_lock.main(['--no-wait','--build-dir',sys.argv[1],'--',sys.executable,'-c',child,sys.argv[3],sys.argv[5]]))
+"""
+            barrier = base / "coordination-acquired"
+            env_ordinary = {**os.environ, "TMPDIR": str(tmp_ordinary)}
+            env_confined = {**os.environ, "TMPDIR": str(tmp_confined)}
+            ordinary = subprocess.Popen(
+                [sys.executable, "-c", worker, str(build), str(ordinary_root),
+                 str(events), module_dir, "ordinary", str(barrier)],
+                env=env_ordinary, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            )
+            try:
+                deadline = time.monotonic() + 10
+                while not barrier.exists():
+                    self.assertIsNone(ordinary.poll(), "ordinary holder exited early")
+                    self.assertLess(time.monotonic(), deadline)
+                    time.sleep(0.01)
+                confined = subprocess.run(
+                    [sys.executable, "-c", worker, str(build), str(readonly / "locks"),
+                     str(events), module_dir, "confined", str(barrier)],
+                    env=env_confined, capture_output=True, text=True, encoding="utf-8", timeout=20,
+                )
+            finally:
+                ordinary.terminate()
+                ordinary.wait(timeout=10)
+                readonly.chmod(0o700)
+            self.assertEqual(confined.returncode, build_dir_lock.BUSY_EXIT, confined.stderr)
+            self.assertNotIn(
+                "confined-start",
+                events.read_text(encoding="utf-8") if events.exists() else "",
+            )
+
     def test_relative_override_is_rejected(self) -> None:
         with mock.patch.dict(
             "os.environ", {build_dir_lock.LOCK_ROOT_ENV: "relative"}, clear=False
         ):
             with self.assertRaisesRegex(ValueError, "absolute path"):
                 build_dir_lock.lock_root()
+
+    def test_fallback_root_is_stable_without_numeric_uid(self) -> None:
+        with mock.patch.object(build_dir_lock.os, "geteuid", None), mock.patch.object(
+            tempfile, "gettempdir", return_value="/tmp"
+        ):
+            self.assertEqual(
+                build_dir_lock.fallback_lock_root(), build_dir_lock.fallback_lock_root()
+            )
+
+    @unittest.skipUnless(sys.platform == "win32", "Windows fallback path")
+    def test_windows_fallback_root_is_independent_of_process_temp(self) -> None:
+        with mock.patch.object(build_dir_lock.os, "name", "nt"), mock.patch.dict(
+            "os.environ", {"SystemRoot": r"C:\Windows"}, clear=False
+        ), mock.patch.object(tempfile, "gettempdir", return_value=r"D:\sandbox-temp"):
+            root = build_dir_lock.fallback_lock_root()
+            self.assertIn("Windows", str(root))
+            self.assertNotIn("sandbox-temp", str(root))
 
 
 @unittest.skipIf(sys.platform == "win32", "holder probes use POSIX signals")
