@@ -170,6 +170,7 @@ void append_utf8(std::string& out, std::uint32_t code_point) {
 struct X11Window final : GlSurface::Impl {
     // UI-thread side.
     Display* ui = nullptr;
+    std::string display_name;
     int screen = 0;
     Window parent = 0;
     Window child = 0;
@@ -238,6 +239,17 @@ struct X11Window final : GlSurface::Impl {
         geometry.drawable_width = pixel_w;
         geometry.drawable_height = pixel_h;
         geometry.in_window = !parent_gone;
+    }
+
+    void clear_geometry() {
+        std::lock_guard<std::mutex> lock(geometry_mutex);
+        ++geometry.generation;
+        geometry.width = 0.0;
+        geometry.height = 0.0;
+        geometry.scale = 0.0;
+        geometry.drawable_width = 0;
+        geometry.drawable_height = 0;
+        geometry.in_window = false;
     }
 
     void emit(SurfaceEventKind kind) {
@@ -313,6 +325,8 @@ struct X11Window final : GlSurface::Impl {
         ui = XOpenDisplay(nullptr);
         if (ui == nullptr)
             return false;
+        const char* name = DisplayString(ui);
+        display_name = name != nullptr ? name : "";
         ErrorRegistry::instance().add(ui);
         parent_gone = false;
         keys_down.clear();
@@ -409,12 +423,11 @@ struct X11Window final : GlSurface::Impl {
         ErrorRegistry::instance().remove(ui);
         XCloseDisplay(ui);
         ui = nullptr;
+        display_name.clear();
         child = 0;
         parent = 0;
         colormap = 0;
-        std::lock_guard<std::mutex> lock(geometry_mutex);
-        ++geometry.generation;
-        geometry.in_window = false;
+        clear_geometry();
     }
 
     void forget_window() override {
@@ -497,13 +510,10 @@ struct X11Window final : GlSurface::Impl {
     bool create_context(const GlSurfaceOptions& opts, GlContextReport& out) override {
         if (ui == nullptr || child == 0)
             return false;
-        rdpy = XOpenDisplay(DisplayString(ui));
+        rdpy = XOpenDisplay(display_name.c_str());
         if (rdpy == nullptr)
             return false;
         ErrorRegistry::instance().add(rdpy);
-        // The windows live on the server, so the render connection can draw
-        // into the one the UI connection made; make sure it exists first.
-        XSync(ui, False);
         GLXFBConfig config = render_fbconfig();
         if (config == nullptr) {
             drop_render_connection();
@@ -687,6 +697,14 @@ struct X11Window final : GlSurface::Impl {
             if (event.xvisibility.window == child)
                 on_visibility(event.xvisibility.state);
             break;
+        case MapNotify:
+            if (event.xmap.window == child)
+                on_map(true);
+            break;
+        case UnmapNotify:
+            if (event.xunmap.window == child)
+                on_map(false);
+            break;
         case ButtonPress:
         case ButtonRelease:
             if (event.xbutton.window == child)
@@ -746,16 +764,26 @@ struct X11Window final : GlSurface::Impl {
         if (parent_gone)
             return;
         parent_gone = true;
-        visibility.in_window = false;
-        update_geometry();
+        visibility = {};
+        clear_geometry();
         emit(SurfaceEventKind::window_changed);
     }
 
     void on_visibility(int state) {
         OnScreenState next = visibility;
         next.in_window = !parent_gone;
-        next.window_visible = true;
         next.occluded = state == VisibilityFullyObscured;
+        if (next == visibility)
+            return;
+        visibility = next;
+        emit(SurfaceEventKind::visibility_changed);
+    }
+
+    void on_map(bool mapped) {
+        OnScreenState next = visibility;
+        next.in_window = !parent_gone;
+        next.window_visible = mapped;
+        next.minimized = !mapped;
         if (next == visibility)
             return;
         visibility = next;

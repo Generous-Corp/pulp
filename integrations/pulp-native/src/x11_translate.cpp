@@ -21,8 +21,6 @@ constexpr unsigned kMod4Mask = 1u << 6;
 constexpr unsigned kButton1Mask = 1u << 8;
 constexpr unsigned kButton2Mask = 1u << 9;
 constexpr unsigned kButton3Mask = 1u << 10;
-constexpr unsigned kButton4Mask = 1u << 11;
-constexpr unsigned kButton5Mask = 1u << 12;
 
 Key letter_key(std::uint32_t lower) {
     return static_cast<Key>(static_cast<std::uint16_t>(Key::a) + (lower - 'a'));
@@ -193,9 +191,13 @@ std::uint32_t buttons_held_from_x11_state(unsigned state) noexcept {
         held |= 1u << 1;
     if (state & kButton2Mask)
         held |= 1u << 2;
-    // Buttons 4 and 5 are wheel motion, never held.
-    (void)kButton4Mask;
-    (void)kButton5Mask;
+    // Buttons 4 through 7 are wheel motion, never held. X11 encodes the
+    // remaining button state as ButtonNMask = 1 << (7 + N), while Pulp's
+    // button numbers continue at 3 for X button 8.
+    for (unsigned button = 8; button <= 24; ++button) {
+        if (state & (1u << (button + 7)))
+            held |= 1u << (button - 5);
+    }
     return held;
 }
 

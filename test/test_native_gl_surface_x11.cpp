@@ -260,7 +260,38 @@ TEST_CASE("attach makes a child that fills the host window and detach removes it
     REQUIRE(surface->event_fd() == -1);
     REQUIRE(host.children() == 0);
     REQUIRE_FALSE(HostWindow::size_of(conn.display, child, w, h));
-    REQUIRE_FALSE(surface->geometry().in_window);
+    const SurfaceGeometry detached = surface->geometry();
+    REQUIRE_FALSE(detached.in_window);
+    REQUIRE(detached.width == 0.0);
+    REQUIRE(detached.height == 0.0);
+    REQUIRE(detached.scale == 0.0);
+    REQUIRE(detached.drawable_width == 0);
+    REQUIRE(detached.drawable_height == 0);
+}
+
+TEST_CASE("mapping and unmapping updates the on-screen state", "[native][gl-surface][x11]") {
+    HostConnection conn;
+    HostWindow host(conn.display);
+    auto surface = GlSurface::create(any_driver());
+    REQUIRE(surface->attach(host.handle()));
+    std::vector<SurfaceEvent> events;
+    surface->set_listener([&](const SurfaceEvent& e) { events.push_back(e); });
+
+    XUnmapWindow(conn.display, host.window);
+    XSync(conn.display, False);
+    REQUIRE(pump(*surface, conn.display, [&] {
+        return !events.empty() && events.back().kind == SurfaceEventKind::visibility_changed &&
+               !events.back().visibility.window_visible;
+    }));
+    REQUIRE(events.back().visibility.minimized);
+
+    XMapWindow(conn.display, host.window);
+    XSync(conn.display, False);
+    REQUIRE(pump(*surface, conn.display, [&] {
+        return events.back().kind == SurfaceEventKind::visibility_changed &&
+               events.back().visibility.window_visible;
+    }));
+    REQUIRE(events.back().visibility.in_window);
 }
 
 TEST_CASE("a parent that does not exist is refused without ending the process",
@@ -603,6 +634,12 @@ TEST_CASE("invalidate after the host window is gone touches nothing", "[native][
     REQUIRE(pump(*surface, conn.display, [&] { return !surface->geometry().in_window; }));
     REQUIRE_FALSE(kinds.empty());
     REQUIRE(kinds.back() == SurfaceEventKind::window_changed);
+    const SurfaceGeometry gone = surface->geometry();
+    REQUIRE(gone.width == 0.0);
+    REQUIRE(gone.height == 0.0);
+    REQUIRE(gone.scale == 0.0);
+    REQUIRE(gone.drawable_width == 0);
+    REQUIRE(gone.drawable_height == 0);
 
     surface->invalidate();
     REQUIRE(releases == 1);

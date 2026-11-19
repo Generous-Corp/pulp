@@ -51,6 +51,9 @@ TEST_CASE("X11 state masks map to modifiers and held buttons", "[native][input][
     REQUIRE(buttons_held_from_x11_state((1u << 8) | (1u << 10)) == 3u);
     // The wheel buttons are never held.
     REQUIRE(buttons_held_from_x11_state((1u << 11) | (1u << 12)) == 0u);
+    // X button 8 and 9 are the first two additional held buttons.
+    REQUIRE(buttons_held_from_x11_state(1u << 15) == (1u << 3));
+    REQUIRE(buttons_held_from_x11_state((1u << 15) | (1u << 16)) == ((1u << 3) | (1u << 4)));
 }
 
 TEST_CASE("X11 button numbers map to pointer buttons and wheel motion", "[native][input][x11]") {

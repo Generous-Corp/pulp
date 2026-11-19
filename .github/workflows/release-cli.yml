@@ -1195,7 +1195,6 @@ jobs:
             $INSPECTOR \
             $REQUIRE_GPU \
             -DPULP_ENABLE_PULP_NATIVE=ON \
-            -DPULP_NATIVE_REQUIRE_X11=ON \
             -DPULP_BUILD_WEBVIEW=ON
           # Build everything the SDK install step needs. This is a full
           # second build on Linux, but it's required to keep the CLI
