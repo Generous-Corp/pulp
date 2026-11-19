@@ -474,7 +474,7 @@ provide the required headless/CDP capture capabilities".
 `pulp create` parses its flags twice: in `tools/cli/cmd_create.cpp` and in the
 Rust `experimental/pulp-rs/src/cmd/create.rs`. A flag added to one only works
 from that binary. A flag that writes into the generated project through a
-template placeholder (for example `{{UI_MODE_LINE}}` for `--ui`) also needs the
+template placeholder (for example `{{UI_LINE}}` for `--ui`, which becomes `NO_EDITOR` or `UI <Name>_VellumEditor`) also needs the
 placeholder in `tools/scripts/verify_create_templates.py` and in
 `test/cmake/create_template_tests.cmake`'s expansion list. Otherwise the
 template check fails on an unknown placeholder, or a generated project carries
