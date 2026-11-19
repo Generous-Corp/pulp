@@ -382,10 +382,10 @@ struct X11Window final : GlSurface::Impl {
         // The per-binary class, so two plug-ins' windows are told apart.
         const std::string class_name = windowed_gl_class_name();
         XClassHint hint;
-        std::vector<char> name(class_name.begin(), class_name.end());
-        name.push_back('\0');
-        hint.res_name = name.data();
-        hint.res_class = name.data();
+        std::vector<char> class_buf(class_name.begin(), class_name.end());
+        class_buf.push_back('\0');
+        hint.res_name = class_buf.data();
+        hint.res_class = class_buf.data();
         XSetClassHint(ui, child, &hint);
         // Follow the host window: its resizes arrive as ConfigureNotify.
         XSelectInput(ui, parent, StructureNotifyMask);
