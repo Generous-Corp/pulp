@@ -9,6 +9,11 @@ function(pulp_add_vellum_editor_package package)
             "Vellum::MirrorView_core, which this Vellum SDK does not provide "
             "(the v0.2.0 release lacks it; use a Vellum SDK that ships the view layer)")
     endif()
+    if(NOT TARGET pulp::vellum)
+        message(FATAL_ERROR "${package}: pulp_add_vellum_editor_package needs "
+            "the Pulp SDK's optional pulp-vellum integration; configure Pulp with "
+            "PULP_ENABLE_PULP_VELLUM=ON and install that SDK")
+    endif()
     if(package MATCHES "::")
         string(REPLACE "::" "-" _package_target "${package}")
     else()

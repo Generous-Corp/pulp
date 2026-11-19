@@ -195,6 +195,13 @@ if(TARGET pulp-native)
     list(APPEND PULP_SDK_TARGETS pulp-native)
 endif()
 
+# The optional Vellum editor bridge is part of the installed SDK when it was
+# enabled for this build. Generated `pulp create --ui vellum` projects link
+# against this exported target and its public headers.
+if(TARGET pulp-vellum)
+    list(APPEND PULP_SDK_TARGETS pulp-vellum)
+endif()
+
 # pulp-canvas links pulp-bundled-fonts privately when Skia is on.
 # CMake exports the canvas target through PulpTargets, and refuses unless
 # every PRIVATE-linked dependency is also in the export set.
@@ -377,6 +384,12 @@ foreach(subsystem IN LISTS _pulp_sdk_header_subsystems)
     endif()
 endforeach()
 unset(_pulp_sdk_header_subsystems)
+
+if(TARGET pulp-vellum)
+    install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/integrations/pulp-vellum/include/pulp/"
+        DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/pulp"
+        FILES_MATCHING PATTERN "*.hpp" PATTERN "*.h")
+endif()
 
 if(TARGET pulp-native)
     install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/integrations/pulp-native/include/pulp/"

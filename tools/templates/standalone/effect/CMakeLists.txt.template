@@ -4,6 +4,7 @@ project({{TARGET_NAME}} VERSION {{VERSION}} LANGUAGES CXX)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
+{{VELLUM_FIND_LINE}}
 find_package(Pulp {{SDK_VERSION}} REQUIRED)
 
 # Tests
@@ -34,7 +35,6 @@ target_link_libraries({{TARGET_NAME}}-test PRIVATE Pulp::format Catch2::Catch2Wi
 target_include_directories({{TARGET_NAME}}-test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 catch_discover_tests({{TARGET_NAME}}-test)
 
-{{VELLUM_FIND_LINE}}
 {{VELLUM_EDITOR_LINE}}
 
 pulp_add_plugin({{TARGET_NAME}}
