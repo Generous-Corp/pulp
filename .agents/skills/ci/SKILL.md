@@ -13828,3 +13828,23 @@ commit that is not on Pulp main.
   hosted runner's `ImageVersion` (`vellum_closure.py export-meta`, which also
   records `ImageOS`). A self-hosted runner or VM sets no `ImageVersion`; the
   step then fails rather than recording a blank or placeholder image.
+
+## Repair after a merge touches a public capability header
+
+When merging `origin/main` into a PR conflicts in the generated capability
+files (for example `docs/status/agent-capability-surface/headers/...` and
+`tools/agent-capabilities/fingerprints/...`), never take one side of the whole
+merge: that once emptied a PR's diff. Use the helper instead:
+
+1. `git merge origin/main`, then `python3 tools/scripts/regen_agent_capability_after_merge.py`.
+   It refuses while conflicts or markers remain outside the two generated trees,
+   resolves the generated ones with main's side, and exits 4 while the merge is
+   uncommitted.
+2. Commit the merge (`git commit --no-edit`).
+3. Rerun it with `--previous-head <sha of the PR head before the merge>`. It
+   accepts every changed fingerprint reported by `--check`, runs `--write` then
+   `--check`, prints `git diff --stat origin/main`, and exits 5 when the branch
+   diff is empty or lost more than half its files.
+
+Review the printed stat before pushing; push once. Tests:
+`tools/scripts/test_regen_agent_capability_after_merge.py`.
