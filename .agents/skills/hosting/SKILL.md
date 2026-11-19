@@ -1118,7 +1118,10 @@ save/reopen render proof beside the legacy caller-owned route controls.
   executor/pool/scratch); only the ring mediates against the consumer.
 - **Anticipation splice (`set_anticipation_enabled`, default OFF; runs on the
   canonical executor path).** When enabled + the routed snapshot is eligible + the
-  graph has an eligible latent interior, `compile_` builds an `AnticipationLane` +
+  graph has an eligible latent interior, `compile_` (through
+  `build_routed_for_snapshot_` in `core/host/src/signal_graph_compile_routed.cpp`,
+  which also builds the serial/parallel routed snapshots and picks the PDC
+  domain) builds an `AnticipationLane` +
   a `skip_mask` over the routed plan (the interior nodes) + a prefill map (each
   lane output channel → the interior boundary-source's `exec_pool` output slot).
   The host drives `pump_anticipation()` from ONE background thread (the producer);
@@ -1205,6 +1208,14 @@ save/reopen render proof beside the legacy caller-owned route controls.
   candidate lock into the caller's `std::optional<GraphMutationLock>` so the
   lock stays held through compile and runtime adoption; a new gate belongs
   there, not back in `prepare()`.
+  Runtime-state adoption from the live snapshot (ingress mailboxes, plugin
+  sequence pointers, matching feed-forward PDC rings) lives in the static
+  `adopt_live_runtime_state_` in
+  `core/host/src/signal_graph_prepared_edit_adoption.cpp`. It returns
+  `RuntimeAdoptionFailed` for feedback or mismatched delay tables and
+  `std::nullopt` otherwise; `prepare()` alone stores the prepared snapshot.
+  Keep the dimensions-changed early exit after the mailbox adoption so pending
+  MIDI and parameter batches survive a resize while DSP history starts fresh.
   `set_live_dsp_telemetry_enabled()` is a control-thread operation serialized
   by the graph mutation lock: a prepared commit re-seeds its snapshot from the
   owner's authoritative desired toggle immediately before publication. Do not
