@@ -94,6 +94,11 @@ TEST_CASE("Vellum editor factory supports editor and inspector roles", "[pulp-ve
     auto editor = factory.create(processor, context, pulp::format::EditorRole::editor);
     REQUIRE(editor);
     REQUIRE(editor->attach({.kind = pulp::format::NativeParentKind::none}));
+    // An X11 parent carries window_id, not handle; the editor must not claim a
+    // parent kind its attach path cannot use.
+    CHECK_FALSE(editor->supports_parent(pulp::format::NativeParentKind::x11_window));
+    CHECK_FALSE(
+        editor->attach({.kind = pulp::format::NativeParentKind::x11_window, .window_id = 42}));
     REQUIRE(editor->size_hints().preferred_width == editor->size().width);
     REQUIRE(editor->size_hints().preferred_height == editor->size().height);
     REQUIRE(editor->set_size({640, 480, 2.0}));
