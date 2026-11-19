@@ -136,8 +136,8 @@ def main() -> int:
     # 4. Accept changed fingerprints, regenerate, verify.
     check = run([sys.executable, manifest, "--check"], root, check=False)
     changed = sorted(set(CHANGED.findall(check.stdout + check.stderr)))
-    if changed:
-        run([sys.executable, manifest, "--accept-fingerprint", *changed], root)
+    for include in changed:
+        run([sys.executable, manifest, "--accept-fingerprint", include], root)
     if changed or check.returncode != 0:
         run([sys.executable, manifest, "--write"], root)
         final = run([sys.executable, manifest, "--check"], root, check=False)

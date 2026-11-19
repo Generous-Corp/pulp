@@ -56,7 +56,6 @@ paths = [
   "tools/scripts/prepare_logic_hostbench_au.py",
   "tools/scripts/queue_age_watchdog.py",
   "tools/scripts/reap_stranded_tracker.py",
-  "tools/scripts/regen_agent_capability_after_merge.py",
   "tools/scripts/release_checksum_manifest.py",
   "tools/scripts/release_platform_subset_check.py",
   "tools/scripts/release_step_timeouts.py",
@@ -6208,7 +6207,10 @@ risk_class = "low"
 
 [[families]]
 name = "script-readers-aca8eb206f2c"
-paths = ["tools/scripts/test_regen_agent_capability_after_merge.py"]
+paths = [
+  "tools/scripts/regen_agent_capability_after_merge.py",
+  "tools/scripts/test_regen_agent_capability_after_merge.py",
+]
 tests = [
   "build-parallelism-guard",
   "changed-surface-policy-inventory",

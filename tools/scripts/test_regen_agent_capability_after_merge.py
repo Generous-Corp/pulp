@@ -19,33 +19,61 @@ import sys
 import tempfile
 import unittest
 
-SCRIPT = pathlib.Path(__file__).with_name("regen_agent_capability_after_merge.py")
+import regen_agent_capability_after_merge as regen_helper
+
+SCRIPT = pathlib.Path(regen_helper.__file__)
 
 INCLUDE = "pulp/host/h.hpp"
 HEADER = "core/host/include/" + INCLUDE
 FRAGMENT = "tools/agent-capabilities/fingerprints/" + INCLUDE + ".json"
 SURFACE = "docs/status/agent-capability-surface/headers/" + INCLUDE + ".json"
+INCLUDE2 = "pulp/host/g.hpp"
+HEADER2 = "core/host/include/" + INCLUDE2
+FRAGMENT2 = "tools/agent-capabilities/fingerprints/" + INCLUDE2 + ".json"
+SURFACE2 = "docs/status/agent-capability-surface/headers/" + INCLUDE2 + ".json"
 
 FAKE_MANIFEST = '''#!/usr/bin/env python3
 import hashlib, pathlib, sys
 root = pathlib.Path.cwd()
-inc = "pulp/host/h.hpp"
-header = root / "core/host/include" / inc
-frag = root / "tools/agent-capabilities/fingerprints" / (inc + ".json")
-surf = root / "docs/status/agent-capability-surface/headers" / (inc + ".json")
-def digest():
-    return hashlib.sha256(header.read_bytes()).hexdigest()
+entries = {
+    "pulp/host/g.hpp": (
+        "core/host/include/pulp/host/g.hpp",
+        "tools/agent-capabilities/fingerprints/pulp/host/g.hpp.json",
+        "docs/status/agent-capability-surface/headers/pulp/host/g.hpp.json",
+    ),
+    "pulp/host/h.hpp": (
+        "core/host/include/pulp/host/h.hpp",
+        "tools/agent-capabilities/fingerprints/pulp/host/h.hpp.json",
+        "docs/status/agent-capability-surface/headers/pulp/host/h.hpp.json",
+    ),
+}
+def paths(inc):
+    return tuple(root / rel for rel in entries[inc])
+def digest(inc):
+    return hashlib.sha256(paths(inc)[0].read_bytes()).hexdigest()
 mode = sys.argv[1]
 if mode == "--accept-fingerprint":
-    frag.write_text(digest() + "\\n")
+    includes = sys.argv[2:]
+    if len(includes) != 1:
+        print("fixture accepts one include per invocation", file=sys.stderr)
+        sys.exit(2)
+    (root / "accept.log").open("a", encoding="utf-8").write(includes[0] + "\\n")
+    paths(includes[0])[1].write_text(digest(includes[0]) + "\\n")
 elif mode == "--write":
-    surf.write_text(frag.read_text(encoding="utf-8"))
+    for inc, (_, frag, surf) in entries.items():
+        frag_path = root / frag
+        if frag_path.exists():
+            (root / surf).write_text(frag_path.read_text(encoding="utf-8"))
 elif mode == "--check":
     bad = []
-    if frag.read_text(encoding="utf-8").strip() != digest():
-        bad.append("public header fingerprint changed: " + inc + "; expected x, got y")
-    if surf.read_text(encoding="utf-8") != frag.read_text(encoding="utf-8"):
-        bad.append("surface stale")
+    for inc, (header, frag, surf) in entries.items():
+        header_path, frag_path, surf_path = paths(inc)
+        if not header_path.exists():
+            continue
+        if frag_path.read_text(encoding="utf-8").strip() != digest(inc):
+            bad.append("public header fingerprint changed: " + inc + "; expected x, got y")
+        if surf_path.read_text(encoding="utf-8") != frag_path.read_text(encoding="utf-8"):
+            bad.append("surface stale")
     print("\\n".join(bad))
     sys.exit(1 if bad else 0)
 '''
@@ -117,6 +145,28 @@ class Fixture(unittest.TestCase):
         write(self.root, SURFACE, "fpr\n")
         write(self.root, "other.txt", "pr only\n")
         self.commit("pr change")
+        self.pr_head = git(self.root, "rev-parse", "HEAD").stdout.strip()
+
+    def multi_header_scenario(self):
+        """Two changed headers require two single-header manifest invocations."""
+        write(self.root, HEADER2, header_text(first="g"))
+        sync2 = self.digest(header_text(first="g")) + "\n"
+        write(self.root, FRAGMENT2, sync2)
+        write(self.root, SURFACE2, sync2)
+        self.commit("add second header fixture")
+        git(self.root, "branch", "-q", "pr")
+        self.advance_main({HEADER: header_text(first="A"), FRAGMENT: "fmain\n",
+                           SURFACE: "fmain\n", FRAGMENT2: "gmain\n",
+                           SURFACE2: "gmain\n"})
+        git(self.root, "checkout", "-q", "pr")
+        write(self.root, HEADER, header_text(fifth="E"))
+        write(self.root, FRAGMENT, "fpr\n")
+        write(self.root, SURFACE, "fpr\n")
+        write(self.root, HEADER2, header_text(fifth="F"))
+        write(self.root, FRAGMENT2, "gpr\n")
+        write(self.root, SURFACE2, "gpr\n")
+        write(self.root, "other.txt", "pr only\n")
+        self.commit("pr changes two headers")
         self.pr_head = git(self.root, "rev-parse", "HEAD").stdout.strip()
 
 
@@ -211,6 +261,22 @@ class RegenTests(Fixture):
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertEqual(git(self.root, "status", "--porcelain").stdout, before)
         self.assertEqual(git(self.root, "rev-parse", "HEAD").stdout, head)
+
+    def test_multiple_changed_fingerprints_use_one_manifest_call_each(self):
+        self.multi_header_scenario()
+        git(self.root, "merge", "-q", "--no-commit", "origin/main", check=False)
+        self.assertEqual(self.run_script().returncode, 4)
+        git(self.root, "commit", "-q", "-m", "merge main")
+        result = self.run_script("--previous-head", self.pr_head)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual((self.root / "accept.log").read_text(encoding="utf-8").splitlines(),
+                         [INCLUDE2, INCLUDE])
+        for header, fragment, surface in ((HEADER, FRAGMENT, SURFACE),
+                                          (HEADER2, FRAGMENT2, SURFACE2)):
+            digest = self.digest((self.root / header).read_text(encoding="utf-8"))
+            self.assertEqual((self.root / fragment).read_text(encoding="utf-8").strip(), digest)
+            self.assertEqual((self.root / surface).read_text(encoding="utf-8"),
+                             (self.root / fragment).read_text(encoding="utf-8"))
 
 
 if __name__ == "__main__":
