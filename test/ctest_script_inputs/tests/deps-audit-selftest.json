@@ -10,6 +10,7 @@
    "tools/cmake/PulpVellumLock.cmake",
    "tools/cmake/PulpWclap.cmake",
    "tools/deps/audit.py",
+   "tools/deps/cmake_commands.py",
    "tools/deps/pulp_lock.py",
    "tools/deps/test_audit.py",
    "tools/deps/wgpu_native_digests.py",
