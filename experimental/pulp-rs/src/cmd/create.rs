@@ -452,7 +452,7 @@ pub fn scaffold(
         "find_package(Vellum CONFIG REQUIRED)".to_owned()
     } else { String::new() };
     let vellum_helper_line = if args.ui == "vellum" {
-        "include(\"${PULP_SDK_DIR}/lib/cmake/Pulp/PulpVellumEditorPackage.cmake\")".to_owned()
+        "if(DEFINED PULP_ROOT_DIR)\n    include(\"${PULP_ROOT_DIR}/integrations/pulp-vellum/cmake/PulpVellumEditorPackage.cmake\")\nelse()\n    include(\"${PULP_SDK_DIR}/lib/cmake/Pulp/PulpVellumEditorPackage.cmake\")\nendif()".to_owned()
     } else { String::new() };
     let vars: Vec<(&str, &str)> = vec![
         ("PLUGIN_NAME", &args.name),

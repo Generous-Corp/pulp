@@ -610,7 +610,11 @@ int cmd_create(const std::vector<std::string>& args) {
          ui == "vellum" ? "find_package(Vellum CONFIG REQUIRED)" : ""},
         {"VELLUM_HELPER_LINE",
          ui == "vellum"
-             ? "include(\"${PULP_SDK_DIR}/lib/cmake/Pulp/PulpVellumEditorPackage.cmake\")"
+             ? "if(DEFINED PULP_ROOT_DIR)\n"
+               "    include(\"${PULP_ROOT_DIR}/integrations/pulp-vellum/cmake/PulpVellumEditorPackage.cmake\")\n"
+               "else()\n"
+               "    include(\"${PULP_SDK_DIR}/lib/cmake/Pulp/PulpVellumEditorPackage.cmake\")\n"
+               "endif()"
              : ""},
         {"UI_LINE",
          ui == "vellum" ? "UI " + class_name + "_VellumEditor" : (ui == "none" ? "NO_EDITOR" : "")},
