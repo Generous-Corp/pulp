@@ -27,3 +27,21 @@ if(NOT result EQUAL 0)
     message(FATAL_ERROR "Vellum editor package configure failed:\n${output}${error}")
 endif()
 message(STATUS "Vellum editor package configure passed")
+
+# Without Vellum's view layer (the pinned v0.2.0 SDK), the helper must stop
+# with a clear message instead of a generate-time missing-target error.
+file(MAKE_DIRECTORY "${FIXTURE_DIR}/noview")
+file(WRITE "${FIXTURE_DIR}/noview/CMakeLists.txt" "cmake_minimum_required(VERSION 3.24)\nproject(VellumNoView CXX)\n"
+    "add_library(pulp-vellum INTERFACE)\nadd_library(pulp::vellum ALIAS pulp-vellum)\n"
+    "include(\"${PULP_SOURCE_DIR}/integrations/pulp-vellum/cmake/PulpVellumEditorPackage.cmake\")\n"
+    "pulp_add_vellum_editor_package(pulp::vellum-editor VIEW_HEADER root.hpp VIEW_TYPE test::RootView)\n")
+execute_process(COMMAND "${CMAKE_COMMAND}" -S "${FIXTURE_DIR}/noview" -B "${FIXTURE_DIR}/noview-build"
+    RESULT_VARIABLE result OUTPUT_VARIABLE output ERROR_VARIABLE error)
+if(result EQUAL 0)
+    message(FATAL_ERROR "Vellum editor package configured without Vellum::MirrorView_core")
+endif()
+string(REGEX REPLACE "[ \t\r\n]+" " " error_flat "${error}")
+if(NOT error_flat MATCHES "needs Vellum::MirrorView_core")
+    message(FATAL_ERROR "missing-view error was not the helper's message:\n${output}${error}")
+endif()
+message(STATUS "Vellum editor package refuses an SDK without the view layer")
