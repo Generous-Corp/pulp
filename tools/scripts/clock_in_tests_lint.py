@@ -163,12 +163,17 @@ def _fstring_clock_spans(source: str) -> list[tuple[int, int]]:
         for node in ast.walk(joined):
             if not isinstance(node, ast.Call) or not isinstance(node.func, ast.Attribute):
                 continue
-            base = node.func.value
-            if not isinstance(base, ast.Name):
-                continue
-            name = unicodedata.normalize("NFKC", base.id)
             method = unicodedata.normalize("NFKC", node.func.attr)
-            if method not in methods.get(name, set()):
+            if method not in {item for values in methods.values() for item in values}:
+                continue
+            receiver = node.func.value
+            receiver_names: list[str] = []
+            while isinstance(receiver, ast.Attribute):
+                receiver_names.append(unicodedata.normalize("NFKC", receiver.attr))
+                receiver = receiver.value
+            if isinstance(receiver, ast.Name):
+                receiver_names.append(unicodedata.normalize("NFKC", receiver.id))
+            if not any(name in methods and method in methods[name] for name in receiver_names):
                 continue
             start = getattr(node, "lineno", None)
             end = getattr(node, "end_lineno", start)

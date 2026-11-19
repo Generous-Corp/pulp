@@ -73,6 +73,8 @@ class FlaggedTest(unittest.TestCase):
             "value = F'{time.time()}'",
             "value = rf'{datetime.now()}'",
             "value = fr'{date.today()}'",
+            "value = f'{dt.datetime.now()}'",
+            "value = f'{datetime.datetime.now()}'",
             'value = RF"""\n{time.time()}\n"""',
         ):
             with self.subTest(source=source):
