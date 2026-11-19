@@ -1,5 +1,6 @@
 // SignalGraph private compile seam: runtime edge bucketing, canonical ordering and telemetry.
 #include "signal_graph_internal.hpp"
+#include <pulp/host/signal_graph_runtime.hpp>
 #include <algorithm>
 #include <cstddef>
 #include <tuple>
