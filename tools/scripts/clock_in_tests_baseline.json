@@ -1,0 +1,260 @@
+{
+  "files": [],
+  "lines": [
+    {
+      "path": "tools/ci/test_install_linux_build_deps.py",
+      "line": "today = dt.datetime.now(dt.timezone.utc).date()",
+      "reason": "existing use when the lint landed"
+    },
+    {
+      "path": "tools/ci/test_proxmox_ephemeral_runner_windows.py",
+      "line": "\"    state['tasks'].append({'type': 'qmshutdown', 'user': 'root@pam', 'starttime': int(time.time())})\\n\"",
+      "reason": "existing use when the lint landed"
+    },
+    {
+      "path": "tools/ci/test_pulp_worktree_gc.py",
+      "line": "old = time.time() - (3 * 24 * 60 * 60)",
+      "reason": "existing use when the lint landed"
+    },
+    {
+      "path": "tools/harness/tests/test_evidence_check.py",
+      "line": "future = (date.today() + timedelta(days=30)).isoformat()",
+      "reason": "existing use when the lint landed"
+    },
+    {
+      "path": "tools/harness/tests/test_evidence_check.py",
+      "line": "past = (date.today() - timedelta(days=1)).isoformat()",
+      "reason": "existing use when the lint landed"
+    },
+    {
+      "path": "tools/harness/tests/test_evidence_check.py",
+      "line": "today_str = date.today().isoformat()",
+      "reason": "existing use when the lint landed"
+    },
+    {
+      "path": "tools/harness/tests/test_evidence_check.py",
+      "line": "future = (date.today() + timedelta(days=30)).isoformat()",
+      "reason": "existing use when the lint landed"
+    },
+    {
+      "path": "tools/harness/tests/test_evidence_check.py",
+      "line": "past = (date.today() - timedelta(days=1)).isoformat()",
+      "reason": "existing use when the lint landed"
+    },
+    {
+      "path": "tools/harness/tests/test_evidence_check.py",
+      "line": "future = (date.today() + timedelta(days=30)).isoformat()",
+      "reason": "existing use when the lint landed"
+    },
+    {
+      "path": "tools/harness/tests/test_evidence_check.py",
+      "line": "past = (date.today() - timedelta(days=1)).isoformat()",
+      "reason": "existing use when the lint landed"
+    },
+    {
+      "path": "tools/harness/tests/test_evidence_check.py",
+      "line": "past = (date.today() - timedelta(days=1)).isoformat()",
+      "reason": "existing use when the lint landed"
+    },
+    {
+      "path": "tools/harness/tests/test_evidence_check.py",
+      "line": "past = (date.today() - timedelta(days=1)).isoformat()",
+      "reason": "existing use when the lint landed"
+    },
+    {
+      "path": "tools/harness/tests/test_evidence_check.py",
+      "line": "past = (date.today() - timedelta(days=1)).isoformat()",
+      "reason": "existing use when the lint landed"
+    },
+    {
+      "path": "tools/harness/tests/test_evidence_check.py",
+      "line": "past = (date.today() - timedelta(days=1)).isoformat()",
+      "reason": "existing use when the lint landed"
+    },
+    {
+      "path": "tools/import-validation/test_source_contracts.py",
+      "line": "due_soon = (dt.date.today() - dt.timedelta(days=2)).isoformat()",
+      "reason": "existing use when the lint landed"
+    },
+    {
+      "path": "tools/rack/test_module_index_atomic.py",
+      "line": "stale = time.time() - 30 * 86400",
+      "reason": "existing use when the lint landed"
+    },
+    {
+      "path": "tools/scripts/test_clean_worktree_builds.py",
+      "line": "old = time.time() - 86_400",
+      "reason": "existing use when the lint landed"
+    },
+    {
+      "path": "tools/scripts/test_clean_worktree_builds.py",
+      "line": "\"deadline=time.time()+120\\n\"",
+      "reason": "existing use when the lint landed"
+    },
+    {
+      "path": "tools/scripts/test_clean_worktree_builds.py",
+      "line": "\"while time.time()<deadline:\\n\"",
+      "reason": "existing use when the lint landed"
+    },
+    {
+      "path": "tools/scripts/test_clean_worktree_builds.py",
+      "line": "old = time.time() - 86_400",
+      "reason": "existing use when the lint landed"
+    },
+    {
+      "path": "tools/scripts/test_clean_worktree_builds.py",
+      "line": "deadline = time.time() + 10",
+      "reason": "existing use when the lint landed"
+    },
+    {
+      "path": "tools/scripts/test_clean_worktree_builds.py",
+      "line": "while time.time() < deadline and not ready.exists():",
+      "reason": "existing use when the lint landed"
+    },
+    {
+      "path": "tools/scripts/test_clean_worktree_builds.py",
+      "line": "old = time.time() - 86_400",
+      "reason": "existing use when the lint landed"
+    },
+    {
+      "path": "tools/scripts/test_clean_worktree_planning.py",
+      "line": "old = time.time() - 4 * 3600",
+      "reason": "existing use when the lint landed"
+    },
+    {
+      "path": "tools/scripts/test_configure_only.py",
+      "line": "old = time.time() - 2 * configure_only.STALE_WITHOUT_LOCK_S",
+      "reason": "existing use when the lint landed"
+    },
+    {
+      "path": "tools/scripts/test_gpu_audio_p2_campaign.py",
+      "line": "\"sampled_at\": datetime.now(timezone.utc).isoformat(),",
+      "reason": "existing use when the lint landed"
+    },
+    {
+      "path": "tools/scripts/test_gpu_audio_p2_campaign.py",
+      "line": "\"measured_at_utc\": datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace(\"+00:00\", \"Z\"),",
+      "reason": "existing use when the lint landed"
+    },
+    {
+      "path": "tools/scripts/test_gpu_audio_p2_campaign.py",
+      "line": "receipt[\"gpu_health_observation\"][\"observation\"][\"measured_at_utc\"] = datetime.now(",
+      "reason": "existing use when the lint landed"
+    },
+    {
+      "path": "tools/scripts/test_gpu_audio_p2_campaign.py",
+      "line": "\"sampled_at\": datetime.now(timezone.utc).isoformat(),",
+      "reason": "existing use when the lint landed"
+    },
+    {
+      "path": "tools/scripts/test_gpu_audio_p2_campaign.py",
+      "line": "\"source_revision\": source, \"host_id\": \"m5\", \"sampled_at\": datetime.now(timezone.utc).isoformat(),",
+      "reason": "existing use when the lint landed"
+    },
+    {
+      "path": "tools/scripts/test_gpu_audio_p2_host_preflight.py",
+      "line": "\"sampled_at\": sampled_at or datetime.now(timezone.utc).isoformat(),",
+      "reason": "existing use when the lint landed"
+    },
+    {
+      "path": "tools/scripts/test_gpu_audio_p2_host_preflight.py",
+      "line": "now = datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace(\"+00:00\", \"Z\")",
+      "reason": "existing use when the lint landed"
+    },
+    {
+      "path": "tools/scripts/test_gpu_audio_p2_host_preflight.py",
+      "line": "stale = datetime.now(timezone.utc).replace(year=2020).isoformat()",
+      "reason": "existing use when the lint landed"
+    },
+    {
+      "path": "tools/scripts/test_live_build_check.py",
+      "line": "started = int(time.time()) - age_secs",
+      "reason": "existing use when the lint landed"
+    },
+    {
+      "path": "tools/scripts/test_local_diff_cover.py",
+      "line": "deadline = time.time() + 10",
+      "reason": "existing use when the lint landed"
+    },
+    {
+      "path": "tools/scripts/test_local_diff_cover.py",
+      "line": "while not self.lock.exists() and time.time() < deadline:",
+      "reason": "existing use when the lint landed"
+    },
+    {
+      "path": "tools/scripts/test_reuse_policy_replay.py",
+      "line": "today = dt.datetime.now(dt.timezone.utc).date()",
+      "reason": "existing use when the lint landed"
+    },
+    {
+      "path": "tools/scripts/test_reuse_policy_replay.py",
+      "line": "today = dt.datetime.now(dt.timezone.utc).date()",
+      "reason": "existing use when the lint landed"
+    },
+    {
+      "path": "tools/scripts/test_reuse_policy_replay.py",
+      "line": "old = (dt.datetime.now(dt.timezone.utc) - dt.timedelta(days=5)).date().isoformat()",
+      "reason": "existing use when the lint landed"
+    },
+    {
+      "path": "tools/scripts/test_reuse_policy_replay.py",
+      "line": "return (dt.datetime.now(dt.timezone.utc) - dt.timedelta(days=5)).date().isoformat()",
+      "reason": "existing use when the lint landed"
+    },
+    {
+      "path": "tools/scripts/test_run_changed_surface_tests.py",
+      "line": "started = int(time.time())",
+      "reason": "existing use when the lint landed"
+    },
+    {
+      "path": "tools/scripts/test_run_changed_surface_tests.py",
+      "line": "started <= not_before <= int(time.time())))",
+      "reason": "existing use when the lint landed"
+    },
+    {
+      "path": "tools/scripts/test_run_changed_surface_tests.py",
+      "line": "horizon = time.strftime(\"%Y-%m-%d\", time.gmtime(time.time() + 28 * 86400))",
+      "reason": "existing use when the lint landed"
+    },
+    {
+      "path": "tools/scripts/test_runner_topology_check.py",
+      "line": "old = (datetime.now(timezone.utc) - timedelta(hours=9)).isoformat()",
+      "reason": "existing use when the lint landed"
+    },
+    {
+      "path": "tools/scripts/test_runner_topology_check.py",
+      "line": "self.base = datetime.now(timezone.utc)",
+      "reason": "existing use when the lint landed"
+    },
+    {
+      "path": "tools/scripts/test_script_test_inputs.py",
+      "line": "future = time.time() + 60",
+      "reason": "existing use when the lint landed"
+    },
+    {
+      "path": "tools/scripts/test_script_test_inputs.py",
+      "line": "future = time.time() + 60",
+      "reason": "existing use when the lint landed"
+    },
+    {
+      "path": "tools/scripts/test_silent_revert_guard.py",
+      "line": "old_origin, \"newer-dated grandparent\", datetime.now(UTC).isoformat()",
+      "reason": "existing use when the lint landed"
+    },
+    {
+      "path": "tools/scripts/test_silent_revert_guard.py",
+      "line": "datetime.now(UTC).isoformat(),",
+      "reason": "existing use when the lint landed"
+    },
+    {
+      "path": "tools/testing/daw-smoke/test_real_host_smoke.py",
+      "line": "self.assertLessEqual(active[\"expires_unix\"] - time.time(), 3600)",
+      "reason": "existing use when the lint landed"
+    },
+    {
+      "path": "tools/testing/daw-smoke/test_real_host_smoke.py",
+      "line": "self.assertGreaterEqual(active[\"expires_unix\"] - time.time(), 600)",
+      "reason": "existing use when the lint landed"
+    }
+  ]
+}

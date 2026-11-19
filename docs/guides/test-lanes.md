@@ -433,6 +433,30 @@ where the gate ran macOS with Python 3.14. Every entry passed on the Linux
 CI leg and under Python 3.12 with no build tree before it moved, and a macOS
 `push` to `main` still runs them all.
 
+## Real-clock reads in Python tests
+
+A Python test that builds an expectation from the real clock while the code
+under test runs on a pinned date passes for weeks, then fails on every run the
+day the calendar crosses a window it assumed. On 2026-11-19 at 00:00 UTC that
+turned the required `Versioning & Skill-Sync` check red for every merge group.
+Two guards cover the class:
+
+- `tools/scripts/clock_in_tests_lint.py` (run by `gates.sh` and the pre-push
+  hook) rejects an added or edited line in `tools/**/test_*.py` or
+  `tools/**/*_test.py` that calls `datetime.now`, `datetime.today`,
+  `datetime.utcnow`, `date.today`, `time.time`, `time.time_ns` or
+  `time.localtime`. A read that is safe says why on the line:
+  `# clock-ok: <reason>`. Existing uses are frozen in
+  `tools/scripts/clock_in_tests_baseline.json`, so only the diff is judged.
+  Pin the date instead whenever the code under test accepts one.
+- The `date-sensitive-selftests-tz-matrix` ctest runs each selftest listed in
+  `tools/scripts/date_sensitive_selftests.json` under `TZ=Pacific/Kiritimati`
+  (UTC+14), `TZ=Pacific/Pago_Pago` (UTC-11) and `TZ=UTC` and fails if any zone
+  differs. At every moment one of those zones is a calendar day from UTC, so a
+  local-clock dependency fails now instead of at the next rollover. Add a
+  selftest to `tests` when it takes a date; `pending` entries are listed but not
+  run. It does not catch a test that reads the UTC clock on both sides.
+
 ## Why example validators are off the required gate
 
 An example plugin's `pluginval`/`auval` run has real value — a plugin that fails

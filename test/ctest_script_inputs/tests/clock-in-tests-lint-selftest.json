@@ -1,0 +1,10 @@
+{
+ "name": "clock-in-tests-lint-selftest",
+ "record": {
+  "entry": "tools/scripts/test_clock_in_tests_lint.py",
+  "inputs": [
+   "tools/scripts/test_clock_in_tests_lint.py"
+  ],
+  "kind": "python"
+ }
+}

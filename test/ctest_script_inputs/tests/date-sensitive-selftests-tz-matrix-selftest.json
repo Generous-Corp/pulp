@@ -1,0 +1,10 @@
+{
+ "name": "date-sensitive-selftests-tz-matrix-selftest",
+ "record": {
+  "entry": "tools/scripts/test_date_sensitive_selftests_tz_matrix.py",
+  "inputs": [
+   "tools/scripts/test_date_sensitive_selftests_tz_matrix.py"
+  ],
+  "kind": "python"
+ }
+}

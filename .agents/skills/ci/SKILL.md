@@ -6168,6 +6168,18 @@ bisectable.
   not diff-scoped, because the condition is a property of a target's entire
   registration set and the rescuing sibling can live in a manifest the push never
   touched.
+- **Clock-in-tests lint and timezone matrix.** A Python test that reads the real
+  clock beside a pinned date fails every run once the calendar crosses a window it
+  assumed (the 2026-11-19 00:00 UTC outage of the required versioning check).
+  `clock_in_tests_lint.py` (in `gates.sh` and pre-push, diff-scoped, baseline in
+  `clock_in_tests_baseline.json`) rejects a newly added `datetime.now`,
+  `date.today`, `time.time` and similar line in `tools/**/test_*.py` unless it
+  carries `# clock-ok: <reason>`. The `date-sensitive-selftests-tz-matrix` ctest
+  runs the selftests in `date_sensitive_selftests.json` under
+  `TZ=Pacific/Kiritimati`, `Pacific/Pago_Pago` and `UTC`, the method that
+  reproduced the outage in about a second per zone. A selftest that takes a date
+  belongs in that list; reproduce a suspected date bug with `TZ=Pacific/Kiritimati`
+  before waiting for midnight UTC.
 - **Release builds must pass `-DPULP_BUILD_EXAMPLES=OFF`.** The
   `pulp-design-tool` example hard-fails CMake configure when `PULP_HAS_SKIA`
   is FALSE (belt-and-suspenders, code 78). `sign-and-release.yml` builds on a
