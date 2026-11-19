@@ -1,4 +1,19 @@
 # Generate a concrete pulp_add_plugin UI package for a plug-in root View type.
+#
+# In-tree, integrations/pulp-vellum defines pulp::vellum. An installed SDK
+# ships it as PulpVellumTargets.cmake next to this file; it names Vellum's
+# imported targets, so include this file after find_package(Vellum).
+if(NOT TARGET pulp::vellum AND EXISTS "${CMAKE_CURRENT_LIST_DIR}/PulpVellumTargets.cmake")
+    if(NOT TARGET Vellum::Value)
+        message(FATAL_ERROR "PulpVellumEditorPackage.cmake: call find_package(Vellum) "
+            "before including it; the installed pulp::vellum links Vellum::Value")
+    endif()
+    include("${CMAKE_CURRENT_LIST_DIR}/PulpVellumTargets.cmake")
+    if(TARGET Pulp::vellum AND NOT TARGET pulp::vellum)
+        add_library(pulp::vellum ALIAS Pulp::vellum)
+    endif()
+endif()
+
 function(pulp_add_vellum_editor_package package)
     cmake_parse_arguments(PARSE_ARGV 1 _vellum_pkg "" "VIEW_HEADER;VIEW_TYPE" "VIEW_INCLUDE_DIRS")
     if(NOT _vellum_pkg_VIEW_HEADER OR NOT _vellum_pkg_VIEW_TYPE)

@@ -3,7 +3,9 @@
 # format-core and on an installed Vellum SDK found through CMAKE_PREFIX_PATH
 # (or Vellum_DIR); it brings no UI and fetches nothing. Core never links it.
 
-find_package(Vellum CONFIG REQUIRED)
+# GLOBAL: the imported Vellum targets must resolve outside this directory too,
+# where the plug-in link-floor checks walk pulp-vellum's link closure.
+find_package(Vellum CONFIG REQUIRED GLOBAL)
 
 add_library(pulp-vellum STATIC
     src/mapping.cpp
@@ -11,7 +13,8 @@ add_library(pulp-vellum STATIC
     src/visual_port_feed.cpp)
 add_library(pulp::vellum ALIAS pulp-vellum)
 target_include_directories(pulp-vellum PUBLIC
-    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>)
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+    $<INSTALL_INTERFACE:include>)
 target_compile_features(pulp-vellum PUBLIC cxx_std_20)
 target_link_libraries(pulp-vellum PUBLIC pulp::format-core Vellum::Value)
 include("${PULP_ROOT_DIR}/integrations/pulp-vellum/cmake/PulpVellumEditorPackage.cmake")

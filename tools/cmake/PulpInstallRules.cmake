@@ -874,6 +874,25 @@ configure_file("${PULP_ROOT_DIR}/tools/cmake/PulpStampSourceInstall.cmake.in"
     "${CMAKE_CURRENT_BINARY_DIR}/PulpStampSourceInstall.cmake" @ONLY)
 install(SCRIPT "${CMAKE_CURRENT_BINARY_DIR}/PulpStampSourceInstall.cmake")
 
+# The optional pulp-vellum bridge (PULP_ENABLE_PULP_VELLUM) links Vellum's
+# imported targets, so it goes in its own export file: PulpTargets.cmake must
+# load for consumers without a Vellum SDK. PulpVellumEditorPackage.cmake loads
+# PulpVellumTargets.cmake after the consumer's find_package(Vellum).
+if(TARGET pulp-vellum)
+    set_target_properties(pulp-vellum PROPERTIES EXPORT_NAME vellum)
+    install(TARGETS pulp-vellum
+        EXPORT PulpVellumTargets
+        ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
+        INCLUDES DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
+    install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/integrations/pulp-vellum/include/pulp/"
+        DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/pulp"
+        FILES_MATCHING PATTERN "*.hpp")
+    install(EXPORT PulpVellumTargets
+        FILE PulpVellumTargets.cmake
+        NAMESPACE Pulp::
+        DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/Pulp)
+endif()
+
 # CMake config files for find_package(Pulp)
 install(EXPORT PulpTargets
     FILE PulpTargets.cmake

@@ -12,8 +12,8 @@ if(PULP_BUILD_TESTS AND TARGET Catch2::Catch2WithMain)
     include(Catch)
     catch_discover_tests(pulp-test-pulp-vellum PROPERTIES LABELS pulp-vellum)
 
-    # The editor tests need Vellum's view layer, which the pinned v0.2.0 SDK
-    # does not ship; skip them there so the parameter-bridge tests still build.
+    # The editor tests need Vellum's mirrored view layer; skip them for an SDK
+    # without it so the parameter-bridge tests still build.
     if(TARGET Vellum::MirrorView_core)
         add_executable(pulp-test-pulp-vellum-editor
             ${PULP_ROOT_DIR}/test/test_pulp_vellum_editor.cpp)
