@@ -9,6 +9,7 @@
 /// lifetime while all edits still use Pulp's existing parameter bridge.
 
 #include <pulp/format/editor_host.hpp>
+#include <pulp/vellum/editor_env.hpp>
 #include <pulp/vellum/param_port_model.hpp>
 #include <pulp/vellum/visual_port_feed.hpp>
 
@@ -19,12 +20,6 @@
 #include <type_traits>
 
 namespace pulp::vellum {
-
-struct EditorEnv {
-    format::EditorContext& context;
-    ParamPortModel& params;
-    ::vellum::value::ValueFeed* visuals = nullptr;
-};
 
 template <typename ViewType> class Editor final : public format::Editor {
     static_assert(std::is_base_of_v<::vellum::view::View, ViewType>,

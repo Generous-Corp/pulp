@@ -1075,8 +1075,12 @@ TEST_CASE("pulp-cpp create --ui vellum emits a Vellum editor package and configu
     CHECK(cmake_lists.find("VIEW_HEADER \"vellumgain_view.hpp\"") != std::string::npos);
     CHECK(cmake_lists.find("VIEW_TYPE vellumgain::VellumGainView") != std::string::npos);
     CHECK(cmake_lists.find("UI VellumGain_VellumEditor") != std::string::npos);
-    CHECK(read_file(out_dir / "vellumgain_view.hpp").find("class VellumGainView") !=
-          std::string::npos);
+    const auto view_header = read_file(out_dir / "vellumgain_view.hpp");
+    CHECK(view_header.find("class VellumGainView") != std::string::npos);
+    // The root view ships one real control bound to the template's parameter.
+    CHECK(view_header.find("::vellum::view::Knob") != std::string::npos);
+    CHECK(view_header.find("bind_parameter(*mix_knob_, env.params") != std::string::npos);
+    CHECK(view_header.find("env.params.resolve(\"Mix\")") != std::string::npos);
 
     pulp::platform::ProcessOptions options;
     options.working_directory = native_path_string(tmp.path);
