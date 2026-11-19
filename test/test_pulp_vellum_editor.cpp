@@ -15,10 +15,18 @@ namespace {
 class Context final : public pulp::format::EditorContext {
   public:
     explicit Context(pulp::format::ParamPort& params) : params_(params) {}
-    pulp::format::ParamPort& params() override { return params_; }
-    pulp::format::VisualPort* visuals() override { return nullptr; }
-    bool request_resize(const pulp::format::EditorSize&) override { return false; }
-    bool host_action(const pulp::format::HostActionRequest&) override { return false; }
+    pulp::format::ParamPort& params() override {
+        return params_;
+    }
+    pulp::format::VisualPort* visuals() override {
+        return nullptr;
+    }
+    bool request_resize(const pulp::format::EditorSize&) override {
+        return false;
+    }
+    bool host_action(const pulp::format::HostActionRequest&) override {
+        return false;
+    }
     pulp::format::EditorHostKind host_kind() const override {
         return pulp::format::EditorHostKind::plugin;
     }
@@ -29,7 +37,9 @@ class Context final : public pulp::format::EditorContext {
 
 class Processor final : public pulp::format::Processor {
   public:
-    pulp::format::PluginDescriptor descriptor() const override { return {}; }
+    pulp::format::PluginDescriptor descriptor() const override {
+        return {};
+    }
     void define_parameters(pulp::state::StateStore&) override {}
     void prepare(const pulp::format::PrepareContext&) override {}
 };
@@ -38,11 +48,11 @@ class TestView final : public ::vellum::view::View {
   public:
     explicit TestView(pulp::vellum::EditorEnv& env) {
         auto gain = env.params.resolve("Gain");
-        subscription_ = env.params.subscribe([this, gain](::vellum::value::ParamHandle handle,
-                                                           double value) {
-            if (handle == gain)
-                observed = value;
-        });
+        subscription_ =
+            env.params.subscribe([this, gain](::vellum::value::ParamHandle handle, double value) {
+                if (handle == gain)
+                    observed = value;
+            });
     }
 
     double observed = -1.0;
@@ -70,8 +80,7 @@ class Fixture {
 
 } // namespace
 
-TEST_CASE("Vellum editor factory supports editor and inspector roles",
-          "[pulp-vellum][editor]") {
+TEST_CASE("Vellum editor factory supports editor and inspector roles", "[pulp-vellum][editor]") {
     Fixture fixture;
     Context context(*fixture.port);
     Processor processor;
@@ -108,4 +117,3 @@ TEST_CASE("Vellum view observes a bridged parameter after the UI pump", "[pulp-v
     fixture.store.reconcile_restore_listeners();
     REQUIRE(view.observed == 0.75);
 }
-

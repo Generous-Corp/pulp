@@ -62,8 +62,7 @@ TEST_CASE("Vellum audio provider never exposes a torn frame", "[pulp-vellum-audi
         for (std::uint32_t sequence = 1; sequence <= kIterations; ++sequence) {
             const float marker = static_cast<float>(sequence);
             const std::array rms{marker, marker, marker, marker};
-            const std::array peak{marker + 0.25f, marker + 0.25f, marker + 0.25f,
-                                  marker + 0.25f};
+            const std::array peak{marker + 0.25f, marker + 0.25f, marker + 0.25f, marker + 0.25f};
             const std::array scope_frame{marker + 0.5f, marker + 0.5f, marker + 0.5f,
                                          marker + 0.5f};
             provider.publish_meter(*meter, rms, peak);

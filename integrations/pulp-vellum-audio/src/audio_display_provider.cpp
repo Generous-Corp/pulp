@@ -50,7 +50,9 @@ void AudioDisplayProvider::publish_scope(std::size_t index,
     });
 }
 
-std::size_t AudioDisplayProvider::channel_count() const noexcept { return channels_.size(); }
+std::size_t AudioDisplayProvider::channel_count() const noexcept {
+    return channels_.size();
+}
 
 ::vellum::value::ChannelInfo AudioDisplayProvider::channel(std::size_t index) const noexcept {
     const auto* c = at(index);
@@ -58,7 +60,9 @@ std::size_t AudioDisplayProvider::channel_count() const noexcept { return channe
                         : ::vellum::value::ChannelInfo{c->name, c->unit, c->shape, c->neutral};
 }
 
-bool AudioDisplayProvider::read_scalar(std::size_t, float&) noexcept { return false; }
+bool AudioDisplayProvider::read_scalar(std::size_t, float&) noexcept {
+    return false;
+}
 
 std::size_t AudioDisplayProvider::read_meter(std::size_t index, std::span<float> rms,
                                              std::span<float> peak) noexcept {
@@ -95,4 +99,4 @@ std::uint32_t AudioDisplayProvider::publish_count(std::size_t index) const noexc
     return c->published.load(std::memory_order_relaxed);
 }
 
-}  // namespace pulp::vellum_audio
+} // namespace pulp::vellum_audio

@@ -26,8 +26,7 @@ struct EditorEnv {
     ::vellum::value::ValueFeed* visuals = nullptr;
 };
 
-template <typename ViewType>
-class Editor final : public format::Editor {
+template <typename ViewType> class Editor final : public format::Editor {
     static_assert(std::is_base_of_v<::vellum::view::View, ViewType>,
                   "a Pulp Vellum editor must derive from vellum::view::View");
 
@@ -46,7 +45,9 @@ class Editor final : public format::Editor {
         host_ = ::vellum::view::PluginViewHost::create(*root_, options);
     }
 
-    ~Editor() override { detach(); }
+    ~Editor() override {
+        detach();
+    }
 
     bool supports_parent(format::NativeParentKind kind) const override {
         return kind == format::NativeParentKind::none ||
@@ -75,7 +76,9 @@ class Editor final : public format::Editor {
         host_.reset();
     }
 
-    format::EditorSize size() const override { return size_; }
+    format::EditorSize size() const override {
+        return size_;
+    }
 
     bool set_size(const format::EditorSize& size) override {
         if (size.width == 0 || size.height == 0)
@@ -112,8 +115,7 @@ class Editor final : public format::Editor {
     format::EditorSize size_{400, 300, 1.0};
 };
 
-template <typename ViewType>
-class EditorFactory final : public format::EditorFactory {
+template <typename ViewType> class EditorFactory final : public format::EditorFactory {
   public:
     bool supports(format::EditorRole role) const override {
         return role == format::EditorRole::editor || role == format::EditorRole::inspector;
@@ -126,10 +128,9 @@ class EditorFactory final : public format::EditorFactory {
 };
 
 /// Return the image-local factory used by `pulp_add_plugin(... UI <package>)`.
-template <typename ViewType>
-format::EditorFactory* editor_factory() {
+template <typename ViewType> format::EditorFactory* editor_factory() {
     static EditorFactory<ViewType> factory;
     return &factory;
 }
 
-}  // namespace pulp::vellum
+} // namespace pulp::vellum

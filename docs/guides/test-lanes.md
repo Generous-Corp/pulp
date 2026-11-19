@@ -255,6 +255,13 @@ stopped compiling and no Pulp check noticed.
   requests that touch the package, its test, or the two CMake files that own its
   option and test registration (`integrations/CMakeLists.txt` and the root
   `CMakeLists.txt`) run the lane.
+- **Editor package and audio display.** The same configure also turns on
+  `PULP_ENABLE_PULP_VELLUM_AUDIO` and builds `pulp-test-pulp-vellum-editor` and
+  `pulp-test-pulp-vellum-audio`, whose ctest labels (`pulp-vellum-editor`,
+  `pulp-vellum-audio`) the `-L pulp-vellum` filter also matches. The editor
+  tests need Vellum's view layer (`Vellum::MirrorView_core`), which is in Vellum
+  main's SDK but not in the v0.2.0 release, so this lane, which builds against
+  main, is where they run until `pulp.lock` pins a release that ships it.
 - **Negative control.** Every full run recompiles one Vellum-side translation
   unit (`knob_panel.cpp`) with `-fsyntax-only`, once against the SDK as
   published, which must succeed, and once against a copy of its mirror headers

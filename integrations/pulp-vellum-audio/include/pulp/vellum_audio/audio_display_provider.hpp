@@ -16,9 +16,9 @@
 #include <atomic>
 #include <cstddef>
 #include <cstdint>
+#include <deque>
 #include <span>
 #include <string>
-#include <deque>
 #include <vector>
 
 namespace pulp::vellum_audio {
@@ -84,4 +84,4 @@ class AudioDisplayProvider final : public ::vellum::value::ValueFeed {
     std::deque<Channel> channels_;
 };
 
-}  // namespace pulp::vellum_audio
+} // namespace pulp::vellum_audio
