@@ -46,6 +46,7 @@ import re
 import subprocess
 import sys
 import tokenize
+import unicodedata
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -124,7 +125,8 @@ def _clock_tokens(source: str):
         return name, cursor
 
     for index, token in enumerate(tokens):
-        if token.type != tokenize.NAME or token.string not in methods:
+        normalized = unicodedata.normalize("NFKC", token.string)
+        if token.type != tokenize.NAME or normalized not in methods:
             continue
         cursor = skip_trivia(index + 1)
         while cursor < len(tokens) and tokens[cursor].string == ")":
@@ -132,7 +134,7 @@ def _clock_tokens(source: str):
         if cursor >= len(tokens) or tokens[cursor].string != ".":
             continue
         parsed_method = wrapped_name(cursor + 1)
-        if parsed_method is None or parsed_method[0] not in methods[token.string]:
+        if parsed_method is None or unicodedata.normalize("NFKC", parsed_method[0]) not in methods[normalized]:
             continue
         _, end = parsed_method
         while end < len(tokens) and tokens[end].string == ")":
@@ -236,6 +238,8 @@ def added_lines(base: str, head: str | None) -> dict[str, list[tuple[int, str]]]
             if in_scope(current):
                 result.setdefault(current, []).append((number, raw[1:]))
             number += 1
+        elif in_hunk and raw.startswith(" "):
+            number += 1
     return result
 
 
@@ -255,7 +259,7 @@ def tracked_lines(ref: str | None = None) -> dict[str, list[tuple[int, str]]]:
             try:
                 text = _git(["show", f"{ref}:{rel}"])
             except subprocess.CalledProcessError:
-                continue
+                raise RuntimeError(f"unable to read committed source {ref}:{rel}")
         result[rel] = list(enumerate(text.split("\n"), 1))
     return result
 
@@ -284,7 +288,11 @@ def main(argv: list[str]) -> int:
         added_by_file: dict[str, set[int]] = {}
     else:
         added = added_lines(args.base, args.head)
-        all_tracked = tracked_lines(args.head) if args.head else tracked_lines()
+        try:
+            all_tracked = tracked_lines(args.head) if args.head else tracked_lines()
+        except RuntimeError as error:
+            print(f"clock_in_tests_lint: {error}", file=sys.stderr)
+            return 1
         source = {rel: all_tracked[rel] for rel in added if rel in all_tracked}
         added_by_file = {rel: {number for number, _ in lines} for rel, lines in added.items()}
     baseline = load_base_baseline(args.base) if not args.all else load_baseline()

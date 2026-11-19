@@ -61,6 +61,9 @@ class FlaggedTest(unittest.TestCase):
         source = "value = (time.time  # ordinary comment\n    ())"
         self.assertEqual(len(scan(source)), 1)  # clock-ok: fixture text
 
+    def test_nfkc_qualified_identifier_is_flagged(self):
+        self.assertEqual(len(scan("value = 𝚝𝚒𝚖𝚎.time()")), 1)  # clock-ok: fixture text
+
     def test_malformed_source_fails_closed(self):
         findings = scan("value = time.time()\nvalue = (")
         self.assertEqual(len(findings), 1)  # clock-ok: fixture text
@@ -83,6 +86,19 @@ class FlaggedTest(unittest.TestCase):
                 self.assertIn("tools/test_é.py", lint.tracked_lines())
             finally:
                 lint.ROOT, lint._git = old_root, old_git
+
+    def test_tracked_lines_fails_closed_on_committed_read_error(self):
+        original = lint._git
+        def failing_git(args):
+            if args[:2] == ["show", "HEAD:tools/test_é.py"]:
+                raise subprocess.CalledProcessError(128, args)
+            return "tools/test_é.py\0"
+        lint._git = failing_git
+        try:
+            with self.assertRaises(RuntimeError):
+                lint.tracked_lines("HEAD")
+        finally:
+            lint._git = original
 
     def test_cli_uses_matching_committed_or_working_source(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -134,6 +150,23 @@ class FlaggedTest(unittest.TestCase):
                          "--base", "HEAD~1", "--head", "HEAD"], cwd=repo,
                         capture_output=True, text=True, encoding="utf-8")
                     self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+
+    def test_cli_head_inventory_survives_staged_index_removal(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            git = lambda *a: subprocess.run(["git", "-C", tmp, *a], check=True, capture_output=True)
+            git("init", "-q", "-b", "main"); git("config", "user.email", "t@example.com"); git("config", "user.name", "t")
+            (repo / "tools" / "scripts").mkdir(parents=True)
+            f = repo / "tools" / "test_a.py"; f.write_text("value = time.\n    monotonic()\n", encoding="utf-8")
+            (repo / "tools/scripts/clock_in_tests_lint.py").write_text((HERE / "clock_in_tests_lint.py").read_text(), encoding="utf-8")
+            (repo / "tools/scripts/clock_in_tests_baseline.json").write_text('{"files": [], "lines": []}\n')
+            git("add", "."); git("commit", "-qm", "base")
+            f.write_text("value = time.\n    time()\n", encoding="utf-8"); git("add", "."); git("commit", "-qm", "clock")
+            git("rm", "--cached", "-q", "tools/test_a.py")
+            result = subprocess.run([sys.executable, str(repo / "tools/scripts/clock_in_tests_lint.py"),
+                                     "--base", "HEAD~1", "--head", "HEAD"], cwd=repo,
+                                    capture_output=True, text=True, encoding="utf-8")
+            self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
     def test_marker_with_reason_passes(self):
         self.assertEqual(scan("t = time.time()  # clock-ok: elapsed measurement"), [])  # clock-ok: fixture text
 
