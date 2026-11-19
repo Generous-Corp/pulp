@@ -508,7 +508,9 @@ pub fn scaffold(
         let supports_ui = fs::read_to_string(cmake_template_dir.join("CMakeLists.txt.template"))
             .map(|t| t.contains("{{UI_LINE}}"))
             .unwrap_or(false);
-        if !supports_ui {
+        let has_view_templates = source_template_dir.join("view.hpp.template").is_file()
+            && source_template_dir.join("view.cpp.template").is_file();
+        if !supports_ui || !has_view_templates {
             return Err(CliError::BadUsage(format!(
                 "--ui vellum is not available for the {template_key} template yet; it uses a script UI"
             )));

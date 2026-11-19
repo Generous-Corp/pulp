@@ -689,8 +689,12 @@ int cmd_create(const std::vector<std::string>& args) {
 
     if (ui == "vellum") {
         const auto cmake_template = cmake_template_dir / "CMakeLists.txt.template";
+        const bool has_view_templates =
+            fs::exists(source_template_dir / "view.hpp.template") &&
+            fs::exists(source_template_dir / "view.cpp.template");
         if (!fs::exists(cmake_template) ||
-            read_file_contents(cmake_template).find("{{UI_LINE}}") == std::string::npos) {
+            read_file_contents(cmake_template).find("{{UI_LINE}}") == std::string::npos ||
+            !has_view_templates) {
             std::cerr << "Error: --ui vellum is not available for the " << template_key
                       << " template yet; it uses a script UI\n";
             return 1;
