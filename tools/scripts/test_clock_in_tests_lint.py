@@ -68,6 +68,17 @@ class FlaggedTest(unittest.TestCase):
         self.assertEqual(len(scan("value = f'{time.time()}'")), 1)  # clock-ok: fixture text
         self.assertEqual(scan("value = f'{time.time()}'  # clock-ok: measured"), [])  # clock-ok: fixture text
 
+    def test_f_string_prefix_variants_and_multiline_expression_are_flagged(self):
+        for source in (
+            "value = F'{time.time()}'",
+            "value = rf'{datetime.now()}'",
+            "value = fr'{date.today()}'",
+            'value = RF"""\n{time.time()}\n"""',
+        ):
+            with self.subTest(source=source):
+                self.assertEqual(len(scan(source)), 1)
+        self.assertEqual(scan("value = RF'{time.time()}'  # clock-ok: measured"), [])  # clock-ok: fixture text
+
     def test_added_lines_context_counter_preserves_later_attribution(self):
         original = lint._git
         calls = iter(["base\n", '+++ b/tools/test_a.py\n@@ -1,0 +1,4 @@\n+first = 1\n context = 2\n+value = time.time()\n'])
@@ -77,6 +88,13 @@ class FlaggedTest(unittest.TestCase):
         finally:
             lint._git = original
         self.assertEqual(added["tools/test_a.py"], [(1, "first = 1"), (3, "value = time.time()")])
+        source = [(1, "first = 1"), (2, "context = 2"), (3, "value = time.time()")]
+        findings = lint.scan_lines(
+            "tools/test_a.py", source, NO_BASELINE,
+            added_numbers={number for number, _ in added["tools/test_a.py"]},
+        )
+        self.assertEqual(len(findings), 1)
+        self.assertIn("tools/test_a.py:3:", findings[0])
 
     def test_malformed_source_fails_closed(self):
         findings = scan("value = time.time()\nvalue = (")

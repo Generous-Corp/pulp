@@ -20,12 +20,14 @@ A line is accepted when it carries an inline marker naming why the read is safe:
 or, during ``--all`` validation, when it matches an entry in the baseline
 ``clock_in_tests_baseline.json`` (frozen existing uses, matched by file and
 stripped line text, each with a reason). Diff scans require explicit markers
-for every added clock read; the baseline only covers unchanged existing uses.
+for every added clock read; baseline entries apply only to existing-tree
+validation.
 
 Detection limits: the scan is textual. It does not follow an alias
-(``from time import time as now``) or a clock read hidden in a helper module,
-and a docstring that mentions ``datetime.now(`` is flagged because only
-comment-only lines are skipped. The marker is the escape for the latter.
+(``from time import time as now``) or a clock read hidden in a helper module.
+Ordinary string literals are ignored; executable clock calls inside f-string
+replacement fields are inspected explicitly. The marker is the escape for
+intentional reads.
 
 Usage::
 
@@ -145,6 +147,36 @@ def _clock_tokens(source: str):
     return spans
 
 
+def _fstring_clock_spans(source: str) -> list[tuple[int, int]]:
+    """Return source spans for clock calls inside f-string expressions."""
+    try:
+        tree = ast.parse(source)
+    except (SyntaxError, ValueError):
+        return []
+    methods = {
+        "datetime": {"now", "today", "utcnow"},
+        "date": {"today"},
+        "time": {"time", "time_ns", "localtime"},
+    }
+    spans: list[tuple[int, int]] = []
+    for joined in (node for node in ast.walk(tree) if isinstance(node, ast.JoinedStr)):
+        for node in ast.walk(joined):
+            if not isinstance(node, ast.Call) or not isinstance(node.func, ast.Attribute):
+                continue
+            base = node.func.value
+            if not isinstance(base, ast.Name):
+                continue
+            name = unicodedata.normalize("NFKC", base.id)
+            method = unicodedata.normalize("NFKC", node.func.attr)
+            if method not in methods.get(name, set()):
+                continue
+            start = getattr(node, "lineno", None)
+            end = getattr(node, "end_lineno", start)
+            if start is not None and end is not None:
+                spans.append((start, end))
+    return spans
+
+
 def scan_lines(rel: str, lines: list[tuple[int, str]], baseline=None, *, consume_baseline: bool = False,
                added_numbers: set[int] | None = None) -> list[str]:
     _, entries = baseline if baseline is not None else load_baseline()
@@ -185,15 +217,20 @@ def scan_lines(rel: str, lines: list[tuple[int, str]], baseline=None, *, consume
         if report_index < len(logical_records):
             number, logical = logical_records[report_index]
             out.append(f"{rel}:{number}: reads the real clock: {logical.strip()}")
-    # Python 3.11 tokenizes an f-string as one STRING token. Detect supported
-    # clock expressions inside f-string replacement fields while keeping plain
-    # string literals outside the scan.
-    for number, logical in logical_records:
-        if re.search(r"\bf(?:'''|\"\"\"|'|\")[^\n]*(?:datetime|date|time)\s*\.\s*(?:now|today|utcnow|time|time_ns|localtime)\s*\(", logical):
-            if added_numbers is not None and number not in added_numbers:
-                continue
-            if number not in marker_lines:
-                out.append(f"{rel}:{number}: reads the real clock: {logical.strip()}")
+    # Python 3.11 tokenizes an f-string as one STRING token. Inspect its AST
+    # replacement fields so every supported prefix and multiline spelling is
+    # covered while ordinary string literals remain outside the scan.
+    for start, end in _fstring_clock_spans(source):
+        span_indexes = range(start - 1, min(end, len(logical_records)))
+        span_numbers = {logical_records[index][0] for index in span_indexes}
+        if added_numbers is not None and not (span_numbers & added_numbers):
+            continue
+        if any(line in marker_lines for line in range(start, end + 1)):
+            continue
+        report_index = next((index for index in span_indexes if added_numbers is None or logical_records[index][0] in added_numbers), start - 1)
+        if report_index < len(logical_records):
+            number, logical = logical_records[report_index]
+            out.append(f"{rel}:{number}: reads the real clock: {logical.strip()}")
     return list(dict.fromkeys(out))
 
 
