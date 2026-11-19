@@ -215,6 +215,27 @@ prepush_claim_check_final
         self.assertEqual(result.returncode, 0)
         self.assertIn("claim check could not read", result.stderr)
 
+    def test_malformed_response_warns_instead_of_crashing(self):
+        def response(nodes):
+            return {"data": {"repository": {"pullRequests": {
+                "nodes": [{"number": 42, "comments": {
+                    "nodes": nodes, "pageInfo": {"hasNextPage": False}}}],
+                "pageInfo": {"hasNextPage": False}}}}}
+        for payload in [None, [], response([None]), response([{"body": None}]),
+                        response([{"body": 42}]), response([{}])]:
+            with self.subTest(payload=payload):
+                bad = self.dir / "malformed.py"
+                bad.write_text("print(" + repr(json.dumps(payload)) + ")\n", encoding="utf-8")
+                env = {k: v for k, v in os.environ.items()
+                       if k not in ("PULP_SKIP_CLAIM_CHECK", "PULP_REPAIR_CLAIM_ID")}
+                env["PULP_CLAIM_CHECK_GH"] = shlex.join([sys.executable, str(bad)])
+                result = subprocess.run([sys.executable, str(TOOL), "--repo", "OWNER/REPO",
+                                         "--branch", "feature/test"], env=env, text=True,
+                                        encoding="utf-8", capture_output=True)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertIn("claim check could not read", result.stderr)
+                self.assertNotIn("Traceback", result.stderr)
+
     def test_unreadable_claim_time_counts_as_live(self):
         result = self.run_check(["repair-claim: lane-a until 2026-13-45T03:04Z"])
         self.assertEqual(result.returncode, 1)

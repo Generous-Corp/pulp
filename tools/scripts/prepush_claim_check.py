@@ -70,6 +70,8 @@ def graphql(repo: str, query: str, **variables: str | int) -> dict:
         raise RuntimeError(detail or f"command exited {result.returncode}")
     try:
         payload = json.loads(result.stdout)
+        if not isinstance(payload, dict):
+            raise ValueError("response is not an object")
         if payload.get("errors"):
             raise ValueError(payload["errors"])
         repository = payload["data"]["repository"]
@@ -118,7 +120,9 @@ def read_prs(repo: str, branch: str):
 def check_pr(repo: str, pr: dict, own: str | None) -> int:
     claims: dict[str, dt.datetime] = {}
     for comment in pr.get("comments", {}).get("nodes", []):
-        body = comment.get("body", "")
+        if not isinstance(comment, dict) or not isinstance(comment.get("body"), str):
+            raise RuntimeError("invalid GraphQL comment: expected an object with a string body")
+        body = comment["body"]
         events = [(m.start(), "claim", m) for m in CLAIM.finditer(body)]
         events += [(m.start(), "release", m) for m in RELEASE.finditer(body)]
         for _, kind, match in sorted(events, key=lambda event: event[0]):
