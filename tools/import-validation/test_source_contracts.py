@@ -431,7 +431,12 @@ class SourceContractsTest(unittest.TestCase):
         # relative to today: a fixed date went overdue once the clock passed it (CI, 2026-11-13).
         # Due in one day keeps it a warning rather than overdue on any day this runs. Its
         # verification_note names the date, so the evidence rule still accepts it.
-        due_soon = (dt.date.today() - dt.timedelta(days=2)).isoformat()
+        # The checker is deliberately invoked with FIXED_TODAY below.  Derive
+        # the fixture date from that same clock so this test remains stable as
+        # the real calendar advances.
+        due_soon = (
+            dt.date.fromisoformat(FIXED_TODAY) - dt.timedelta(days=2)
+        ).isoformat()
         for source, verified in (("stitch", "2020-01-01"), ("figma", due_soon)):
             entry = _contract(registry, source)
             entry["recheck_interval_days"] = 3
