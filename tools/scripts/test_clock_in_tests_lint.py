@@ -36,6 +36,10 @@ class FlaggedTest(unittest.TestCase):
             with self.subTest(expr=expr):
                 self.assertEqual(len(scan(f"x = {expr}")), 1)
 
+    def test_multiline_qualified_clock_read_is_flagged(self):
+        lines = [(1, "value = datetime"), (2, "    .now()"), (3, "other = time\\"), (4, "    .time()")]
+        self.assertEqual(len(lint.scan_lines(TEST_FILE, lines, NO_BASELINE)), 2)  # clock-ok: fixture text
+
     def test_marker_with_reason_passes(self):
         self.assertEqual(scan("t = time.time()  # clock-ok: elapsed measurement"), [])  # clock-ok: fixture text
 

@@ -2973,7 +2973,6 @@ risk_class = "low"
 [[families]]
 name = "script-readers-bc6c8f790696"
 paths = [
-  "tools/scripts/clock_in_tests_lint.py",
   "tools/scripts/test_clock_in_tests_lint.py",
 ]
 tests = [

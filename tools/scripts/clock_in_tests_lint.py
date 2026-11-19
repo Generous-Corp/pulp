@@ -72,9 +72,12 @@ def flagged(line: str) -> bool:
         tokens = tokenize.generate_tokens(io.StringIO(line + "\n").readline)
         if any(kind == tokenize.COMMENT and _MARKER.search(text) for kind, text, *_ in tokens):
             return False
-    except tokenize.TokenError:
+    except (tokenize.TokenError, IndentationError, SyntaxError):
         pass
-    return _CLOCK.search(line) is not None
+    # A backslash continuation can split the qualified call between physical
+    # lines. Normalize that separator for the textual fallback scan.
+    normalized = line.replace("\\\n", "\n").replace("\\\r\n", "\n")
+    return _CLOCK.search(normalized) is not None
 
 
 def load_baseline(path: Path = BASELINE) -> tuple[dict[str, str], set[tuple[str, str]]]:
@@ -90,18 +93,34 @@ def scan_lines(rel: str, lines: list[tuple[int, str]], baseline=None, *, consume
     _, entries = baseline if baseline is not None else load_baseline()
     remaining = set(entries)
     out = []
+    logical_records: list[tuple[int, str]] = []
     for number, text in lines:
-        # Patch records are LF-delimited, but Python also treats CR as a
-        # source newline. Scan each logical source segment so a comment before
-        # an embedded CR cannot hide an executable clock read.
         for logical in text.replace("\r", "\n").split("\n"):
-            key = (rel, logical.strip())
-            # Diff scans have no stable base occurrence identity. Require an
-            # explicit marker for every added clock read; baseline entries are
-            # reserved for --all validation of existing tree occurrences.
-            exempt = key in entries and not consume_baseline
-            if flagged(logical) and not exempt:
-                out.append(f"{rel}:{number}: reads the real clock: {logical.strip()}")
+            logical_records.append((number, logical))
+    covered: set[int] = set()
+    for index, (number, logical) in enumerate(logical_records):
+        if index in covered:
+            continue
+        # Patch records are LF-delimited, but Python also treats CR as a
+        # source newline. Scan each logical source segment and short contiguous
+        # windows so a split qualified call cannot bypass the lint.
+        candidates: list[tuple[int, str]] = [(1, logical)]
+        if index + 1 < len(logical_records):
+            next_logical = logical_records[index + 1][1]
+            # A qualified call split over physical lines has the attribute
+            # selector on the following line. Restrict joined scans to this
+            # shape so unrelated source lines cannot form false positives.
+            if re.search(r"\b(?:datetime|date|time)\s*(?:\\\s*)?$", logical) and next_logical.lstrip().startswith("."):
+                candidates.append((2, logical + "\n" + next_logical))
+        matched = next(((width, candidate) for width, candidate in candidates if flagged(candidate)), None)
+        key = (rel, logical.strip())
+        # Diff scans have no stable base occurrence identity. Require an
+        # explicit marker for every added clock read; baseline entries are
+        # reserved for --all validation of existing tree occurrences.
+        exempt = key in entries and not consume_baseline
+        if matched is not None and not exempt:
+            out.append(f"{rel}:{number}: reads the real clock: {logical.strip()}")
+            covered.update(range(index, index + matched[0]))
     return out
 
 
