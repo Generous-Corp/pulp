@@ -39,7 +39,7 @@ MARKER = re.compile(r"^(<{7}|={7}|>{7})( |$)", re.MULTILINE)
 
 
 def run(args: list[str], root: pathlib.Path, check: bool = True) -> subprocess.CompletedProcess:
-    result = subprocess.run(args, cwd=root, text=True, capture_output=True)
+    result = subprocess.run(args, cwd=root, text=True, encoding="utf-8", capture_output=True)
     if check and result.returncode != 0:
         sys.stderr.write(f"{' '.join(args)} failed:\n{result.stdout}{result.stderr}")
         raise SystemExit(3)

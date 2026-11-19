@@ -39,12 +39,12 @@ mode = sys.argv[1]
 if mode == "--accept-fingerprint":
     frag.write_text(digest() + "\\n")
 elif mode == "--write":
-    surf.write_text(frag.read_text())
+    surf.write_text(frag.read_text(encoding="utf-8"))
 elif mode == "--check":
     bad = []
-    if frag.read_text().strip() != digest():
+    if frag.read_text(encoding="utf-8").strip() != digest():
         bad.append("public header fingerprint changed: " + inc + "; expected x, got y")
-    if surf.read_text() != frag.read_text():
+    if surf.read_text(encoding="utf-8") != frag.read_text(encoding="utf-8"):
         bad.append("surface stale")
     print("\\n".join(bad))
     sys.exit(1 if bad else 0)
@@ -52,14 +52,14 @@ elif mode == "--check":
 
 
 def git(root, *args, check=True):
-    return subprocess.run(["git", "-C", str(root), *args], text=True,
+    return subprocess.run(["git", "-C", str(root), *args], text=True, encoding="utf-8",
                           capture_output=True, check=check)
 
 
 def write(root, rel, text):
     path = root / rel
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(text)
+    path.write_text(text, encoding="utf-8")
 
 
 def header_text(first="a", fifth="e"):
@@ -104,7 +104,7 @@ class Fixture(unittest.TestCase):
         return subprocess.run(
             [sys.executable, str(SCRIPT), "--manifest", str(self.root / "fake_manifest.py"),
              *extra],
-            cwd=self.root, text=True, capture_output=True)
+            cwd=self.root, text=True, encoding="utf-8", capture_output=True)
 
     def standard_scenario(self):
         """Main and the PR both rewrite the generated files; the header merges clean."""
@@ -129,17 +129,17 @@ class RegenTests(Fixture):
         first = self.run_script()
         self.assertEqual(first.returncode, 4, first.stderr)
         self.assertIn("commit the merge", first.stderr)
-        self.assertEqual((self.root / FRAGMENT).read_text(), "fmain\n")
-        self.assertEqual((self.root / SURFACE).read_text(), "fmain\n")
+        self.assertEqual((self.root / FRAGMENT).read_text(encoding="utf-8"), "fmain\n")
+        self.assertEqual((self.root / SURFACE).read_text(encoding="utf-8"), "fmain\n")
         self.assertEqual(git(self.root, "diff", "--name-only", "--diff-filter=U").stdout, "")
 
         git(self.root, "commit", "-q", "-m", "merge main")
         second = self.run_script("--previous-head", self.pr_head)
         self.assertEqual(second.returncode, 0, second.stdout + second.stderr)
         self.assertIn("other.txt", second.stdout)
-        digest = self.digest((self.root / HEADER).read_text())
-        self.assertEqual((self.root / FRAGMENT).read_text().strip(), digest)
-        self.assertEqual((self.root / SURFACE).read_text(), (self.root / FRAGMENT).read_text())
+        digest = self.digest((self.root / HEADER).read_text(encoding="utf-8"))
+        self.assertEqual((self.root / FRAGMENT).read_text(encoding="utf-8").strip(), digest)
+        self.assertEqual((self.root / SURFACE).read_text(encoding="utf-8"), (self.root / FRAGMENT).read_text(encoding="utf-8"))
         self.assertTrue((self.root / "other.txt").exists())
 
     def test_unresolved_source_conflict_refuses(self):
@@ -153,7 +153,7 @@ class RegenTests(Fixture):
         self.assertEqual(result.returncode, 2, result.stderr)
         self.assertIn("src.txt", result.stderr)
         # The refusal must not have touched the conflicted source file.
-        self.assertIn("<<<<<<<", (self.root / "src.txt").read_text())
+        self.assertIn("<<<<<<<", (self.root / "src.txt").read_text(encoding="utf-8"))
 
     def test_committed_conflict_markers_outside_generated_trees_refuse(self):
         git(self.root, "branch", "-q", "pr")
