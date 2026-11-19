@@ -1901,6 +1901,14 @@ if(Python3_Interpreter_FOUND)
             WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}/tools/scripts")
         set_tests_properties(clean-build-cov-selftest PROPERTIES TIMEOUT 300)
 
+        # The post-merge capability regeneration helper: a planted merge in a
+        # throwaway repository must resolve generated conflicts by main's side,
+        # refuse source conflicts, and fail on an empty or shrunken diff.
+        add_test(NAME regen-agent-capability-after-merge-selftest
+            COMMAND ${Python3_EXECUTABLE} -m unittest test_regen_agent_capability_after_merge
+            WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}/tools/scripts")
+        set_tests_properties(regen-agent-capability-after-merge-selftest PROPERTIES TIMEOUT 120)
+
         # The cutover trial report parser: a planted missing header must land in
         # its capability row, and a log without it must hit no row.
         add_test(NAME cutover-trial-selftest

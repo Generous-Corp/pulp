@@ -2175,6 +2175,8 @@ class SignalGraph : public format::AudioWorkgroupClient {
     bool bind_executable_nodes_(
         CompiledGraph& cg, double sample_rate, int max_block_size,
         const std::unordered_map<NodeId, std::shared_ptr<PreparedSampleRegion>>& region_by_anchor);
+    // compile_'s edge bucketing, canonical ordinary-audio ordering and telemetry preparation.
+    void assemble_runtime_(CompiledGraph& cg, int max_block_size);
     // Caller holds GraphMutationLock. Includes the live generation after source edits.
     static bool snapshot_has_isolated_plugins_(const CompiledGraph&) noexcept;
     bool has_isolated_plugins_locked_() const noexcept;
