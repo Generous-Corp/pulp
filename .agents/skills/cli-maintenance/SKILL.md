@@ -469,6 +469,21 @@ staged `browser_capture-v1/` copy, the capability probe hits
 `ERR_MODULE_NOT_FOUND`, and discovery reports that the system Chrome "does not
 provide the required headless/CDP capture capabilities".
 
+### A `pulp create` flag lands in both CLIs and in the template checks
+
+`pulp create` parses its flags twice: in `tools/cli/cmd_create.cpp` and in the
+Rust `experimental/pulp-rs/src/cmd/create.rs`. A flag added to one only works
+from that binary. A flag that writes into the generated project through a
+template placeholder (for example `{{UI_MODE_LINE}}` for `--ui`) also needs the
+placeholder in `tools/scripts/verify_create_templates.py` and in
+`test/cmake/create_template_tests.cmake`'s expansion list. Otherwise the
+template check fails on an unknown placeholder, or a generated project carries
+the literal `{{...}}`. Prove the generated project still configures in
+`test/test_cli_create_shellout.cpp`. Its SDK is a stub whose `pulp_add_plugin`
+creates no targets, so link-graph assertions there are vacuous; a link-closure
+proof belongs in an in-tree fixture that calls the real `pulp_add_plugin` (see
+`test/fixtures/no_editor_link_floor`).
+
 ### `pulp graph` is split across `tools/cli/cmd_graph*.cpp`
 
 `cmd_graph.cpp` is the dispatcher, the single-document handlers (inspect,

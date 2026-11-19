@@ -63,11 +63,45 @@ foreach(_fmt IN LISTS _no_editor_formats)
                 "PulpNoEditorLinkFloor_${_fmt} reaches ${_forbidden}: ${_no_editor_closure}")
         endif()
     endforeach()
+    # The UI stacks a project chooses with `pulp create --ui`: an audio-only
+    # (--ui none) plug-in reaches neither the Vellum bridge nor RmlUi, under
+    # any of their Pulp or installed-SDK target names.
+    foreach(_forbidden pulp-vellum pulp-rmlui-native pulp-rmlui-native-metal
+                       pulp-view-rmlui-importer-adapter)
+        if(_forbidden IN_LIST _no_editor_closure)
+            message(FATAL_ERROR
+                "PulpNoEditorLinkFloor_${_fmt} reaches ${_forbidden}: ${_no_editor_closure}")
+        endif()
+    endforeach()
+    foreach(_target IN LISTS _no_editor_closure)
+        if(_target MATCHES "^(Vellum|VellumRmlUi|RmlUi)::")
+            message(FATAL_ERROR
+                "PulpNoEditorLinkFloor_${_fmt} reaches ${_target}: ${_no_editor_closure}")
+        endif()
+    endforeach()
     if(NOT pulp-format-core IN_LIST _no_editor_closure)
         message(FATAL_ERROR
             "PulpNoEditorLinkFloor_${_fmt} lost pulp-format-core: ${_no_editor_closure}")
     endif()
 endforeach()
+
+# Control for the Vellum check above: when the pulp-vellum bridge is
+# configured, its own closure must match the same pattern, or the check
+# could never fire.
+if(TARGET pulp-vellum)
+    pulp_link_closure(pulp-vellum TARGETS_OUT _vellum_bridge_closure)
+    set(_vellum_bridge_seen OFF)
+    foreach(_target IN LISTS _vellum_bridge_closure)
+        if(_target MATCHES "^(Vellum|VellumRmlUi|RmlUi)::")
+            set(_vellum_bridge_seen ON)
+        endif()
+    endforeach()
+    if(NOT _vellum_bridge_seen)
+        message(FATAL_ERROR
+            "pulp-vellum's closure names no Vellum:: target, so the Vellum check is blind: "
+            "${_vellum_bridge_closure}")
+    endif()
+endif()
 
 # What the control's editor stack contains in this configuration. View and
 # canvas always; the GPU layers only when the build has them.
