@@ -1,5 +1,14 @@
 {
-  "files": [],
+  "files": [
+    {
+      "path": "tools/scripts/test_clock_in_tests_lint.py",
+      "reason": "clock reads appear only as fixture text for the lint's own detector"
+    },
+    {
+      "path": "tools/scripts/test_date_sensitive_selftests_tz_matrix.py",
+      "reason": "deliberately clock-dependent fixture used to prove the zone matrix detects it"
+    }
+  ],
   "lines": [
     {
       "path": "tools/ci/test_install_linux_build_deps.py",
