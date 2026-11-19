@@ -1201,6 +1201,14 @@ save/reopen render proof beside the legacy caller-owned route controls.
   candidate lock into the caller's `std::optional<GraphMutationLock>` so the
   lock stays held through compile and runtime adoption; a new gate belongs
   there, not back in `prepare()`.
+  Runtime-state adoption from the live snapshot (ingress mailboxes, plugin
+  sequence pointers, matching feed-forward PDC rings) lives in the static
+  `adopt_live_runtime_state_` in
+  `core/host/src/signal_graph_prepared_edit_adoption.cpp`. It returns
+  `RuntimeAdoptionFailed` for feedback or mismatched delay tables and
+  `std::nullopt` otherwise; `prepare()` alone stores the prepared snapshot.
+  Keep the dimensions-changed early exit after the mailbox adoption so pending
+  MIDI and parameter batches survive a resize while DSP history starts fresh.
   `set_live_dsp_telemetry_enabled()` is a control-thread operation serialized
   by the graph mutation lock: a prepared commit re-seeds its snapshot from the
   owner's authoritative desired toggle immediately before publication. Do not
