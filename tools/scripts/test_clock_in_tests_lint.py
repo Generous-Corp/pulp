@@ -40,6 +40,32 @@ class FlaggedTest(unittest.TestCase):
         lines = [(1, "value = datetime"), (2, "    .now()"), (3, "other = time\\"), (4, "    .time()")]
         self.assertEqual(len(lint.scan_lines(TEST_FILE, lines, NO_BASELINE)), 2)  # clock-ok: fixture text
 
+    def test_parenthesized_multiline_call_is_flagged(self):
+        lines = [(1, "value = (time."), (2, "    time())")]
+        self.assertEqual(len(lint.scan_lines(TEST_FILE, lines, NO_BASELINE)), 1)  # clock-ok: fixture text
+
+    def test_changed_method_line_is_flagged_with_unchanged_qualifier(self):
+        lines = [(1, "value = time."), (2, "    time()")]
+        self.assertEqual(len(lint.scan_lines(TEST_FILE, lines, NO_BASELINE, added_numbers={2})), 1)  # clock-ok: fixture text
+
+    def test_marker_inside_multiline_string_does_not_bypass_lint(self):
+        source = 's = """start\n"""\nvalue = time.time()\ntail = """# clock-ok: fake\nend"""'
+        self.assertEqual(len(scan(source)), 1)  # clock-ok: fixture text
+
+    def test_tracked_lines_preserves_non_ascii_git_paths(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            path = root / "tools" / "test_é.py"
+            path.parent.mkdir()
+            path.write_text("value = 1\n", encoding="utf-8")
+            old_root, old_git = lint.ROOT, lint._git
+            lint.ROOT = root
+            lint._git = lambda _args: "tools/test_é.py\0"
+            try:
+                self.assertIn("tools/test_é.py", lint.tracked_lines())
+            finally:
+                lint.ROOT, lint._git = old_root, old_git
+
     def test_marker_with_reason_passes(self):
         self.assertEqual(scan("t = time.time()  # clock-ok: elapsed measurement"), [])  # clock-ok: fixture text
 

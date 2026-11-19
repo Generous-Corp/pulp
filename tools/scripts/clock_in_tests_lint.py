@@ -17,11 +17,10 @@ A line is accepted when it carries an inline marker naming why the read is safe:
 
     started = time.time()  # clock-ok: elapsed-time measurement, never compared to a date
 
-or when it matches an entry in the baseline ``clock_in_tests_baseline.json``
-(frozen existing uses, matched by file and stripped line text, each with a
-reason). Only the diff is scanned, so the existing population never blocks a
-push; the baseline exists so an unrelated edit to a baselined line does not
-either.
+or, during ``--all`` validation, when it matches an entry in the baseline
+``clock_in_tests_baseline.json`` (frozen existing uses, matched by file and
+stripped line text, each with a reason). Diff scans require explicit markers
+for every added clock read; the baseline only covers unchanged existing uses.
 
 Detection limits: the scan is textual. It does not follow an alias
 (``from time import time as now``) or a clock read hidden in a helper module,
@@ -89,7 +88,41 @@ def load_baseline(path: Path = BASELINE) -> tuple[dict[str, str], set[tuple[str,
     return files, lines
 
 
-def scan_lines(rel: str, lines: list[tuple[int, str]], baseline=None, *, consume_baseline: bool = False) -> list[str]:
+def _clock_tokens(source: str):
+    """Yield (start_line, end_line) for qualified real-clock calls in source."""
+    try:
+        tokens = list(tokenize.generate_tokens(io.StringIO(source).readline))
+    except (tokenize.TokenError, IndentationError, SyntaxError):
+        return []
+    methods = {
+        "datetime": {"now", "today", "utcnow"},
+        "date": {"today"},
+        "time": {"time", "time_ns", "localtime"},
+    }
+    spans = []
+    for index, token in enumerate(tokens):
+        if token.type != tokenize.NAME or token.string not in methods:
+            continue
+        cursor = index + 1
+        while cursor < len(tokens) and tokens[cursor].type in (tokenize.NL, tokenize.NEWLINE, tokenize.INDENT, tokenize.DEDENT):
+            cursor += 1
+        if cursor >= len(tokens) or tokens[cursor].string != ".":
+            continue
+        cursor += 1
+        while cursor < len(tokens) and tokens[cursor].type in (tokenize.NL, tokenize.NEWLINE, tokenize.INDENT, tokenize.DEDENT):
+            cursor += 1
+        if cursor >= len(tokens) or tokens[cursor].type != tokenize.NAME or tokens[cursor].string not in methods[token.string]:
+            continue
+        end = cursor + 1
+        while end < len(tokens) and tokens[end].type in (tokenize.NL, tokenize.NEWLINE, tokenize.INDENT, tokenize.DEDENT):
+            end += 1
+        if end < len(tokens) and tokens[end].string == "(":
+            spans.append((token.start[0], tokens[end].end[0]))
+    return spans
+
+
+def scan_lines(rel: str, lines: list[tuple[int, str]], baseline=None, *, consume_baseline: bool = False,
+               added_numbers: set[int] | None = None) -> list[str]:
     _, entries = baseline if baseline is not None else load_baseline()
     remaining = set(entries)
     out = []
@@ -97,30 +130,34 @@ def scan_lines(rel: str, lines: list[tuple[int, str]], baseline=None, *, consume
     for number, text in lines:
         for logical in text.replace("\r", "\n").split("\n"):
             logical_records.append((number, logical))
-    covered: set[int] = set()
-    for index, (number, logical) in enumerate(logical_records):
-        if index in covered:
+    source = "\n".join(text for _, text in logical_records)
+    marker_lines: set[int] = set()
+    try:
+        for token in tokenize.generate_tokens(io.StringIO(source).readline):
+            if token.type == tokenize.COMMENT and _MARKER.search(token.string):
+                marker_lines.add(token.start[0])
+    except (tokenize.TokenError, IndentationError, SyntaxError):
+        pass
+    for start, end in _clock_tokens(source):
+        span_indexes = range(start - 1, min(end, len(logical_records)))
+        span_numbers = {logical_records[index][0] for index in span_indexes}
+        if added_numbers is not None and not (span_numbers & added_numbers):
             continue
-        # Patch records are LF-delimited, but Python also treats CR as a
-        # source newline. Scan each logical source segment and short contiguous
-        # windows so a split qualified call cannot bypass the lint.
-        candidates: list[tuple[int, str]] = [(1, logical)]
-        if index + 1 < len(logical_records):
-            next_logical = logical_records[index + 1][1]
-            # A qualified call split over physical lines has the attribute
-            # selector on the following line. Restrict joined scans to this
-            # shape so unrelated source lines cannot form false positives.
-            if re.search(r"\b(?:datetime|date|time)\s*(?:\\\s*)?$", logical) and next_logical.lstrip().startswith("."):
-                candidates.append((2, logical + "\n" + next_logical))
-        matched = next(((width, candidate) for width, candidate in candidates if flagged(candidate)), None)
-        key = (rel, logical.strip())
-        # Diff scans have no stable base occurrence identity. Require an
-        # explicit marker for every added clock read; baseline entries are
-        # reserved for --all validation of existing tree occurrences.
-        exempt = key in entries and not consume_baseline
-        if matched is not None and not exempt:
+        marker = any(line in marker_lines for line in range(start, end + 1))
+        # Diff scans require an explicit marker for spans touching an added
+        # line; unchanged spans are validated against the trusted base. Direct
+        # callers retain the older exact-baseline behavior for --all tests.
+        if added_numbers is not None:
+            exempt = marker
+        else:
+            exempt = marker or (not consume_baseline and any(
+                (rel, logical_records[index][1].strip()) in entries for index in span_indexes))
+        if exempt:
+            continue
+        report_index = next((index for index in span_indexes if added_numbers is None or logical_records[index][0] in added_numbers), start - 1)
+        if report_index < len(logical_records):
+            number, logical = logical_records[report_index]
             out.append(f"{rel}:{number}: reads the real clock: {logical.strip()}")
-            covered.update(range(index, index + matched[0]))
     return out
 
 
@@ -179,7 +216,9 @@ def added_lines(base: str, head: str | None) -> dict[str, list[tuple[int, str]]]
 
 def tracked_lines() -> dict[str, list[tuple[int, str]]]:
     result: dict[str, list[tuple[int, str]]] = {}
-    for rel in _git(["ls-files", "tools"]).splitlines():
+    for rel in _git(["ls-files", "-z", "tools"]).split("\0"):
+        if not rel:
+            continue
         if in_scope(rel) and (ROOT / rel).is_file():
             text = (ROOT / rel).read_text(encoding="utf-8", errors="replace")
             result[rel] = list(enumerate(text.splitlines(), 1))
@@ -205,10 +244,18 @@ def main(argv: list[str]) -> int:
         return 0
 
     found: list[str] = []
-    source = tracked_lines() if args.all else added_lines(args.base, args.head)
+    if args.all:
+        source = tracked_lines()
+        added_by_file: dict[str, set[int]] = {}
+    else:
+        added = added_lines(args.base, args.head)
+        all_tracked = tracked_lines()
+        source = {rel: all_tracked.get(rel, lines) for rel, lines in added.items()}
+        added_by_file = {rel: {number for number, _ in lines} for rel, lines in added.items()}
     baseline = load_base_baseline(args.base) if not args.all else load_baseline()
     for rel, lines in sorted(source.items()):
-        found.extend(scan_lines(rel, lines, baseline, consume_baseline=not args.all))
+        found.extend(scan_lines(rel, lines, baseline, consume_baseline=not args.all,
+                                added_numbers=None if args.all else added_by_file[rel]))
     if found:
         print("\n".join(found), file=sys.stderr)
         print(
