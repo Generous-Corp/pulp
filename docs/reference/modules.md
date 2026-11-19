@@ -35,7 +35,7 @@ use without hard-coding macOS, Windows, Linux, iOS, or Web behavior.
 
 ## native
 
-`pulp::native` (`integrations/pulp-native`, macOS, Windows and Linux) gives an editor that brings its own renderer a native surface: a child `NSView` backed by a `CAMetalLayer` (`metal_surface.hpp`), a display-linked frame pump (`frame_pump.hpp`) and pointer and key input (`input.hpp`). The `NSView` and Metal surface are macOS only; Windows and Linux ship the shared input and surface types. It links Pulp's platform layer and system frameworks only, with no view, canvas, render or GPU-runtime target and no Skia, Dawn, Vellum or RmlUi.
+`pulp::native` (`integrations/pulp-native`, macOS, Windows and Linux) gives an editor that brings its own renderer a native surface: a child `NSView` backed by a `CAMetalLayer` (`metal_surface.hpp`), a display-linked frame pump (`frame_pump.hpp`) and pointer and key input (`input.hpp`) on macOS; a child window with a WGL context on Windows; and on Linux a child window of the host's X11 window with a GLX context (`gl_surface.hpp`), which follows the host window's size and delivers pointer, wheel, key and text input when the editor calls `dispatch_events()` (or when `event_fd()` is readable). It links Pulp's platform layer and system libraries only, with no view, canvas, render or GPU-runtime target and no Skia, Dawn, Vellum or RmlUi.
 
 ## pulp_vellum
 

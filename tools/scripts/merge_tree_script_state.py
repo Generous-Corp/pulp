@@ -37,7 +37,8 @@ UNAVAILABLE = None
 # (stale) and from 3 (the merge conflicts), so a caller can never read "did
 # not run" as "passed".
 NOT_CHECKED = 4
-BASE_CHECK_TIMEOUT = 20.0
+BASE_CHECK_TIMEOUT = 60.0
+LOAD_SCALE_SECONDS = 20.0
 MAX_CHECK_TIMEOUT = 240.0
 ENV_VAR = "PULP_MERGE_TREE_CHECK_TIMEOUT"
 
@@ -53,10 +54,10 @@ def _load_per_core() -> tuple[float, float]:
 
 def _check_timeout() -> float:
     """Seconds one check may take. PULP_MERGE_TREE_CHECK_TIMEOUT overrides;
-    otherwise 20 s while the host has at most half a runnable task per core,
-    growing by 80 s per extra load-per-core above that (60 s at one per core,
-    180 s at 2.5), capped at 240 s, so a loaded shared host does not turn
-    every check into a timeout."""
+    otherwise a 60 s floor, growing by 80 s per extra load-per-core above one
+    (180 s at 2.5 per core), capped at 240 s, so a loaded shared host does not
+    turn every check into a timeout. A timed-out check is retried once at
+    double the limit (see _run)."""
     override = os.environ.get(ENV_VAR)
     if override:
         try:
@@ -64,24 +65,35 @@ def _check_timeout() -> float:
         except ValueError:
             pass
     _, per_core = _load_per_core()
-    return min(MAX_CHECK_TIMEOUT, BASE_CHECK_TIMEOUT * max(1.0, 4.0 * per_core - 1.0))
+    scaled = LOAD_SCALE_SECONDS * max(1.0, 4.0 * per_core - 1.0)
+    return min(MAX_CHECK_TIMEOUT, max(BASE_CHECK_TIMEOUT, scaled))
 
 
 def _run(cmd: list[str], cwd: Path, env: dict[str, str], timeout: float | None = None) -> int | None:
+    """Run one check. A timeout is retried once with double the limit; a second
+    timeout (or a start failure) is UNAVAILABLE, which callers treat as not
+    checked, never as a pass."""
     if timeout is None:
         timeout = _check_timeout()
-    start = time.monotonic()
-    try:
-        proc = subprocess.run(cmd, cwd=cwd, env=env, text=True, encoding="utf-8",
-                              timeout=timeout, capture_output=True)
-    except (OSError, subprocess.TimeoutExpired) as exc:
-        elapsed = time.monotonic() - start
-        load, _ = _load_per_core()
-        print(f"merge-tree script-state: {cmd[0]} unavailable or timed out: {exc} "
-              f"(elapsed {elapsed:.1f}s, limit {timeout:.0f}s, 1-min load {load:.1f}); "
-              f"raise it with {ENV_VAR}=<seconds>, e.g. {ENV_VAR}=240",
-              file=sys.stderr)
-        return UNAVAILABLE
+    proc = None
+    for limit in (timeout, timeout * 2):
+        start = time.monotonic()
+        try:
+            proc = subprocess.run(cmd, cwd=cwd, env=env, text=True, encoding="utf-8",
+                                  timeout=limit, capture_output=True)
+            break
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            elapsed = time.monotonic() - start
+            load, _ = _load_per_core()
+            retrying = isinstance(exc, subprocess.TimeoutExpired) and limit == timeout
+            print(f"merge-tree script-state: {cmd[0]} unavailable or timed out: {exc} "
+                  f"(elapsed {elapsed:.1f}s, limit {limit:.0f}s, 1-min load {load:.1f}); "
+                  + (f"retrying once with limit {limit * 2:.0f}s" if retrying else
+                     f"raise it with {ENV_VAR}=<seconds>, e.g. {ENV_VAR}=240"),
+                  file=sys.stderr)
+            if not retrying:
+                return UNAVAILABLE
+    assert proc is not None
     if proc.stdout:
         print(proc.stdout, end="", file=sys.stderr)
     if proc.stderr:

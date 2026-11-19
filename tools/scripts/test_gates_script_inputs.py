@@ -573,6 +573,29 @@ class GatesScriptInputsTests(unittest.TestCase):
         self.assertIn("FAILED, not verified (changed_surface_script_families.py --check exited 77", r.stderr)
         self.assertNotIn("NOT CHECKED locally: changed-surface-script-families-drift", r.stderr)
 
+    def test_a_families_skip_names_the_checkers_reason_and_the_remedy(self) -> None:
+        self.write("tools/scripts/test_alpha.py", "print('alpha, edited')\n")
+        self.commit()
+        reason = ("changed-surface script families: SKIP: build is not a gate-profile build "
+                  "(PULP_BUILD_EXAMPLES=ON (the gate configures OFF))")
+        r = self.gates(FAKE_FAMILIES_RC="77", FAKE_FAMILIES_SAYS=reason)
+        self.assertEqual(r.returncode, 1, r.stderr)
+        # The checker's own SKIP reason is carried into the failing line, not only the code.
+        self.assertIn("checker says: build is not a gate-profile build", r.stderr)
+        # And the known prerequisites are listed with the commands that satisfy them.
+        self.assertIn("-DPULP_BUILD_EXAMPLES=OFF", r.stderr)
+        self.assertIn("npm ci", r.stderr)
+        self.assertIn("tools/import-design/jsx-runtime", r.stderr)
+
+    def test_a_families_drift_failure_does_not_print_the_skip_remedy(self) -> None:
+        # Control: only an exit-77 skip prints the prerequisite remedy.
+        self.write("tools/scripts/test_alpha.py", "print('alpha, edited')\n")
+        self.commit()
+        r = self.gates(FAKE_FAMILIES_RC="1",
+                       FAKE_FAMILIES_SAYS="  tools/scripts/test_alpha.py: newly mapped")
+        self.assertEqual(r.returncode, 1, r.stderr)
+        self.assertNotIn("npm ci", r.stderr)
+
     def test_a_new_public_header_with_a_stale_census_fails_and_prints_the_write_command(self) -> None:
         # The planted case: the census does not list the header this diff adds.
         self.write("core/foo/include/pulp/foo/added.hpp", "#pragma once\n")

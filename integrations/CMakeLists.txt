@@ -14,6 +14,8 @@ option(PULP_ENABLE_PULP_NATIVE
     "Build integrations/pulp-native, the native surface for editors that bring their own renderer"
     ${_pulp_native_default})
 unset(_pulp_native_default)
+option(PULP_NATIVE_REQUIRE_X11
+    "Fail configure when pulp-native cannot build its X11 GLX backend (release SDK builds)" OFF)
 
 if(PULP_ENABLE_PULP_NATIVE)
     if(NOT ((APPLE AND NOT IOS AND NOT PULP_IOS) OR WIN32 OR
