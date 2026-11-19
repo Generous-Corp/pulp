@@ -834,6 +834,7 @@ TEST_CASE("pulp create --ci pins the CLI's SDK version and the project configure
     CHECK(r.stderr_output.find("built by cargo alone") == std::string::npos);
     const auto cmake_lists = read_file(out_dir / "CMakeLists.txt");
     CHECK(cmake_lists.find("find_package(Pulp " + expected + " REQUIRED)") != std::string::npos);
+    CHECK(cmake_lists.find("NO_EDITOR") == std::string::npos);
     CHECK(read_file(out_dir / "pulp.toml").find("sdk_version = \"" + expected + "\"") !=
           std::string::npos);
 
@@ -854,5 +855,29 @@ TEST_CASE("pulp create --ci pins the CLI's SDK version and the project configure
     REQUIRE(configure.exit_code == 0);
     CHECK(read_file(out_dir / "build" / "CMakeCache.txt")
               .find("Pulp_DIR:PATH=" + native_path_string(cfg)) != std::string::npos);
+
+    const auto none_dir = tmp.path / "CiGainNone";
+    auto none = run_rust_cli(PULP_RUST_CLI_BINARY,
+                             {"create", "CiGainNone", "--ui", "none", "--type", "effect",
+                              "--output", native_path_string(none_dir), "--no-build", "--ci"},
+                             source_root(), nullptr);
+    INFO(none.stdout_output);
+    INFO(none.stderr_output);
+    REQUIRE_FALSE(none.timed_out);
+    REQUIRE(none.exit_code == 0);
+    const auto none_cmake = read_file(none_dir / "CMakeLists.txt");
+    REQUIRE(none_cmake.find("NO_EDITOR") != std::string::npos);
+    auto none_configure = pulp::platform::ChildProcess::run(
+        PULP_CMAKE_COMMAND,
+        {"-S", native_path_string(none_dir), "-B", native_path_string(none_dir / "build"),
+         "-DCMAKE_PREFIX_PATH=" + native_path_string(sdk),
+         "-DFETCHCONTENT_TRY_FIND_PACKAGE_MODE=NEVER",
+         "-DFETCHCONTENT_SOURCE_DIR_CATCH2=" PULP_CATCH2_SOURCE_DIR,
+         "-DFETCHCONTENT_FULLY_DISCONNECTED=ON"},
+        options);
+    INFO(none_configure.stdout_output);
+    INFO(none_configure.stderr_output);
+    REQUIRE_FALSE(none_configure.timed_out);
+    REQUIRE(none_configure.exit_code == 0);
 #endif
 }

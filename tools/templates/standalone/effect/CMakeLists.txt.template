@@ -48,6 +48,7 @@ pulp_add_plugin({{TARGET_NAME}}
     MANUFACTURER_CODE "{{MANUFACTURER_CODE}}"
     AAX_PRODUCT_CODE "{{AAX_PRODUCT_CODE}}"
     AAX_NATIVE_CODE "{{AAX_NATIVE_CODE}}"
+    {{UI_MODE_LINE}}
 )
 
 # In-app updates for the standalone app (macOS, Sparkle 2): "Check for Updates…"

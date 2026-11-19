@@ -1477,6 +1477,10 @@
           {
             "name": "--debug",
             "kind": "flag"
+          },
+          {
+            "name": "--ui",
+            "kind": "option"
           }
         ],
         "subcommands": []
