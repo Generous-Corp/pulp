@@ -617,10 +617,18 @@ namespace {
 class EnvContext final : public pulp::format::EditorContext {
   public:
     explicit EnvContext(pulp::format::ParamPort& params) : params_(params) {}
-    pulp::format::ParamPort& params() override { return params_; }
-    pulp::format::VisualPort* visuals() override { return nullptr; }
-    bool request_resize(const pulp::format::EditorSize&) override { return false; }
-    bool host_action(const pulp::format::HostActionRequest&) override { return false; }
+    pulp::format::ParamPort& params() override {
+        return params_;
+    }
+    pulp::format::VisualPort* visuals() override {
+        return nullptr;
+    }
+    bool request_resize(const pulp::format::EditorSize&) override {
+        return false;
+    }
+    bool host_action(const pulp::format::HostActionRequest&) override {
+        return false;
+    }
     pulp::format::EditorHostKind host_kind() const override {
         return pulp::format::EditorHostKind::plugin;
     }
@@ -643,8 +651,8 @@ TEST_CASE("EditorEnv carries the bridge to a root view without the view host",
     const auto gain = env.params.resolve("Gain");
     REQUIRE(gain.valid());
     double observed = -1.0;
-    auto subscription = env.params.subscribe(
-        [&](::vellum::value::ParamHandle handle, double value) {
+    auto subscription =
+        env.params.subscribe([&](::vellum::value::ParamHandle handle, double value) {
             if (handle == gain)
                 observed = value;
         });
