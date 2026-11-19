@@ -107,9 +107,10 @@ def load_base_baseline(base: str) -> tuple[dict[str, str], set[tuple[str, str]]]
 
 
 def _git(args: list[str]) -> str:
-    return subprocess.run(
-        ["git", "-C", str(ROOT), *args], check=True, capture_output=True, text=True, encoding="utf-8"
-    ).stdout
+    result = subprocess.run(["git", "-C", str(ROOT), *args], check=True, capture_output=True)
+    # Preserve CR and form-feed bytes: Git patch records are LF-delimited, while
+    # str.splitlines() would silently turn content bytes into fake records.
+    return result.stdout.decode("utf-8", errors="surrogateescape")
 
 
 def added_lines(base: str, head: str | None) -> dict[str, list[tuple[int, str]]]:
@@ -121,12 +122,12 @@ def added_lines(base: str, head: str | None) -> dict[str, list[tuple[int, str]]]
     current = None
     number = 0
     in_hunk = False
-    for raw in _git(cmd).splitlines():
+    for raw in _git(cmd).split("\n"):
         if raw.startswith("diff --git "):
             current = None
             in_hunk = False
         elif not in_hunk and raw.startswith("+++ "):
-            payload = raw[4:]
+            payload = raw[4:].rstrip("\r")
             if payload.startswith("b/"):
                 current = payload[2:]
             elif payload.startswith('"'):

@@ -1,5 +1,5 @@
 {
-  "_comment": "Python selftests whose result can depend on the real date. date_sensitive_selftests_tz_matrix.py runs each under zones a day apart from UTC, so a test that mixes the real clock with a pinned date fails in one zone on every run instead of on one calendar day. `tests` run and gate; `pending` are listed but not run.",
+  "_comment": "Python selftests whose result can depend on the real date. The active source-contract selftest runs under zones a day apart from UTC, so a test that mixes the real clock with a pinned date fails in one zone on every run instead of on one calendar day. `tests` run and gate; `pending` are listed but not run.",
   "zones": [
     "Pacific/Kiritimati",
     "Pacific/Pago_Pago",

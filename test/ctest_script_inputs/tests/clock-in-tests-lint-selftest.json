@@ -3,6 +3,8 @@
  "record": {
   "entry": "tools/scripts/test_clock_in_tests_lint.py",
   "inputs": [
+   "tools/scripts/clock_in_tests_baseline.json",
+   "tools/scripts/clock_in_tests_lint.py",
    "tools/scripts/test_clock_in_tests_lint.py"
   ],
   "kind": "python"

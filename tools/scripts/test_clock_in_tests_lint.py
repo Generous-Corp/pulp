@@ -167,7 +167,7 @@ class DiffScopeTest(unittest.TestCase):
             (repo / "tools").mkdir(); f = repo / "tools" / "test_a.py"
             f.write_text("old = 1\n", encoding="utf-8")
             git("add", "."); git("commit", "-qm", "base")
-            (repo / ".gitattributes").write_text("tools/test_a.py diff=hide\n", encoding="utf-8")
+            (repo / ".gitattributes").write_text("tools/test_a.py -diff\n", encoding="utf-8")
             (repo / "tools" / "test_a.py").write_text("old = 1\nnew = time.time()\n", encoding="utf-8")  # clock-ok: fixture text
             git("add", "."); git("commit", "-qm", "plant")
             old_root = lint.ROOT; lint.ROOT = repo
@@ -195,6 +195,18 @@ class DiffScopeTest(unittest.TestCase):
             finally:
                 lint.ROOT = old_root
             self.assertIn("tools/test_a.py", added)
+            self.assertEqual(len(lint.scan_lines("tools/test_a.py", added["tools/test_a.py"], NO_BASELINE)), 1)
+
+    def test_form_feed_inside_added_line_is_scanned(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp); git = lambda *a: subprocess.run(["git", "-C", tmp, *a], check=True, capture_output=True)
+            git("init", "-q", "-b", "main"); git("config", "user.email", "t@example.com"); git("config", "user.name", "t")
+            (repo / "tools").mkdir(); f = repo / "tools" / "test_a.py"; f.write_text("old = 1\n", encoding="utf-8")
+            git("add", "."); git("commit", "-qm", "base")
+            f.write_bytes(b"old = 1\nvalue = 0\fvalue = time.time()\n"); git("add", "."); git("commit", "-qam", "plant")  # clock-ok: fixture text
+            old_root = lint.ROOT; lint.ROOT = repo
+            try: added = lint.added_lines("HEAD~1", "HEAD")
+            finally: lint.ROOT = old_root
             self.assertEqual(len(lint.scan_lines("tools/test_a.py", added["tools/test_a.py"], NO_BASELINE)), 1)
 
     def test_renamed_test_destination_is_scanned(self):

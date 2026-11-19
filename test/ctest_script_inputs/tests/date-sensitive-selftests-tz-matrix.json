@@ -3,6 +3,7 @@
  "record": {
   "entry": "tools/scripts/date_sensitive_selftests_tz_matrix.py",
   "inputs": [
+   "tools/import-validation/test_source_contracts.py",
    "tools/scripts/date_sensitive_selftests.json",
    "tools/scripts/date_sensitive_selftests_tz_matrix.py"
   ],
