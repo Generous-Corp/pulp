@@ -1,4 +1,17 @@
 # Read and validate the repository's Vellum release lock.
+#
+# What each lock field binds:
+#   tag, sha            the Vellum release and its commit. The FetchContent source
+#                       build of gpu-runtime is pinned by this commit, not by an
+#                       archive, so it is covered by `sha` alone.
+#   gpu_runtime_digest  sha256 of the prebuilt vellum-gpu-runtime archive. Enforced
+#                       for PULP_GPU_RUNTIME_PREFIX (PulpGpuRuntime.cmake requires
+#                       PULP_GPU_RUNTIME_ARCHIVE and fails closed without it).
+#   sdk_digest          sha256 of the prebuilt Vellum SDK archive. Pulp itself
+#                       ingests no Vellum SDK archive (the SDK consumer lane
+#                       deliberately tracks Vellum main), so it is enforced only
+#                       when a caller supplies PULP_VELLUM_SDK_ARCHIVE.
+#   render_toolchain    the renderer lock digest the gpu-runtime package carries.
 set(PULP_VELLUM_LOCK_FILE "${CMAKE_CURRENT_LIST_DIR}/../../pulp.lock"
     CACHE FILEPATH "Pulp Vellum lock file")
 if(NOT EXISTS "${PULP_VELLUM_LOCK_FILE}")
@@ -40,6 +53,7 @@ if(DEFINED PULP_VELLUM_SDK_ARCHIVE AND NOT PULP_VELLUM_SDK_ARCHIVE STREQUAL "")
         message(FATAL_ERROR "Pulp: SDK archive digest mismatch (lock ${PULP_VELLUM_sdk_digest}, file ${_pulp_sdk_digest})")
     endif()
 endif()
+# Same check for a caller that supplies the gpu-runtime archive outside the prefix path.
 if(DEFINED PULP_VELLUM_GPU_RUNTIME_ARCHIVE AND NOT PULP_VELLUM_GPU_RUNTIME_ARCHIVE STREQUAL "")
     if(NOT EXISTS "${PULP_VELLUM_GPU_RUNTIME_ARCHIVE}")
         message(FATAL_ERROR "Pulp: gpu-runtime archive does not exist: ${PULP_VELLUM_GPU_RUNTIME_ARCHIVE}")

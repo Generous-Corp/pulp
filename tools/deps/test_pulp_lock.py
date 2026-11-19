@@ -4,7 +4,10 @@
 from __future__ import annotations
 
 import copy
+import hashlib
+import io
 import json
+import tarfile
 import subprocess
 import tempfile
 import unittest
@@ -42,6 +45,92 @@ class PulpLockTests(unittest.TestCase):
             )
             self.assertNotEqual(result.returncode, 0)
             self.assertIn("digest mismatch", result.stderr)
+
+
+COMMIT = "d361ea5b855707391798b7315183d99b6cbe69b6"
+CMAKE_DIR = Path(__file__).parents[1] / "cmake"
+DRIVER = """cmake_minimum_required(VERSION 3.24)
+set(APPLE 1)
+set(PULP_SKIA_PROVIDES_DAWN ON)
+set(SKIA_DIR "${WORK}/no-skia")
+set(PULP_GPU_RUNTIME_PREFIX "${PREFIX}" CACHE PATH "" FORCE)
+set(PULP_GPU_RUNTIME_ARCHIVE "${ARCHIVE}" CACHE FILEPATH "" FORCE)
+include("${MODULE}")
+"""
+
+
+class GpuRuntimePrefixTests(unittest.TestCase):
+    """PULP_GPU_RUNTIME_PREFIX must match the archive pulp.lock hashes."""
+
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self._tmp.name)
+        self.addCleanup(self._tmp.cleanup)
+        payload = b"locked library bytes"
+        record = {
+            "source_commit": COMMIT,
+            "files": [{"path": "lib/libx.a", "sha256": hashlib.sha256(payload).hexdigest(),
+                       "size": len(payload), "executable": False}],
+        }
+        record_bytes = json.dumps(record, sort_keys=True).encode()
+        self.archive = self.root / "gpu-runtime.tar.gz"
+        with tarfile.open(self.archive, "w:gz") as tar:
+            for name, data in (("gpu-runtime-artifact.json", record_bytes), ("lib/libx.a", payload)):
+                info = tarfile.TarInfo(name)
+                info.size = len(data)
+                tar.addfile(info, io.BytesIO(data))
+        self.prefix = self.root / "prefix"
+        (self.prefix / "lib").mkdir(parents=True)
+        (self.prefix / "gpu-runtime-artifact.json").write_bytes(record_bytes)
+        (self.prefix / "lib" / "libx.a").write_bytes(payload)
+        lock = copy.deepcopy(pulp_lock.load())
+        lock["vellum"]["gpu_runtime_digest"] = hashlib.sha256(self.archive.read_bytes()).hexdigest()
+        lock["vellum"]["sha"] = COMMIT
+        self.lock_path = self.root / "pulp.lock"
+        self.lock_path.write_text(json.dumps(lock), encoding="utf-8")
+        (self.root / "driver.cmake").write_text(DRIVER, encoding="utf-8")
+
+    def run_module(self, archive: Path | str | None) -> str:
+        """Configure-time output of PulpGpuRuntime.cmake; 'REACHED-FIND' when it got past the digest checks."""
+        result = subprocess.run(
+            ["cmake", f"-DWORK={self.root}", f"-DPREFIX={self.prefix}",
+             f"-DARCHIVE={archive if archive is not None else ''}",
+             f"-DMODULE={CMAKE_DIR / 'PulpGpuRuntime.cmake'}",
+             f"-DPULP_VELLUM_LOCK_FILE={self.lock_path}",
+             "-DCMAKE_BINARY_DIR=" + str(self.root / "bin"),
+             "-P", str(self.root / "driver.cmake")],
+            capture_output=True, text=True, encoding="utf-8", check=False)
+        text = " ".join((result.stdout + result.stderr).split())
+        if "no VellumGpuRuntime" in text:
+            return "REACHED-FIND"
+        self.assertNotEqual(result.returncode, 0, text)
+        return text
+
+    def test_matching_archive_and_prefix_pass_the_digest_check(self) -> None:
+        self.assertEqual(self.run_module(self.archive), "REACHED-FIND")
+
+    def test_missing_archive_fails_closed_naming_the_lock_field(self) -> None:
+        out = self.run_module(None)
+        self.assertIn("vellum.gpu_runtime_digest", out)
+        self.assertIn("PULP_GPU_RUNTIME_ARCHIVE", out)
+
+    def test_changed_archive_fails(self) -> None:
+        other = self.root / "other.tar.gz"
+        other.write_bytes(self.archive.read_bytes() + b"x")
+        self.assertIn("archive digest mismatch", self.run_module(other))
+
+    def test_tampered_prefix_file_fails(self) -> None:
+        (self.prefix / "lib" / "libx.a").write_bytes(b"tampered")
+        self.assertIn("changed after extraction", self.run_module(self.archive))
+
+    def test_tampered_record_with_same_commit_fails(self) -> None:
+        record = self.prefix / "gpu-runtime-artifact.json"
+        record.write_bytes(record.read_bytes() + b" ")
+        self.assertIn("differs from the archive's", self.run_module(self.archive))
+
+    def test_extra_prefix_file_fails(self) -> None:
+        (self.prefix / "lib" / "extra.cmake").write_text("message(WARNING injected)")
+        self.assertIn("holds lib/extra.cmake", self.run_module(self.archive))
 
 
 if __name__ == "__main__":
