@@ -10,7 +10,7 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parent
-TOOL = ROOT / "prepush_claim_check.py"
+TOOL = ROOT.parent.parent / "tools/scripts/prepush_claim_check.py"
 
 
 class ClaimCheckTests(unittest.TestCase):

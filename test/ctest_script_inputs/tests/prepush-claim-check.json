@@ -5,6 +5,7 @@
   "inputs": [
    ".githooks/pre-push",
    "tools/scripts/gate_host_policy.sh",
+   "tools/scripts/prepush_claim_check.py",
    "tools/scripts/test_prepush_claim_check.py",
    "tools/scripts/worktree_lineage.sh"
   ],
