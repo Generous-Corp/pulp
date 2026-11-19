@@ -92,6 +92,12 @@ if(Python3_Interpreter_FOUND)
     add_test(NAME pulp-lock-selftest COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/deps/test_pulp_lock.py" "${CMAKE_SOURCE_DIR}/pulp.lock")
     set_tests_properties(pulp-lock-selftest PROPERTIES LABELS "tools;selftest" TIMEOUT 120)
+    # bundle_vellum_sdk.py: lock-pinned darwin-arm64 archive verification,
+    # safe extraction, staging refusal, and NOTICE merge idempotence.
+    add_test(NAME vellum-sdk-bundle-selftest COMMAND ${Python3_EXECUTABLE}
+        "tools/scripts/test_bundle_vellum_sdk.py")
+    set_tests_properties(vellum-sdk-bundle-selftest PROPERTIES
+        LABELS "tools;selftest" TIMEOUT 120 WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
     add_test(NAME harness-adapters-base-selftest COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/harness/tests/test_adapters_base.py")
     set_tests_properties(harness-adapters-base-selftest PROPERTIES LABELS "tools;selftest" TIMEOUT 120)
