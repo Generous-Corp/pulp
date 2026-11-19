@@ -2,8 +2,11 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include "support/thread_progress.hpp"
+
 #include <array>
 #include <atomic>
+#include <chrono>
 #include <thread>
 #include <vector>
 
@@ -72,7 +75,9 @@ TEST_CASE("Vellum audio provider never exposes a torn frame", "[pulp-vellum-audi
     });
     std::thread editor([&] {
         std::array<float, 8> rms{}, peak{}, samples{};
-        while (!done.load(std::memory_order_acquire)) {
+        const auto deadline = std::chrono::steady_clock::now() + pulp::test::kProgressDeadline;
+        while (!done.load(std::memory_order_acquire) &&
+               std::chrono::steady_clock::now() < deadline) {
             const auto count = provider.read_meter(*meter, rms, peak);
             for (std::size_t i = 1; i < count; ++i)
                 if (rms[i] != rms[0] || peak[i] != peak[0] || peak[i] != rms[0] + 0.25f)
@@ -85,6 +90,7 @@ TEST_CASE("Vellum audio provider never exposes a torn frame", "[pulp-vellum-audi
     });
     audio.join();
     editor.join();
+    REQUIRE(done.load(std::memory_order_acquire));
 
     std::array<float, 8> rms{}, peak{}, samples{};
     REQUIRE(provider.read_meter(*meter, rms, peak) == 4);
