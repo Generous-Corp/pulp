@@ -38,6 +38,7 @@ function(pulp_add_vellum_editor_package package)
     file(WRITE "${_generated_header}"
 "#pragma once\n#include <pulp/vellum/editor.hpp>\n#include <${_vellum_pkg_VIEW_HEADER}>\n\nnamespace pulp::vellum::generated {\ninline ::pulp::format::EditorFactory* ${_package_id}() {\n    return ::pulp::vellum::editor_factory<${_vellum_pkg_VIEW_TYPE}>();\n}\n} // namespace pulp::vellum::generated\n")
     target_include_directories("${_package_target}" INTERFACE
+        "${CMAKE_CURRENT_SOURCE_DIR}"
         "${CMAKE_CURRENT_BINARY_DIR}" ${_vellum_pkg_VIEW_INCLUDE_DIRS})
     target_link_libraries("${_package_target}" INTERFACE
         ${_pulp_vellum_target} Vellum::MirrorView_core)

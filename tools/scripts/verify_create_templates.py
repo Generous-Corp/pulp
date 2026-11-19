@@ -83,6 +83,7 @@ KNOWN_TEMPLATE_VARS = frozenset({
     "UI_MODE_LINE",
     "VIEW_HEADER",
     "VIEW_TYPE",
+    "VELLUM_SOURCE_LINE",
     "VELLUM_EDITOR_LINE",
     "UI_LINE",
     "VELLUM_FIND_LINE",

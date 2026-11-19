@@ -41,6 +41,7 @@ function(_pulp_expand_create_template type in_file out_file)
             "UI_MODE_LINE="
             "VIEW_HEADER=${lower}_view.hpp"
             "VIEW_TYPE=${lower}::${class}View"
+            "VELLUM_SOURCE_LINE="
             "VELLUM_EDITOR_LINE="
             "VELLUM_HELPER_LINE="
             "UI_LINE="
