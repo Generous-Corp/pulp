@@ -80,6 +80,7 @@ KNOWN_TEMPLATE_VARS = frozenset({
     "DESCRIPTION",
     "VST3_UID",
     "SDK_VERSION",
+    "UI_MODE_LINE",
 })
 
 # Per-template-type minimum file set. Missing any of these fails — the
