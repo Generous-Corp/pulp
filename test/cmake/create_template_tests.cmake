@@ -39,6 +39,11 @@ function(_pulp_expand_create_template type in_file out_file)
             "PLUGIN_URI=urn:pulp:${lower}"
             "VST3_UID=00000000000000000000000000000000"
             "UI_MODE_LINE="
+            "VIEW_HEADER=${lower}_view.hpp"
+            "VIEW_TYPE=${lower}::${class}View"
+            "VELLUM_EDITOR_LINE="
+            "UI_LINE="
+            "VELLUM_FIND_LINE="
             "SDK_VERSION=0.0.0")
         string(FIND "${pair}" "=" eq)
         string(SUBSTRING "${pair}" 0 ${eq} key)

@@ -34,6 +34,9 @@ target_link_libraries({{TARGET_NAME}}-test PRIVATE Pulp::format Catch2::Catch2Wi
 target_include_directories({{TARGET_NAME}}-test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 catch_discover_tests({{TARGET_NAME}}-test)
 
+{{VELLUM_FIND_LINE}}
+{{VELLUM_EDITOR_LINE}}
+
 pulp_add_plugin({{TARGET_NAME}}
     # The processor body is compiled once and shared by every format, so an
     # edit to process() rebuilds one file before the relinks.
@@ -48,7 +51,7 @@ pulp_add_plugin({{TARGET_NAME}}
     MANUFACTURER_CODE "{{MANUFACTURER_CODE}}"
     AAX_PRODUCT_CODE "{{AAX_PRODUCT_CODE}}"
     AAX_NATIVE_CODE "{{AAX_NATIVE_CODE}}"
-    {{UI_MODE_LINE}}
+    {{UI_LINE}}
 )
 
 # In-app updates for the standalone app (macOS, Sparkle 2): "Check for Updates…"
