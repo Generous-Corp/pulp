@@ -145,7 +145,7 @@ class GpuRuntimePrefixTests(unittest.TestCase):
         self.assertIn("differs from the archive's", self.run_module(self.archive))
 
     def test_extra_prefix_file_fails(self) -> None:
-        (self.prefix / "lib" / "extra.cmake").write_text("message(WARNING injected)")
+        (self.prefix / "lib" / "extra.cmake").write_text("message(WARNING injected)", encoding="utf-8")
         self.assertIn("holds lib/extra.cmake", self.run_module(self.archive))
 
 

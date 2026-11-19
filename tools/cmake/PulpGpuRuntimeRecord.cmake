@@ -36,7 +36,7 @@ function(pulp_check_gpu_runtime_archive prefix archive locked_digest)
         message(FATAL_ERROR
             "Pulp: PULP_GPU_RUNTIME_PREFIX (${prefix}) cannot be matched to pulp.lock "
             "vellum.gpu_runtime_digest: set PULP_GPU_RUNTIME_ARCHIVE to the "
-            "vellum-gpu-runtime archive the prefix was extracted from")
+            "gpu-runtime archive the prefix was extracted from")
     endif()
     if(NOT EXISTS "${archive}")
         message(FATAL_ERROR "Pulp: gpu-runtime archive does not exist: ${archive}")

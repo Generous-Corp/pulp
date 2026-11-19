@@ -28,7 +28,7 @@ include("${CMAKE_CURRENT_LIST_DIR}/PulpVellumLock.cmake")
 set(PULP_GPU_RUNTIME_PREFIX "" CACHE PATH
     "An extracted vellum-gpu-runtime archive; empty builds the pinned source")
 set(PULP_GPU_RUNTIME_ARCHIVE "" CACHE FILEPATH
-    "The vellum-gpu-runtime archive PULP_GPU_RUNTIME_PREFIX was extracted from")
+    "The gpu-runtime archive PULP_GPU_RUNTIME_PREFIX was extracted from")
 
 # OFF builds Pulp's own device sources on macOS too, the layer every other
 # platform still uses; it keeps that mode compilable where it can gate.
