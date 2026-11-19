@@ -8,6 +8,10 @@ If the worktree is superseded, merged, or archived, follow its recorded
 successor/disposition instead of resuming it. If no status is recorded,
 classify the worktree before editing.
 
+A review subagent runs read-only and returns a patch; an agent edits only worktrees
+it created. Set `PULP_AGENT_OWNER` to your lane label so the pre-push ownership
+guard can refuse edits made in another agent's active worktree.
+
 ## Choosing a UI stack
 
 The default UI is Vellum on Skia/Dawn. RmlUi (an opt-in Vellum component) and a
