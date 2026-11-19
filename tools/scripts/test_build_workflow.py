@@ -480,12 +480,16 @@ class ReadyPullRequestReceiptTest(unittest.TestCase):
                     _evaluate_if(self.full["continue-on-error"], armed_failure),
                     f"audit PR #{pr} must be refused before queue admission")
 
-    def test_merge_group_and_push_still_run_the_full_suite_as_the_gate(self) -> None:
-        for event in ("merge_group", "push"):
-            ctx = self._context(event)
-            self.assertTrue(_evaluate_if(self.full["if"], ctx))
+    def test_merge_group_and_opted_in_push_run_the_full_suite_as_the_gate(self) -> None:
+        for event, push_var in (("merge_group", ""), ("push", "1")):
+            ctx = {**self._context(event), "vars.PULP_PUSH_LINUX_TESTS": push_var}
+            self.assertTrue(_evaluate_if(self.full["if"], ctx), event)
             self.assertFalse(_evaluate_if(self.fast["if"], ctx))
             self.assertFalse(_evaluate_if(self.full["continue-on-error"], ctx), event)
+
+    def test_push_skips_the_full_suite_unless_opted_in(self) -> None:
+        ctx = {**self._context("push"), "vars.PULP_PUSH_LINUX_TESTS": ""}
+        self.assertFalse(_evaluate_if(self.full["if"], ctx))
 
     def test_issuer_runs_only_after_a_ready_heads_full_suite_passed(self) -> None:
         passed = self._context("pull_request", suite="full", ctest_outcome="success")
