@@ -71,9 +71,10 @@ std::size_t AudioDisplayProvider::read_meter(std::size_t index, std::span<float>
         return 0;
     const auto& frame = c->meter.read();
     const auto n = std::min<std::size_t>(frame.count, kMaxMeterChannels);
-    std::copy_n(frame.rms.begin(), std::min(n, rms.size()), rms.begin());
-    std::copy_n(frame.peak.begin(), std::min(n, peak.size()), peak.begin());
-    return n;
+    const auto copied = std::min({n, rms.size(), peak.size()});
+    std::copy_n(frame.rms.begin(), copied, rms.begin());
+    std::copy_n(frame.peak.begin(), copied, peak.begin());
+    return copied;
 }
 
 std::size_t AudioDisplayProvider::read_vector(std::size_t index,

@@ -40,6 +40,26 @@ TEST_CASE("Vellum audio provider publishes complete meter and scope frames",
     CHECK(provider.publish_count(*scope) != 0);
 }
 
+TEST_CASE("Vellum audio provider read_meter returns the count actually copied",
+          "[pulp-vellum-audio]") {
+    pulp::vellum_audio::AudioDisplayProvider provider({
+        {.name = "level", .shape = ::vellum::value::ChannelShape::meter},
+    });
+    const auto meter = provider.find("level", ::vellum::value::ChannelShape::meter);
+    REQUIRE(meter);
+    provider.publish_meter(*meter, std::array{0.1f, 0.2f, 0.3f}, std::array{0.4f, 0.5f, 0.6f});
+
+    std::array<float, 1> short_rms{};
+    std::array<float, 3> long_peak{};
+    CHECK(provider.read_meter(*meter, short_rms, long_peak) == 1);
+    CHECK(short_rms[0] == 0.1f);
+
+    std::array<float, 3> long_rms{};
+    std::array<float, 2> short_peak{};
+    CHECK(provider.read_meter(*meter, long_rms, short_peak) == 2);
+    CHECK(short_peak[1] == 0.5f);
+}
+
 TEST_CASE("Vellum audio provider refuses wrong channel shapes", "[pulp-vellum-audio]") {
     using Provider = pulp::vellum_audio::AudioDisplayProvider;
     Provider provider({{.name = "meter", .shape = ::vellum::value::ChannelShape::meter}});
