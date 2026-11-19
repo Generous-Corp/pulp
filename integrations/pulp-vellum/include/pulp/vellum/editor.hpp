@@ -49,12 +49,14 @@ template <typename ViewType> class Editor final : public format::Editor {
         detach();
     }
 
+    // X11 is not offered: an X11 parent carries its window in window_id with a
+    // null handle, and PluginViewHost attaches only to a pointer parent, so a
+    // claimed X11 parent could never attach. Add it once the host takes an id.
     bool supports_parent(format::NativeParentKind kind) const override {
         return kind == format::NativeParentKind::none ||
                kind == format::NativeParentKind::cocoa_view ||
                kind == format::NativeParentKind::uikit_view ||
-               kind == format::NativeParentKind::win32_window ||
-               kind == format::NativeParentKind::x11_window;
+               kind == format::NativeParentKind::win32_window;
     }
 
     bool attach(const format::NativeParent& parent) override {

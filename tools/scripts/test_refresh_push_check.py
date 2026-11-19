@@ -592,23 +592,42 @@ def case_an_invalid_check_fails(fx: Fixture) -> None:
 
 
 def case_the_check_timeout_scales_with_load(fx: Fixture) -> None:
-    """20 s at or below one runnable task per core, scaled above it, capped."""
+    """60 s floor, scaled up past one runnable task per core, capped."""
     from unittest import mock
     with mock.patch.dict(os.environ, {}, clear=False):
         os.environ.pop("PULP_MERGE_TREE_CHECK_TIMEOUT", None)
         with mock.patch.object(os, "cpu_count", return_value=8):
             with mock.patch.object(os, "getloadavg", return_value=(4.0, 0, 0)):
-                assert merge_tree_state._check_timeout() == 20.0
+                assert merge_tree_state._check_timeout() == 60.0
             with mock.patch.object(os, "getloadavg", return_value=(20.0, 0, 0)):
-                assert merge_tree_state._check_timeout() == 20.0 * 9  # 2.5/core
+                assert merge_tree_state._check_timeout() == 180.0  # 2.5/core
             with mock.patch.object(os, "getloadavg", return_value=(8.0, 0, 0)):
                 assert merge_tree_state._check_timeout() == 60.0  # 1/core
             with mock.patch.object(os, "getloadavg", return_value=(0.0, 0, 0)):
-                assert merge_tree_state._check_timeout() == 20.0  # idle
+                assert merge_tree_state._check_timeout() == 60.0  # idle
             with mock.patch.object(os, "getloadavg", return_value=(800.0, 0, 0)):
                 assert merge_tree_state._check_timeout() == merge_tree_state.MAX_CHECK_TIMEOUT == 240.0
         os.environ["PULP_MERGE_TREE_CHECK_TIMEOUT"] = "7"
         assert merge_tree_state._check_timeout() == 7.0
+
+
+def case_a_timed_out_check_is_retried_once_with_double_the_limit(fx: Fixture) -> None:
+    """A check slower than its limit but within twice it passes on the retry;
+    one slower than both stays unavailable after exactly two attempts."""
+    counter = fx.tmp / "attempts.txt"
+    counter.write_text("", encoding="utf-8")
+    body = (f"import time; open({str(counter)!r}, 'a').write('x'); time.sleep(%s)")
+    env = dict(os.environ)
+    slow_ok = [sys.executable, "-c", body % "1.5"]
+    assert merge_tree_state._run(slow_ok, fx.tmp, env, 1.0) == 0
+    assert counter.read_text(encoding="utf-8") == "xx"
+    counter.write_text("", encoding="utf-8")
+    too_slow = [sys.executable, "-c", body % "6"]
+    assert merge_tree_state._run(too_slow, fx.tmp, env, 1.0) is merge_tree_state.UNAVAILABLE
+    assert counter.read_text(encoding="utf-8") == "xx"
+    counter.write_text("", encoding="utf-8")
+    assert merge_tree_state._run([sys.executable, "-c", body % "0"], fx.tmp, env, 1.0) == 0
+    assert counter.read_text(encoding="utf-8") == "x"
 
 
 def case_gates_and_pre_push_fail_on_not_checked(fx: Fixture) -> None:

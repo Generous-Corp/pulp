@@ -15,6 +15,11 @@
 
 namespace pulp::native {
 
+/// The display scale from an X server's `RESOURCE_MANAGER` text (the value of
+/// `Xft.dpi` over 96), or 0 when it sets none or an unusable one. Pure; the
+/// X11 backend reads the string from the server and passes it here.
+double scale_from_xft_dpi(const std::string& resource_manager);
+
 /// Who decides the drawable size.
 enum class DrawableSizing : std::uint8_t {
     /// The surface keeps the drawable at the view's size times its scale,

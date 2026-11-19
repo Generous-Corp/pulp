@@ -4,6 +4,11 @@ function(pulp_add_vellum_editor_package package)
     if(NOT _vellum_pkg_VIEW_HEADER OR NOT _vellum_pkg_VIEW_TYPE)
         message(FATAL_ERROR "${package}: VIEW_HEADER and VIEW_TYPE are required")
     endif()
+    if(NOT TARGET Vellum::MirrorView_core)
+        message(FATAL_ERROR "${package}: pulp_add_vellum_editor_package needs "
+            "Vellum::MirrorView_core, which this Vellum SDK does not provide "
+            "(the v0.2.0 release lacks it; use a Vellum SDK that ships the view layer)")
+    endif()
     if(package MATCHES "::")
         string(REPLACE "::" "-" _package_target "${package}")
     else()

@@ -21,6 +21,14 @@
 ///    loop holds no callback into this binary afterwards, and drops every task
 ///    still queued.
 ///
+/// All scopes in a binary share one `CFRunLoopSource` on the main run loop, and
+/// a wake visits only the scopes that have posted work. A source per scope made
+/// every wake walk every live scope, which cost the main thread measurable time
+/// with thousands of idle scopes. The source exists while any scope does and is
+/// removed when the last one is destroyed, so the guarantee above still holds
+/// once a binary has no scope left. Posts from one scope still run in order;
+/// work posted by different scopes runs in the order the scopes first posted.
+///
 /// The common modes include `NSEventTrackingRunLoopMode` and
 /// `NSModalPanelRunLoopMode` once AppKit's NSApplication exists, which is
 /// always true inside a host.
@@ -35,6 +43,7 @@
 /// refusal is visible to the caller) and timers never fire.
 
 #include <chrono>
+#include <cstddef>
 #include <cstdint>
 #include <functional>
 #include <memory>
@@ -110,6 +119,12 @@ struct MainThreadTimerState;
 /// plus timer fires), process-wide. Lets a test prove an idle scope costs the
 /// main thread nothing without counting unrelated run-loop wake-ups.
 std::uint64_t main_thread_callouts() noexcept;
+#if defined(__APPLE__)
+/// How many run-loop sources the scopes of this binary have installed on the
+/// main run loop: 0 with no live scope, otherwise 1, however many scopes there
+/// are (they share one source, so an idle scope adds nothing to each wake).
+std::size_t main_thread_source_count() noexcept;
+#endif
 } // namespace detail
 
 /// Owner of the work one client (typically one editor) schedules on the main

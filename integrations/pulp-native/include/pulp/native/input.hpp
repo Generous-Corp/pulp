@@ -1,8 +1,8 @@
 #pragma once
 
 /// @file input.hpp
-/// Neutral input events for a native-surface editor, and the macOS translation
-/// from `NSEvent`.
+/// Neutral input events for a native-surface editor, the macOS translation
+/// from `NSEvent`, and the X11 translation tables.
 ///
 /// The events name no AppKit type. Positions are in logical points with the
 /// origin at the surface's top-left, so a client converts to pixels with the
@@ -317,6 +317,38 @@ std::optional<KeyEvent> translate_key(void* ns_event);
 /// that key with its side (left or right shift). Caps Lock reports down when
 /// it turns on and up when it turns off.
 std::optional<KeyEvent> translate_flags_changed(void* ns_event);
+
+// ── X11 translation ──────────────────────────────────────────────────────────
+//
+// Pure tables over X11 protocol values (keysyms, state masks, button numbers).
+// They need no X headers, so they are built and testable on every platform;
+// the X11 surface backend feeds them what the server sends.
+
+/// The key for the X keysym a key produces at its first level (the unshifted
+/// symbol: lower-case letters, digits, keypad keys with and without Num Lock),
+/// or `Key::unknown`. An upper-case letter keysym maps to its letter.
+Key key_for_x11_keysym(std::uint32_t keysym) noexcept;
+
+/// Modifier bits from an X event `state`: Shift, Lock (Caps Lock), Control,
+/// Mod1 (Alt, as `modifier_option`) and Mod4 (Super, as `modifier_command`).
+std::uint32_t modifiers_from_x11_state(unsigned state) noexcept;
+
+/// `PointerEvent::buttons_held` from the button bits of an X event `state`
+/// (Button1Mask to Button5Mask): bit 0 left, bit 1 right, bit 2 middle, and
+/// bit n for button number n of a further button.
+std::uint32_t buttons_held_from_x11_state(unsigned state) noexcept;
+
+/// The pointer button for X button number 1 (left), 2 (middle), 3 (right) or
+/// 8 and up (further buttons, numbered from 3). Buttons 4 to 7 are wheel
+/// motion and map to `PointerButton::none`; `number` receives the Pulp button
+/// number (0 left, 1 right, 2 middle), or -1 for a wheel button.
+PointerButton pointer_button_for_x11(unsigned button, int& number) noexcept;
+
+/// Wheel motion for X button 4 (up), 5 (down), 6 (left) or 7 (right), in
+/// lines, with the sign convention of `WheelEvent` (positive `dy` moves
+/// content down, positive `dx` moves content right). False for any other
+/// button.
+bool wheel_delta_for_x11_button(unsigned button, double& dx, double& dy) noexcept;
 
 /// The `NSCursor*` for `cursor`. A cursor the running system has no public
 /// equivalent for falls back to the arrow; `cursor_is_native` says which.

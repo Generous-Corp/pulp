@@ -1171,6 +1171,21 @@ never from the check run alone.
   as it is with `shipyard ship --pr <n>`. Refresh only for a real conflict or a
   failing required check (see "Do not refresh a `BEHIND` PR" below); the
   pre-push hook prints a hint when a push only re-bases an armed PR.
+- **The pre-push hook refuses a push under someone else's live claim.** Its
+  last step, on every allowed path (including `PULP_SKIP_PREPUSH`), reads
+  every updated branch's open PRs in the actual push destination and their full
+  comment history, with pagination,
+  and refuses while another actor's `repair-claim:` is
+  live. Named releases remove only that ID (single-label and slash-separated
+  IDs use the same grammar); only a bare release clears all claims. An
+  unreadable expiry remains live until released or corrected. A whitespace-separated
+  explanation after a valid UTC timestamp does not extend its expiry; malformed
+  timestamp tokens still count as live. Name your own
+  claim with `PULP_REPAIR_CLAIM_ID`. A failed read warns and
+  allows. With `PULP_AGENT_OWNER` set, it also refuses a push from an active
+  worktree whose lineage owner is someone else
+  (`worktree_lineage.sh assert-owner`). Edit only worktrees you created, and
+  run review subagents read-only so they return a patch.
 - **A diff-coverage heartbeat is a build, not a hang.** If the work is already
   validated, stop and re-push with `PULP_SKIP_DIFF_COVER=1`. Never pipe
   `git push`, `shipyard pr`, or `shipyard ship` through `tail`/`head`: the pipe
@@ -5567,8 +5582,8 @@ uses, or the golden warms a cache the real jobs never touch.
 - **A gate that did not run is not a pass.** The merge-tree checks exit 4
   (NOT_CHECKED) when one times out or cannot start; gates.sh exits 4 and the
   pre-push hook blocks on it (bypass: `PULP_PREPUSH_ALLOW_NOT_CHECKED=1`).
-  Each check's timeout is 20 s at idle, scaled up with 1-minute load per core (60 s at one per core), capped at 240 s; a timeout prints elapsed time, load and the env var;
-  `PULP_MERGE_TREE_CHECK_TIMEOUT` overrides it.
+  Each check's timeout is a 60 s floor, scaled up with 1-minute load per core past one (180 s at 2.5 per core), capped at 240 s; a timed-out check is retried once at double the limit before it reports NOT CHECKED (still exit 4, fail closed), and each timeout prints elapsed time, load and the env var;
+  `PULP_MERGE_TREE_CHECK_TIMEOUT` overrides the first limit.
 
 - **A workflow that runs a test binary by name breaks when that suite joins
   a test group.** `pulp_add_test_suite(... GROUP <group>)` compiles the
@@ -9353,7 +9368,12 @@ waiters), but it lives in owner-only per-user host state rather than beside the
 build directory, so exact-source verification never sees a lock artifact as a
 checkout mutation. Canonical path aliases share a lock; same-named build dirs in
 different worktrees use different full-digest identities. The absolute
-`PULP_BUILD_DIR_LOCK_ROOT` override is for trusted tests only.
+`PULP_BUILD_DIR_LOCK_ROOT` override is for trusted tests only. Default-configured
+processes first acquire the shared `pulp-build-dir-locks-<user>` coordination lock
+under the system temp dir, then ordinary processes also take the durable host-state
+lock when it is writable. This keeps confined and ordinary builds on one lock
+identity; if the shared coordination root is unavailable, the build fails closed.
+An explicit override uses only that root and is never replaced.
 
 `build.yml` excludes CTest labels matching `slow` on both `pull_request`
 events and `workflow_dispatch` because Shipyard PR validation dispatches
@@ -13835,3 +13855,23 @@ commit that is not on Pulp main.
   hosted runner's `ImageVersion` (`vellum_closure.py export-meta`, which also
   records `ImageOS`). A self-hosted runner or VM sets no `ImageVersion`; the
   step then fails rather than recording a blank or placeholder image.
+
+## Repair after a merge touches a public capability header
+
+When merging `origin/main` into a PR conflicts in the generated capability
+files (for example `docs/status/agent-capability-surface/headers/...` and
+`tools/agent-capabilities/fingerprints/...`), never take one side of the whole
+merge: that once emptied a PR's diff. Use the helper instead:
+
+1. `git merge origin/main`, then `python3 tools/scripts/regen_agent_capability_after_merge.py`.
+   It refuses while conflicts or markers remain outside the two generated trees,
+   resolves the generated ones with main's side, and exits 4 while the merge is
+   uncommitted.
+2. Commit the merge (`git commit --no-edit`).
+3. Rerun it with `--previous-head <sha of the PR head before the merge>`. It
+   accepts every changed fingerprint reported by `--check`, runs `--write` then
+   `--check`, prints `git diff --stat origin/main`, and exits 5 when the branch
+   diff is empty or lost more than half its files.
+
+Review the printed stat before pushing; push once. Tests:
+`tools/scripts/test_regen_agent_capability_after_merge.py`.
