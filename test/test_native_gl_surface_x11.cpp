@@ -15,6 +15,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <GL/gl.h>
+#include <GL/glx.h>
 #include <X11/Xlib.h>
 #include <X11/Xutil.h>
 #include <X11/keysym.h>
@@ -441,6 +442,10 @@ TEST_CASE("the context is made on the client thread and honours a request",
 
     bool made = false;
     bool swapped = false;
+    GLXDrawable drawable = 0;
+    unsigned drawable_config = 0;
+    int context_config = 0;
+    int query_status = -1;
     GlContextReport report;
     std::array<unsigned char, 4> pixel{0, 0, 0, 0};
     on_render_thread([&] {
@@ -448,6 +453,11 @@ TEST_CASE("the context is made on the client thread and honours a request",
         made = gl.make_current();
         if (!made)
             return;
+        drawable = glXGetCurrentDrawable();
+        Display* render_display = glXGetCurrentDisplay();
+        glXQueryDrawable(render_display, drawable, GLX_FBCONFIG_ID, &drawable_config);
+        query_status = glXQueryContext(render_display, glXGetCurrentContext(), GLX_FBCONFIG_ID,
+                                      &context_config);
         report = gl.report();
         glClearColor(0.2f, 0.4f, 0.6f, 1.0f);
         glClear(GL_COLOR_BUFFER_BIT);
@@ -458,6 +468,13 @@ TEST_CASE("the context is made on the client thread and honours a request",
     INFO("GL_VERSION " << report.version << ", GL_RENDERER " << report.renderer);
     REQUIRE(made);
     REQUIRE(swapped);
+    // A GLXWindow is a separate server resource, not the UI thread's raw X
+    // child. Its FBConfig must match the context used for rendering/readback.
+    REQUIRE(drawable != 0);
+    REQUIRE(drawable != child_of(*surface));
+    REQUIRE(query_status == Success);
+    REQUIRE(drawable_config != 0);
+    REQUIRE(drawable_config == static_cast<unsigned>(context_config));
     REQUIRE(first_honoured_request(any_driver().requests, report.major, report.minor,
                                    report.profile) == report.request_index);
     REQUIRE(report.max_texture_size > 0);

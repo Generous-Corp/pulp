@@ -519,7 +519,14 @@ struct X11Window final : GlSurface::Impl {
             drop_render_connection();
             return false;
         }
-        drawable = child;
+        // FBConfig-created contexts render to a GLXWindow wrapping the X
+        // child, owned by this connection independently of the UI window.
+        drawable = glXCreateWindow(rdpy, config, child, nullptr);
+        const bool drawable_failed = sync_failed(rdpy);
+        if (drawable_failed || drawable == 0) {
+            drop_render_connection();
+            return false;
+        }
         const auto create_attribs =
             glx_extension<CreateContextAttribs>("glXCreateContextAttribsARB");
 
@@ -603,6 +610,10 @@ struct X11Window final : GlSurface::Impl {
     void drop_render_connection() {
         if (rdpy == nullptr)
             return;
+        if (drawable != 0) {
+            glXDestroyWindow(rdpy, drawable);
+            drawable = 0;
+        }
         sync_failed(rdpy);
         ErrorRegistry::instance().remove(rdpy);
         XCloseDisplay(rdpy);
