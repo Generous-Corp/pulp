@@ -512,44 +512,6 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-3e9d699cd5b7"
-paths = ["tools/scripts/component_regression.py"]
-tests = [
-  "build-parallelism-guard",
-  "changed-surface-policy-inventory",
-  "changed-surface-policy-selftest",
-  "changed-surface-script-families-drift",
-  "changed-surface-script-families-selftest",
-  "changed-surface-shadow-plans-selftest",
-  "clean-worktree-planning-selftest",
-  "component-visual-regression",
-  "configure-only-selftest",
-  "flake-exoneration-selftest",
-  "gate-common-selftest",
-  "gpu-audio-provider-identity-selftest",
-  "gpu-dpr-runner-selftest",
-  "gpu-first-visible-acceptance-selftest",
-  "gpu-first-visible-campaign-selftest",
-  "gpu-first-visible-external-adapter-selftest",
-  "gpu-first-visible-role-producers-selftest",
-  "gpu-handoff-provenance-selftest",
-  "pr-head-affected-tests-selftest",
-  "pr-head-diff-scoped-registrations",
-  "prepush-receipt",
-  "prepush-refresh-push",
-  "reuse-policy-replay-selftest",
-  "sample-region-compat-baseline-selftest",
-  "vellum-watch-preflight-selftest",
-  "wide-non-native-selftest",
-]
-build_targets = ["pulp-cli"]
-supported_build_types = [
-  "debug",
-  "release",
-]
-risk_class = "low"
-
-[[families]]
 name = "script-readers-0fc7a4f4f2a4"
 paths = ["tools/scripts/convolver_crossover_check.py"]
 tests = [
@@ -797,84 +759,6 @@ tests = [
   "configure-only-selftest",
   "flake-exoneration-selftest",
   "format-header-view-boundary",
-  "gate-common-selftest",
-  "gpu-audio-provider-identity-selftest",
-  "gpu-dpr-runner-selftest",
-  "gpu-first-visible-acceptance-selftest",
-  "gpu-first-visible-campaign-selftest",
-  "gpu-first-visible-external-adapter-selftest",
-  "gpu-first-visible-role-producers-selftest",
-  "gpu-handoff-provenance-selftest",
-  "pr-head-affected-tests-selftest",
-  "pr-head-diff-scoped-registrations",
-  "prepush-receipt",
-  "prepush-refresh-push",
-  "reuse-policy-replay-selftest",
-  "sample-region-compat-baseline-selftest",
-  "vellum-watch-preflight-selftest",
-  "wide-non-native-selftest",
-]
-build_targets = ["pulp-cli"]
-supported_build_types = [
-  "debug",
-  "release",
-]
-risk_class = "low"
-
-[[families]]
-name = "script-readers-d5b8d60de729"
-paths = ["tools/scripts/gallery_regression.py"]
-tests = [
-  "build-parallelism-guard",
-  "changed-surface-policy-inventory",
-  "changed-surface-policy-selftest",
-  "changed-surface-script-families-drift",
-  "changed-surface-script-families-selftest",
-  "changed-surface-shadow-plans-selftest",
-  "clean-worktree-planning-selftest",
-  "configure-only-selftest",
-  "flake-exoneration-selftest",
-  "gallery-visual-regression",
-  "gate-common-selftest",
-  "gpu-audio-provider-identity-selftest",
-  "gpu-dpr-runner-selftest",
-  "gpu-first-visible-acceptance-selftest",
-  "gpu-first-visible-campaign-selftest",
-  "gpu-first-visible-external-adapter-selftest",
-  "gpu-first-visible-role-producers-selftest",
-  "gpu-handoff-provenance-selftest",
-  "pr-head-affected-tests-selftest",
-  "pr-head-diff-scoped-registrations",
-  "prepush-receipt",
-  "prepush-refresh-push",
-  "reuse-policy-replay-selftest",
-  "sample-region-compat-baseline-selftest",
-  "vellum-watch-preflight-selftest",
-  "wide-non-native-selftest",
-]
-build_targets = ["pulp-cli"]
-supported_build_types = [
-  "debug",
-  "release",
-]
-risk_class = "low"
-
-[[families]]
-name = "script-readers-ccac0e84a8c3"
-paths = ["tools/scripts/gallery_visual_diff.py"]
-tests = [
-  "build-parallelism-guard",
-  "changed-surface-policy-inventory",
-  "changed-surface-policy-selftest",
-  "changed-surface-script-families-drift",
-  "changed-surface-script-families-selftest",
-  "changed-surface-shadow-plans-selftest",
-  "clean-worktree-planning-selftest",
-  "component-visual-regression",
-  "configure-only-selftest",
-  "flake-exoneration-selftest",
-  "gallery-diff-selftest",
-  "gallery-visual-regression",
   "gate-common-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
