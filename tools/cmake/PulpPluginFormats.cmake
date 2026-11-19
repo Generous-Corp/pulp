@@ -211,6 +211,24 @@ function(_pulp_add_vst3 target name bundle_id version manufacturer category)
             "${_pulp_vst3_windows_bundle}/Contents/${_pulp_vst3_windows_arch}")
     endif()
 
+    # Linux: the VST3 SDK's layout is <name>.vst3/Contents/<machine>-linux/<name>.so,
+    # where <machine> is what `uname -m` reports (the loader builds the path
+    # from it). The linker output stays where it is, for the same staging
+    # reasons as on Windows, and the assembled bundle is what a host scans.
+    if(UNIX AND NOT APPLE AND NOT ANDROID)
+        execute_process(
+            COMMAND uname -m
+            OUTPUT_VARIABLE _pulp_vst3_linux_machine
+            OUTPUT_STRIP_TRAILING_WHITESPACE
+            ERROR_QUIET)
+        if(NOT _pulp_vst3_linux_machine)
+            message(FATAL_ERROR "Unable to determine the Linux VST3 bundle architecture with uname -m")
+        endif()
+        set(_pulp_vst3_linux_bundle "${CMAKE_BINARY_DIR}/VST3/${name}.vst3")
+        set(_pulp_vst3_linux_contents
+            "${_pulp_vst3_linux_bundle}/Contents/${_pulp_vst3_linux_machine}-linux")
+    endif()
+
     # Info.plist: use custom if available, otherwise generate from template
     if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/Info.plist.vst3")
         set_target_properties(${target}_VST3 PROPERTIES
@@ -302,6 +320,31 @@ function(_pulp_add_vst3 target name bundle_id version manufacturer category)
                     COMMAND ${CMAKE_COMMAND} -E copy_if_different
                         "$<TARGET_FILE_DIR:${target}_VST3>/${_pulp_vst3_runtime_file}"
                         "${_pulp_vst3_windows_contents}/${_pulp_vst3_runtime_file}"
+                    COMMENT "Copying ${_pulp_vst3_runtime_file} into ${name}.vst3"
+                    VERBATIM)
+            endforeach()
+            unset(_pulp_vst3_runtime_file)
+        endif()
+    endif()
+    if(UNIX AND NOT APPLE AND NOT ANDROID)
+        add_custom_command(TARGET ${target}_VST3 POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E make_directory
+                "${_pulp_vst3_linux_contents}"
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                "$<TARGET_FILE:${target}_VST3>"
+                "${_pulp_vst3_linux_contents}/${name}.so"
+            COMMENT "Assembling Linux VST3 bundle ${name}.vst3"
+            VERBATIM)
+        # An editor-less target stages no sidecars. Otherwise the runtime files
+        # the shared helper stages beside the module go beside it in the bundle
+        # too, where the module's $ORIGIN rpath finds them.
+        if(NOT PULP_${target}_NO_EDITOR)
+            pulp_expected_runtime_dependencies(_pulp_vst3_runtime_files)
+            foreach(_pulp_vst3_runtime_file IN LISTS _pulp_vst3_runtime_files)
+                add_custom_command(TARGET ${target}_VST3 POST_BUILD
+                    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                        "$<TARGET_FILE_DIR:${target}_VST3>/${_pulp_vst3_runtime_file}"
+                        "${_pulp_vst3_linux_contents}/${_pulp_vst3_runtime_file}"
                     COMMENT "Copying ${_pulp_vst3_runtime_file} into ${name}.vst3"
                     VERBATIM)
             endforeach()
