@@ -200,6 +200,15 @@ class GpuRuntimePinTests(unittest.TestCase):
         self.assertTrue(found, "bracket-comment-only pin must fail closed")
         self.assertTrue(any("does not include PulpVellumLock.cmake" in item for item in found), found)
 
+    def test_quoted_fake_pin_does_not_count(self) -> None:
+        (self.root / self.GPU).write_text(
+            'set(_documentation "FetchContent_Declare(vellum_gpu_runtime GIT_TAG '
+            '${PULP_GPU_RUNTIME_COMMIT}) include(PulpVellumLock.cmake)")\n',
+            encoding="utf-8")
+        found = self.problems()
+        self.assertTrue(found, "quoted fake pin must fail closed")
+        self.assertTrue(any("does not include PulpVellumLock.cmake" in item for item in found), found)
+
     def test_a_hand_set_commit_fails(self) -> None:
         self.edit(self.GPU, 'include(FetchContent)',
                   f'include(FetchContent)\nset(PULP_GPU_RUNTIME_COMMIT "{COMMIT}")')
@@ -371,6 +380,19 @@ class VellumDriftTests(unittest.TestCase):
         self.assertTrue(any("pulp.lock pins" in p for p in audit.pulp_lock_agreement(stale)))
         self.assertTrue(any("no " + audit.GPU_RUNTIME_ENTRY in p
                             for p in audit.pulp_lock_agreement([])))
+
+    def test_pulp_lock_renderer_digest_is_bound_to_exact_lock_bytes(self) -> None:
+        import hashlib
+        import json
+        lock = json.loads((ROOT / "pulp.lock").read_text(encoding="utf-8"))
+        real = json.loads((ROOT / "tools/deps/manifest.json").read_text(encoding="utf-8"))["dependencies"]
+        payload = b"renderer lock bytes"
+        lock["render_toolchain"]["lock_digest"] = hashlib.sha256(payload).hexdigest()
+        self.assertEqual(audit.renderer_lock_digest_problems(
+            lock, real, lambda *_args: payload), [])
+        lock["render_toolchain"]["lock_digest"] = "0" * 64
+        problems = audit.renderer_lock_digest_problems(lock, real, lambda *_args: payload)
+        self.assertTrue(any("hashes to" in problem for problem in problems), problems)
 
 
 if __name__ == "__main__":
