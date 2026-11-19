@@ -332,9 +332,10 @@ class TimeoutAllowlistTest(unittest.TestCase):
     def _run(self, cmake: str, allow: dict | None):
         with tempfile.TemporaryDirectory() as d:
             m = Path(d) / "x.cmake"
-            m.write_text(cmake)
+            m.write_text(cmake, encoding="utf-8")
             a = Path(d) / "allow.json"
-            a.write_text(json.dumps(allow if allow is not None else {"allow": []}))
+            a.write_text(json.dumps(allow if allow is not None else {"allow": []}),
+                         encoding="utf-8")
             return guard.main([str(m), "--allowlist", str(a)])
 
     SLOW = ("pulp_add_test_suite(pulp-test-base SOURCES a.cpp)\n"

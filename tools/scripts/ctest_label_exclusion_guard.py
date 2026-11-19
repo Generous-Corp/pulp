@@ -549,7 +549,8 @@ def _ctest_inventory(build_dir: Path) -> list[dict] | None:
     try:
         res = subprocess.run(
             ["ctest", "--test-dir", str(build_dir), "--show-only=json-v1"],
-            capture_output=True, text=True, timeout=120, check=False)
+            capture_output=True, text=True, encoding="utf-8",
+            timeout=120, check=False)
         data = json.loads(res.stdout)
     except (OSError, subprocess.SubprocessError, json.JSONDecodeError):
         return None
@@ -568,7 +569,8 @@ def _ctest_inventory(build_dir: Path) -> list[dict] | None:
 def _git(*argv: str) -> str | None:
     import subprocess
     res = subprocess.run(["git", "-C", str(REPO_ROOT), *argv],
-                         capture_output=True, text=True, check=False)
+                         capture_output=True, text=True,
+                         encoding="utf-8", check=False)
     return res.stdout if res.returncode == 0 else None
 
 
