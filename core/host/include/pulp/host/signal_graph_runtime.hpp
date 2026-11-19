@@ -2171,6 +2171,10 @@ class SignalGraph : public format::AudioWorkgroupClient {
     // compile_'s routed-executor, PDC-domain and anticipation-splice build.
     bool build_routed_for_snapshot_(CompiledGraph& cg, double sample_rate, int max_block_size,
                                     CompileMode mode);
+    // compile_'s per-node runtime, mailbox and custom/sample-region callback binding.
+    bool bind_executable_nodes_(
+        CompiledGraph& cg, double sample_rate, int max_block_size,
+        const std::unordered_map<NodeId, std::shared_ptr<PreparedSampleRegion>>& region_by_anchor);
     // Caller holds GraphMutationLock. Includes the live generation after source edits.
     static bool snapshot_has_isolated_plugins_(const CompiledGraph&) noexcept;
     bool has_isolated_plugins_locked_() const noexcept;

@@ -7,6 +7,7 @@
   "owned_paths": [
     "core/host/include/pulp/host/graph_serializer.hpp",
     "core/host/src/graph_serializer.cpp",
+    "core/host/src/graph_serializer_save.cpp",
     "test/test_graph_serializer.cpp",
     "examples/g3-resolved-identity-consumer/main.cpp",
     "docs/evidence/g3-d5-saved-identity-20261111.md",
@@ -25,7 +26,11 @@
     },
     {
       "path": "core/host/src/graph_serializer.cpp",
-      "needles": ["GraphSerializer::inspect_document", "GraphDocumentRefusal::NestingLimitExceeded", "pulp.graph.semantic.v6", "GraphSerializer::to_saved_document", "IdentityBindingDangling"]
+      "needles": ["GraphSerializer::inspect_document", "GraphDocumentRefusal::NestingLimitExceeded", "pulp.graph.semantic.v6", "IdentityBindingDangling"]
+    },
+    {
+      "path": "core/host/src/graph_serializer_save.cpp",
+      "needles": ["GraphSerializer::to_saved_document"]
     },
     {
       "path": "test/test_graph_serializer.cpp",

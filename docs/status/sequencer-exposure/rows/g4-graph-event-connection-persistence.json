@@ -9,6 +9,7 @@
     "core/host/include/pulp/host/graph_history.hpp",
     "core/host/include/pulp/host/signal_graph_subgraph.hpp",
     "core/host/src/graph_serializer.cpp",
+    "core/host/src/graph_serializer_save.cpp",
     "core/host/src/graph_serializer_test_access.hpp",
     "core/host/src/graph_history.cpp",
     "core/host/src/signal_graph_subgraph.cpp",
@@ -22,7 +23,11 @@
   "evidence": [
     {
       "path": "core/host/src/graph_serializer.cpp",
-      "needles": ["validate_event_connections", "event_connection_not_restored", "root.addMember(\"event_connections\", events);"]
+      "needles": ["validate_event_connections", "event_connection_not_restored"]
+    },
+    {
+      "path": "core/host/src/graph_serializer_save.cpp",
+      "needles": ["root.addMember(\"event_connections\", events);"]
     },
     {
       "path": "core/host/src/graph_serializer_test_access.hpp",
