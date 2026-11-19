@@ -1205,18 +1205,45 @@ GPU_RUNTIME_PREFIX_VERSION_RE = re.compile(
 
 
 def strip_cmake_comments(text: str) -> str:
-    """Drop `#` comments (outside double-quoted strings) so a commented-out line proves nothing."""
-    lines = []
-    for line in text.splitlines():
-        quoted = False
-        for index, char in enumerate(line):
-            if char == '"' and (index == 0 or line[index - 1] != "\\"):
-                quoted = not quoted
-            elif char == "#" and not quoted:
-                line = line[:index]
+    """Drop CMake line and bracket comments outside double-quoted strings.
+
+    Bracket comments (``#[[...]]`` and ``#[=[...]=]``) can span lines, so a
+    line-at-a-time scrub would leave fake FetchContent and lock-reader calls
+    visible to the audit. Preserve newlines from removed comments so reports
+    still point at the original source lines.
+    """
+    output: list[str] = []
+    index = 0
+    quoted = False
+    length = len(text)
+    while index < length:
+        char = text[index]
+        if char == '"' and (index == 0 or text[index - 1] != "\\"):
+            quoted = not quoted
+            output.append(char)
+            index += 1
+            continue
+        if not quoted and char == "#":
+            bracket = re.match(r"#(\[=*)\[", text[index:])
+            if bracket:
+                marker = bracket.group(1)
+                closing = "]" + "=" * marker.count("=") + "]"
+                start = index + len(bracket.group(0))
+                end = text.find(closing, start)
+                if end < 0:
+                    end = length
+                output.extend("\n" for value in text[start:end] if value == "\n")
+                index = min(length, end + len(closing)) if end < length else length
+                continue
+            end = text.find("\n", index)
+            if end < 0:
                 break
-        lines.append(line)
-    return "\n".join(lines)
+            output.append("\n")
+            index = end + 1
+            continue
+        output.append(char)
+        index += 1
+    return "".join(output)
 
 
 def cmake_declare_blocks(text: str) -> list[list[str]]:

@@ -187,6 +187,19 @@ class GpuRuntimePinTests(unittest.TestCase):
                   f"GIT_TAG {COMMIT} # GIT_TAG ${{PULP_GPU_RUNTIME_COMMIT}}")
         self.assertFlags("GIT_TAG must be exactly")
 
+    def test_bracket_comment_fake_pin_does_not_count(self) -> None:
+        (self.root / self.GPU).write_text(
+            "#[=[\n"
+            "include(\"${CMAKE_CURRENT_LIST_DIR}/PulpVellumLock.cmake\")\n"
+            "FetchContent_Declare(vellum_gpu_runtime GIT_TAG ${PULP_GPU_RUNTIME_COMMIT})\n"
+            "if(NOT _pulp_gpu_runtime_version STREQUAL PULP_GPU_RUNTIME_VERSION)\n"
+            "pulp_find_gpu_runtime_package(${PULP_GPU_RUNTIME_VERSION})\n"
+            "]=]\n",
+            encoding="utf-8")
+        found = self.problems()
+        self.assertTrue(found, "bracket-comment-only pin must fail closed")
+        self.assertTrue(any("does not include PulpVellumLock.cmake" in item for item in found), found)
+
     def test_a_hand_set_commit_fails(self) -> None:
         self.edit(self.GPU, 'include(FetchContent)',
                   f'include(FetchContent)\nset(PULP_GPU_RUNTIME_COMMIT "{COMMIT}")')
