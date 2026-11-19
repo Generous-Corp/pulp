@@ -409,6 +409,19 @@ class SourceContractsTest(unittest.TestCase):
         pinned += src.count('str(CHECKER_PATH),\n            "--today",')
         self.assertEqual(launches, pinned)
 
+    def test_fixtures_never_read_the_real_clock(self) -> None:
+        # Poka-yoke: a fixture date derived from the real clock drifts away from the pinned
+        # --today, so a test passes on the day it is written and fails a week later.
+        # Fixture dates derive from FIXED_TODAY or TODAY instead.
+        calls = ("date" + ".today(", "datetime" + ".now(", "time" + ".time(", "datetime" + ".utcnow(")
+        lines = Path(__file__).read_text(encoding="utf-8").splitlines()
+        offending = [
+            f"line {n}: {line.strip()}"
+            for n, line in enumerate(lines, 1)
+            if any(call in line for call in calls)
+        ]
+        self.assertEqual(offending, [])
+
     def test_today_override_is_deterministic_regardless_of_real_clock(self) -> None:
         registry = _load_registry()
         entry = _contract(registry, "figma")
@@ -427,11 +440,11 @@ class SourceContractsTest(unittest.TestCase):
 
     def test_due_or_overdue_rechecks_never_fail_strict_and_annotate_on_actions(self) -> None:
         registry = _load_registry()
-        # The CLI checks against the real clock (date.today()), so the "due soon" entry must be
-        # relative to today: a fixed date went overdue once the clock passed it (CI, 2026-11-13).
-        # Due in one day keeps it a warning rather than overdue on any day this runs. Its
-        # verification_note names the date, so the evidence rule still accepts it.
-        due_soon = (dt.date.today() - dt.timedelta(days=2)).isoformat()
+        # The checker runs with --today FIXED_TODAY, so the "due soon" entry is relative to that
+        # pinned date: verified two days earlier with a three-day interval it is due one day
+        # after FIXED_TODAY, inside the warning window and never overdue, whatever the real
+        # date. Its verification_note names the date, so the evidence rule still accepts it.
+        due_soon = (dt.date.fromisoformat(FIXED_TODAY) - dt.timedelta(days=2)).isoformat()
         for source, verified in (("stitch", "2020-01-01"), ("figma", due_soon)):
             entry = _contract(registry, source)
             entry["recheck_interval_days"] = 3
