@@ -1293,6 +1293,47 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
+name = "script-readers-aca8eb206f2c"
+paths = [
+  "tools/scripts/regen_agent_capability_after_merge.py",
+  "tools/scripts/test_regen_agent_capability_after_merge.py",
+]
+tests = [
+  "build-parallelism-guard",
+  "changed-surface-policy-inventory",
+  "changed-surface-policy-selftest",
+  "changed-surface-script-families-drift",
+  "changed-surface-script-families-selftest",
+  "changed-surface-shadow-plans-selftest",
+  "clean-worktree-planning-selftest",
+  "configure-only-selftest",
+  "flake-exoneration-selftest",
+  "gate-common-selftest",
+  "gpu-audio-provider-identity-selftest",
+  "gpu-dpr-runner-selftest",
+  "gpu-first-visible-acceptance-selftest",
+  "gpu-first-visible-campaign-selftest",
+  "gpu-first-visible-external-adapter-selftest",
+  "gpu-first-visible-role-producers-selftest",
+  "gpu-handoff-provenance-selftest",
+  "pr-head-affected-tests-selftest",
+  "pr-head-diff-scoped-registrations",
+  "prepush-receipt",
+  "prepush-refresh-push",
+  "regen-agent-capability-after-merge-selftest",
+  "reuse-policy-replay-selftest",
+  "sample-region-compat-baseline-selftest",
+  "vellum-watch-preflight-selftest",
+  "wide-non-native-selftest",
+]
+build_targets = ["pulp-cli"]
+supported_build_types = [
+  "debug",
+  "release",
+]
+risk_class = "low"
+
+[[families]]
 name = "script-readers-2afe6cdbee82"
 paths = ["tools/scripts/relay_contract_check.py"]
 tests = [
@@ -9108,6 +9149,7 @@ paths = [
   "tools/scripts/queue_age_watchdog.py",
   "tools/scripts/raw_this_async_check.py",
   "tools/scripts/reap_stranded_tracker.py",
+  "tools/scripts/regen_agent_capability_after_merge.py",
   "tools/scripts/relay_contract_check.py",
   "tools/scripts/release_checksum_manifest.py",
   "tools/scripts/release_platform_subset_check.py",
@@ -9379,6 +9421,7 @@ paths = [
   "tools/scripts/test_realtime_pool_resource_locks.py",
   "tools/scripts/test_reap_stranded_tracker.py",
   "tools/scripts/test_refresh_push_check.py",
+  "tools/scripts/test_regen_agent_capability_after_merge.py",
   "tools/scripts/test_relay_contract_check.py",
   "tools/scripts/test_release_breakage_watchdog_wiring.py",
   "tools/scripts/test_release_cache_isolation.py",
@@ -9729,6 +9772,7 @@ paths = [
   "tools/scripts/queue_age_watchdog.py",
   "tools/scripts/raw_this_async_check.py",
   "tools/scripts/reap_stranded_tracker.py",
+  "tools/scripts/regen_agent_capability_after_merge.py",
   "tools/scripts/relay_contract_check.py",
   "tools/scripts/release_checksum_manifest.py",
   "tools/scripts/release_platform_subset_check.py",
@@ -10000,6 +10044,7 @@ paths = [
   "tools/scripts/test_realtime_pool_resource_locks.py",
   "tools/scripts/test_reap_stranded_tracker.py",
   "tools/scripts/test_refresh_push_check.py",
+  "tools/scripts/test_regen_agent_capability_after_merge.py",
   "tools/scripts/test_relay_contract_check.py",
   "tools/scripts/test_release_breakage_watchdog_wiring.py",
   "tools/scripts/test_release_cache_isolation.py",

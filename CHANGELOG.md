@@ -9,6 +9,29 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
      release's bullet block. See docs/guides/versioning.md § Release pipeline
      for the full end-to-end flow. -->
 
+<a id="v11690"></a>
+## [1.169.0] - 2026-11-19
+
+- release/version bump ([#12612](https://github.com/Generous-Corp/pulp/pull/12612))
+- feature/linux x11 gl surface ([#12548](https://github.com/Generous-Corp/pulp/pull/12548))
+- graph/refactor compile2 20261119 ([#12609](https://github.com/Generous-Corp/pulp/pull/12609))
+- graph/refactor serializer3 20261119 ([#12600](https://github.com/Generous-Corp/pulp/pull/12600))
+- fix/main thread scope shared source ([#12605](https://github.com/Generous-Corp/pulp/pull/12605))
+
+<a id="v11680"></a>
+## [1.168.0] - 2026-11-19
+
+- release/version bump ([#12608](https://github.com/Generous-Corp/pulp/pull/12608))
+- fix/mergetree timeout 20261119 ([#12590](https://github.com/Generous-Corp/pulp/pull/12590))
+- fix/gates exit77 20261119 ([#12604](https://github.com/Generous-Corp/pulp/pull/12604))
+- fix/control shipping paren names ([#12602](https://github.com/Generous-Corp/pulp/pull/12602))
+- feature/pulp ui vellum none ([#12591](https://github.com/Generous-Corp/pulp/pull/12591))
+- release/version bump ([#12601](https://github.com/Generous-Corp/pulp/pull/12601))
+- graph/refactor compile1 20261118 ([#12549](https://github.com/Generous-Corp/pulp/pull/12549))
+- fix/slowctest guard 20261119 ([#12592](https://github.com/Generous-Corp/pulp/pull/12592))
+- graph/refactor prepare3 20261118 ([#12583](https://github.com/Generous-Corp/pulp/pull/12583))
+- feature/linux vst3 bundle ([#12547](https://github.com/Generous-Corp/pulp/pull/12547))
+
 <a id="v11661"></a>
 ## [1.166.1] - 2026-11-19
 
@@ -13340,6 +13363,8 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/Generous-Corp/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/Generous-Corp/pulp/pull/2))
 
+[1.169.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.169.0
+[1.168.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.168.0
 [1.166.1]: https://github.com/Generous-Corp/pulp/releases/tag/v1.166.1
 [1.166.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.166.0
 [1.165.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.165.0
