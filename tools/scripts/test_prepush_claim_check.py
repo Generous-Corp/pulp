@@ -262,7 +262,7 @@ prepush_claim_check_final
         env["GIT_CONFIG_GLOBAL"] = os.devnull
         def git(*args):
             return subprocess.run(["git", *args], cwd=repo, env=env,
-                                  check=True, capture_output=True, text=True)
+                                  check=True, capture_output=True, text=True, encoding="utf-8")
         git("init", "-q")
         git("init", "-q", "--bare", str(remote))
         git("config", "user.email", "test@example.invalid")
@@ -280,7 +280,7 @@ prepush_claim_check_final
         if requested_owner is not None:
             env["PULP_AGENT_OWNER"] = requested_owner
         result = subprocess.run(["git", "push", str(remote), "HEAD:refs/heads/test"],
-                                cwd=repo, env=env, capture_output=True, text=True)
+                                cwd=repo, env=env, capture_output=True, text=True, encoding="utf-8")
         remote_head = git("ls-remote", str(remote), "refs/heads/test").stdout.strip()
         return result, remote_head
 
