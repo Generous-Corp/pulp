@@ -940,6 +940,9 @@ mod tests {
             "project({{CLASS_NAME}})\n{{UI_LINE}}\n",
         )
         .unwrap();
+        let templates = td.path().join("tools").join("templates").join("effect");
+        fs::write(templates.join("view.hpp.template"), "struct {{CLASS_NAME}}View {};\n").unwrap();
+        fs::write(templates.join("view.cpp.template"), "// Vellum view\n").unwrap();
         let result = scaffold(&args, &td.path().join("out"), &td.path().join("tools").join("templates"), None, "1.0.0", &mut Vec::new());
         assert!(result.is_ok());
     }
