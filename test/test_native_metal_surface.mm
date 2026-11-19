@@ -12,6 +12,7 @@
 #include "support/thread_progress.hpp"
 #include <pulp/platform/objc_unique_class.hpp>
 
+#include <pulp/platform/test_visibility.hpp>
 #import <AppKit/AppKit.h>
 #import <Metal/Metal.h>
 #import <QuartzCore/CAMetalLayer.h>
@@ -561,7 +562,7 @@ TEST_CASE("the surface reports when its window is shown and hidden",
             if (e.kind == SurfaceEventKind::visibility_changed)
                 seen.push_back(e.visibility);
         });
-        [window orderFrontRegardless];
+        pulp::platform::order_in_window(window, false);
         pump_main(0.2);
         if (!window.isVisible)
             SKIP("no window server; window visibility was not exercised");

@@ -35,6 +35,14 @@ WebView layer across the platforms we have focused proof for:
 - Ubuntu/Linux: CHOC GTK/WebKitGTK backend, focused configure/build/test proof,
   and `pulp-webview-palette` build proof
 
+On Linux the WebView is opt-in per target, not part of the `pulp::view`
+umbrella: WebKitGTK and its JavaScriptCore are shared libraries a desktop may
+not have, so a plug-in on the default view stack needs none of `libgtk-3`,
+`libwebkit2gtk-4.1` or `libjavascriptcoregtk-4.1` at run time. A target that
+shows a `WebViewPanel` links `pulp::view-webview` itself. Without the GTK3 and
+WebKitGTK development files, `PULP_BUILD_WEBVIEW=ON` warns and builds without
+the WebView instead of failing the configure.
+
 This is enough to claim native backend availability behind
 `PULP_BUILD_WEBVIEW=ON` on those hosts when the required dependencies are
 installed. It is not yet a claim that every higher-level WebView workflow has

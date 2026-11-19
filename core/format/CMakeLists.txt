@@ -83,6 +83,7 @@ target_sources(pulp-format-core PRIVATE
     src/editor_package.cpp
     src/contract_editor_session.cpp
     src/main_thread_timer.cpp
+    src/host_run_loop_lease.cpp
     src/ara.cpp
     src/ara_factory.cpp
     src/ios_audio_session.cpp
@@ -262,6 +263,9 @@ if(PULP_HAS_VST3)
         # The editor-host contract's IPlugView; view-free like the adapter.
         src/vst3_contract_view.cpp
     )
+    if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+        target_sources(pulp-format-core PRIVATE src/vst3_host_run_loop.cpp)
+    endif()
     target_link_libraries(pulp-format-core PUBLIC vst3-sdk)
     # PULP_VST3_GUI must stay defined here. It guards createView()'s body in
     # vst3_adapter.cpp; without it createView() returns nullptr, which is legal
@@ -283,6 +287,7 @@ if(PULP_HAS_CLAP)
     target_sources(pulp-format-view PRIVATE
         src/clap_adapter.cpp
         src/clap_contract_gui.cpp
+        src/clap_host_run_loop.cpp
         src/clap_remote_controls.cpp
         src/clap_note_name.cpp
     )
@@ -300,6 +305,7 @@ if(PULP_HAS_CLAP)
     add_library(pulp-format-clap-core
         src/clap_adapter.cpp
         src/clap_contract_gui.cpp
+        src/clap_host_run_loop.cpp
         src/clap_remote_controls.cpp
         src/clap_note_name.cpp
     )

@@ -1376,6 +1376,10 @@ pulp_add_test_suite(pulp-test-clipboard GROUP pulp-test-group-core-platform
 pulp_add_test_suite(pulp-test-file-dialog GROUP pulp-test-group-core-platform
     LIBRARIES pulp::platform)
 
+# Windows text conversion and COM apartment policy (portable header, runs everywhere)
+pulp_add_test_suite(pulp-test-win-text-convert GROUP pulp-test-group-core-platform
+    LIBRARIES pulp::platform)
+
 # binary_unique_name: names unique to the binary that holds the code.
 pulp_add_test_suite(pulp-test-binary-unique-name GROUP pulp-test-group-core-platform
     LIBRARIES pulp::platform)

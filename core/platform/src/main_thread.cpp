@@ -40,7 +40,10 @@ struct MainThreadScopeState : std::enable_shared_from_this<MainThreadScopeState>
     std::mutex mutex;
     bool alive = true;
     std::deque<std::function<void()>> queue;
-    CFRunLoopSourceRef source = nullptr;
+    // Whether this scope is on the shared source's pending list.
+    bool scheduled = false;
+    // Whether this scope counts as a user of the shared source.
+    bool holds_source = false;
     // Timers bound to this scope; touched only on the main thread.
     std::vector<MainThreadTimerState*> timers;
     // Teardown hooks; touched only on the main thread.
@@ -48,47 +51,111 @@ struct MainThreadScopeState : std::enable_shared_from_this<MainThreadScopeState>
     std::uint64_t next_teardown_id = 1;
     bool tearing_down = false;
 
-    ~MainThreadScopeState() {
-        if (source != nullptr)
-            CFRelease(source);
+    bool post(std::function<void()> fn);
+};
+
+// One run-loop source for every scope in the process. A source per scope made
+// the run loop walk every live scope's source on each wake, so thousands of idle
+// scopes cost the main thread real time with nothing to run. Scopes that have
+// work wait on `pending`; the source is signalled once and its callback visits
+// only them. The source exists while at least one scope does, so no run-loop
+// callback into this binary remains once the last scope is gone.
+struct SharedSource {
+    std::mutex mutex;
+    std::size_t users = 0;
+    CFRunLoopSourceRef source = nullptr;
+    std::vector<std::weak_ptr<MainThreadScopeState>> pending;
+
+    static SharedSource& instance() {
+        // Never destroyed: a scope in a plug-in's statics may outlive main().
+        static SharedSource* shared = new SharedSource;
+        return *shared;
     }
 
-    bool post(std::function<void()> fn) {
-        if (!fn)
-            return false;
+    // Main thread. False when the source cannot be made.
+    bool acquire() {
         std::lock_guard<std::mutex> lock(mutex);
-        if (!alive)
-            return false;
-        queue.push_back(std::move(fn));
-        // Signal under the lock so a concurrent shutdown cannot invalidate the
-        // source between the alive check and the signal.
-        CFRunLoopSourceSignal(source);
-        CFRunLoopWakeUp(CFRunLoopGetMain());
+        if (users == 0) {
+            CFRunLoopSourceContext context{};
+            context.perform = &SharedSource::perform;
+            source = CFRunLoopSourceCreate(kCFAllocatorDefault, 0, &context);
+            if (source == nullptr)
+                return false;
+            CFRunLoopAddSource(CFRunLoopGetMain(), source, kCFRunLoopCommonModes);
+        }
+        ++users;
         return true;
     }
 
-    static void perform(void* info) {
-        g_callouts.fetch_add(1, std::memory_order_relaxed);
-        auto* raw = static_cast<MainThreadScopeState*>(info);
-        // A task may destroy the scope; keep the state alive for this pass.
-        std::shared_ptr<MainThreadScopeState> self = raw->shared_from_this();
+    // Main thread, after the scope stopped taking posts.
+    void release() {
+        std::lock_guard<std::mutex> lock(mutex);
+        if (users == 0 || --users != 0)
+            return;
+        pending.clear();
+        CFRunLoopSourceInvalidate(source);
+        CFRelease(source);
+        source = nullptr;
+    }
+
+    // Any thread, with the scope's own mutex held and its queue non-empty.
+    void schedule(std::weak_ptr<MainThreadScopeState> scope) {
+        std::lock_guard<std::mutex> lock(mutex);
+        if (source == nullptr)
+            return;
+        pending.push_back(std::move(scope));
+        CFRunLoopSourceSignal(source);
+        CFRunLoopWakeUp(CFRunLoopGetMain());
+    }
+
+    static void perform(void*);
+};
+
+bool MainThreadScopeState::post(std::function<void()> fn) {
+    if (!fn)
+        return false;
+    std::lock_guard<std::mutex> lock(mutex);
+    if (!alive)
+        return false;
+    queue.push_back(std::move(fn));
+    if (!scheduled) {
+        scheduled = true;
+        SharedSource::instance().schedule(weak_from_this());
+    }
+    return true;
+}
+
+void SharedSource::perform(void*) {
+    g_callouts.fetch_add(1, std::memory_order_relaxed);
+    std::vector<std::weak_ptr<MainThreadScopeState>> visit;
+    {
+        SharedSource& shared = instance();
+        std::lock_guard<std::mutex> lock(shared.mutex);
+        visit.swap(shared.pending);
+    }
+    for (auto& weak : visit) {
+        // A task may destroy its scope; keep the state alive for this pass.
+        std::shared_ptr<MainThreadScopeState> self = weak.lock();
+        if (!self)
+            continue;
         std::deque<std::function<void()>> batch;
         {
             std::lock_guard<std::mutex> lock(self->mutex);
+            self->scheduled = false;
             if (!self->alive)
-                return;
+                continue;
             batch.swap(self->queue);
         }
         for (auto& task : batch) {
             {
                 std::lock_guard<std::mutex> lock(self->mutex);
                 if (!self->alive)
-                    return; // the scope died during this pass: drop the rest
+                    break; // the scope died during this pass: drop the rest
             }
             run_contained(task);
         }
     }
-};
+}
 
 struct MainThreadTimerState : std::enable_shared_from_this<MainThreadTimerState> {
     std::weak_ptr<MainThreadScopeState> scope;
@@ -150,10 +217,25 @@ std::uint64_t main_thread_callouts() noexcept {
     return g_callouts.load(std::memory_order_relaxed);
 }
 
+std::size_t main_thread_source_count() noexcept {
+    SharedSource& shared = SharedSource::instance();
+    std::lock_guard<std::mutex> lock(shared.mutex);
+    return shared.source != nullptr ? 1 : 0;
+}
+
 } // namespace detail
 
 bool main_thread_supported() noexcept {
     return true;
+}
+
+// The main run loop is always there: a host's own loop is never needed.
+HostRunLoopToken register_host_run_loop(HostRunLoop&) {
+    return 0;
+}
+
+bool unregister_host_run_loop(HostRunLoopToken) {
+    return false;
 }
 
 bool is_main_thread() noexcept {
@@ -161,14 +243,10 @@ bool is_main_thread() noexcept {
 }
 
 MainThreadScope::MainThreadScope() : state_(std::make_shared<detail::MainThreadScopeState>()) {
-    CFRunLoopSourceContext context{};
-    context.info = state_.get();
-    context.perform = &detail::MainThreadScopeState::perform;
-    state_->source = CFRunLoopSourceCreate(kCFAllocatorDefault, 0, &context);
-    if (state_->source != nullptr)
-        CFRunLoopAddSource(CFRunLoopGetMain(), state_->source, kCFRunLoopCommonModes);
-    else
+    if (!detail::SharedSource::instance().acquire())
         state_->alive = false;
+    else
+        state_->holds_source = true;
 }
 
 MainThreadScope::~MainThreadScope() {
@@ -176,9 +254,9 @@ MainThreadScope::~MainThreadScope() {
         std::lock_guard<std::mutex> lock(state_->mutex);
         state_->alive = false;
         state_->queue.clear();
-        if (state_->source != nullptr)
-            CFRunLoopSourceInvalidate(state_->source);
     }
+    if (state_->holds_source)
+        detail::SharedSource::instance().release();
     // Timers are bound on the main thread, and so is this destructor.
     auto timers = std::move(state_->timers);
     for (auto* timer : timers)
@@ -205,6 +283,10 @@ void MainThreadScope::remove_teardown(std::uint64_t id) {
             return;
         }
     }
+}
+
+MainThreadScope::FdWatch MainThreadScope::watch_fd(int, std::function<void()>) {
+    return {};
 }
 
 bool MainThreadScope::post(std::function<void()> fn) {
@@ -299,61 +381,6 @@ std::chrono::microseconds MainThreadTimer::tolerance() const {
         return std::chrono::microseconds(0);
     return std::chrono::microseconds(
         static_cast<long long>(CFRunLoopTimerGetTolerance(state_->timer) * 1.0e6));
-}
-
-#else // !__APPLE__
-
-namespace detail {
-struct MainThreadScopeState {};
-struct MainThreadTimerState {};
-std::uint64_t main_thread_callouts() noexcept {
-    return 0;
-}
-} // namespace detail
-
-bool main_thread_supported() noexcept {
-    return false;
-}
-
-bool is_main_thread() noexcept {
-    return false;
-}
-
-MainThreadScope::MainThreadScope() : state_(std::make_shared<detail::MainThreadScopeState>()) {}
-MainThreadScope::~MainThreadScope() = default;
-bool MainThreadScope::post(std::function<void()>) {
-    return false;
-}
-MainThreadScope::Handle MainThreadScope::handle() const {
-    return Handle(state_);
-}
-std::uint64_t MainThreadScope::add_teardown(std::function<void()>) {
-    return 0;
-}
-void MainThreadScope::remove_teardown(std::uint64_t) {}
-MainThreadScope::Handle::Handle(std::weak_ptr<detail::MainThreadScopeState> state)
-    : state_(std::move(state)) {}
-bool MainThreadScope::Handle::post(std::function<void()>) const {
-    return false;
-}
-bool MainThreadScope::Handle::alive() const {
-    return !state_.expired();
-}
-
-MainThreadTimer::MainThreadTimer(MainThreadScope&, std::function<void()>)
-    : state_(std::make_shared<detail::MainThreadTimerState>()) {}
-MainThreadTimer::~MainThreadTimer() = default;
-void MainThreadTimer::fire_after(std::chrono::milliseconds) {}
-void MainThreadTimer::fire_every(std::chrono::milliseconds) {}
-void MainThreadTimer::cancel() {}
-bool MainThreadTimer::pending() const {
-    return false;
-}
-std::optional<std::chrono::steady_clock::time_point> MainThreadTimer::next_fire() const {
-    return std::nullopt;
-}
-std::chrono::microseconds MainThreadTimer::tolerance() const {
-    return std::chrono::microseconds(0);
 }
 
 #endif

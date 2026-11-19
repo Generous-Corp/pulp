@@ -259,6 +259,295 @@ class TreeTest(unittest.TestCase):
         self.assertGreater(len(names), 50)
 
 
+def long_timeouts(text: str) -> list[str]:
+    """Names of registrations in `text` that raise TIMEOUT without an excluded label."""
+    with tempfile.NamedTemporaryFile("w", suffix=".cmake", delete=False) as fh:
+        fh.write(text)
+        path = Path(fh.name)
+    try:
+        regs = guard.scan_timeouts(path)
+        return [r.name for r in guard.find_unlabelled_long_timeouts(regs, EXCLUDED)]
+    finally:
+        path.unlink()
+
+
+class LongTimeoutTest(unittest.TestCase):
+    """A raised TIMEOUT declares a long runtime; it must stay off the required gate."""
+
+    def test_planted_literal_timeout_without_label_is_flagged(self):
+        self.assertEqual(long_timeouts(
+            "add_test(NAME slow-thing COMMAND foo)\n"
+            "set_tests_properties(slow-thing PROPERTIES TIMEOUT 300)\n"),
+            ["slow-thing"])
+
+    def test_set_tests_properties_flags_every_listed_name(self):
+        self.assertEqual(long_timeouts(
+            "set_tests_properties(old-one new-one PROPERTIES TIMEOUT 300)\n"),
+            ["old-one", "new-one"])
+
+    def test_suite_timeout_without_label_is_flagged(self):
+        self.assertEqual(long_timeouts(
+            "pulp_add_test_suite(pulp-test-fft SOURCES a.cpp TIMEOUT 600)\n"),
+            ["pulp-test-fft"])
+
+    def test_catch_discover_properties_timeout_is_flagged(self):
+        self.assertEqual(long_timeouts(
+            "catch_discover_tests(pulp-test-x PROPERTIES TIMEOUT 900)\n"),
+            ["pulp-test-x"])
+
+    def test_scaled_variable_timeout_is_resolved_and_flagged(self):
+        self.assertEqual(long_timeouts(
+            "pulp_scaled_test_timeout(_t 900)\n"
+            'catch_discover_tests(pulp-test-x PROPERTIES TIMEOUT "${_t}")\n'),
+            ["pulp-test-x"])
+
+    def test_slow_label_passes(self):
+        self.assertEqual(long_timeouts(
+            "pulp_add_test_suite(pulp-test-x TIMEOUT 600 LABELS slow)\n"), [])
+
+    def test_labels_inside_properties_pass(self):
+        self.assertEqual(long_timeouts(
+            "set_tests_properties(t PROPERTIES TIMEOUT 300 LABELS \"a;slow\")\n"), [])
+
+    def test_timeout_at_or_below_default_passes(self):
+        self.assertEqual(long_timeouts(
+            "set_tests_properties(t PROPERTIES TIMEOUT 120)\n"
+            "set_tests_properties(u PROPERTIES TIMEOUT 30)\n"), [])
+
+    def test_no_timeout_is_a_clean_control(self):
+        self.assertEqual(long_timeouts(
+            "pulp_add_test_suite(pulp-test-x SOURCES a.cpp)\n"
+            "set_tests_properties(t PROPERTIES LABELS cmake)\n"), [])
+
+    def test_unresolved_timeout_variable_fails_closed(self):
+        # A budget the scan cannot read may resolve above the gate default at
+        # configure time, so it is flagged rather than passed.
+        self.assertEqual(long_timeouts(
+            "set_tests_properties(t PROPERTIES TIMEOUT ${LONG_TIMEOUT})\n"),
+            ["t"])
+
+    def test_unresolved_timeout_with_slow_label_passes(self):
+        self.assertEqual(long_timeouts(
+            "set_tests_properties(t PROPERTIES TIMEOUT ${LONG_TIMEOUT} "
+            "LABELS slow)\n"), [])
+
+    def test_timeout_variable_is_resolved_transitively(self):
+        self.assertEqual(long_timeouts(
+            "set(_base 600)\n"
+            'set(LONG_TIMEOUT "${_base}")\n'
+            "set_tests_properties(t PROPERTIES TIMEOUT ${LONG_TIMEOUT})\n"),
+            ["t"])
+
+    def test_transitive_short_timeout_is_a_clean_control(self):
+        self.assertEqual(long_timeouts(
+            "set(_base 60)\n"
+            "pulp_scaled_test_timeout(SHORT_TIMEOUT ${_base})\n"
+            "set_tests_properties(t PROPERTIES TIMEOUT ${SHORT_TIMEOUT})\n"), [])
+
+    def test_conflicting_timeout_definitions_fail_closed(self):
+        self.assertEqual(long_timeouts(
+            "if(APPLE)\n  set(_t 60)\nelse()\n  set(_t 600)\nendif()\n"
+            "set_tests_properties(t PROPERTIES TIMEOUT ${_t})\n"), ["t"])
+
+    def test_unresolved_labels_fail_closed(self):
+        self.assertEqual(long_timeouts(
+            "set_tests_properties(t PROPERTIES TIMEOUT 300 LABELS ${LABELS_VAR})\n"),
+            ["t"])
+
+    def test_labels_variable_resolving_to_slow_passes(self):
+        self.assertEqual(long_timeouts(
+            'set(_labels "cmake;slow")\n'
+            'set_tests_properties(t PROPERTIES TIMEOUT 300 LABELS "${_labels}")\n'),
+            [])
+
+    def test_labels_variable_resolving_to_no_excluded_label_is_flagged(self):
+        self.assertEqual(long_timeouts(
+            'set(_labels "cmake;sdk")\n'
+            'set_tests_properties(t PROPERTIES TIMEOUT 300 LABELS "${_labels}")\n'),
+            ["t"])
+
+    def test_labels_in_a_separate_call_are_aggregated(self):
+        self.assertEqual(long_timeouts(
+            "add_test(NAME t COMMAND foo)\n"
+            "set_tests_properties(t PROPERTIES TIMEOUT 300)\n"
+            "set_tests_properties(t PROPERTIES LABELS slow)\n"), [])
+
+    def test_separate_call_with_unrelated_label_does_not_rescue(self):
+        self.assertEqual(long_timeouts(
+            "set_tests_properties(t PROPERTIES TIMEOUT 300)\n"
+            "set_tests_properties(t PROPERTIES LABELS cmake)\n"), ["t"])
+
+    def test_suite_registrations_are_not_aggregated(self):
+        # Two registrations of one target are two distinct ctest populations:
+        # the slow-labelled sibling does not rescue the unlabelled long one.
+        self.assertEqual(long_timeouts(
+            "pulp_add_test_suite(pulp-test-x SOURCES a.cpp TIMEOUT 600)\n"
+            'catch_discover_tests(pulp-test-x TEST_SPEC "[slow]" LABELS slow)\n'),
+            ["pulp-test-x"])
+
+    def test_unrelated_label_does_not_rescue(self):
+        self.assertEqual(long_timeouts(
+            "set_tests_properties(t PROPERTIES TIMEOUT 300 LABELS cmake)\n"),
+            ["t"])
+
+    def test_comment_is_ignored(self):
+        self.assertEqual(long_timeouts(
+            "# set_tests_properties(t PROPERTIES TIMEOUT 300)\n"), [])
+
+
+class TimeoutAllowlistTest(unittest.TestCase):
+    def _run(self, cmake: str, allow: dict | None):
+        with tempfile.TemporaryDirectory() as d:
+            m = Path(d) / "x.cmake"
+            m.write_text(cmake, encoding="utf-8")
+            a = Path(d) / "allow.json"
+            a.write_text(json.dumps(allow if allow is not None else {"allow": []}),
+                         encoding="utf-8")
+            return guard.main([str(m), "--allowlist", str(a)])
+
+    SLOW = ("pulp_add_test_suite(pulp-test-base SOURCES a.cpp)\n"
+            "set_tests_properties(ok PROPERTIES TIMEOUT 600 LABELS slow)\n"
+            "set_tests_properties(t PROPERTIES TIMEOUT 300)\n")
+
+    def test_planted_violation_fails(self):
+        self.assertEqual(self._run(self.SLOW, None), 1)
+
+    def test_allowlisted_violation_passes(self):
+        self.assertEqual(self._run(self.SLOW, {"allow": [], "timeout_allow": [
+            {"target": "t", "reason": "pre-existing, long by design"}]}), 0)
+
+    def test_entry_without_reason_is_rejected(self):
+        self.assertEqual(self._run(self.SLOW, {"allow": [], "timeout_allow": [
+            {"target": "t", "reason": ""}]}), 1)
+
+    def test_unresolved_timeout_fails_main_unless_allowlisted(self):
+        cmake = ("pulp_add_test_suite(pulp-test-base SOURCES a.cpp)\n"
+                 "set_tests_properties(t PROPERTIES TIMEOUT ${LONG_TIMEOUT})\n")
+        self.assertEqual(self._run(cmake, None), 1)
+        self.assertEqual(self._run(cmake, {"allow": [], "timeout_allow": [
+            {"target": "t", "reason": "pre-existing unresolved"}]}), 0)
+
+    def test_unresolved_labels_fail_main_unless_allowlisted(self):
+        cmake = ("pulp_add_test_suite(pulp-test-base SOURCES a.cpp)\n"
+                 "set_tests_properties(t PROPERTIES TIMEOUT 300 LABELS ${L})\n")
+        self.assertEqual(self._run(cmake, None), 1)
+        self.assertEqual(self._run(cmake, {"allow": [], "timeout_allow": [
+            {"target": "t", "reason": "pre-existing unresolved"}]}), 0)
+
+    def test_stale_entry_fails(self):
+        clean = ("pulp_add_test_suite(pulp-test-base SOURCES a.cpp)\n"
+                 "set_tests_properties(ok PROPERTIES TIMEOUT 600 LABELS slow)\n")
+        self.assertEqual(self._run(clean, {"allow": [], "timeout_allow": [
+            {"target": "ok", "reason": "pre-existing, no longer needed"}]}), 1)
+
+    def test_shipped_ledger_matches_the_tree(self):
+        regs = []
+        for p in guard.iter_default_targets():
+            regs.extend(guard.scan_timeouts(p))
+        self.assertGreater(len(regs), 100)
+        excluded = guard.read_excluded_labels(guard.REPO_ROOT / guard.POLICY_FILE)
+        found = {r.name for r in guard.find_unlabelled_long_timeouts(regs, excluded)}
+        allowed = set(guard.read_timeout_allowlist(guard.REPO_ROOT / guard.ALLOWLIST_FILE))
+        self.assertEqual(found, allowed)
+
+
+LAST_TEST_LOG = """Start testing: Nov 19 00:00 UTC
+----------------------------------------------------------
+1/2 Testing: fast-one
+1/2 Test: fast-one
+Command: "/x/fast"
+Test Passed.
+"fast-one" end time: Nov 19 00:00 UTC
+"fast-one" time elapsed: 00:00:01
+----------------------------------------------------------
+2/2 Testing: fft-big
+2/2 Test: fft-big
+Test Passed.
+"fft-big" end time: Nov 19 00:02 UTC
+"fft-big" time elapsed: 00:02:05
+----------------------------------------------------------
+"""
+
+
+class RuntimeCheckTest(unittest.TestCase):
+    def test_last_test_log_is_parsed(self):
+        self.assertEqual(guard.parse_last_test_log(LAST_TEST_LOG),
+                         {"fast-one": 1.0, "fft-big": 125.0})
+
+    def test_junit_is_parsed(self):
+        xml = ('<testsuite><testcase name="a" time="2.5"/>'
+               '<testcase name="b" time="40"/></testsuite>')
+        self.assertEqual(guard.parse_junit_times(xml), {"a": 2.5, "b": 40.0})
+
+    def test_changed_registration_over_threshold_without_label_is_flagged(self):
+        new = "add_test(NAME fft-big COMMAND x)\n"
+        out = guard.runtime_violations(
+            changed_names=["fft-big"], times={"fft-big": 125.0},
+            labels={"fft-big": []}, excluded=EXCLUDED, limit=30.0)
+        self.assertEqual([n for n, _t in out], ["fft-big"])
+        self.assertTrue(new)
+
+    def test_labelled_slow_test_passes(self):
+        self.assertEqual(guard.runtime_violations(
+            ["fft-big"], {"fft-big": 125.0}, {"fft-big": ["slow"]},
+            EXCLUDED, 30.0), [])
+
+    def test_fast_test_passes(self):
+        self.assertEqual(guard.runtime_violations(
+            ["fast-one"], {"fast-one": 1.0}, {}, EXCLUDED, 30.0), [])
+
+    def test_unchanged_slow_test_is_not_this_diffs_problem(self):
+        self.assertEqual(guard.runtime_violations(
+            [], {"fft-big": 125.0}, {}, EXCLUDED, 30.0), [])
+
+    def test_changed_registrations_are_the_set_difference(self):
+        old = "add_test(NAME a COMMAND x)\nadd_test(NAME b COMMAND y)\n"
+        new = ("add_test(NAME a COMMAND x)\nadd_test(NAME b COMMAND z)\n"
+               "add_test(NAME c COMMAND w)\n")
+        got = guard.changed_runtime_names(old, new)
+        self.assertEqual(sorted(got), ["b", "c"])
+
+    def test_no_change_is_a_clean_control(self):
+        t = "add_test(NAME a COMMAND x)\n"
+        self.assertEqual(guard.changed_runtime_names(t, t), [])
+
+    def test_suite_target_maps_to_its_ctest_names(self):
+        inventory = [{"name": "case one", "exe": "pulp-test-fft", "labels": []},
+                     {"name": "other", "exe": "pulp-test-y", "labels": []}]
+        names, labels = guard.names_for_targets(["pulp-test-fft"], inventory)
+        self.assertEqual(names, ["case one"])
+        self.assertEqual(labels, {"case one": []})
+
+    def test_missing_timing_data_is_a_loud_skip_not_a_pass(self):
+        import contextlib
+        import io
+        buf = io.StringIO()
+        with tempfile.TemporaryDirectory() as d, contextlib.redirect_stderr(buf):
+            rc = guard.main(["--runtime-base", "origin/main", "--build-dir", d])
+        # Distinct from both pass (0) and fail (1): the callers report it as
+        # NOT CHECKED rather than folding it into a pass.
+        self.assertEqual(rc, guard.EXIT_NOT_CHECKED)
+        self.assertNotIn(rc, (0, 1))
+        self.assertIn("SKIPPED", buf.getvalue())
+        self.assertIn("NOT CHECKED", buf.getvalue())
+
+    def test_static_failure_outranks_a_runtime_skip(self):
+        import contextlib
+        import io
+        with tempfile.TemporaryDirectory() as d:
+            m = Path(d) / "x.cmake"
+            m.write_text("pulp_add_test_suite(pulp-test-base SOURCES a.cpp)\n"
+                         "set_tests_properties(t PROPERTIES TIMEOUT 300)\n",
+                         encoding="utf-8")
+            a = Path(d) / "allow.json"
+            a.write_text(json.dumps({"allow": []}), encoding="utf-8")
+            with contextlib.redirect_stderr(io.StringIO()):
+                rc = guard.main([str(m), "--allowlist", str(a),
+                                 "--runtime-base", "origin/main",
+                                 "--build-dir", d])
+        self.assertEqual(rc, 1)
+
+
 class ArgumentHandlingTest(unittest.TestCase):
     """A guard that shrugs at its own command line reports a green run over
     nothing. Each case below returned 0 before argparse landed."""

@@ -71,8 +71,17 @@ endif()
 # `error: could not execute process \`rustc -vV\``. Verify rustc is both found
 # AND runnable so an incomplete toolchain SKIPS the experimental CLI instead of
 # breaking the whole build (this is what wedged the required macOS CI lane).
-find_program(RUSTC_EXECUTABLE rustc
-    HINTS "$ENV{HOME}/.cargo/bin" "$ENV{USERPROFILE}/.cargo/bin")
+# Honor Cargo's explicit compiler overrides before discovering the default.
+# Bind the selected compiler below: PATH can otherwise make Cargo execute a
+# different rustc from the one this configure validated (and miss target std).
+if(NOT "$ENV{RUSTC}" STREQUAL "")
+    set(RUSTC_EXECUTABLE "$ENV{RUSTC}")
+elseif(NOT "$ENV{CARGO_BUILD_RUSTC}" STREQUAL "")
+    set(RUSTC_EXECUTABLE "$ENV{CARGO_BUILD_RUSTC}")
+else()
+    find_program(RUSTC_EXECUTABLE rustc
+        HINTS "$ENV{HOME}/.cargo/bin" "$ENV{USERPROFILE}/.cargo/bin")
+endif()
 
 if(NOT RUSTC_EXECUTABLE)
     message(STATUS
@@ -167,6 +176,7 @@ set(_pulp_rs_manifest_inputs
 add_custom_command(
     OUTPUT "${_pulp_rs_cargo_bin}" "${_pulp_rs_dest_bin}"
     COMMAND ${CMAKE_COMMAND} -E env
+        "RUSTC=${RUSTC_EXECUTABLE}"
         "CARGO_TARGET_DIR=${_pulp_rs_target_dir}"
         "PULP_RS_BUILD_VERSION=${PROJECT_VERSION}"
         ${CARGO_EXECUTABLE} build ${_pulp_rs_cargo_args}
@@ -212,6 +222,7 @@ if(PULP_BUILD_TESTS)
 
     add_test(NAME pulp-rust-gpu-trace-analysis-unit
         COMMAND ${CMAKE_COMMAND} -E env
+            "RUSTC=${RUSTC_EXECUTABLE}"
             "CARGO_TARGET_DIR=${_pulp_rs_test_target_dir}"
             ${CARGO_EXECUTABLE} test ${_pulp_rs_lock_args}
             --manifest-path "${CMAKE_CURRENT_SOURCE_DIR}/Cargo.toml"
@@ -219,7 +230,8 @@ if(PULP_BUILD_TESTS)
     set_tests_properties(pulp-rust-gpu-trace-analysis-unit
         PROPERTIES RESOURCE_LOCK pulp-rs-cargo-test LABELS "trace;gpu;rust")
     add_test(NAME pulp-rust-gpu-trace-analysis-integration
-        COMMAND ${Python3_EXECUTABLE}
+        COMMAND ${CMAKE_COMMAND} -E env "RUSTC=${RUSTC_EXECUTABLE}"
+            ${Python3_EXECUTABLE}
             "${CMAKE_CURRENT_SOURCE_DIR}/tests/run_trace_gpu_analysis_integration.py"
             --cargo "${CARGO_EXECUTABLE}"
             --target-dir "${_pulp_rs_test_target_dir}"
@@ -238,6 +250,7 @@ if(PULP_BUILD_TESTS)
     # re-running through a checkout's own CLI, before any configure.
     add_test(NAME pulp-rust-stale-cli-guard
         COMMAND ${CMAKE_COMMAND} -E env
+            "RUSTC=${RUSTC_EXECUTABLE}"
             "CARGO_TARGET_DIR=${_pulp_rs_test_target_dir}"
             ${CARGO_EXECUTABLE} test ${_pulp_rs_lock_args}
             --manifest-path "${CMAKE_CURRENT_SOURCE_DIR}/Cargo.toml"
@@ -263,6 +276,7 @@ if(PULP_BUILD_TESTS)
     endforeach()
     add_test(NAME pulp-rust-cli-cargo-tests
         COMMAND ${CMAKE_COMMAND} -E env
+            "RUSTC=${RUSTC_EXECUTABLE}"
             "CARGO_TARGET_DIR=${_pulp_rs_test_target_dir}"
             ${CARGO_EXECUTABLE} test ${_pulp_rs_lock_args}
             --manifest-path "${CMAKE_CURRENT_SOURCE_DIR}/Cargo.toml"
@@ -273,6 +287,7 @@ if(PULP_BUILD_TESTS)
         TIMEOUT 900)
     add_test(NAME pulp-rust-cli-doc-tests
         COMMAND ${CMAKE_COMMAND} -E env
+            "RUSTC=${RUSTC_EXECUTABLE}"
             "CARGO_TARGET_DIR=${_pulp_rs_test_target_dir}"
             ${CARGO_EXECUTABLE} test ${_pulp_rs_lock_args}
             --manifest-path "${CMAKE_CURRENT_SOURCE_DIR}/Cargo.toml"

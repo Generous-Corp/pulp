@@ -451,8 +451,8 @@
           "repo": "Generous-Corp/pulp",
           "path": "core/view/platform/mac/window_host_mac.mm",
           "state": "pulp-owned-retained",
-          "revision": "ce1fccaf96b9eb8a2c39829faeea13e90e9678e8",
-          "object_id": "ea60f7bd8b5b5a03a9a73e82b80db128645ef46a",
+          "revision": "12423ff4dc0fcbe6d97aed148ae47841dc654d70",
+          "object_id": "7a22dc64f747e34f5b1bf29c3b33c6be10b5b654",
           "object_type": "blob"
         },
         {
@@ -2743,8 +2743,8 @@
           "repo": "Generous-Corp/pulp",
           "path": ".agents/skills/screenshot/SKILL.md",
           "state": "pulp-owned-retained",
-          "revision": "3594e5b77e00c8310887459585a3a44a25a40e97",
-          "object_id": "6768334c8853c87d6cd3b979d33fa3f3b79ab779",
+          "revision": "12423ff4dc0fcbe6d97aed148ae47841dc654d70",
+          "object_id": "41fde1a4136333609e541e70bb0a658fb0c8da10",
           "object_type": "blob"
         },
         {
@@ -2775,8 +2775,8 @@
           "repo": "Generous-Corp/pulp",
           "path": ".agents/skills/view-bridge/SKILL.md",
           "state": "pulp-owned-retained",
-          "revision": "6cbdec62259403941891e328b3db137ca285e3b5",
-          "object_id": "8f7e30a22909a96e394378a178bd290ff1ed8259",
+          "revision": "12423ff4dc0fcbe6d97aed148ae47841dc654d70",
+          "object_id": "8aef44d110190bf376aa2bb5fe221d8bb180fc82",
           "object_type": "blob"
         },
         {
@@ -3010,8 +3010,8 @@
           "repo": "Generous-Corp/pulp",
           "path": ".github/workflows/release-cli.yml",
           "state": "pulp-owned-retained",
-          "revision": "625967544e1f071b6ae7b580e023dd4efc788352",
-          "object_id": "345e3db78726bdedb99c5d6941352602975b3867",
+          "revision": "341fed49b8184decd844c8394b1180f92371299f",
+          "object_id": "3a061833d199d32a3a37770da40095b12a610d03",
           "object_type": "blob"
         },
         {
@@ -3058,8 +3058,8 @@
           "repo": "Generous-Corp/pulp",
           "path": "tools/scripts/release_product_matrix.json",
           "state": "pulp-owned-retained",
-          "revision": "d457374b2baac217fe57cad135f785db458067c3",
-          "object_id": "fcdf118f368e2768dd2657b8b2a1bf0589007b5e",
+          "revision": "cef3efe18b46e8d03d5c5f0900f609f487992c96",
+          "object_id": "96e9f18487dffa35aafdc4231eec1a4091a15d4b",
           "object_type": "blob"
         },
         {
@@ -3074,8 +3074,8 @@
           "repo": "Generous-Corp/pulp",
           "path": "tools/scripts/test_release_artifact_contents.py",
           "state": "pulp-owned-retained",
-          "revision": "b84d29787992fbdd724fa9695945c99a811f18ee",
-          "object_id": "591bd865bd6ad8e103b66146c632d957b636b9e3",
+          "revision": "3f82dbdb2bac84048a5fb295b735aefb89be2e5c",
+          "object_id": "d095194c4eaa7fbcbee98c84398ca8e69144f94c",
           "object_type": "blob"
         }
       ],

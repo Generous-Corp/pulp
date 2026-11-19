@@ -251,6 +251,14 @@ authenticated rootless `gh`. The job account receives neither client nor token.
 
 ## The Linux x64 lanes run on macpro (Proxmox)
 
+> **Retired 2026-11-18.** macpro is powered off and out of CI. Its pool had been
+> wedged since 2026-11-07 on a golden that carried a runner version GitHub
+> deprecated, and it produced no green Linux job in the 28 days before. x64
+> Linux and Windows run on GitHub-hosted runners. `.shipyard/config.toml` lists
+> the host as `active = false`. Nothing was deleted on the host; the revive
+> steps are in the fleet handbook (`docs/ssh.md`, "Retired hosts"). The rest of
+> this section describes the pool as it was and as it would run again.
+
 Ephemeral x86_64 Proxmox VMs run on **macpro** — a Late-2013 Mac Pro
 (Xeon E5-1650 v2, 6c/12t, 31 GB) repurposed as a Linux CI host. The
 repository-scoped pool retains its existing operator-dispatch behavior and five
@@ -1118,6 +1126,17 @@ baked in, not installed per job.
    - ccache: run the same commit twice, cold then warm. The second shows
      `ccache remote storage: read-write` and a hit rate near the cacheable
      count. The Build step needs a compiling `main`.
+
+## A push to main builds Linux for the caches and does not test it
+
+The push run of `build.yml` exists to publish the Linux and Windows ccache and
+FetchContent caches; only a default-branch run writes a cache every pull request
+can restore. Its `Test (non-Windows)` step took about 46 of each 65 minutes and
+failed on every run for a week (tracked in the `PARKED/linux` issue), and the
+merge group already runs the suite on the exact commit that lands. A push
+therefore skips that step. Set the repository variable `PULP_PUSH_LINUX_TESTS`
+to `1` to run it on push again; pull requests, merge groups and manual
+dispatches are not affected by the variable.
 
 ## Windows runs nightly, not per merge
 
@@ -2967,6 +2986,16 @@ unlock so queued waiters keep one inode. Tests may set the trusted, absolute
 `PULP_BUILD_DIR_LOCK_ROOT` override; production uses durable per-user
 application state with owner-only permissions (or the user's inherited profile
 ACL on Windows), rather than an OS-purgeable cache or runtime directory.
+Default-configured processes first acquire the shared
+`pulp-build-dir-locks-<user>` coordination lock under the system temp directory,
+then ordinary processes also take the durable host-state lock when it is writable.
+This keeps confined and ordinary processes on one lock identity; if the shared
+coordination root is unavailable, the build fails closed. An explicit
+`PULP_BUILD_DIR_LOCK_ROOT` uses only that root and is never replaced.
+Known limits: a sandbox with a private `/tmp` mount cannot share this lock
+(set `PULP_BUILD_DIR_LOCK_ROOT` to a path every participant sees), and wrappers
+from checkouts that predate this change take only the durable host-state lock,
+so serialization against them resumes once the checkout is updated.
 
 Interactive builds take the same lock without waiting. `tools/ci/governed-build.sh`
 runs every `cmake --build <dir>` under `build_dir_lock.py --no-wait`, which refuses a

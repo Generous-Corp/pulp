@@ -25,6 +25,11 @@ start, the sanitizer and coverage lanes included, routes it to the lane's
 GitHub-hosted fallback. See [local-ci.md](local-ci.md) for the rule and its
 lint.
 
+The retired MacPro Linux pool is also excluded from workflow routing. If the
+legacy `PULP_LOCAL_LINUX_RUNS_ON_JSON` or `PULP_AUTO_LINUX_RUNS_ON_JSON`
+setting still contains `pulp-host-macpro`, the workflow uses hosted Linux until
+the setting is removed and a replacement pool is proven.
+
 The required gate is **serialized on self-hosted macOS runners** and takes
 about 40 min (median 39.8 min of wall-clock over 45 sampled `pull_request`
 runs). Keeping it
@@ -200,6 +205,35 @@ still runs `source-selftest`, a Linux or Windows push excludes only
 [`.shipyard/config.toml`](../../.shipyard/config.toml) (`[validation.default]`,
 `test =`).
 
+### Long-running tests need the `slow` label
+
+The required gate runs ctest with `--timeout 120`, and a per-test `TIMEOUT`
+property overrides that default. A registration that raises `TIMEOUT` above 120
+therefore declares a test that can run for minutes on the merge-blocking lane,
+where a 125 s case surfaces only as a late timeout. `ctest_label_exclusion_guard.py`
+(the `ctest-label-exclusion-guard` ctest, `gates.sh` and pre-push) fails when a
+`pulp_add_test_suite`, `catch_discover_tests` or `set_tests_properties`
+registration raises `TIMEOUT` above 120 without a label the gate excludes
+(`slow` in practice). Resolve it by shrinking the fixture or adding
+`LABELS slow`. The check fails closed on values it cannot read: a `TIMEOUT` or
+`LABELS` value built from a variable is resolved through `set()` and
+`pulp_scaled_test_timeout()` calls in the same manifest, and one that still does
+not resolve (assigned in another file, or differently in two branches) counts
+as a long budget with no excluded label. Labels set in a separate
+`set_tests_properties` call on the same test name are combined with its
+`TIMEOUT`; `set_property(TEST ...)` is not read. Registrations that predate the
+rule are frozen under `timeout_allow` in
+`tools/scripts/ctest_label_exclusion_guard.json`; a stale entry fails the
+guard, so delete a line when its registration is fixed.
+
+With `--runtime-base REF` (gates and pre-push pass it) the guard also reads the
+local build's `Testing/Temporary/LastTest.log` and fails when a registration
+added or edited against `REF` ran over 30 s without such a label. With no timing
+data it prints a loud `SKIPPED ... NOT CHECKED` line and exits 3 once the static
+checks pass. `gates.sh` lists that under NOT CHECKED (a pass with an uncovered
+item, not a full pass) and pre-push prints it without blocking, so the runtime
+rule is enforced only where local timing data exists.
+
 ### Installed-SDK consumers on the macOS gate
 
 An installed-SDK consumer test runs `cmake --install` into a scratch prefix,
@@ -250,6 +284,13 @@ stopped compiling and no Pulp check noticed.
   requests that touch the package, its test, or the two CMake files that own its
   option and test registration (`integrations/CMakeLists.txt` and the root
   `CMakeLists.txt`) run the lane.
+- **Editor package and audio display.** The same configure also turns on
+  `PULP_ENABLE_PULP_VELLUM_AUDIO` and builds `pulp-test-pulp-vellum-editor` and
+  `pulp-test-pulp-vellum-audio`, whose ctest labels (`pulp-vellum-editor`,
+  `pulp-vellum-audio`) the `-L pulp-vellum` filter also matches. The editor
+  tests need Vellum's view layer (`Vellum::MirrorView_core`), which is in Vellum
+  main's SDK but not in the v0.2.0 release, so this lane, which builds against
+  main, is where they run until `pulp.lock` pins a release that ships it.
 - **Negative control.** Every full run recompiles one Vellum-side translation
   unit (`knob_panel.cpp`) with `-fsyntax-only`, once against the SDK as
   published, which must succeed, and once against a copy of its mirror headers
@@ -587,6 +628,23 @@ both directions: the sanitizer lane goes red exactly as before, while every othe
 lane quietly stops exercising the code. `pulp-test-control-runtime-closure-sanitizer-guard`
 asserts whichever direction is true for the build it is compiled into, so each
 lane checks its own.
+
+## Windows: tests render offscreen by default
+
+A test must not put a window on the developer's screen. ctest exports
+`PULP_TEST_OFFSCREEN=1` for every registered test (the root `CMakeLists.txt`
+adds a `TEST_INCLUDE_FILES` script that sets it unless the caller already
+did). Under it the macOS window hosts, popup panels and test fixtures present
+into an ordered-in window that is fully transparent, click-through and never
+activates the application (`pulp/platform/test_visibility.hpp`); the SDL host
+parks its window outside the display. Presentation stays real, so a test that
+checks frames are presented still passes. Running an app by hand is unaffected.
+
+A visible window is opt-in with `PULP_TEST_SHOW_WINDOWS=1`. Tests that need
+it: `pulp-test-mac-hover-cursor-live` (drives the real pointer; it skips under
+the default) and the REAPER real-DAW smoke (`tools/testing/daw-smoke`, which
+launches a real host outside ctest). New tests use `order_in_window` rather
+than `makeKeyAndOrderFront`, or park the window far off screen.
 
 ## Adding a test — where will it land?
 

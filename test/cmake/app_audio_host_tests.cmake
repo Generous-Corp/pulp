@@ -799,7 +799,7 @@ pulp_add_test_suite(pulp-test-identity LIBRARIES pulp::runtime)
 # WebView tests (requires PULP_BUILD_WEBVIEW — WebViewPanel::create is only compiled when ON)
 if(PULP_BUILD_WEBVIEW)
     add_executable(pulp-test-webview test_web_view.cpp)
-    target_link_libraries(pulp-test-webview PRIVATE pulp::view Catch2::Catch2WithMain)
+    target_link_libraries(pulp-test-webview PRIVATE pulp::view pulp::view-webview Catch2::Catch2WithMain)
     catch_discover_tests(pulp-test-webview)
 
     # G2: examples/webview-plugin native-editor retention + host-agnostic attach.
@@ -807,7 +807,7 @@ if(PULP_BUILD_WEBVIEW)
     # WebViewPanel) and includes the example header directly.
     pulp_add_test_suite(pulp-test-webview-plugin-example
         SOURCES test_webview_plugin_example.cpp
-        LIBRARIES pulp::format pulp::view pulp::state)
+        LIBRARIES pulp::format pulp::view pulp::view-webview pulp::state)
 endif()
 
 # WebView backend detection smoke — always built. Validates that
@@ -1159,9 +1159,10 @@ if((PULP_HAS_VST3 OR PULP_HAS_CLAP) AND NOT (PULP_IOS OR ANDROID OR EMSCRIPTEN O
     if(PULP_HAS_VST3)
         add_dependencies(pulp-test-host-probe-bundles PulpHostProbe_VST3)
         # CMake's BUNDLE property is Apple-only: on macOS the VST3 is the
-        # .vst3 bundle directory, elsewhere the linker output is a plain module
-        # that PluginSlot's VST3 loader opens directly.
-        if(APPLE)
+        # .vst3 bundle directory, on Linux the build assembles the SDK-layout
+        # bundle, and PluginSlot's VST3 loader opens either.
+        if(APPLE OR UNIX)
+            # Linux loads the SDK-layout bundle the build assembles.
             set(_pulp_host_probe_vst3 "${CMAKE_BINARY_DIR}/VST3/Pulp Host Probe.vst3")
         else()
             set(_pulp_host_probe_vst3 "$<TARGET_FILE:PulpHostProbe_VST3>")

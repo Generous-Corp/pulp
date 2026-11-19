@@ -72,8 +72,9 @@ if(UNIX AND NOT APPLE AND TARGET pulp-native AND PULP_NATIVE_HAS_X11)
     endif()
     # xvfb-run -a picks a free display number but races when several start at
     # once, hence the lock.
+    pulp_scaled_test_timeout(_pulp_native_x11_timeout 120)
     # Every property here takes one value, and LABELS comes last: Catch2 folds
     # whatever follows LABELS into the labels.
     catch_discover_tests(pulp-test-native-gl-surface-x11
-        PROPERTIES ${_pulp_x11_test_env} TIMEOUT 120 RESOURCE_LOCK pulp_xvfb LABELS native-surface)
+        PROPERTIES ${_pulp_x11_test_env} TIMEOUT "${_pulp_native_x11_timeout}" RESOURCE_LOCK pulp_xvfb LABELS native-surface)
 endif()

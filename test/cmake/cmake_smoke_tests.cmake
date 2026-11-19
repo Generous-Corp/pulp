@@ -887,6 +887,14 @@ if(PULP_PYTHON3_FOR_TESTS)
         set_tests_properties(prepush-receipt PROPERTIES
             LABELS "tooling;hooks"
             TIMEOUT 180)
+        # The pre-push hook's last step refuses a push while any other actor
+        # holds a live repair-claim on the branch's open PR (fake gh, no network).
+        add_test(NAME prepush-claim-check
+            COMMAND ${PULP_PYTHON3_FOR_TESTS}
+                ${CMAKE_SOURCE_DIR}/tools/scripts/test_prepush_claim_check.py)
+        set_tests_properties(prepush-claim-check PROPERTIES
+            LABELS "tooling;hooks"
+            TIMEOUT 60)
         # An auto-merge-armed or queued PR re-based onto main by hand (same PR
         # diff, newer main base) gets an advisory hint; a content change, an
         # unarmed PR, a failing or hanging lookup, and the override stay silent.
@@ -1485,6 +1493,14 @@ add_test(NAME cmake-pulp-add-plugin-editor-stack
 set_tests_properties(cmake-pulp-add-plugin-editor-stack PROPERTIES
     LABELS "cmake;format" TIMEOUT 120)
 
+add_test(NAME cmake-pulp-vellum-editor-package
+    COMMAND ${CMAKE_COMMAND}
+        -DPULP_SOURCE_DIR=${CMAKE_SOURCE_DIR}
+        -DFIXTURE_DIR=${CMAKE_CURRENT_BINARY_DIR}/pulp-vellum-editor-package
+        -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/test_pulp_vellum_editor_package.cmake)
+set_tests_properties(cmake-pulp-vellum-editor-package PROPERTIES
+    LABELS "cmake;format;vellum" TIMEOUT 120)
+
 add_test(NAME cmake-control-shipping-matrix
     COMMAND ${CMAKE_COMMAND}
         -DPULP_SOURCE_DIR=${CMAKE_SOURCE_DIR}
@@ -1551,6 +1567,16 @@ add_test(NAME cmake-control-shipping-fresh-stamp
         -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/test_control_shipping_fresh_stamp.cmake)
 set_tests_properties(cmake-control-shipping-fresh-stamp PROPERTIES
     LABELS "cmake;control;ship" TIMEOUT 60)
+
+if(APPLE)
+    add_test(NAME cmake-control-shipping-paren-name
+        COMMAND ${CMAKE_COMMAND}
+            -DPULP_SOURCE_DIR=${CMAKE_SOURCE_DIR}
+            -DFIXTURE_DIR=${CMAKE_CURRENT_BINARY_DIR}/control-shipping-paren-name
+            -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/test_control_shipping_paren_name.cmake)
+    set_tests_properties(cmake-control-shipping-paren-name PROPERTIES
+        LABELS "cmake;control;ship" TIMEOUT 60)
+endif()
 
 add_test(NAME cmake-pulp-add-sparkle
     COMMAND ${CMAKE_COMMAND}

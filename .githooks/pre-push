@@ -60,6 +60,64 @@ if ! PREPUSH_UPDATE_RECORDS="$(cat)"; then
     echo "✗ pre-push: failed to capture Git's pushed-ref records; refusing to validate an unknown source tree." >&2
     exit 1
 fi
+# Git passes the actual push destination as $2.  Keep it for the final claim
+# check; consulting origin here would inspect the wrong repository when a push
+# targets another remote.
+PREPUSH_REMOTE_URL="${2:-}"
+
+# Live repair-claim check from ANY actor, run immediately before every path that
+# allows the push (including PULP_SKIP_PREPUSH and demoted gates). It reads the
+# comments of every open PR for each updated branch; a read failure warns and
+# allows (CI and the repair lane still check), a live foreign claim refuses. PULP_REPAIR_CLAIM_ID names your own.
+prepush_claim_check_final() {
+    # This is deliberately the final check: the gates above can take minutes,
+    # so a repair claim is read as close as possible to Git sending the push.
+    CLAIM_CHECK="$ROOT/tools/scripts/prepush_claim_check.py"
+    if [ -f "$CLAIM_CHECK" ]; then
+        _claim_repo=""
+        _claim_branch=""
+        _claim_origin="${PREPUSH_REMOTE_URL:-}"
+        if [[ "$_claim_origin" =~ github\.com[:/]([^/]+)/([^/]+)$ ]]; then
+            _claim_repo="${BASH_REMATCH[1]}/${BASH_REMATCH[2]}"
+            _claim_repo="${_claim_repo%.git}"
+        fi
+        while read -r _claim_local _claim_local_sha _claim_remote _claim_remote_sha _claim_extra; do
+            [ -n "${_claim_remote:-}" ] || continue
+            [ -n "${_claim_local_sha:-}" ] || continue
+            case "$_claim_remote" in
+                refs/heads/*)
+                    case "$_claim_local_sha" in
+                        0000000000000000000000000000000000000000) continue ;;
+                    esac
+                    _claim_branch="${_claim_remote#refs/heads/}"
+                    if [ -n "$_claim_repo" ]; then
+                        "${PULP_PYTHON:-python3}" "$CLAIM_CHECK" --repo "$_claim_repo" --branch "$_claim_branch"
+                        _claim_rc=$?
+                        if [ "$_claim_rc" -eq 1 ]; then
+                            exit 1
+                        fi
+                    fi
+                    ;;
+            esac
+        done <<< "$PREPUSH_UPDATE_RECORDS"
+        unset _claim_repo _claim_branch _claim_origin _claim_local _claim_local_sha \
+            _claim_remote _claim_remote_sha _claim_extra _claim_rc
+    fi
+}
+
+# An agent lane may only push from the active worktree it owns. Humans leave
+# PULP_AGENT_OWNER unset and retain the historical behavior.
+if [ -n "${PULP_AGENT_OWNER:-}" ]; then
+    "$ROOT/tools/scripts/worktree_lineage.sh" assert-owner --path "$ROOT" --owner "$PULP_AGENT_OWNER"
+    _owner_rc=$?
+    if [ "$_owner_rc" -eq 3 ]; then
+        echo "✗ pre-push: active worktree ownership does not match PULP_AGENT_OWNER=$PULP_AGENT_OWNER; refusing push." >&2
+        exit 1
+    elif [ "$_owner_rc" -ne 0 ]; then
+        echo "[pre-push] worktree ownership check could not run (exit $_owner_rc); continuing." >&2
+    fi
+    unset _owner_rc
+fi
 
 # Resolve the configured interpreter before any advisory helper runs. GUI
 # environments may omit Homebrew from PATH, while PYTHON may be a command name
@@ -261,6 +319,7 @@ fi
 if [ "${PULP_SKIP_PREPUSH:-0}" = "1" ]; then
     echo "[pre-push] PULP_SKIP_PREPUSH=1 — skipping gates." >&2
     prepush_receipt_note skipped all-gates "PULP_SKIP_PREPUSH=1"
+    prepush_claim_check_final
     exit 0
 fi
 
@@ -1080,10 +1139,11 @@ fi
 # the condition is a property of a target's whole registration set and can live
 # in a manifest this push never touched. Sub-second, offline.
 if [ -f "$LABEL_EXCLUSION" ]; then
-    run_gate_captured "$PYTHON" "$LABEL_EXCLUSION"
+    run_gate_captured "$PYTHON" "$LABEL_EXCLUSION" --runtime-base "$BASE"
     gate_rc=$?; case $gate_rc in
         0) ;;
-        1) echo "[pre-push] ctest label-exclusion guard: a Catch2 suite reaches neither the required gate nor coverage — run \`python3 tools/scripts/ctest_label_exclusion_guard.py\` for the target list." >&2; prepush_fail ;;
+        1) echo "[pre-push] ctest label-exclusion guard: a Catch2 suite reaches neither the required gate nor coverage, or a registration raises TIMEOUT above 120s without the slow label — run \`python3 tools/scripts/ctest_label_exclusion_guard.py\` for the target list." >&2; prepush_fail ;;
+        3) echo "[pre-push] ctest label-exclusion guard: static checks passed; slow-test runtime NOT CHECKED (no local CTest timing data)." >&2 ;;
         *) gate_could_not_run "ctest_label_exclusion_guard" "$gate_rc"; prepush_fail ;;
     esac
 fi
@@ -1239,6 +1299,7 @@ fi
 # diff-cover gate only.
 
 if [ "$fail" = "0" ] && [ "$diff_cover_failed" = "0" ] && [ "$compat_flip_failed" = "0" ]; then
+    prepush_claim_check_final
     if [ "$_prepush_diff_cover_refused" = "1" ]; then
         # A refused lane is not a pass; say so in the verdict itself.
         echo "[pre-push] gates clean except diff coverage: NOT CHECKED (gate host; run tools/scripts/local_diff_cover.sh on a TARTCI_ROLE=light host such as m1, or a disposable VM)." >&2
@@ -1271,6 +1332,7 @@ fi
 
 if [ "$fail" = "0" ] && [ "$diff_cover_failed" = "0" ] && [ "$compat_flip_failed" = "0" ]; then
     echo "[pre-push] gate failures present but demoted by env override; push allowed. Fix before merging." >&2
+    prepush_claim_check_final
     if [ "$_prepush_diff_cover_refused" = "1" ]; then
         echo "[pre-push] diff coverage: NOT CHECKED (gate host; run tools/scripts/local_diff_cover.sh on a TARTCI_ROLE=light host such as m1, or a disposable VM)." >&2
     fi

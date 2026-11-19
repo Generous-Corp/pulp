@@ -112,6 +112,25 @@ web list a wasm-safe definition, as `isolated_plugin_slot_web.cpp` does for
 `is_isolated_plugin_slot`, and add the symbol to the closure selftest in
 `tools/scripts/test_sample_region_compat_baseline.py`.
 
+**A new serializer source joins the web list too.** `graph_serializer.cpp` is
+compiled into that same curated profile, so splitting it into a new
+`graph_serializer_*.cpp` (persisted sample-region validation lives in
+`graph_serializer_regions.cpp`, plugin node resolution in
+`graph_serializer_plugin_resolver.cpp`, the save path in
+`graph_serializer_save.cpp`) needs the new file in `pulp-host`, in
+`PulpSampleRegionWebSources.cmake`, and in the `COMPAT_INPUTS` of
+`tools/scripts/sample_region_compat_baseline.py` with its two
+`test/ctest_script_inputs` JSON copies. Missing it from the web list builds
+natively and fails only at `wasm-ld`. The plugin scanner is native-only:
+`PULP_GRAPH_SERIALIZER_WITHOUT_PLUGIN_SCANNER` and the scanner includes live
+in `graph_serializer_plugin_resolver.cpp` alone, behind the private
+`detail::PluginNodeResolver` whose web variant leaves every plugin node an
+unresolved placeholder; keep scanner types out of its header and out of
+`graph_serializer.cpp`. Format constants, writer bounds and the node identity
+spelling that the save and load units share live in the private
+`graph_serializer_internal.hpp`, so the writer and the readers cannot drift
+apart.
+
 **Recover a terminal isolated node by republishing, never by re-preparing.**
 An isolated graph refuses a second eager `prepare()`, `begin_swap_edit()` and
 prepared topology edits, so `recover_isolated_graph_node()` publishes the fresh
@@ -985,7 +1004,10 @@ save/reopen render proof beside the legacy caller-owned route controls.
   `process(ProcessBuffers&, midi_in, midi_out, param_events, n, const
   format::ProcessContext&)` overload; a custom node's type sets
   `process_transport` (stateless) or `process_instance_transport` (stateful).
-  `compile_` resolves the capability ONCE into the cached, prepare-stable
+  `compile_` (in its per-node binding pass, `bind_executable_nodes_` in
+  `core/host/src/signal_graph_compile_nodes.cpp`, which also builds each node's
+  runtime, mailboxes and custom/sample-region callbacks) resolves the capability
+  ONCE into the cached, prepare-stable
   `GraphNode::transport_sensitive` (Plugin: from `slot->wants_transport()`;
   Custom: from a non-empty transport callback registration), resolved BEFORE the
   anticipation eligibility analysis. That ONE cached bit is read by BOTH the
@@ -1099,7 +1121,10 @@ save/reopen render proof beside the legacy caller-owned route controls.
   executor/pool/scratch); only the ring mediates against the consumer.
 - **Anticipation splice (`set_anticipation_enabled`, default OFF; runs on the
   canonical executor path).** When enabled + the routed snapshot is eligible + the
-  graph has an eligible latent interior, `compile_` builds an `AnticipationLane` +
+  graph has an eligible latent interior, `compile_` (through
+  `build_routed_for_snapshot_` in `core/host/src/signal_graph_compile_routed.cpp`,
+  which also builds the serial/parallel routed snapshots and picks the PDC
+  domain) builds an `AnticipationLane` +
   a `skip_mask` over the routed plan (the interior nodes) + a prefill map (each
   lane output channel → the interior boundary-source's `exec_pool` output slot).
   The host drives `pump_anticipation()` from ONE background thread (the producer);
@@ -1169,6 +1194,31 @@ save/reopen render proof beside the legacy caller-owned route controls.
   allocator), move the authoring containers, and call the Slot's noexcept
   prepared publication. Never put an allocating `emplace` or ordinary
   `Slot::publish` after that boundary.
+  When the edit carries an authored prepared description, `prepare()` rebuilds
+  it from the compiled serial routed snapshot through
+  `detail::capture_prepared_description` in
+  `core/host/src/signal_graph_prepared_description_capture.cpp`. That function
+  reads the candidate only through its public accessors and returns nullptr
+  (mapped to `PreflightFailed`) on any plan, edge, port or slot mismatch; keep
+  the domain gate that needs the private `CompiledGraph` in `prepare()`.
+  `ExecutionSnapshot::export_prepared_description` still validates the same
+  record separately.
+  The admission gates that run before the candidate compiles (stale base,
+  spectral and MIDI-output refusals, baseline removal, preflight, and the
+  processor, plugin and custom lifecycle checks that also prepare instances
+  minted inside the edit) live in `admission_result_` in
+  `core/host/src/signal_graph_prepared_edit_admission.cpp`. It acquires the
+  candidate lock into the caller's `std::optional<GraphMutationLock>` so the
+  lock stays held through compile and runtime adoption; a new gate belongs
+  there, not back in `prepare()`.
+  Runtime-state adoption from the live snapshot (ingress mailboxes, plugin
+  sequence pointers, matching feed-forward PDC rings) lives in the static
+  `adopt_live_runtime_state_` in
+  `core/host/src/signal_graph_prepared_edit_adoption.cpp`. It returns
+  `RuntimeAdoptionFailed` for feedback or mismatched delay tables and
+  `std::nullopt` otherwise; `prepare()` alone stores the prepared snapshot.
+  Keep the dimensions-changed early exit after the mailbox adoption so pending
+  MIDI and parameter batches survive a resize while DSP history starts fresh.
   `set_live_dsp_telemetry_enabled()` is a control-thread operation serialized
   by the graph mutation lock: a prepared commit re-seeds its snapshot from the
   owner's authoritative desired toggle immediately before publication. Do not
@@ -2433,6 +2483,8 @@ Watch out for:
   same-named node), and a v6/v7 pair is refused rather than compared. A
   pre-v4 legacy file is refused as `invalid_format_version`, not
   `logical_identity_missing`; re-save it with `to_saved_document` first.
+  The CLI front end is `tools/cli/cmd_graph_diff.cpp`; `pulp graph probe`,
+  `render` and `report` are in `cmd_graph_probe.cpp` and `cmd_graph_render.cpp`.
 - A graph event connection (`connect_graph_event`) persists ONLY in the
   saved-identity v7 document (`event_connections`, endpoints by authored ID).
   `to_json`/`to_file` refuse a graph that holds one rather than drop it, and a
@@ -3574,6 +3626,10 @@ across loops; round it like the adapters do). The AU "transport state
 changed" flags fire on play/stop too, so never map them to `discontinuity`.
 Convert AUv3 event times with `au_event_block_time()`, not the adapter's
 `au_event_block_offset()`, which clamps out-of-block times into the block.
+`au_event_block_time()` delegates its range rule to the adapter's
+`format::admit_au_event_time()`, so the host and an AU v3 adapter refuse the
+same times (including an in-block offset past `INT32_MAX`). Change the rule in
+`EventTimeAdmission`, never by adding a range check on the host side.
 
 LV2 enters through `clock_from_lv2()`. LV2 has no steady counter at all, so
 the clock is always counter-free: a skipped `run()` is indistinguishable from
@@ -3730,6 +3786,19 @@ A Custom member's state is checked by creating a probe instance, calling
 `load_state`) must carry empty state. The writer applies the same check, so it
 returns an empty string for a member whose live state its type refuses.
 
+Fixed-count voice templates (`instantiate_subgraph_voices`, also in
+`subgraph_persistence.hpp`) expand one template as 1..`kMaxSubgraphVoices`
+voices whose instance identities are derived (`<declaration>.voice.<k>`, index
+k). Each voice saves as an ordinary `subgraphs` record plus one
+`voice_declarations` entry, and restores into
+`SubgraphDocumentLoad::voice_banks`, never into `subgraphs`; pass the banks to
+the four-argument `to_saved_subgraph_document` overload or a re-save drops the
+declaration. Watch out: a graph binds one event edge, so a template that
+declares `event_edge` (itself or in a child) is refused as a voice template
+even for one voice. The declaration is not the `VoiceBankBinding` runtime: no
+allocator state, token, epoch, pedal hold or tail is persisted, and the plain
+`from_saved_document` reader ignores the declaration as it ignores records.
+
 Saved identity strictness: `inspect_document`, `diff_graph_documents` and
 `from_saved_document` rebuild each node's identity string from its saved record
 (numbered by persisted node id, as the writer does) and refuse a mismatch as
@@ -3740,7 +3809,7 @@ that cannot be saved reports the failing rule through `SaveResult::error`
 (`to_saved_file` refuses it with that reason); the older string-returning
 writer overloads keep returning an empty string. The writer and inspection
 build identity strings through one key function (`identity_key` in
-`graph_serializer.cpp`); change the format there, never in only one side, or
+`graph_serializer_internal.hpp`); change the format there, never in only one side, or
 every saved document is refused. The tolerant loader drops a node record it
 cannot add (a second Control index input, a plugin record without plugin info)
 and lists it in `LoadResult::unrestored_node_ids`; `from_saved_document` and

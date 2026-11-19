@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "event_id": "20261118-linux-host-run-loop",
+  "kind": "exported-path-change",
+  "created_at": "2026-11-18T10:07:05Z",
+  "receipt_export_id": "20261107-f0ac0a4ff392",
+  "paths": [
+    "core/platform/include/pulp/platform/main_thread.hpp",
+    "core/platform/src/main_thread.cpp",
+    "core/platform/src/main_thread_host.cpp"
+  ],
+  "vellum_inherits": false,
+  "rationale": "Adds HostRunLoop and register_host_run_loop to the platform layer and a non-Apple MainThreadScope and MainThreadTimer that run through it, for plug-in editors inside a Linux host. The Apple implementation is unchanged apart from registration stubs. This is a Pulp-only edit: Vellum's framework transfer is in effect and Vellum's own editors do not use the platform main-thread layer off Apple."
+}

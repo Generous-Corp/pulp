@@ -2,6 +2,16 @@
 
 Source: `tools/cmake/PulpUtils.cmake`
 
+## Rust CLI compiler selection
+
+When the source build enables `PULP_BUILD_RUST_CLI`, CMake validates the Rust
+compiler and passes that same executable to Cargo for builds and registered
+Cargo tests. Selection uses `RUSTC`, then `CARGO_BUILD_RUSTC`, then the
+`RUSTC_EXECUTABLE` CMake cache entry or compiler discovery. Set overrides before
+configuring and reconfigure when changing them. A later shell `PATH` change
+cannot substitute another compiler. Direct `cargo` commands retain Cargo's
+normal compiler selection.
+
 ## pulp_add_plugin
 
 **Status**: usable
@@ -147,6 +157,21 @@ pulp_add_plugin(MyPlugin FORMATS CLAP VST3 Standalone UI my-ui ...)
 An installed package lists both properties in its targets' `EXPORT_PROPERTIES`
 so they survive `install(EXPORT)`. The package target must exist when
 `pulp_add_plugin()` runs; a missing target or property stops configuration.
+
+With the optional Vellum integration enabled, include
+`integrations/pulp-vellum/cmake/PulpVellumEditorPackage.cmake` and create a concrete package for
+the plug-in's root view type:
+
+```cmake
+pulp_add_vellum_editor_package(pulp::vellum-editor
+    VIEW_HEADER my_plugin/editor.hpp
+    VIEW_TYPE my_plugin::Editor
+    VIEW_INCLUDE_DIRS ${CMAKE_CURRENT_SOURCE_DIR}/include)
+pulp_add_plugin(MyPlugin FORMATS CLAP UI pulp::vellum-editor ...)
+```
+
+The helper generates the ordinary factory function and links the Vellum view
+target only into this package; the parameter bridge remains view-free.
 
 A plug-in that declares a package gets `NO_EDITOR`'s view-free link without
 saying so: its VST3, CLAP, AU v2 and LV2 modules link `Pulp::format-core`

@@ -9,6 +9,108 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
      release's bullet block. See docs/guides/versioning.md § Release pipeline
      for the full end-to-end flow. -->
 
+<a id="v11720"></a>
+## [1.172.0] - 2026-11-19
+
+- release/version bump ([#12620](https://github.com/Generous-Corp/pulp/pull/12620))
+
+<a id="v11710"></a>
+## [1.171.0] - 2026-11-19
+
+- release/version bump ([#12617](https://github.com/Generous-Corp/pulp/pull/12617))
+- feature/pulp vellum audio editor glue ([#12594](https://github.com/Generous-Corp/pulp/pull/12594))
+- fix/capability regen 20261119 ([#12593](https://github.com/Generous-Corp/pulp/pull/12593))
+- graph/refactor compile3 20261119 ([#12613](https://github.com/Generous-Corp/pulp/pull/12613))
+
+<a id="v11700"></a>
+## [1.170.0] - 2026-11-19
+
+- release/version bump ([#12614](https://github.com/Generous-Corp/pulp/pull/12614))
+
+<a id="v11690"></a>
+## [1.169.0] - 2026-11-19
+
+- release/version bump ([#12612](https://github.com/Generous-Corp/pulp/pull/12612))
+- feature/linux x11 gl surface ([#12548](https://github.com/Generous-Corp/pulp/pull/12548))
+- graph/refactor compile2 20261119 ([#12609](https://github.com/Generous-Corp/pulp/pull/12609))
+- graph/refactor serializer3 20261119 ([#12600](https://github.com/Generous-Corp/pulp/pull/12600))
+- fix/main thread scope shared source ([#12605](https://github.com/Generous-Corp/pulp/pull/12605))
+
+<a id="v11680"></a>
+## [1.168.0] - 2026-11-19
+
+- release/version bump ([#12608](https://github.com/Generous-Corp/pulp/pull/12608))
+- fix/mergetree timeout 20261119 ([#12590](https://github.com/Generous-Corp/pulp/pull/12590))
+- fix/gates exit77 20261119 ([#12604](https://github.com/Generous-Corp/pulp/pull/12604))
+- fix/control shipping paren names ([#12602](https://github.com/Generous-Corp/pulp/pull/12602))
+- feature/pulp ui vellum none ([#12591](https://github.com/Generous-Corp/pulp/pull/12591))
+- release/version bump ([#12601](https://github.com/Generous-Corp/pulp/pull/12601))
+- graph/refactor compile1 20261118 ([#12549](https://github.com/Generous-Corp/pulp/pull/12549))
+- fix/slowctest guard 20261119 ([#12592](https://github.com/Generous-Corp/pulp/pull/12592))
+- graph/refactor prepare3 20261118 ([#12583](https://github.com/Generous-Corp/pulp/pull/12583))
+- feature/linux vst3 bundle ([#12547](https://github.com/Generous-Corp/pulp/pull/12547))
+
+<a id="v11661"></a>
+## [1.166.1] - 2026-11-19
+
+- release/version bump ([#12598](https://github.com/Generous-Corp/pulp/pull/12598))
+- graph/refactor serializer2 20261118 ([#12578](https://github.com/Generous-Corp/pulp/pull/12578))
+
+<a id="v11660"></a>
+## [1.166.0] - 2026-11-18
+
+- release/version bump ([#12582](https://github.com/Generous-Corp/pulp/pull/12582))
+- fix/rust cli validated compiler 20261118 ([#12581](https://github.com/Generous-Corp/pulp/pull/12581))
+- graph/refactor prepare2 20261118 ([#12579](https://github.com/Generous-Corp/pulp/pull/12579))
+- ci/linux push tests opt in ([#12550](https://github.com/Generous-Corp/pulp/pull/12550))
+
+<a id="v11650"></a>
+## [1.165.0] - 2026-11-18
+
+- release/version bump ([#12570](https://github.com/Generous-Corp/pulp/pull/12570))
+- ci/macpro retired inventory ([#12543](https://github.com/Generous-Corp/pulp/pull/12543))
+- graph/refactor serializer1 20261118 ([#12563](https://github.com/Generous-Corp/pulp/pull/12563))
+- ci/codeql cpp sharded ([#12546](https://github.com/Generous-Corp/pulp/pull/12546))
+
+<a id="v11640"></a>
+## [1.164.0] - 2026-11-18
+
+- release/version bump ([#12568](https://github.com/Generous-Corp/pulp/pull/12568))
+- fix/windows host port findings ([#12539](https://github.com/Generous-Corp/pulp/pull/12539))
+- feature/linux host run loop ([#12533](https://github.com/Generous-Corp/pulp/pull/12533))
+- feature/offscreen tests default ([#12538](https://github.com/Generous-Corp/pulp/pull/12538))
+- graph/refactor cmdgraph 20261118 ([#12562](https://github.com/Generous-Corp/pulp/pull/12562))
+- graph/fix admission 20261118 ([#12559](https://github.com/Generous-Corp/pulp/pull/12559))
+- fix/release linux native matrix 20261118 ([#12558](https://github.com/Generous-Corp/pulp/pull/12558))
+- graph/refactor prepare1 20261118 ([#12557](https://github.com/Generous-Corp/pulp/pull/12557))
+
+<a id="v11630"></a>
+## [1.163.0] - 2026-11-18
+
+- release/version bump ([#12561](https://github.com/Generous-Corp/pulp/pull/12561))
+- fix/atspi properties errors ([#12555](https://github.com/Generous-Corp/pulp/pull/12555))
+- graph/fix launchfixture 20261118 ([#12542](https://github.com/Generous-Corp/pulp/pull/12542))
+- graph/s1 voices 20261117 ([#12507](https://github.com/Generous-Corp/pulp/pull/12507))
+
+<a id="v11620"></a>
+## [1.162.0] - 2026-11-18
+
+- release/version bump ([#12553](https://github.com/Generous-Corp/pulp/pull/12553))
+- feature/linux optional webview ([#12545](https://github.com/Generous-Corp/pulp/pull/12545))
+- ci/sandbox e2e rust toolchain ([#12532](https://github.com/Generous-Corp/pulp/pull/12532))
+- affected/test cmake fragments 20261117 ([#12488](https://github.com/Generous-Corp/pulp/pull/12488))
+
+<a id="v11610"></a>
+## [1.161.0] - 2026-11-18
+
+- graph/fix review mcp au 20261117 ([#12501](https://github.com/Generous-Corp/pulp/pull/12501))
+- release/version bump ([#12541](https://github.com/Generous-Corp/pulp/pull/12541))
+- feature/linux native surface ([#12531](https://github.com/Generous-Corp/pulp/pull/12531))
+- linux backend review fixes ([#12509](https://github.com/Generous-Corp/pulp/pull/12509))
+- graph/fix review2 20261118 ([#12530](https://github.com/Generous-Corp/pulp/pull/12530))
+- graph/d5 sustain 20261117 ([#12489](https://github.com/Generous-Corp/pulp/pull/12489))
+- ci/flake exoneration main lookback ([#12528](https://github.com/Generous-Corp/pulp/pull/12528))
+
 <a id="v11600"></a>
 ## [1.160.0] - 2026-11-18
 
@@ -13279,6 +13381,18 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/Generous-Corp/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/Generous-Corp/pulp/pull/2))
 
+[1.172.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.172.0
+[1.171.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.171.0
+[1.170.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.170.0
+[1.169.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.169.0
+[1.168.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.168.0
+[1.166.1]: https://github.com/Generous-Corp/pulp/releases/tag/v1.166.1
+[1.166.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.166.0
+[1.165.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.165.0
+[1.164.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.164.0
+[1.163.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.163.0
+[1.162.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.162.0
+[1.161.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.161.0
 [1.160.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.160.0
 [1.159.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.159.0
 [1.158.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.158.0

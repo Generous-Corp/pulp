@@ -429,6 +429,38 @@ class SignalGraph : public format::AudioWorkgroupClient {
     // Remove a node and all its connections
     bool remove_node(NodeId id);
 
+    /// Save the graph's authoring allocators while a caller performs a bounded
+    /// mutation sequence. Removing newly-created nodes does not rewind their
+    /// allocator state, so a refused transaction can use this checkpoint to
+    /// restore the exact next identities. The graph topology remains the
+    /// caller's responsibility and must be rolled back before this checkpoint
+    /// is released.
+    class GraphMutationCheckpoint {
+      public:
+        explicit GraphMutationCheckpoint(SignalGraph& graph) noexcept;
+        ~GraphMutationCheckpoint();
+        GraphMutationCheckpoint(const GraphMutationCheckpoint&) = delete;
+        GraphMutationCheckpoint& operator=(const GraphMutationCheckpoint&) = delete;
+        GraphMutationCheckpoint(GraphMutationCheckpoint&& other) noexcept;
+        GraphMutationCheckpoint& operator=(GraphMutationCheckpoint&& other) noexcept;
+
+        void commit() noexcept;
+        void rollback() noexcept;
+
+      private:
+        SignalGraph* graph_ = nullptr;
+        NodeId next_id_ = 0;
+        std::uint64_t next_connection_identity_ = 0;
+        std::uint64_t authored_id_counter_ = 0;
+        std::uint64_t authored_id_salt_[2] = {0, 0};
+        bool authored_id_seeded_ = false;
+        bool completed_ = false;
+    };
+
+    GraphMutationCheckpoint mutation_checkpoint() noexcept {
+        return GraphMutationCheckpoint(*this);
+    }
+
     /// Rename a node. Its authored ID, ports and connections are unchanged.
     /// Returns false for an unknown node, an empty name, or while a spectral
     /// controller refuses mutation.
@@ -2136,6 +2168,15 @@ class SignalGraph : public format::AudioWorkgroupClient {
     enum class CompileMode { Normal, SwapNoAnticipation };
     std::shared_ptr<CompiledGraph> compile_(double sample_rate, int max_block_size,
                                             CompileMode mode = CompileMode::Normal);
+    // compile_'s routed-executor, PDC-domain and anticipation-splice build.
+    bool build_routed_for_snapshot_(CompiledGraph& cg, double sample_rate, int max_block_size,
+                                    CompileMode mode);
+    // compile_'s per-node runtime, mailbox and custom/sample-region callback binding.
+    bool bind_executable_nodes_(
+        CompiledGraph& cg, double sample_rate, int max_block_size,
+        const std::unordered_map<NodeId, std::shared_ptr<PreparedSampleRegion>>& region_by_anchor);
+    // compile_'s edge bucketing, canonical ordinary-audio ordering and telemetry preparation.
+    void assemble_runtime_(CompiledGraph& cg, int max_block_size);
     // Caller holds GraphMutationLock. Includes the live generation after source edits.
     static bool snapshot_has_isolated_plugins_(const CompiledGraph&) noexcept;
     bool has_isolated_plugins_locked_() const noexcept;

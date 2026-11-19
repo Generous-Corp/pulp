@@ -14,3 +14,4 @@ target_include_directories(pulp-vellum PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>)
 target_compile_features(pulp-vellum PUBLIC cxx_std_20)
 target_link_libraries(pulp-vellum PUBLIC pulp::format-core Vellum::Value)
+include("${PULP_ROOT_DIR}/integrations/pulp-vellum/cmake/PulpVellumEditorPackage.cmake")

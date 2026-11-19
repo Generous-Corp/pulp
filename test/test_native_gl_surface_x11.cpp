@@ -15,6 +15,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <GL/gl.h>
+#include <GL/glx.h>
 #include <X11/Xlib.h>
 #include <X11/Xutil.h>
 #include <X11/keysym.h>
@@ -263,7 +264,38 @@ TEST_CASE("attach makes a child that fills the host window and detach removes it
     REQUIRE(surface->event_fd() == -1);
     REQUIRE(host.children() == 0);
     REQUIRE_FALSE(HostWindow::size_of(conn.display, child, w, h));
-    REQUIRE_FALSE(surface->geometry().in_window);
+    const SurfaceGeometry detached = surface->geometry();
+    REQUIRE_FALSE(detached.in_window);
+    REQUIRE(detached.width == 0.0);
+    REQUIRE(detached.height == 0.0);
+    REQUIRE(detached.scale == 0.0);
+    REQUIRE(detached.drawable_width == 0);
+    REQUIRE(detached.drawable_height == 0);
+}
+
+TEST_CASE("mapping and unmapping updates the on-screen state", "[native][gl-surface][x11]") {
+    HostConnection conn;
+    HostWindow host(conn.display);
+    auto surface = GlSurface::create(any_driver());
+    REQUIRE(surface->attach(host.handle()));
+    std::vector<SurfaceEvent> events;
+    surface->set_listener([&](const SurfaceEvent& e) { events.push_back(e); });
+
+    XUnmapWindow(conn.display, host.window);
+    XSync(conn.display, False);
+    REQUIRE(pump(*surface, conn.display, [&] {
+        return !events.empty() && events.back().kind == SurfaceEventKind::visibility_changed &&
+               !events.back().visibility.window_visible;
+    }));
+    REQUIRE(events.back().visibility.minimized);
+
+    XMapWindow(conn.display, host.window);
+    XSync(conn.display, False);
+    REQUIRE(pump(*surface, conn.display, [&] {
+        return events.back().kind == SurfaceEventKind::visibility_changed &&
+               events.back().visibility.window_visible;
+    }));
+    REQUIRE(events.back().visibility.in_window);
 }
 
 TEST_CASE("a parent that does not exist is refused without ending the process",
@@ -413,6 +445,10 @@ TEST_CASE("the context is made on the client thread and honours a request",
 
     bool made = false;
     bool swapped = false;
+    GLXDrawable drawable = 0;
+    unsigned drawable_config = 0;
+    int context_config = 0;
+    int query_status = -1;
     GlContextReport report;
     std::array<unsigned char, 4> pixel{0, 0, 0, 0};
     on_render_thread([&] {
@@ -420,6 +456,11 @@ TEST_CASE("the context is made on the client thread and honours a request",
         made = gl.make_current();
         if (!made)
             return;
+        drawable = glXGetCurrentDrawable();
+        Display* render_display = glXGetCurrentDisplay();
+        glXQueryDrawable(render_display, drawable, GLX_FBCONFIG_ID, &drawable_config);
+        query_status = glXQueryContext(render_display, glXGetCurrentContext(), GLX_FBCONFIG_ID,
+                                       &context_config);
         report = gl.report();
         glClearColor(0.2f, 0.4f, 0.6f, 1.0f);
         glClear(GL_COLOR_BUFFER_BIT);
@@ -430,6 +471,13 @@ TEST_CASE("the context is made on the client thread and honours a request",
     INFO("GL_VERSION " << report.version << ", GL_RENDERER " << report.renderer);
     REQUIRE(made);
     REQUIRE(swapped);
+    // A GLXWindow is a separate server resource, not the UI thread's raw X
+    // child. Its FBConfig must match the context used for rendering/readback.
+    REQUIRE(drawable != 0);
+    REQUIRE(drawable != child_of(*surface));
+    REQUIRE(query_status == Success);
+    REQUIRE(drawable_config != 0);
+    REQUIRE(drawable_config == static_cast<unsigned>(context_config));
     REQUIRE(first_honoured_request(any_driver().requests, report.major, report.minor,
                                    report.profile) == report.request_index);
     REQUIRE(report.max_texture_size > 0);
@@ -606,6 +654,12 @@ TEST_CASE("invalidate after the host window is gone touches nothing", "[native][
     REQUIRE(pump(*surface, conn.display, [&] { return !surface->geometry().in_window; }));
     REQUIRE_FALSE(kinds.empty());
     REQUIRE(kinds.back() == SurfaceEventKind::window_changed);
+    const SurfaceGeometry gone = surface->geometry();
+    REQUIRE(gone.width == 0.0);
+    REQUIRE(gone.height == 0.0);
+    REQUIRE(gone.scale == 0.0);
+    REQUIRE(gone.drawable_width == 0);
+    REQUIRE(gone.drawable_height == 0);
 
     surface->invalidate();
     REQUIRE(releases == 1);
@@ -885,6 +939,48 @@ TEST_CASE("focus changes reach the handler", "[native][gl-surface][x11]") {
     REQUIRE_FALSE(focus.back());
     XGetInputFocus(conn.display, &holder, &revert);
     REQUIRE(holder != child_of(*surface));
+}
+
+TEST_CASE("a key released while focus was elsewhere is a new press when focus returns",
+          "[native][gl-surface][x11]") {
+    HostConnection conn;
+    HostWindow host(conn.display);
+    auto surface = GlSurface::create(any_driver());
+    REQUIRE(surface->attach(host.handle()));
+    const Window child = child_of(*surface);
+    std::vector<KeyEvent> keys;
+    std::vector<bool> focus;
+    InputHandler handler;
+    handler.key = [&](const KeyEvent& e) {
+        keys.push_back(e);
+        return true;
+    };
+    handler.focus = [&](const FocusEvent& e) { focus.push_back(e.focused); };
+    surface->set_input_handler(handler);
+
+    surface->set_keyboard_focus(KeyboardFocus::keys);
+    REQUIRE(pump(*surface, conn.display, [&] { return !focus.empty(); }));
+    XEvent c_down = key_event(conn.display, child, KeyPress, XK_c);
+    send_to_client(conn.display, child, c_down);
+    REQUIRE(pump(*surface, conn.display, [&] { return keys.size() == 1; }));
+    REQUIRE_FALSE(keys[0].repeat);
+
+    // Focus leaves while C is held; its release goes elsewhere and never
+    // reaches the child.
+    surface->set_keyboard_focus(KeyboardFocus::none);
+    REQUIRE(pump(*surface, conn.display, [&] { return focus.size() >= 2; }));
+    REQUIRE_FALSE(focus.back());
+
+    // Focus returns and C is pressed again: a new press, not a repeat.
+    surface->set_keyboard_focus(KeyboardFocus::keys);
+    REQUIRE(pump(*surface, conn.display, [&] { return focus.size() >= 3; }));
+    REQUIRE(focus.back());
+    keys.clear();
+    send_to_client(conn.display, child, c_down);
+    REQUIRE(pump(*surface, conn.display, [&] { return keys.size() == 1; }));
+    REQUIRE(keys[0].kind == KeyKind::down);
+    REQUIRE(keys[0].key == Key::c);
+    REQUIRE_FALSE(keys[0].repeat);
 }
 
 #if defined(PULP_TEST_HAS_XTEST)

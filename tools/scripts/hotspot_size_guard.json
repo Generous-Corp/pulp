@@ -41,6 +41,61 @@
       "note": "SignalGraph runtime and mutation contract; node, connection, and custom registration declarations must remain outside this header"
     },
     {
+      "path": "core/host/src/graph_serializer.cpp",
+      "max_loc": 3094,
+      "note": "GraphSerializer public entry points, document shape and load; persisted sample-region validation, plugin node resolution, the save path and later split concerns belong in focused graph_serializer_*.cpp units"
+    },
+    {
+      "path": "core/host/src/graph_serializer_plugin_resolver.cpp",
+      "max_loc": 171,
+      "note": "Plugin node resolution for serializer loads (known-root checks, per-format identity scans, the web placeholder stub); the only serializer unit that includes the plugin scanner"
+    },
+    {
+      "path": "core/host/src/graph_serializer_save.cpp",
+      "max_loc": 722,
+      "note": "Serializer save path: writer selection, plain and saved-identity v7 documents, the legacy v6 test writer and durable .pulpgraph file writes"
+    },
+    {
+      "path": "core/host/src/graph_serializer_regions.cpp",
+      "max_loc": 456,
+      "note": "Persisted sample-region metadata, parser-shape and topology validation for serializer loads; reads the graph through public queries only"
+    },
+    {
+      "path": "core/host/src/signal_graph_prepared_topology_edit.cpp",
+      "max_loc": 2659,
+      "note": "Prepared-topology transaction lifecycle; prepared-description capture and other prepare() phases belong in focused signal_graph_prepared_*.cpp units"
+    },
+    {
+      "path": "core/host/src/signal_graph_prepared_description_capture.cpp",
+      "max_loc": 672,
+      "note": "Prepared-description capture from one compiled serial routed snapshot, cross-checked against the authored candidate"
+    },
+    {
+      "path": "core/host/src/signal_graph_prepare.cpp",
+      "max_loc": 1158,
+      "note": "SignalGraph compile/prepare lifecycle; compile_ phases belong in focused signal_graph_compile_*.cpp units"
+    },
+    {
+      "path": "core/host/src/signal_graph_compile_nodes.cpp",
+      "max_loc": 397,
+      "note": "Per-node runtime, mailbox, custom-node and sample-region callback binding for one compiled snapshot"
+    },
+    {
+      "path": "core/host/src/signal_graph_compile_routed.cpp",
+      "max_loc": 306,
+      "note": "Routed-executor snapshot build, PDC execution-domain choice and anticipation splice for one compiled snapshot"
+    },
+    {
+      "path": "core/host/src/signal_graph_prepared_edit_admission.cpp",
+      "max_loc": 198,
+      "note": "Prepared-topology admission gates and new-instance lifecycle preparation run before the candidate compiles"
+    },
+    {
+      "path": "core/host/src/signal_graph_prepared_edit_adoption.cpp",
+      "max_loc": 151,
+      "note": "Prepared-topology runtime-state adoption from the live snapshot: ingress mailboxes, plugin sequence pointers and matching feed-forward PDC rings"
+    },
+    {
       "path": "core/host/src/timeline_graph_binding.cpp",
       "max_loc": 424,
       "note": "Timeline binding lifecycle, realtime processing, and public query shell; candidate construction and route reconciliation belong in their focused units"
