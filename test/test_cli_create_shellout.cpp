@@ -834,6 +834,7 @@ TEST_CASE("pulp create --ci pins the CLI's SDK version and the project configure
     CHECK(r.stderr_output.find("built by cargo alone") == std::string::npos);
     const auto cmake_lists = read_file(out_dir / "CMakeLists.txt");
     CHECK(cmake_lists.find("find_package(Pulp " + expected + " REQUIRED)") != std::string::npos);
+    CHECK(cmake_lists.find("NO_EDITOR") == std::string::npos);
     CHECK(read_file(out_dir / "pulp.toml").find("sdk_version = \"" + expected + "\"") !=
           std::string::npos);
 
@@ -854,5 +855,131 @@ TEST_CASE("pulp create --ci pins the CLI's SDK version and the project configure
     REQUIRE(configure.exit_code == 0);
     CHECK(read_file(out_dir / "build" / "CMakeCache.txt")
               .find("Pulp_DIR:PATH=" + native_path_string(cfg)) != std::string::npos);
+
+    const auto none_dir = tmp.path / "CiGainNone";
+    auto none = run_rust_cli(PULP_RUST_CLI_BINARY,
+                             {"create", "CiGainNone", "--ui", "none", "--type", "effect",
+                              "--output", native_path_string(none_dir), "--no-build", "--ci"},
+                             source_root(), nullptr);
+    INFO(none.stdout_output);
+    INFO(none.stderr_output);
+    REQUIRE_FALSE(none.timed_out);
+    REQUIRE(none.exit_code == 0);
+    const auto none_cmake = read_file(none_dir / "CMakeLists.txt");
+    REQUIRE(none_cmake.find("NO_EDITOR") != std::string::npos);
+    auto none_configure = pulp::platform::ChildProcess::run(
+        PULP_CMAKE_COMMAND,
+        {"-S", native_path_string(none_dir), "-B", native_path_string(none_dir / "build"),
+         "-DCMAKE_PREFIX_PATH=" + native_path_string(sdk),
+         "-DFETCHCONTENT_TRY_FIND_PACKAGE_MODE=NEVER",
+         "-DFETCHCONTENT_SOURCE_DIR_CATCH2=" PULP_CATCH2_SOURCE_DIR,
+         "-DFETCHCONTENT_FULLY_DISCONNECTED=ON"},
+        options);
+    INFO(none_configure.stdout_output);
+    INFO(none_configure.stderr_output);
+    REQUIRE_FALSE(none_configure.timed_out);
+    REQUIRE(none_configure.exit_code == 0);
 #endif
+}
+
+TEST_CASE("pulp-cpp create --ui none scaffolds an audio-only project that configures",
+          "[cli][create][shellout][ui-mode][configure]") {
+    // Drives the C++ CLI directly (PULP_CLI_BINARY / pulp-cpp), so the --ui
+    // parsing and the UI_MODE_LINE substitution are exercised in C++ rather
+    // than only through the Rust front end.
+#if !defined(PULP_CATCH2_SOURCE_DIR)
+    SKIP("no Catch2 source copy in this build to serve the generated project offline");
+#else
+    if (!pulp_binary_exists()) {
+        SKIP("pulp binary not built");
+    }
+    TempDir tmp("pulp-create-ui-none");
+
+    const auto sdk = tmp.path / "stub-sdk";
+    const auto cfg = sdk / "lib" / "cmake" / "Pulp";
+    write_file(cfg / "PulpConfigVersion.cmake",
+               "set(PACKAGE_VERSION \"" PULP_EXPECTED_SDK_VERSION "\")\n"
+               "set(PACKAGE_VERSION_COMPATIBLE TRUE)\n");
+    write_file(cfg / "PulpConfig.cmake",
+               "if(NOT TARGET Pulp::format)\n"
+               "  add_library(Pulp::format INTERFACE IMPORTED)\n"
+               "endif()\n"
+               "function(pulp_add_plugin target)\n"
+               "  set_property(GLOBAL APPEND PROPERTY PULP_STUB_PLUGINS \"${target}\")\n"
+               "endfunction()\n");
+
+    const auto none_dir = tmp.path / "UiNone";
+    auto none = run_create({"create", "UiNone", "--ui", "none", "--type", "effect", "--output",
+                            native_path_string(none_dir), "--no-build", "--ci"},
+                           source_root());
+    INFO(none.stdout_output);
+    INFO(none.stderr_output);
+    REQUIRE_FALSE(none.timed_out);
+    REQUIRE(none.exit_code == 0);
+    REQUIRE(read_file(none_dir / "CMakeLists.txt").find("NO_EDITOR") != std::string::npos);
+
+    pulp::platform::ProcessOptions options;
+    options.working_directory = native_path_string(tmp.path);
+    options.timeout_ms = pulp_test_cli::shellout_timeout_ms();
+    auto configure = pulp::platform::ChildProcess::run(
+        PULP_CMAKE_COMMAND,
+        {"-S", native_path_string(none_dir), "-B", native_path_string(none_dir / "build"),
+         "-DCMAKE_PREFIX_PATH=" + native_path_string(sdk),
+         "-DFETCHCONTENT_TRY_FIND_PACKAGE_MODE=NEVER",
+         "-DFETCHCONTENT_SOURCE_DIR_CATCH2=" PULP_CATCH2_SOURCE_DIR,
+         "-DFETCHCONTENT_FULLY_DISCONNECTED=ON"},
+        options);
+    INFO(configure.stdout_output);
+    INFO(configure.stderr_output);
+    REQUIRE_FALSE(configure.timed_out);
+    REQUIRE(configure.exit_code == 0);
+#endif
+}
+
+TEST_CASE("pulp-cpp create without --ui leaves the editor enabled",
+          "[cli][create][shellout][ui-mode]") {
+    if (!pulp_binary_exists()) {
+        SKIP("pulp binary not built");
+    }
+    TempDir tmp("pulp-create-ui-default");
+    const auto out_dir = tmp.path / "UiDefault";
+    auto r = run_create({"create", "UiDefault", "--type", "effect", "--output",
+                         native_path_string(out_dir), "--no-build", "--ci"},
+                        source_root());
+    INFO(r.stdout_output);
+    INFO(r.stderr_output);
+    REQUIRE_FALSE(r.timed_out);
+    REQUIRE(r.exit_code == 0);
+    CHECK(read_file(out_dir / "CMakeLists.txt").find("NO_EDITOR") == std::string::npos);
+}
+
+TEST_CASE("pulp-cpp create rejects unavailable and unknown --ui values",
+          "[cli][create][shellout][ui-mode]") {
+    if (!pulp_binary_exists()) {
+        SKIP("pulp binary not built");
+    }
+    TempDir tmp("pulp-create-ui-reject");
+
+    for (const char* mode : {"vellum", "rmlui"}) {
+        const auto out_dir = tmp.path / (std::string("Ui_") + mode);
+        auto r = run_create({"create", "UiReject", "--ui", mode, "--type", "effect", "--output",
+                             native_path_string(out_dir), "--no-build", "--ci"},
+                            source_root());
+        INFO(mode);
+        INFO(r.stderr_output);
+        REQUIRE_FALSE(r.timed_out);
+        REQUIRE(r.exit_code != 0);
+        CHECK(r.stderr_output.find(std::string("--ui ") + mode) != std::string::npos);
+        CHECK(r.stderr_output.find("not available yet") != std::string::npos);
+        CHECK_FALSE(fs::exists(out_dir));
+    }
+
+    const auto bogus_dir = tmp.path / "UiBogus";
+    auto bogus = run_create({"create", "UiBogus", "--ui", "bogus", "--type", "effect", "--output",
+                             native_path_string(bogus_dir), "--no-build", "--ci"},
+                            source_root());
+    INFO(bogus.stderr_output);
+    REQUIRE_FALSE(bogus.timed_out);
+    REQUIRE(bogus.exit_code != 0);
+    CHECK_FALSE(fs::exists(bogus_dir));
 }

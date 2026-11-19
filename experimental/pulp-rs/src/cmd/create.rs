@@ -91,6 +91,8 @@ pub struct CreateArgs {
     /// `--debug`. Parsed so the native `--ci` path can report that it has no
     /// configure/build step where Debug could take effect.
     pub debug_build: bool,
+    /// Empty preserves the historical template default; `none` selects NO_EDITOR.
+    pub ui: String,
     /// `--help` / `-h`.
     pub wants_help: bool,
 }
@@ -110,6 +112,7 @@ impl Default for CreateArgs {
             ci_mode: false,
             pin_sdk: false,
             debug_build: false,
+            ui: String::new(),
             wants_help: false,
         }
     }
@@ -153,6 +156,7 @@ pub fn parse_args(args: &[String]) -> CreateArgs {
             "--no-interactive" | "--ci" => out.ci_mode = true,
             "--pin" => out.pin_sdk = true,
             "--debug" => out.debug_build = true,
+            "--ui" if i + 1 < args.len() => { i += 1; out.ui = args[i].clone(); }
             _ if !a.starts_with('-') && out.name.is_empty() => {
                 out.name = a.clone();
             }
@@ -221,6 +225,7 @@ pub fn print_help(out: &mut impl Write) -> Result<()> {
         \x20 --template <name-or-kit-dir>         Use named template (e.g. gain, agent-toolkit) or local template kit\n\
         \x20 --manufacturer <name>                Manufacturer (default: Pulp)\n\
         \x20 --output <dir>                       Override output directory\n\
+        \x20 --ui <vellum|rmlui|none>              Select UI stack; none is audio-only\n\
         \x20 --targets <list>                     Comma-separated extra targets (e.g. android)\n\
         \x20 --in-tree, --example                 Add the project to examples/\n\
         \x20 --no-build                           Skip build after scaffolding\n\
@@ -426,7 +431,14 @@ pub fn scaffold(
     };
     let plugin_uri = format!("http://pulp.audio/plugins/{lower_name}");
     let vst3_uid = make_vst3_uid();
+    if !args.ui.is_empty() && args.ui != "none" {
+        return Err(CliError::BadUsage(format!(
+            "--ui {} is not available yet: needs the pulp-vellum editor package",
+            args.ui
+        )));
+    }
 
+    let ui_mode_line = if args.ui == "none" { "NO_EDITOR".to_owned() } else { String::new() };
     let vars: Vec<(&str, &str)> = vec![
         ("PLUGIN_NAME", &args.name),
         ("CLASS_NAME", &class_name),
@@ -448,6 +460,7 @@ pub fn scaffold(
         ("DESCRIPTION", &description),
         ("VST3_UID", &vst3_uid),
         ("SDK_VERSION", sdk_version),
+        ("UI_MODE_LINE", &ui_mode_line),
     ];
 
     // Pick template_key (prefer --template if supplied).
@@ -861,6 +874,20 @@ mod tests {
     }
 
     #[test]
+    fn parse_ui_stack_defaults_and_accepts_opt_out() {
+        assert!(parse_args(&["Gain".into()]).ui.is_empty());
+        assert_eq!(parse_args(&["Gain".into(), "--ui".into(), "none".into()]).ui, "none");
+    }
+
+    #[test]
+    fn unavailable_ui_packages_are_rejected() {
+        let td = tempfile::tempdir().unwrap();
+        let args = CreateArgs { name: "Gain".into(), ui: "vellum".into(), ..Default::default() };
+        let err = scaffold(&args, &td.path().join("out"), td.path(), None, "1.0.0", &mut Vec::new()).unwrap_err();
+        assert!(err.to_string().contains("not available yet"));
+    }
+
+    #[test]
     fn vst3_uid_deterministic_from_words() {
         let uid = make_vst3_uid_from([0x1234_5678, 0xDEAD_BEEF, 0, 1]);
         assert_eq!(
@@ -925,6 +952,7 @@ mod tests {
             ci_mode: true,
             pin_sdk: false,
             debug_build: false,
+            ui: String::new(),
             wants_help: false,
         };
 
