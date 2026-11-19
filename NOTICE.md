@@ -2318,7 +2318,7 @@ https://www.apache.org/licenses/LICENSE-2.0
 
 gpu-runtime, the GPU device layer Pulp's macOS device targets forward to: a
 self-contained subproject of the Vellum repository (`gpu-runtime/`), pinned to
-commit `14bd4c5e430bc8da6b4204f1daa8a1bdbc6b7f3a`. It adds no third-party code to a Pulp build; its Dawn is
+commit `d361ea5b855707391798b7315183d99b6cbe69b6`. It adds no third-party code to a Pulp build; its Dawn is
 the Skia toolchain's, covered under Dawn and Skia above.
 
 MIT License

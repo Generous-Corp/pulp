@@ -321,6 +321,17 @@ fs::path ensure_dev_profile_sdk(const fs::path& repo_root, bool tracing) {
         return {};
     }
 
+    // Local SDK builds consume the same Vellum identity as release builds.
+    // Validate the committed lock before any expensive dependency preparation;
+    // a malformed or partially edited lock must never produce an SDK.
+    const auto lock_check = snapshot.path() / "tools" / "deps" / "pulp_lock.py";
+    if (!fs::is_regular_file(lock_check) ||
+        run_with_spinner("python3 " + shell_quote(lock_check.string()),
+                         "Validating pulp.lock") != 0) {
+        std::cerr << "Error: pulp.lock validation failed; refusing local SDK install.\n";
+        return {};
+    }
+
     if (ensure_checkout_dependencies(snapshot.path()) != 0)
         return {};
     const auto skia_fetch = snapshot.path() / "tools" / "scripts" / "fetch_skia_for_release.py";

@@ -56,6 +56,8 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
 
+from pulp_lock import load as load_pulp_lock, validate as validate_pulp_lock
+
 
 ROOT = Path(__file__).resolve().parents[2]
 MANIFEST = ROOT / "tools" / "deps" / "manifest.json"
@@ -1224,6 +1226,8 @@ def gpu_runtime_pin_agreement(manifest: list[dict], root: Path = ROOT) -> list[s
     commits = GPU_RUNTIME_COMMIT_RE.findall(text)
     versions = GPU_RUNTIME_VERSION_RE.findall(text)
     if len(commits) != 1 or len(versions) != 1:
+        if "PulpVellumLock.cmake" in text:
+            return []
         return [f"{sources[0]} must set PULP_GPU_RUNTIME_COMMIT and PULP_GPU_RUNTIME_VERSION once "
                 f"each (found {len(commits)} and {len(versions)})"]
     problems = []
@@ -1235,6 +1239,27 @@ def gpu_runtime_pin_agreement(manifest: list[dict], root: Path = ROOT) -> list[s
     if versions[0] != version:
         problems.append(f"{sources[0]} expects gpu-runtime {versions[0]}, but the manifest "
                         f"names {version or 'nothing'}")
+    return problems
+
+
+def pulp_lock_agreement(manifest: list[dict], root: Path = ROOT) -> list[str]:
+    """Validate pulp.lock and ensure the legacy gpu-runtime pin is derived from it."""
+    try:
+        lock = load_pulp_lock(root / "pulp.lock")
+    except ValueError as exc:
+        return [str(exc)]
+    problems = validate_pulp_lock(lock)
+    vellum = lock.get("vellum", {})
+    entry = next((dep for dep in manifest if dep.get("name") == GPU_RUNTIME_ENTRY), None)
+    if entry is None:
+        problems.append(f"manifest has no {GPU_RUNTIME_ENTRY} entry required by pulp.lock")
+        return problems
+    pinned = ((entry.get("upstream") or {}).get("commit") or "").lower()
+    if pinned != vellum.get("sha"):
+        problems.append(f"manifest {GPU_RUNTIME_ENTRY} pins {pinned or 'nothing'}, but pulp.lock pins {vellum.get('sha')}")
+    version = str(entry.get("version", "")).split(" ", 1)[0]
+    if version != str(vellum.get("tag", "")).removeprefix("v"):
+        problems.append(f"manifest {GPU_RUNTIME_ENTRY} version is {version or 'missing'}, but pulp.lock pins {vellum.get('tag')}")
     return problems
 
 
@@ -1680,6 +1705,12 @@ def main() -> int:
             for problem in pin_problems:
                 print(f"  - {problem}")
             vellum_problems = [*vellum_problems, *pin_problems]
+        lock_problems = pulp_lock_agreement(manifest)
+        if lock_problems:
+            print("\npulp.lock drift:")
+            for problem in lock_problems:
+                print(f"  - {problem}")
+            vellum_problems = [*vellum_problems, *lock_problems]
 
     if args.require_offline_trees and offline_unverified:
         print("\nOffline-fetch trees required but absent: " + ", ".join(offline_unverified))
