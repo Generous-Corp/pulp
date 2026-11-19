@@ -58,10 +58,8 @@ endfunction()
 # checks that it carries the device layer Pulp forwards to. Sets <out-error>
 # to an empty string on success, or to the reason it cannot be used.
 #
-# Components are checked here rather than requested from find_package(): the
-# package marks a missing Dawn with VellumGpuRuntime_Device_FOUND FALSE but
-# never marks an installed component found, so check_required_components()
-# reports the whole package as not found as soon as any component is named.
+# Components are checked here rather than requested from find_package(), so the
+# reason a missing Dawn is refused names the Dawn build to fix.
 # GPU_RUNTIME_SKIA_DIR (or GPU_RUNTIME_RENDERER_ARCHIVE) must name the locked
 # Dawn build before the call.
 function(pulp_find_gpu_runtime_package version dir out_error)
@@ -75,7 +73,7 @@ function(pulp_find_gpu_runtime_package version dir out_error)
         endif()
     elseif(NOT VellumGpuRuntime_HAS_DEVICE OR
            (DEFINED VellumGpuRuntime_Device_FOUND AND NOT VellumGpuRuntime_Device_FOUND) OR
-           NOT TARGET gpu-runtime-dawn)
+           NOT TARGET VellumGpuRuntime::Dawn)
         set(_error
             "the VellumGpuRuntime package in ${dir} has no usable device library: it was "
             "built without one, or GPU_RUNTIME_SKIA_DIR ('${GPU_RUNTIME_SKIA_DIR}') does not "
