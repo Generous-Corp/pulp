@@ -117,6 +117,22 @@ class GpuRuntimePrefixTests(unittest.TestCase):
         self.lock_path.write_text(json.dumps(lock), encoding="utf-8")
         (self.root / "driver.cmake").write_text(DRIVER, encoding="utf-8")
 
+    def relock(self, listed: list[str], members: dict[str, bytes]) -> Path:
+        """Rebuild the archive, record and lock so the record lists `listed`; return the new archive."""
+        files = [{"path": name, "sha256": hashlib.sha256(members[name]).hexdigest(),
+                  "size": len(members[name]), "executable": False} for name in listed]
+        record_bytes = json.dumps({"source_commit": COMMIT, "files": files}, sort_keys=True).encode()
+        archive = self.root / "relocked.tar.gz"
+        with tarfile.open(archive, "w:gz") as tar:
+            info = tarfile.TarInfo("gpu-runtime-artifact.json")
+            info.size = len(record_bytes)
+            tar.addfile(info, io.BytesIO(record_bytes))
+        (self.prefix / "gpu-runtime-artifact.json").write_bytes(record_bytes)
+        lock = json.loads(self.lock_path.read_text(encoding="utf-8"))
+        lock["vellum"]["gpu_runtime_digest"] = hashlib.sha256(archive.read_bytes()).hexdigest()
+        self.lock_path.write_text(json.dumps(lock), encoding="utf-8")
+        return archive
+
     def run_module(self, archive: Path | str | None) -> str:
         """Configure-time output of PulpGpuRuntime.cmake; 'REACHED-FIND' when it got past the digest checks."""
         result = subprocess.run(
@@ -158,6 +174,52 @@ class GpuRuntimePrefixTests(unittest.TestCase):
     def test_extra_prefix_file_fails(self) -> None:
         (self.prefix / "lib" / "extra.cmake").write_text("message(WARNING injected)", encoding="utf-8")
         self.assertIn("holds lib/extra.cmake", self.run_module(self.archive))
+
+    def test_nested_plain_layout_passes(self) -> None:
+        data = {"lib/cmake/VellumGpuRuntime/a.cmake": b"a", "lib/libx.a": b"locked library bytes",
+                "include/x/y.h": b"h"}
+        for name, body in data.items():
+            (self.prefix / name).parent.mkdir(parents=True, exist_ok=True)
+            (self.prefix / name).write_bytes(body)
+        archive = self.relock(list(data), data)
+        self.assertEqual(self.run_module(archive), "REACHED-FIND")
+
+    def test_symlinked_lib_directory_fails(self) -> None:
+        outside = self.root / "outside"
+        outside.mkdir()
+        (outside / "libx.a").write_bytes(b"locked library bytes")
+        (self.prefix / "lib" / "libx.a").unlink()
+        (self.prefix / "lib").rmdir()
+        (self.prefix / "lib").symlink_to(outside, target_is_directory=True)
+        out = self.run_module(self.archive)
+        self.assertIn("is a symlink", out)
+        self.assertIn("lib", out)
+
+    def test_symlinked_intermediate_directory_fails(self) -> None:
+        outside = self.root / "outside"
+        outside.mkdir()
+        (outside / "y.h").write_bytes(b"h")
+        (self.prefix / "include").mkdir()
+        (self.prefix / "include" / "x").symlink_to(outside, target_is_directory=True)
+        archive = self.relock(["lib/libx.a", "include/x/y.h"],
+                              {"lib/libx.a": b"locked library bytes", "include/x/y.h": b"h"})
+        out = self.run_module(archive)
+        self.assertIn("is a symlink", out)
+        self.assertIn("include/x", out)
+
+    def test_dotdot_listed_path_fails(self) -> None:
+        (self.root / "escape.bin").write_bytes(b"e")
+        archive = self.relock(["lib/libx.a", "../escape.bin"],
+                              {"lib/libx.a": b"locked library bytes", "../escape.bin": b"e"})
+        self.assertIn("can leave the prefix", self.run_module(archive))
+
+    def test_symlinked_directory_in_prefix_scan_fails(self) -> None:
+        # A symlinked directory the record does not list is refused by the scan, not followed.
+        outside = self.root / "outside"
+        outside.mkdir()
+        (outside / "extra.cmake").write_text("message(WARNING injected)", encoding="utf-8")
+        (self.prefix / "lib" / "ext").symlink_to(outside, target_is_directory=True)
+        self.assertIn("holds the symlink lib/ext", self.run_module(self.archive))
 
 
 class RepositoryLockTests(unittest.TestCase):

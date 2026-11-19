@@ -19,6 +19,49 @@ function(pulp_check_gpu_runtime_record prefix commit)
     endif()
 endfunction()
 
+# _pulp_gpu_runtime_check_contained(<real-prefix> <prefix> <relative-path>)
+#
+# Refuses a listed path that is not a plain file reached through plain
+# directories beneath the prefix: no absolute or ".." component, no symlink at
+# any component from the prefix down, and a resolved path that still starts with
+# the resolved prefix. A symlinked directory would otherwise let the existence
+# and sha256 checks read files outside the prefix.
+function(_pulp_gpu_runtime_check_contained real_prefix prefix rel)
+    if(rel STREQUAL "" OR IS_ABSOLUTE "${rel}")
+        message(FATAL_ERROR
+            "Pulp: the gpu-runtime at ${prefix} lists '${rel}', which is not a path "
+            "beneath the prefix")
+    endif()
+    string(REPLACE "\\" "/" _norm "${rel}")
+    string(REPLACE "/" ";" _parts "${_norm}")
+    set(_walk "${prefix}")
+    foreach(_part IN LISTS _parts)
+        if(_part STREQUAL ".." OR _part STREQUAL "." OR _part STREQUAL "")
+            message(FATAL_ERROR
+                "Pulp: the gpu-runtime at ${prefix} lists '${rel}', which has a '${_part}' "
+                "component and can leave the prefix")
+        endif()
+        set(_walk "${_walk}/${_part}")
+        if(IS_SYMLINK "${_walk}")
+            message(FATAL_ERROR
+                "Pulp: ${_walk} in the gpu-runtime at ${prefix} is a symlink; every component "
+                "of a listed path must be a plain file or directory beneath the prefix")
+        endif()
+    endforeach()
+    if(NOT EXISTS "${_walk}" OR IS_DIRECTORY "${_walk}")
+        message(FATAL_ERROR
+            "Pulp: the gpu-runtime at ${prefix} lacks ${rel}; it does not match pulp.lock "
+            "vellum.gpu_runtime_digest")
+    endif()
+    file(REAL_PATH "${_walk}" _real)
+    string(FIND "${_real}" "${real_prefix}/" _at)
+    if(NOT _at EQUAL 0)
+        message(FATAL_ERROR
+            "Pulp: ${rel} in the gpu-runtime at ${prefix} resolves to ${_real}, outside the "
+            "prefix (${real_prefix})")
+    endif()
+endfunction()
+
 # pulp_check_gpu_runtime_archive(<prefix> <archive> <locked-digest>)
 #
 # Binds an installed gpu-runtime prefix to the archive digest pulp.lock names
@@ -29,7 +72,8 @@ endfunction()
 #      to the prefix's, so the prefix claims exactly the locked archive's files;
 #   3. every file that record lists must exist in the prefix with its recorded
 #      sha256, and the prefix holds nothing else
-#      (no extra or symlinked file can ride along).
+#      (no extra or symlinked file can ride along), and no listed path may pass
+#      through a symlink or resolve outside the prefix.
 # A prefix whose archive is not supplied, or does not match, stops configure.
 function(pulp_check_gpu_runtime_archive prefix archive locked_digest)
     if(archive STREQUAL "")
@@ -47,6 +91,8 @@ function(pulp_check_gpu_runtime_archive prefix archive locked_digest)
             "Pulp: gpu-runtime archive digest mismatch against pulp.lock "
             "vellum.gpu_runtime_digest (lock ${locked_digest}, file ${_archive_digest})")
     endif()
+    file(REAL_PATH "${prefix}" _real_prefix)
+    _pulp_gpu_runtime_check_contained("${_real_prefix}" "${prefix}" "gpu-runtime-artifact.json")
     string(SHA256 _scratch_id "${archive}${prefix}")
     set(_scratch "${CMAKE_BINARY_DIR}/pulp-gpu-runtime-archive-${_scratch_id}")
     file(REMOVE_RECURSE "${_scratch}")
@@ -74,11 +120,7 @@ function(pulp_check_gpu_runtime_archive prefix archive locked_digest)
         string(JSON _path GET "${_json}" files ${_index} path)
         string(JSON _sha GET "${_json}" files ${_index} sha256)
         list(APPEND _listed "${_path}")
-        if(IS_SYMLINK "${prefix}/${_path}" OR NOT EXISTS "${prefix}/${_path}")
-            message(FATAL_ERROR
-                "Pulp: the gpu-runtime at ${prefix} lacks ${_path} (or it is a symlink); it "
-                "does not match pulp.lock vellum.gpu_runtime_digest")
-        endif()
+        _pulp_gpu_runtime_check_contained("${_real_prefix}" "${prefix}" "${_path}")
         file(SHA256 "${prefix}/${_path}" _actual)
         if(NOT _actual STREQUAL _sha)
             message(FATAL_ERROR
@@ -87,8 +129,16 @@ function(pulp_check_gpu_runtime_archive prefix archive locked_digest)
                 "vellum.gpu_runtime_digest")
         endif()
     endforeach()
-    file(GLOB_RECURSE _present RELATIVE "${prefix}" LIST_DIRECTORIES false "${prefix}/*")
+    file(GLOB_RECURSE _present RELATIVE "${prefix}" LIST_DIRECTORIES true "${prefix}/*")
     foreach(_file IN LISTS _present)
+        if(IS_SYMLINK "${prefix}/${_file}")
+            message(FATAL_ERROR
+                "Pulp: the gpu-runtime at ${prefix} holds the symlink ${_file}; it does not "
+                "match pulp.lock vellum.gpu_runtime_digest")
+        endif()
+        if(IS_DIRECTORY "${prefix}/${_file}")
+            continue()
+        endif()
         if(NOT _file IN_LIST _listed)
             message(FATAL_ERROR
                 "Pulp: the gpu-runtime at ${prefix} holds ${_file}, which the locked archive "
