@@ -119,12 +119,17 @@ def added_lines(base: str, head: str | None) -> dict[str, list[tuple[int, str]]]
     result: dict[str, list[tuple[int, str]]] = {}
     current = None
     number = 0
+    in_hunk = False
     for raw in _git(cmd).splitlines():
-        if raw.startswith("+++ b/"):
+        if raw.startswith("diff --git "):
+            current = None
+            in_hunk = False
+        elif not in_hunk and raw.startswith("+++ b/"):
             current = raw[6:]
         elif raw.startswith("@@"):
+            in_hunk = True
             number = int(re.search(r"\+(\d+)", raw).group(1))
-        elif raw.startswith("+") and current:
+        elif in_hunk and raw.startswith("+") and current:
             if in_scope(current):
                 result.setdefault(current, []).append((number, raw[1:]))
             number += 1

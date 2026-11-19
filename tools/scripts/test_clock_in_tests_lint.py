@@ -121,7 +121,7 @@ class DiffScopeTest(unittest.TestCase):
             (repo / "tools").mkdir()
             f = repo / "tools" / "test_a.py"
             f.write_text("old = 1\n", encoding="utf-8"); git("add", "."); git("commit", "-qm", "base")
-            f.write_text("old = 1\n++ time.time()\nnext = time.time()\n", encoding="utf-8")  # clock-ok: fixture text
+            f.write_text("old = 1\n++ b/x\nnext = time.time()\n", encoding="utf-8")  # clock-ok: fixture text
             git("commit", "-qam", "plant")
             old_root = lint.ROOT; lint.ROOT = repo
             try:

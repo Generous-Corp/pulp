@@ -61,7 +61,11 @@ class MatrixTest(unittest.TestCase):
             cfg.write_text(json.dumps({
                 "zones": ZONES, "tests": [],
                 "pending": [{"path": "x.py", "reason": "r"}]}), encoding="utf-8")
-            self.assertNotEqual(matrix.main(["--config", str(cfg)]), 0)
+            old_root = matrix.ROOT; matrix.ROOT = Path(tmp)
+            try:
+                self.assertNotEqual(matrix.main(["--config", str(cfg)]), 0)
+            finally:
+                matrix.ROOT = old_root
 
     def test_empty_zones_fail_closed(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -74,7 +78,11 @@ class MatrixTest(unittest.TestCase):
             cfg = Path(tmp) / "c.json"
             (Path(tmp) / "x.py").write_text(PINNED, encoding="utf-8")
             cfg.write_text(json.dumps({"zones": ["UTC"], "tests": [{"path": "x.py", "reason": "fixture"}]}), encoding="utf-8")
-            self.assertNotEqual(matrix.main(["--config", str(cfg)]), 0)
+            old_root = matrix.ROOT; matrix.ROOT = Path(tmp)
+            try:
+                self.assertNotEqual(matrix.main(["--config", str(cfg)]), 0)
+            finally:
+                matrix.ROOT = old_root
 
     def test_shipped_config_is_well_formed(self):
         config = json.loads(matrix.CONFIG.read_text(encoding="utf-8"))

@@ -36,7 +36,6 @@ ROOT = Path(__file__).resolve().parents[2]
 CONFIG = ROOT / "tools/scripts/date_sensitive_selftests.json"
 TIMEOUT_S = 120
 REQUIRED_ZONES = {"Pacific/Kiritimati", "Pacific/Pago_Pago", "UTC"}
-REQUIRED_ZONES = {"Pacific/Kiritimati", "Pacific/Pago_Pago", "UTC"}
 
 
 def validate_config(zones: list[str], tests: list[str]) -> list[str]:
@@ -47,8 +46,6 @@ def validate_config(zones: list[str], tests: list[str]) -> list[str]:
         errors.append("tests must contain at least one active selftest")
     if any(not isinstance(zone, str) or not zone for zone in zones):
         errors.append("zones must contain non-empty strings")
-    if set(zones) != REQUIRED_ZONES:
-        errors.append("zones must be exactly Pacific/Kiritimati, Pacific/Pago_Pago and UTC")
     if set(zones) != REQUIRED_ZONES:
         errors.append("zones must be exactly Pacific/Kiritimati, Pacific/Pago_Pago and UTC")
     return errors
