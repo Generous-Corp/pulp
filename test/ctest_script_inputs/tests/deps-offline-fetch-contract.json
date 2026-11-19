@@ -4,7 +4,9 @@
   "entry": "tools/deps/audit.py",
   "inputs": [
    "tools/ci/tart-provision.sh",
+   "tools/cmake",
    "tools/cmake/PulpGpuRuntime.cmake",
+   "tools/cmake/PulpVellumLock.cmake",
    "tools/deps/audit.py",
    "tools/deps/pulp_lock.py",
    "tools/packages/test-stubs"
