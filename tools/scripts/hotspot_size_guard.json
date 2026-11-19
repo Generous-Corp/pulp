@@ -42,8 +42,13 @@
     },
     {
       "path": "core/host/src/graph_serializer.cpp",
-      "max_loc": 3995,
-      "note": "GraphSerializer public entry points, document shape, save and load; persisted sample-region validation and later split concerns belong in focused graph_serializer_*.cpp units"
+      "max_loc": 3849,
+      "note": "GraphSerializer public entry points, document shape, save and load; persisted sample-region validation, plugin node resolution and later split concerns belong in focused graph_serializer_*.cpp units"
+    },
+    {
+      "path": "core/host/src/graph_serializer_plugin_resolver.cpp",
+      "max_loc": 171,
+      "note": "Plugin node resolution for serializer loads (known-root checks, per-format identity scans, the web placeholder stub); the only serializer unit that includes the plugin scanner"
     },
     {
       "path": "core/host/src/graph_serializer_regions.cpp",
