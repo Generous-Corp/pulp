@@ -326,8 +326,8 @@ fs::path ensure_dev_profile_sdk(const fs::path& repo_root, bool tracing) {
     // a malformed or partially edited lock must never produce an SDK.
     const auto lock_check = snapshot.path() / "tools" / "deps" / "pulp_lock.py";
     if (!fs::is_regular_file(lock_check) ||
-        run_with_spinner("python3 " + shell_quote(lock_check.string()),
-                         "Validating pulp.lock") != 0) {
+        run_with_spinner("python3 " + shell_quote(lock_check.string()), "Validating pulp.lock") !=
+            0) {
         std::cerr << "Error: pulp.lock validation failed; refusing local SDK install.\n";
         return {};
     }

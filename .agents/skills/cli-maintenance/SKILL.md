@@ -4405,3 +4405,10 @@ render callback only latches a request; `service_program_changes()` loads it on
 the main thread. Both built-in editors call it beside `service_state_persistence`
 from their idle hook. A standalone built without an editor must call it itself,
 or a Program Change is latched and never applied.
+
+## `pulp sdk install --local` validates `pulp.lock` first
+
+`local_sdk_install.cpp` runs `tools/deps/pulp_lock.py` from the source snapshot
+before building and refuses the install when the lock is missing or malformed.
+A snapshot without `tools/deps/pulp_lock.py` is treated as a failure, not
+skipped.

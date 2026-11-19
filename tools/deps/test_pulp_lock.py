@@ -38,7 +38,7 @@ class PulpLockTests(unittest.TestCase):
             result = subprocess.run(
                 ["cmake", f"-DPULP_VELLUM_LOCK_FILE={lock_path}",
                  f"-DPULP_VELLUM_SDK_ARCHIVE={archive}", "-P", str(reader)],
-                capture_output=True, text=True, check=False,
+                capture_output=True, text=True, encoding="utf-8", check=False,
             )
             self.assertNotEqual(result.returncode, 0)
             self.assertIn("digest mismatch", result.stderr)

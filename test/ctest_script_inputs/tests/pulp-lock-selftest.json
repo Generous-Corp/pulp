@@ -1,0 +1,11 @@
+{
+ "name": "pulp-lock-selftest",
+ "record": {
+  "entry": "tools/deps/test_pulp_lock.py",
+  "inputs": [
+   "tools/deps/pulp_lock.py",
+   "tools/deps/test_pulp_lock.py"
+  ],
+  "kind": "python"
+ }
+}
