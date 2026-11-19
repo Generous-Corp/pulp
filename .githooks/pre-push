@@ -63,8 +63,8 @@ fi
 
 # Live repair-claim check from ANY actor, run immediately before every path that
 # allows the push (including PULP_SKIP_PREPUSH and demoted gates). It reads the
-# PR's comments once; a read failure warns and allows (CI and the repair lane
-# still check), a live foreign claim refuses. PULP_REPAIR_CLAIM_ID names your own.
+# comments of every open PR for each updated branch; a read failure warns and
+# allows (CI and the repair lane still check), a live foreign claim refuses. PULP_REPAIR_CLAIM_ID names your own.
 prepush_claim_check_final() {
     # This is deliberately the final check: the gates above can take minutes,
     # so a repair claim is read as close as possible to Git sending the push.
@@ -86,17 +86,16 @@ prepush_claim_check_final() {
                         0000000000000000000000000000000000000000) continue ;;
                     esac
                     _claim_branch="${_claim_remote#refs/heads/}"
-                    break
+                    if [ -n "$_claim_repo" ]; then
+                        "${PULP_PYTHON:-python3}" "$CLAIM_CHECK" --repo "$_claim_repo" --branch "$_claim_branch"
+                        _claim_rc=$?
+                        if [ "$_claim_rc" -eq 1 ]; then
+                            exit 1
+                        fi
+                    fi
                     ;;
             esac
         done <<< "$PREPUSH_UPDATE_RECORDS"
-        if [ -n "$_claim_repo" ] && [ -n "$_claim_branch" ]; then
-            "${PULP_PYTHON:-python3}" "$CLAIM_CHECK" --repo "$_claim_repo" --branch "$_claim_branch"
-            _claim_rc=$?
-            if [ "$_claim_rc" -eq 1 ]; then
-                exit 1
-            fi
-        fi
         unset _claim_repo _claim_branch _claim_origin _claim_local _claim_local_sha \
             _claim_remote _claim_remote_sha _claim_extra _claim_rc
     fi

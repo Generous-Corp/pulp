@@ -1172,8 +1172,9 @@ never from the check run alone.
   failing required check (see "Do not refresh a `BEHIND` PR" below); the
   pre-push hook prints a hint when a push only re-bases an armed PR.
 - **The pre-push hook refuses a push under someone else's live claim.** Its
-  last step, on every allowed path (including `PULP_SKIP_PREPUSH`), reads the
-  branch's open PR once and refuses while another actor's `repair-claim:` is
+  last step, on every allowed path (including `PULP_SKIP_PREPUSH`), reads
+  every updated branch's open PRs and their full comment history, with pagination,
+  and refuses while another actor's `repair-claim:` is
   live. Name your own claim with `PULP_REPAIR_CLAIM_ID`. A failed read warns and
   allows. With `PULP_AGENT_OWNER` set, it also refuses a push from an active
   worktree whose lineage owner is someone else
