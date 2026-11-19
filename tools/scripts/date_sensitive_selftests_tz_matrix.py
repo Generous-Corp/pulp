@@ -37,6 +37,17 @@ CONFIG = ROOT / "tools/scripts/date_sensitive_selftests.json"
 TIMEOUT_S = 120
 
 
+def validate_config(zones: list[str], tests: list[str]) -> list[str]:
+    errors = []
+    if not zones:
+        errors.append("zones must contain at least one timezone")
+    if not tests:
+        errors.append("tests must contain at least one active selftest")
+    if any(not isinstance(zone, str) or not zone for zone in zones):
+        errors.append("zones must contain non-empty strings")
+    return errors
+
+
 def run_matrix(tests: list[str], zones: list[str], root: Path = ROOT) -> dict[str, dict[str, int]]:
     results: dict[str, dict[str, int]] = {}
     for rel in tests:
@@ -72,6 +83,10 @@ def main(argv: list[str]) -> int:
     zones = config["zones"]
     tests = [e["path"] for e in config.get("tests", [])]
     pending = [e["path"] for e in config.get("pending", [])]
+    errors = validate_config(zones, tests)
+    if errors:
+        print("invalid date-sensitive selftest configuration: " + "; ".join(errors), file=sys.stderr)
+        return 1
     if args.include_pending:
         tests += pending
     elif pending:

@@ -27,28 +27,31 @@ def scan(text: str, baseline=NO_BASELINE, rel: str = TEST_FILE) -> list[str]:
 class FlaggedTest(unittest.TestCase):
     def test_each_clock_read_is_flagged(self):
         for expr in (
-            "datetime.now()", "dt.datetime.now(tz)", "datetime.today()", "datetime.utcnow()",
-            "date.today()", "time.time()", "time.time_ns()", "time.localtime()",
+            "datetime.now()", "dt.datetime.now(tz)", "datetime.today()", "datetime.utcnow()",  # clock-ok: fixture text
+            "date.today()", "time.time()", "time.time_ns()", "time.localtime()",  # clock-ok: fixture text
         ):
             with self.subTest(expr=expr):
                 self.assertEqual(len(scan(f"x = {expr}")), 1)
 
     def test_marker_with_reason_passes(self):
-        self.assertEqual(scan("t = time.time()  # clock-ok: elapsed measurement"), [])
+        self.assertEqual(scan("t = time.time()  # clock-ok: elapsed measurement"), [])  # clock-ok: fixture text
 
     def test_marker_without_reason_still_fails(self):
-        self.assertEqual(len(scan("t = time.time()  # clock-ok:")), 1)
+        self.assertEqual(len(scan("t = time.time()  # clock-ok:")), 1)  # clock-ok: fixture text
+
+    def test_marker_in_string_literal_does_not_bypass_lint(self):
+        self.assertEqual(len(scan('t = time.time() + "clock-ok: fake"')), 1)  # clock-ok: fixture text
 
     def test_comment_only_and_clock_free_lines_pass(self):
-        self.assertEqual(scan("# uses datetime.now() in prose\nx = time.monotonic()"), [])
+        self.assertEqual(scan("# uses datetime.now() in prose\nx = time.monotonic()"), [])  # clock-ok: fixture text
 
     def test_baselined_line_passes_and_changed_line_fails(self):
-        base = ({}, {(TEST_FILE, "x = date.today()")})
-        self.assertEqual(scan("    x = date.today()", base), [])
-        self.assertEqual(len(scan("x = date.today() + one", base)), 1)
+        base = ({}, {(TEST_FILE, "x = date.today()")})  # clock-ok: fixture text
+        self.assertEqual(scan("    x = date.today()", base), [])  # clock-ok: fixture text
+        self.assertEqual(len(scan("x = date.today() + one", base)), 1)  # clock-ok: fixture text
 
-    def test_baselined_file_passes(self):
-        self.assertEqual(scan("x = date.today()", ({TEST_FILE: "reason"}, set())), [])
+    def test_baselined_file_still_scans_new_lines(self):
+        self.assertEqual(len(scan("x = date.today()", ({TEST_FILE: "reason"}, set()))), 1)  # clock-ok: fixture text
 
     def test_scope(self):
         self.assertTrue(lint.in_scope("tools/a/b/test_x.py"))
@@ -74,16 +77,16 @@ class DiffScopeTest(unittest.TestCase):
             git("config", "user.name", "t")
             (repo / "tools").mkdir()
             f = repo / "tools" / "test_a.py"
-            f.write_text("old = time.time()\n", encoding="utf-8")
+            f.write_text("old = time.time()\n", encoding="utf-8")  # clock-ok: fixture text
             git("add", "."); git("commit", "-qm", "base")
-            f.write_text("old = time.time()\nnew = datetime.now()\n", encoding="utf-8")
+            f.write_text("old = time.time()\nnew = datetime.now()\n", encoding="utf-8")  # clock-ok: fixture text
             git("commit", "-qam", "plant")
             lint.ROOT = repo
             try:
                 added = lint.added_lines("HEAD~1", "HEAD")
             finally:
                 lint.ROOT = HERE.parents[1]
-            self.assertEqual(added, {"tools/test_a.py": [(2, "new = datetime.now()")]})
+            self.assertEqual(added, {"tools/test_a.py": [(2, "new = datetime.now()")]})  # clock-ok: fixture text
 
 
 if __name__ == "__main__":

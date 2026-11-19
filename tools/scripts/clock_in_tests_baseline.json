@@ -1,14 +1,5 @@
 {
-  "files": [
-    {
-      "path": "tools/scripts/test_clock_in_tests_lint.py",
-      "reason": "clock reads appear only as fixture text for the lint's own detector"
-    },
-    {
-      "path": "tools/scripts/test_date_sensitive_selftests_tz_matrix.py",
-      "reason": "deliberately clock-dependent fixture used to prove the zone matrix detects it"
-    }
-  ],
+  "files": [],
   "lines": [
     {
       "path": "tools/ci/test_install_linux_build_deps.py",
@@ -81,11 +72,6 @@
       "reason": "existing use when the lint landed"
     },
     {
-      "path": "tools/import-validation/test_source_contracts.py",
-      "line": "due_soon = (dt.date.today() - dt.timedelta(days=2)).isoformat()",
-      "reason": "existing use when the lint landed"
-    },
-    {
       "path": "tools/rack/test_module_index_atomic.py",
       "line": "stale = time.time() - 30 * 86400",
       "reason": "existing use when the lint landed"
@@ -131,8 +117,78 @@
       "reason": "existing use when the lint landed"
     },
     {
+      "path": "tools/scripts/test_clock_in_tests_lint.py",
+      "line": "\"datetime.now()\", \"dt.datetime.now(tz)\", \"datetime.today()\", \"datetime.utcnow()\",",
+      "reason": "existing use when the lint landed"
+    },
+    {
+      "path": "tools/scripts/test_clock_in_tests_lint.py",
+      "line": "\"date.today()\", \"time.time()\", \"time.time_ns()\", \"time.localtime()\",",
+      "reason": "existing use when the lint landed"
+    },
+    {
+      "path": "tools/scripts/test_clock_in_tests_lint.py",
+      "line": "self.assertEqual(scan(\"t = time.time()  # clock-ok: elapsed measurement\"), [])",
+      "reason": "existing use when the lint landed"
+    },
+    {
+      "path": "tools/scripts/test_clock_in_tests_lint.py",
+      "line": "self.assertEqual(len(scan(\"t = time.time()  # clock-ok:\")), 1)",
+      "reason": "existing use when the lint landed"
+    },
+    {
+      "path": "tools/scripts/test_clock_in_tests_lint.py",
+      "line": "self.assertEqual(len(scan('t = time.time() + \"clock-ok: fake\"')), 1)",
+      "reason": "existing use when the lint landed"
+    },
+    {
+      "path": "tools/scripts/test_clock_in_tests_lint.py",
+      "line": "self.assertEqual(scan(\"# uses datetime.now() in prose\\nx = time.monotonic()\"), [])",
+      "reason": "existing use when the lint landed"
+    },
+    {
+      "path": "tools/scripts/test_clock_in_tests_lint.py",
+      "line": "base = ({}, {(TEST_FILE, \"x = date.today()\")})",
+      "reason": "existing use when the lint landed"
+    },
+    {
+      "path": "tools/scripts/test_clock_in_tests_lint.py",
+      "line": "self.assertEqual(scan(\"    x = date.today()\", base), [])",
+      "reason": "existing use when the lint landed"
+    },
+    {
+      "path": "tools/scripts/test_clock_in_tests_lint.py",
+      "line": "self.assertEqual(len(scan(\"x = date.today() + one\", base)), 1)",
+      "reason": "existing use when the lint landed"
+    },
+    {
+      "path": "tools/scripts/test_clock_in_tests_lint.py",
+      "line": "self.assertEqual(len(scan(\"x = date.today()\", ({TEST_FILE: \"reason\"}, set()))), 1)",
+      "reason": "existing use when the lint landed"
+    },
+    {
+      "path": "tools/scripts/test_clock_in_tests_lint.py",
+      "line": "f.write_text(\"old = time.time()\\n\", encoding=\"utf-8\")",
+      "reason": "existing use when the lint landed"
+    },
+    {
+      "path": "tools/scripts/test_clock_in_tests_lint.py",
+      "line": "f.write_text(\"old = time.time()\\nnew = datetime.now()\\n\", encoding=\"utf-8\")",
+      "reason": "existing use when the lint landed"
+    },
+    {
+      "path": "tools/scripts/test_clock_in_tests_lint.py",
+      "line": "self.assertEqual(added, {\"tools/test_a.py\": [(2, \"new = datetime.now()\")]})",
+      "reason": "existing use when the lint landed"
+    },
+    {
       "path": "tools/scripts/test_configure_only.py",
       "line": "old = time.time() - 2 * configure_only.STALE_WITHOUT_LOCK_S",
+      "reason": "existing use when the lint landed"
+    },
+    {
+      "path": "tools/scripts/test_date_sensitive_selftests_tz_matrix.py",
+      "line": "\"sys.exit(0 if d.date.today() == d.datetime.now(d.timezone.utc).date() else 1)\\n\"",
       "reason": "existing use when the lint landed"
     },
     {

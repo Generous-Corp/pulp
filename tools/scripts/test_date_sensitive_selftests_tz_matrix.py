@@ -24,7 +24,7 @@ ZONES = ["Pacific/Kiritimati", "Pacific/Pago_Pago", "UTC"]
 # day at every moment for at least one of them, so this exits non-zero somewhere.
 CLOCK_DEPENDENT = (
     "import datetime as d, sys\n"
-    "sys.exit(0 if d.date.today() == d.datetime.now(d.timezone.utc).date() else 1)\n"
+    "sys.exit(0 if d.date.today() == d.datetime.now(d.timezone.utc).date() else 1)\n"  # clock-ok: fixture text
 )
 PINNED = (
     "import datetime as d, sys\n"
@@ -54,13 +54,19 @@ class MatrixTest(unittest.TestCase):
         self.assertEqual(results["UTC"], 0)
         self.assertNotEqual(results["Pacific/Kiritimati"], 0)
 
-    def test_pending_entries_are_not_run_and_listed_tests_gate(self):
+    def test_pending_only_configuration_fails_closed(self):
         with tempfile.TemporaryDirectory() as tmp:
             cfg = Path(tmp) / "c.json"
             cfg.write_text(json.dumps({
                 "zones": ["UTC"], "tests": [],
                 "pending": [{"path": "does/not/exist.py", "reason": "r"}]}), encoding="utf-8")
-            self.assertEqual(matrix.main(["--config", str(cfg)]), 0)
+            self.assertNotEqual(matrix.main(["--config", str(cfg)]), 0)
+
+    def test_empty_zones_fail_closed(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cfg = Path(tmp) / "c.json"
+            cfg.write_text(json.dumps({"zones": [], "tests": [{"path": "x.py"}]}), encoding="utf-8")
+            self.assertNotEqual(matrix.main(["--config", str(cfg)]), 0)
 
     def test_shipped_config_is_well_formed(self):
         config = json.loads(matrix.CONFIG.read_text(encoding="utf-8"))

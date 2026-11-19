@@ -40,10 +40,12 @@ Exit status: 0 clean, 1 a flagged line.
 from __future__ import annotations
 
 import argparse
+import io
 import json
 import re
 import subprocess
 import sys
+import tokenize
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -65,8 +67,12 @@ def flagged(line: str) -> bool:
     """True when the line reads the real clock without an inline marker."""
     if line.lstrip().startswith("#"):
         return False
-    if _MARKER.search(line):
-        return False
+    try:
+        tokens = tokenize.generate_tokens(io.StringIO(line + "\n").readline)
+        if any(kind == tokenize.COMMENT and _MARKER.search(text) for kind, text, *_ in tokens):
+            return False
+    except tokenize.TokenError:
+        pass
     return _CLOCK.search(line) is not None
 
 
@@ -80,14 +86,23 @@ def load_baseline(path: Path = BASELINE) -> tuple[dict[str, str], set[tuple[str,
 
 
 def scan_lines(rel: str, lines: list[tuple[int, str]], baseline=None) -> list[str]:
-    files, entries = baseline if baseline is not None else load_baseline()
-    if rel in files:
-        return []
+    _, entries = baseline if baseline is not None else load_baseline()
     out = []
     for number, text in lines:
         if flagged(text) and (rel, text.strip()) not in entries:
             out.append(f"{rel}:{number}: reads the real clock: {text.strip()}")
     return out
+
+
+def load_base_baseline(base: str) -> tuple[dict[str, str], set[tuple[str, str]]]:
+    try:
+        raw = _git(["show", f"{base}:tools/scripts/clock_in_tests_baseline.json"])
+    except subprocess.CalledProcessError:
+        return {}, set()
+    data = json.loads(raw)
+    files = {e["path"]: e["reason"] for e in data.get("files", [])}
+    lines = {(e["path"], e["line"]) for e in data.get("lines", [])}
+    return files, lines
 
 
 def _git(args: list[str]) -> str:
@@ -147,7 +162,7 @@ def main(argv: list[str]) -> int:
 
     found: list[str] = []
     source = tracked_lines() if args.all else added_lines(args.base, args.head)
-    baseline = load_baseline()
+    baseline = load_base_baseline(args.base) if not args.all else load_baseline()
     for rel, lines in sorted(source.items()):
         found.extend(scan_lines(rel, lines, baseline))
     if found:
