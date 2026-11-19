@@ -60,6 +60,10 @@ if ! PREPUSH_UPDATE_RECORDS="$(cat)"; then
     echo "✗ pre-push: failed to capture Git's pushed-ref records; refusing to validate an unknown source tree." >&2
     exit 1
 fi
+# Git passes the actual push destination as $2.  Keep it for the final claim
+# check; consulting origin here would inspect the wrong repository when a push
+# targets another remote.
+PREPUSH_REMOTE_URL="${2:-}"
 
 # Live repair-claim check from ANY actor, run immediately before every path that
 # allows the push (including PULP_SKIP_PREPUSH and demoted gates). It reads the
@@ -72,7 +76,7 @@ prepush_claim_check_final() {
     if [ -f "$CLAIM_CHECK" ]; then
         _claim_repo=""
         _claim_branch=""
-        _claim_origin="$(git remote get-url origin 2>/dev/null || true)"
+        _claim_origin="${PREPUSH_REMOTE_URL:-}"
         if [[ "$_claim_origin" =~ github\.com[:/]([^/]+)/([^/]+)$ ]]; then
             _claim_repo="${BASH_REMATCH[1]}/${BASH_REMATCH[2]}"
             _claim_repo="${_claim_repo%.git}"

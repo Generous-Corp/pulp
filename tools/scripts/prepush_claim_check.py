@@ -17,8 +17,14 @@ import subprocess
 import sys
 
 
-CLAIM = re.compile(r"repair-claim: (\S+) until (\d{4}-\d\d-\d\d)[T ](\d\d:\d\d(?::\d\d)?)\s*(?:Z|UTC)")
-RELEASE = re.compile(r"^repair-claim-released:[ \t]*(?:([\w.-]+/[\w.-]+)(?![\w./-]))?", re.M)
+# Repair-lane IDs are either a single label (for example ``lane-a``) or the
+# usual ``lane/name`` form.  Keep the grammar shared by claims and named
+# releases so releasing one actor can never accidentally clear every claim.
+CLAIM_ID = r"[A-Za-z0-9_.-]+(?:/[A-Za-z0-9_.-]+)?"
+CLAIM = re.compile(
+    rf"repair-claim:[ \t]*(?P<claim_id>{CLAIM_ID})[ \t]+until[ \t]*(?P<until>[^\r\n]*)"
+)
+RELEASE = re.compile(r"^repair-claim-released:(?P<tail>[^\r\n]*)", re.M)
 
 
 def warning(message: str) -> int:
@@ -118,15 +124,31 @@ def check_pr(repo: str, pr: dict, own: str | None) -> int:
         for _, kind, match in sorted(events, key=lambda event: event[0]):
             if kind == "claim":
                 try:
-                    claims[match.group(1)] = parse_until(match.group(2), match.group(3))
+                    until = match.group("until").strip()
+                    timestamp = re.fullmatch(
+                        r"(\d{4}-\d\d-\d\d)[T ](\d\d:\d\d(?::\d\d)?)\s*(?:Z|UTC)",
+                        until,
+                    )
+                    if not timestamp:
+                        raise ValueError("claim expiry has invalid shape")
+                    claims[match.group("claim_id")] = parse_until(
+                        timestamp.group(1), timestamp.group(2)
+                    )
                 except ValueError:
                     # Same rule as the fleet repair lane: an unreadable time counts as
                     # live, so a typo never lets a push land under someone's claim.
-                    claims[match.group(1)] = dt.datetime.max.replace(tzinfo=dt.timezone.utc)
-            elif match.group(1):
-                claims.pop(match.group(1), None)
-            else:
-                claims.clear()
+                    claims[match.group("claim_id")] = dt.datetime.max.replace(
+                        tzinfo=dt.timezone.utc
+                    )
+            elif kind == "release":
+                tail = match.group("tail").strip()
+                if not tail:
+                    # Only an explicitly bare release clears every claim.
+                    claims.clear()
+                    continue
+                release_id = tail.split(None, 1)[0]
+                if re.fullmatch(CLAIM_ID, release_id):
+                    claims.pop(release_id, None)
     now = dt.datetime.now(dt.timezone.utc)
     live = [(claim_id, until) for claim_id, until in claims.items() if until > now and claim_id != own]
     if not live:

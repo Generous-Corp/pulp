@@ -91,18 +91,57 @@ print(json.dumps({'data': {'repository': result}}))
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertNotIn("could not read", result.stderr)
 
+    def test_named_release_preserves_other_actor_claim(self):
+        for first, second in [("lane-a", "graph-lead-claude"),
+                              ("lane/a", "graph/lead-claude")]:
+            for released, remaining in [(first, second), (second, first)]:
+                with self.subTest(released=released):
+                    result = self.run_check([
+                        f"repair-claim: {first} until 2099-01-02T03:04Z",
+                        f"repair-claim: {second} until 2099-01-02T03:04Z",
+                        f"repair-claim-released: {released} (finished)",
+                    ])
+                    self.assertEqual(result.returncode, 1, result.stderr)
+                    self.assertIn(f"live repair-claim {remaining}", result.stderr)
+                    # The released ID really disappears; it is not just that
+                    # both claims remain and still produce a refusal.
+                    result = self.run_check([
+                        f"repair-claim: {released} until 2099-01-02T03:04Z",
+                        f"repair-claim-released: {released} (finished)",
+                    ])
+                    self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_malformed_named_release_preserves_claims(self):
+        for release in ["(lane-a)", "lane/a/extra", "lane-a:"]:
+            with self.subTest(release=release):
+                result = self.run_check([
+                    "repair-claim: lane-a until 2099-01-02T03:04Z",
+                    f"repair-claim-released: {release}",
+                ])
+                self.assertEqual(result.returncode, 1, result.stderr)
+
+    def test_malformed_timestamp_counts_as_live(self):
+        result = self.run_check(["repair-claim: lane-a until 2099-XX-02T03:04Z"])
+        self.assertEqual(result.returncode, 1, result.stderr)
+        result = self.run_check(["repair-claim: lane-a until"])
+        self.assertEqual(result.returncode, 1, result.stderr)
+
     def test_release_in_other_pr_does_not_clear_claim(self):
         result = self.run_check([], prs=[
             {"number": 41, "comments": ["repair-claim-released:"]},
             {"number": 42, "comments": ["repair-claim: lane-a until 2099-01-02T03:04Z"]}])
         self.assertEqual(result.returncode, 1, result.stderr)
 
-    def run_hook_check(self, branches, held):
+    def run_hook_check(self, branches, held, remote_url="https://github.com/OWNER/REPO.git",
+                       held_repo="OWNER/REPO"):
         hook = (ROOT.parent.parent / ".githooks" / "pre-push").read_text(encoding="utf-8")
         function = hook[hook.index("prepush_claim_check_final() {"):]
         function = function[:function.index("\n}\n") + 3]
         checker = self.dir / "checker.py"
-        checker.write_text("import sys\nraise SystemExit(1 if sys.argv[-1] == " + repr(held) + " else 0)\n", encoding="utf-8")
+        checker.write_text("import sys\nargs = sys.argv\nraise SystemExit(1 if "
+                           "args[args.index('--branch') + 1] == " + repr(held) +
+                           " and args[args.index('--repo') + 1] == " + repr(held_repo) +
+                           " else 0)\n", encoding="utf-8")
         # Execute the actual hook function with isolated git/Python commands;
         # no expensive gates or real GitHub reads are part of this fixture.
         script = self.dir / "hook.sh"
@@ -110,6 +149,7 @@ print(json.dumps({'data': {'repository': result}}))
 git() { echo https://github.com/OWNER/REPO.git; }
 run_checker() { python3 "$CHECKER" "$@"; }
 PULP_PYTHON=run_checker
+PREPUSH_REMOTE_URL=""" + repr(remote_url) + """
 prepush_claim_check_final
 """, encoding="utf-8")
         records = []
@@ -129,6 +169,17 @@ prepush_claim_check_final
                                       ("refs/heads/also-free", "a" * 40)], "held")
         self.assertEqual(result.returncode, 0, result.stderr)
 
+    def test_hook_uses_push_destination_instead_of_origin(self):
+        for url in ["https://github.com/OTHER/DEST.git",
+                    "git@github.com:OTHER/DEST.git"]:
+            with self.subTest(url=url):
+                result = self.run_hook_check([("refs/heads/held", "a" * 40)], "held",
+                                             remote_url=url, held_repo="OTHER/DEST")
+                self.assertEqual(result.returncode, 1, result.stderr)
+                result = self.run_hook_check([("refs/heads/held", "a" * 40)], "held",
+                                             remote_url=url, held_repo="OWNER/REPO")
+                self.assertEqual(result.returncode, 0, result.stderr)
+
     def test_hook_skips_deletions_and_tags(self):
         result = self.run_hook_check([("refs/heads/held", "0" * 40),
                                       ("refs/tags/held", "a" * 40),
@@ -145,6 +196,8 @@ prepush_claim_check_final
 
     def test_expired_claim_passes(self):
         self.assertEqual(self.run_check(["repair-claim: lane-a until 2000-01-02T03:04Z"]).returncode, 0)
+        self.assertEqual(self.run_check(["repair-claim: lane-a until 2000-01-02 03:04 UTC"]).returncode, 0)
+        self.assertEqual(self.run_check(["repair-claim: lane-a until 2000-01-02T03:04 UTC"]).returncode, 0)
 
     def test_id_release_passes(self):
         self.assertEqual(self.run_check(["repair-claim: OWNER/REPO until 2099-01-02T03:04Z", "repair-claim-released: OWNER/REPO"]).returncode, 0)
@@ -165,6 +218,66 @@ prepush_claim_check_final
     def test_unreadable_claim_time_counts_as_live(self):
         result = self.run_check(["repair-claim: lane-a until 2026-13-45T03:04Z"])
         self.assertEqual(result.returncode, 1)
+
+    def run_owner_guard(self, requested_owner=None):
+        # Exercise Git's actual hook entrypoint and ref update in an isolated
+        # local repository. Unrelated expensive gates are absent in the fixture.
+        repo = self.dir / "owner-repo"
+        remote = self.dir / "destination.git"
+        (repo / "tools/scripts").mkdir(parents=True)
+        (repo / ".githooks").mkdir()
+        source = ROOT / "worktree_lineage.sh"
+        target = repo / "tools/scripts/worktree_lineage.sh"
+        target.write_bytes(source.read_bytes())
+        target.chmod(0o755)
+        hook = repo / ".githooks/pre-push"
+        hook.write_bytes((ROOT.parent.parent / ".githooks/pre-push").read_bytes())
+        hook.chmod(0o755)
+        (repo / "tools/scripts/gate_host_policy.sh").write_text(
+            "pulp_gate_host_builds_reserved() { return 1; }\n", encoding="utf-8")
+        env = {k: v for k, v in os.environ.items()
+               if not k.startswith(("GIT_", "PULP_"))}
+        env["GIT_CONFIG_NOSYSTEM"] = "1"
+        env["GIT_CONFIG_GLOBAL"] = os.devnull
+        def git(*args):
+            return subprocess.run(["git", *args], cwd=repo, env=env,
+                                  check=True, capture_output=True, text=True)
+        git("init", "-q")
+        git("init", "-q", "--bare", str(remote))
+        git("config", "user.email", "test@example.invalid")
+        git("config", "user.name", "test")
+        git("config", "core.hooksPath", ".githooks")
+        (repo / "marker").write_text("fixture\n", encoding="utf-8")
+        git("add", "marker")
+        git("commit", "-qm", "fixture")
+        subprocess.run(["bash", str(target), "mark", "--status", "active", "--owner", "recorded-owner"],
+                       cwd=repo, env=env, check=True, stdout=subprocess.DEVNULL)
+        # This bypass exists only inside the disposable hook fixture. The real
+        # repair push must execute every required gate.
+        env["PULP_SKIP_PREPUSH"] = "1"
+        env["PYTHON"] = sys.executable
+        if requested_owner is not None:
+            env["PULP_AGENT_OWNER"] = requested_owner
+        result = subprocess.run(["git", "push", str(remote), "HEAD:refs/heads/test"],
+                                cwd=repo, env=env, capture_output=True, text=True)
+        remote_head = git("ls-remote", str(remote), "refs/heads/test").stdout.strip()
+        return result, remote_head
+
+    def test_hook_owner_guard_refuses_foreign_owner(self):
+        result, remote_head = self.run_owner_guard("foreign-owner")
+        self.assertEqual(result.returncode, 1, result.stderr)
+        self.assertIn("ownership does not match", result.stderr)
+        self.assertEqual(remote_head, "")
+
+    def test_hook_owner_guard_allows_matching_owner(self):
+        result, remote_head = self.run_owner_guard("recorded-owner")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertTrue(remote_head, result.stderr)
+
+    def test_hook_owner_guard_allows_unset_owner(self):
+        result, remote_head = self.run_owner_guard()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertTrue(remote_head, result.stderr)
 
     def test_hook_checks_claims_on_every_allowed_push_path(self):
         hook = (ROOT.parent.parent / ".githooks" / "pre-push").read_text(encoding="utf-8")
