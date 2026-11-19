@@ -70,13 +70,36 @@ class FlaggedTest(unittest.TestCase):
 class DiffScopeTest(unittest.TestCase):
     """End to end on a scratch repo: only added lines are judged."""
 
+    def test_unquoted_destination_tab_header_is_scanned(self):
+        original = lint._git
+        calls = iter(["base\n", '+++ b/tools/x/test_thing space.py\t\n@@ -1,0 +1,1 @@\n+x = time.time()\n'])  # clock-ok: fixture text
+        lint._git = lambda _args: next(calls)
+        try:
+            self.assertEqual(lint.added_lines("base", "HEAD"), {
+                "tools/x/test_thing space.py": [(1, "x = time.time()")]  # clock-ok: fixture text
+            })
+        finally:
+            lint._git = original
+
+    def test_embedded_cr_before_clock_read_is_scanned(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp); git = lambda *a: subprocess.run(["git", "-C", tmp, *a], check=True, capture_output=True)
+            git("init", "-q", "-b", "main"); git("config", "user.email", "t@example.com"); git("config", "user.name", "t")
+            (repo / "tools").mkdir(); f = repo / "tools" / "test_cr.py"; f.write_text("old = 1\n", encoding="utf-8")
+            git("add", "."); git("commit", "-qm", "base")
+            f.write_bytes(b"# harmless\rvalue = time.time()\n"); git("add", "."); git("commit", "-qam", "plant")  # clock-ok: fixture text
+            old_root = lint.ROOT; lint.ROOT = repo
+            try: added = lint.added_lines("HEAD~1", "HEAD")
+            finally: lint.ROOT = old_root
+            self.assertEqual(len(lint.scan_lines("tools/test_cr.py", added["tools/test_cr.py"], NO_BASELINE)), 1)
+
     def test_quoted_destination_header_is_scanned(self):
         original = lint._git
         calls = iter(["base\n", '+++ "b/tools/x/test_thing space.py"\n@@ -1,0 +1,1 @@\n+x = time.time()\n'])  # clock-ok: fixture text
         lint._git = lambda _args: next(calls)
         try:
             self.assertEqual(lint.added_lines("base", "HEAD"), {
-                "tools/x/test_thing space.py": [(1, "x = time.time()")]  # clock-ok: fixture text
+                "tools/x/test_thing space.py": [(1, "x = time.time()")]  # clock-ok: fixture text  # clock-ok: fixture text
             })
         finally:
             lint._git = original

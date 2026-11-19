@@ -669,7 +669,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-d02cb7664b0c"
+name = "script-readers-6ff1726a4748"
 paths = ["tools/scripts/date_sensitive_selftests_tz_matrix.py"]
 tests = [
   "build-parallelism-guard",
@@ -681,6 +681,7 @@ tests = [
   "clean-worktree-planning-selftest",
   "configure-only-selftest",
   "date-sensitive-selftests-tz-matrix",
+  "date-sensitive-selftests-tz-matrix-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
   "gpu-audio-provider-identity-selftest",
@@ -2971,7 +2972,10 @@ risk_class = "low"
 
 [[families]]
 name = "script-readers-bc6c8f790696"
-paths = ["tools/scripts/test_clock_in_tests_lint.py"]
+paths = [
+  "tools/scripts/clock_in_tests_lint.py",
+  "tools/scripts/test_clock_in_tests_lint.py",
+]
 tests = [
   "build-parallelism-guard",
   "changed-surface-policy-inventory",

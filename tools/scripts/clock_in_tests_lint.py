@@ -90,8 +90,12 @@ def scan_lines(rel: str, lines: list[tuple[int, str]], baseline=None) -> list[st
     _, entries = baseline if baseline is not None else load_baseline()
     out = []
     for number, text in lines:
-        if flagged(text) and (rel, text.strip()) not in entries:
-            out.append(f"{rel}:{number}: reads the real clock: {text.strip()}")
+        # Patch records are LF-delimited, but Python also treats CR as a
+        # source newline. Scan each logical source segment so a comment before
+        # an embedded CR cannot hide an executable clock read.
+        for logical in text.replace("\r", "\n").split("\n"):
+            if flagged(logical) and (rel, logical.strip()) not in entries:
+                out.append(f"{rel}:{number}: reads the real clock: {logical.strip()}")
     return out
 
 
@@ -127,7 +131,7 @@ def added_lines(base: str, head: str | None) -> dict[str, list[tuple[int, str]]]
             current = None
             in_hunk = False
         elif not in_hunk and raw.startswith("+++ "):
-            payload = raw[4:].rstrip("\r")
+            payload = raw[4:].rstrip("\r").strip()
             if payload.startswith("b/"):
                 current = payload[2:]
             elif payload.startswith('"'):
