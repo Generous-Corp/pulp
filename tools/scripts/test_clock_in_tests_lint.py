@@ -64,6 +64,20 @@ class FlaggedTest(unittest.TestCase):
     def test_nfkc_qualified_identifier_is_flagged(self):
         self.assertEqual(len(scan("value = 𝚝𝚒𝚖𝚎.time()")), 1)  # clock-ok: fixture text
 
+    def test_f_string_clock_expression_is_flagged(self):
+        self.assertEqual(len(scan("value = f'{time.time()}'")), 1)  # clock-ok: fixture text
+        self.assertEqual(scan("value = f'{time.time()}'  # clock-ok: measured"), [])  # clock-ok: fixture text
+
+    def test_added_lines_context_counter_preserves_later_attribution(self):
+        original = lint._git
+        calls = iter(["base\n", '+++ b/tools/test_a.py\n@@ -1,0 +1,4 @@\n+first = 1\n context = 2\n+value = time.time()\n'])
+        lint._git = lambda _args: next(calls)
+        try:
+            added = lint.added_lines("base", "HEAD")
+        finally:
+            lint._git = original
+        self.assertEqual(added["tools/test_a.py"], [(1, "first = 1"), (3, "value = time.time()")])
+
     def test_malformed_source_fails_closed(self):
         findings = scan("value = time.time()\nvalue = (")
         self.assertEqual(len(findings), 1)  # clock-ok: fixture text

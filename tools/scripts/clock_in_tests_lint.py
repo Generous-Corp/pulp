@@ -185,7 +185,16 @@ def scan_lines(rel: str, lines: list[tuple[int, str]], baseline=None, *, consume
         if report_index < len(logical_records):
             number, logical = logical_records[report_index]
             out.append(f"{rel}:{number}: reads the real clock: {logical.strip()}")
-    return out
+    # Python 3.11 tokenizes an f-string as one STRING token. Detect supported
+    # clock expressions inside f-string replacement fields while keeping plain
+    # string literals outside the scan.
+    for number, logical in logical_records:
+        if re.search(r"\bf(?:'''|\"\"\"|'|\")[^\n]*(?:datetime|date|time)\s*\.\s*(?:now|today|utcnow|time|time_ns|localtime)\s*\(", logical):
+            if added_numbers is not None and number not in added_numbers:
+                continue
+            if number not in marker_lines:
+                out.append(f"{rel}:{number}: reads the real clock: {logical.strip()}")
+    return list(dict.fromkeys(out))
 
 
 def load_base_baseline(base: str) -> tuple[dict[str, str], set[tuple[str, str]]]:
