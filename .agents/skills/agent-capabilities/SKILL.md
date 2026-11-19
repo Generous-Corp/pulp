@@ -1085,6 +1085,16 @@ after reviewing a changed public capability header:
    version-at-land bump assigns it,
 4. re-run `--check` and confirm it reports `fresh`.
 
+### After merging main into a branch
+
+A merge that conflicts in the generated surface and fingerprint files must not
+be resolved by taking one side of the whole merge. Run
+`tools/scripts/regen_agent_capability_after_merge.py`: it takes main's side for
+those two generated trees only, refuses while the merge is uncommitted, then
+accepts each fingerprint `--check` reports as changed, runs `--write` and
+`--check`, and fails when the branch diff against `origin/main` is empty or
+shrank (`--previous-head <sha>`). See the `ci` skill for the full sequence.
+
 ### The fingerprint lives in THREE places, and `--write` adds a fourth file
 
 The recipe above names two. A third holds the value the checker actually
