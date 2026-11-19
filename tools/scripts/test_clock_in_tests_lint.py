@@ -54,6 +54,12 @@ class FlaggedTest(unittest.TestCase):
 
     def test_parenthesized_qualifier_is_flagged(self):
         self.assertEqual(len(scan("value = (time).time()")), 1)  # clock-ok: fixture text
+        self.assertEqual(len(scan("value = ((time)).time()")), 1)  # clock-ok: fixture text
+        self.assertEqual(len(scan("value = (time.time)()")), 1)  # clock-ok: fixture text
+
+    def test_comment_before_call_is_flagged(self):
+        source = "value = (time.time  # ordinary comment\n    ())"
+        self.assertEqual(len(scan(source)), 1)  # clock-ok: fixture text
 
     def test_malformed_source_fails_closed(self):
         findings = scan("value = time.time()\nvalue = (")
@@ -78,6 +84,56 @@ class FlaggedTest(unittest.TestCase):
             finally:
                 lint.ROOT, lint._git = old_root, old_git
 
+    def test_cli_uses_matching_committed_or_working_source(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            git = lambda *a: subprocess.run(["git", "-C", tmp, *a], check=True, capture_output=True)
+            git("init", "-q", "-b", "main")
+            git("config", "user.email", "t@example.com"); git("config", "user.name", "t")
+            (repo / "tools" / "scripts").mkdir(parents=True)
+            (repo / "tools" / "test_a.py").write_text("value = 1\n", encoding="utf-8")
+            (repo / "tools" / "scripts" / "clock_in_tests_lint.py").write_text(
+                (HERE / "clock_in_tests_lint.py").read_text(encoding="utf-8"), encoding="utf-8")
+            (repo / "tools" / "scripts" / "clock_in_tests_baseline.json").write_text(
+                '{"files": [], "lines": []}\n', encoding="utf-8")
+            git("add", "."); git("commit", "-qm", "base")
+            (repo / "tools" / "test_a.py").write_text("value = time.time()\n", encoding="utf-8")
+            git("add", "."); git("commit", "-qm", "clock")
+            (repo / "tools" / "test_a.py").write_text("value = 1\n", encoding="utf-8")
+            result = subprocess.run(
+                [sys.executable, str(repo / "tools/scripts/clock_in_tests_lint.py"),
+                 "--base", "HEAD~1", "--head", "HEAD"], cwd=repo,
+                capture_output=True, text=True, encoding="utf-8")
+            self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+            git("reset", "--hard", "-q", "HEAD~1")
+            (repo / "tools" / "test_a.py").write_text("value = time.time()\n", encoding="utf-8")
+            result = subprocess.run(
+                [sys.executable, str(repo / "tools/scripts/clock_in_tests_lint.py"),
+                 "--base", "HEAD"], cwd=repo,
+                capture_output=True, text=True, encoding="utf-8")
+            self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+
+    def test_cli_preserves_embedded_cr_and_form_feed_records(self):
+        for payload in (b"# harmless\rvalue = time.time()\n", b"value = 0\fvalue = time.time()\n"):
+            with self.subTest(payload=payload):
+                with tempfile.TemporaryDirectory() as tmp:
+                    repo = Path(tmp)
+                    git = lambda *a: subprocess.run(["git", "-C", tmp, *a], check=True, capture_output=True)
+                    git("init", "-q", "-b", "main")
+                    git("config", "user.email", "t@example.com"); git("config", "user.name", "t")
+                    (repo / "tools" / "scripts").mkdir(parents=True)
+                    f = repo / "tools" / "test_a.py"; f.write_bytes(b"value = 1\n")
+                    (repo / "tools" / "scripts" / "clock_in_tests_lint.py").write_text(
+                        (HERE / "clock_in_tests_lint.py").read_text(encoding="utf-8"), encoding="utf-8")
+                    (repo / "tools" / "scripts" / "clock_in_tests_baseline.json").write_text(
+                        '{"files": [], "lines": []}\n', encoding="utf-8")
+                    git("add", "."); git("commit", "-qm", "base")
+                    f.write_bytes(payload); git("add", "."); git("commit", "-qm", "clock")
+                    result = subprocess.run(
+                        [sys.executable, str(repo / "tools/scripts/clock_in_tests_lint.py"),
+                         "--base", "HEAD~1", "--head", "HEAD"], cwd=repo,
+                        capture_output=True, text=True, encoding="utf-8")
+                    self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
     def test_marker_with_reason_passes(self):
         self.assertEqual(scan("t = time.time()  # clock-ok: elapsed measurement"), [])  # clock-ok: fixture text
 

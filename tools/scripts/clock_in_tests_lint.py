@@ -100,26 +100,44 @@ def _clock_tokens(source: str):
         "time": {"time", "time_ns", "localtime"},
     }
     spans = []
+    def skip_trivia(cursor: int) -> int:
+        while cursor < len(tokens) and tokens[cursor].type in (
+                tokenize.NL, tokenize.NEWLINE, tokenize.INDENT,
+                tokenize.DEDENT, tokenize.COMMENT):
+            cursor += 1
+        return cursor
+
+    def wrapped_name(cursor: int):
+        cursor = skip_trivia(cursor)
+        opens = 0
+        while cursor < len(tokens) and tokens[cursor].string == "(":
+            opens += 1
+            cursor = skip_trivia(cursor + 1)
+        if cursor >= len(tokens) or tokens[cursor].type != tokenize.NAME:
+            return None
+        name = tokens[cursor].string
+        cursor = skip_trivia(cursor + 1)
+        for _ in range(opens):
+            if cursor >= len(tokens) or tokens[cursor].string != ")":
+                return None
+            cursor = skip_trivia(cursor + 1)
+        return name, cursor
+
     for index, token in enumerate(tokens):
         if token.type != tokenize.NAME or token.string not in methods:
             continue
-        cursor = index + 1
-        while cursor < len(tokens) and tokens[cursor].type in (tokenize.NL, tokenize.NEWLINE, tokenize.INDENT, tokenize.DEDENT, tokenize.COMMENT):
-            cursor += 1
-        if cursor < len(tokens) and tokens[cursor].string == ")":
-            cursor += 1
-            while cursor < len(tokens) and tokens[cursor].type in (tokenize.NL, tokenize.NEWLINE, tokenize.INDENT, tokenize.DEDENT, tokenize.COMMENT):
-                cursor += 1
+        cursor = skip_trivia(index + 1)
+        while cursor < len(tokens) and tokens[cursor].string == ")":
+            cursor = skip_trivia(cursor + 1)
         if cursor >= len(tokens) or tokens[cursor].string != ".":
             continue
-        cursor += 1
-        while cursor < len(tokens) and tokens[cursor].type in (tokenize.NL, tokenize.NEWLINE, tokenize.INDENT, tokenize.DEDENT, tokenize.COMMENT):
-            cursor += 1
-        if cursor >= len(tokens) or tokens[cursor].type != tokenize.NAME or tokens[cursor].string not in methods[token.string]:
+        parsed_method = wrapped_name(cursor + 1)
+        if parsed_method is None or parsed_method[0] not in methods[token.string]:
             continue
-        end = cursor + 1
-        while end < len(tokens) and tokens[end].type in (tokenize.NL, tokenize.NEWLINE, tokenize.INDENT, tokenize.DEDENT):
-            end += 1
+        _, end = parsed_method
+        while end < len(tokens) and tokens[end].string == ")":
+            end = skip_trivia(end + 1)
+        end = skip_trivia(end)
         if end < len(tokens) and tokens[end].string == "(":
             spans.append((token.start[0], tokens[end].end[0]))
     return spans
@@ -223,7 +241,8 @@ def added_lines(base: str, head: str | None) -> dict[str, list[tuple[int, str]]]
 
 def tracked_lines(ref: str | None = None) -> dict[str, list[tuple[int, str]]]:
     result: dict[str, list[tuple[int, str]]] = {}
-    for rel in _git(["ls-files", "-z", "tools"]).split("\0"):
+    listing = _git(["ls-tree", "-r", "--name-only", "-z", ref, "tools"]) if ref else _git(["ls-files", "-z", "tools"])
+    for rel in listing.split("\0"):
         if not rel:
             continue
         if not in_scope(rel):
@@ -265,8 +284,8 @@ def main(argv: list[str]) -> int:
         added_by_file: dict[str, set[int]] = {}
     else:
         added = added_lines(args.base, args.head)
-        all_tracked = tracked_lines(args.head or "HEAD")
-        source = {rel: all_tracked.get(rel, lines) for rel, lines in added.items()}
+        all_tracked = tracked_lines(args.head) if args.head else tracked_lines()
+        source = {rel: all_tracked[rel] for rel in added if rel in all_tracked}
         added_by_file = {rel: {number for number, _ in lines} for rel, lines in added.items()}
     baseline = load_base_baseline(args.base) if not args.all else load_baseline()
     for rel, lines in sorted(source.items()):
