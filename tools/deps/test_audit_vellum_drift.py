@@ -284,9 +284,20 @@ class VellumDriftTests(unittest.TestCase):
                     mock.patch.object(audit, "parse_licensing_md", lambda: {"Skia"}), \
                     mock.patch.object(audit, "read_vellum_pin_source", reader(text)), \
                     mock.patch.object(audit, "gpu_runtime_pin_agreement", lambda *_a, **_k: []), \
+                    mock.patch.object(audit, "pulp_lock_agreement", lambda *_a, **_k: []), \
                     mock.patch.object(sys, "argv", ["audit.py", "--strict"]), \
                     contextlib.redirect_stdout(io.StringIO()) as out:
                 self.assertEqual(audit.main(), expected, out.getvalue())
+
+    def test_pulp_lock_agreement_reads_the_real_lock_and_catches_drift(self) -> None:
+        import json
+        real = json.loads((ROOT / "tools/deps/manifest.json").read_text(encoding="utf-8"))["dependencies"]
+        self.assertEqual(audit.pulp_lock_agreement(real), [])
+        stale = [{**dep, "upstream": {**dep.get("upstream", {}), "commit": "0" * 40}}
+                 if dep.get("name") == audit.GPU_RUNTIME_ENTRY else dep for dep in real]
+        self.assertTrue(any("pulp.lock pins" in p for p in audit.pulp_lock_agreement(stale)))
+        self.assertTrue(any("no " + audit.GPU_RUNTIME_ENTRY in p
+                            for p in audit.pulp_lock_agreement([])))
 
 
 if __name__ == "__main__":
