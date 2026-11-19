@@ -116,7 +116,8 @@ web list a wasm-safe definition, as `isolated_plugin_slot_web.cpp` does for
 compiled into that same curated profile, so splitting it into a new
 `graph_serializer_*.cpp` (persisted sample-region validation lives in
 `graph_serializer_regions.cpp`, plugin node resolution in
-`graph_serializer_plugin_resolver.cpp`) needs the new file in `pulp-host`, in
+`graph_serializer_plugin_resolver.cpp`, the save path in
+`graph_serializer_save.cpp`) needs the new file in `pulp-host`, in
 `PulpSampleRegionWebSources.cmake`, and in the `COMPAT_INPUTS` of
 `tools/scripts/sample_region_compat_baseline.py` with its two
 `test/ctest_script_inputs` JSON copies. Missing it from the web list builds
@@ -125,7 +126,10 @@ natively and fails only at `wasm-ld`. The plugin scanner is native-only:
 in `graph_serializer_plugin_resolver.cpp` alone, behind the private
 `detail::PluginNodeResolver` whose web variant leaves every plugin node an
 unresolved placeholder; keep scanner types out of its header and out of
-`graph_serializer.cpp`.
+`graph_serializer.cpp`. Format constants, writer bounds and the node identity
+spelling that the save and load units share live in the private
+`graph_serializer_internal.hpp`, so the writer and the readers cannot drift
+apart.
 
 **Recover a terminal isolated node by republishing, never by re-preparing.**
 An isolated graph refuses a second eager `prepare()`, `begin_swap_edit()` and
@@ -3802,7 +3806,7 @@ that cannot be saved reports the failing rule through `SaveResult::error`
 (`to_saved_file` refuses it with that reason); the older string-returning
 writer overloads keep returning an empty string. The writer and inspection
 build identity strings through one key function (`identity_key` in
-`graph_serializer.cpp`); change the format there, never in only one side, or
+`graph_serializer_internal.hpp`); change the format there, never in only one side, or
 every saved document is refused. The tolerant loader drops a node record it
 cannot add (a second Control index input, a plugin record without plugin info)
 and lists it in `LoadResult::unrestored_node_ids`; `from_saved_document` and

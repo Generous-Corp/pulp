@@ -8,6 +8,7 @@
     "core/host/src/spectral_graph_persistence.cpp",
     "core/host/src/spectral_graph_persistence.hpp",
     "core/host/src/graph_serializer.cpp",
+    "core/host/src/graph_serializer_save.cpp",
     "core/host/src/graph_serializer_test_access.hpp",
     "core/host/src/graph_history.cpp",
     "core/host/src/subgraph_persistence.cpp",
@@ -27,7 +28,7 @@
       "needles": ["identity_record(const SpectralIdentity& shape)", "\"finite_policy\"", "type == \"spectral_analysis\"", "type == \"spectral_asset_source\""]
     },
     {
-      "path": "core/host/src/graph_serializer.cpp",
+      "path": "core/host/src/graph_serializer_save.cpp",
       "needles": ["spectral_persistence::write(graph, editor_layout, why, saved_identity)"]
     },
     {
