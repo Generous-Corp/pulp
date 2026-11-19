@@ -42,6 +42,7 @@ def main() -> int:
         "vellum header": ("core/view/src/a.cpp", '#include <vellum/value/param_model.hpp>\n'),
         "sdk target": ("core/render/CMakeLists.txt", "target_link_libraries(x PRIVATE Vellum::Value)\n"),
         "option": ("core/format/CMakeLists.txt", "if(PULP_ENABLE_PULP_VELLUM)\n"),
+        "audio option": ("core/format/CMakeLists.txt", "if(PULP_ENABLE_PULP_VELLUM_AUDIO)\n"),
     }
     for name, (rel, text) in planted.items():
         with tempfile.TemporaryDirectory(prefix="pulp-integrations-boundary-") as raw:
