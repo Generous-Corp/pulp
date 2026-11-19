@@ -205,6 +205,26 @@ still runs `source-selftest`, a Linux or Windows push excludes only
 [`.shipyard/config.toml`](../../.shipyard/config.toml) (`[validation.default]`,
 `test =`).
 
+### Long-running tests need the `slow` label
+
+The required gate runs ctest with `--timeout 120`, and a per-test `TIMEOUT`
+property overrides that default. A registration that raises `TIMEOUT` above 120
+therefore declares a test that can run for minutes on the merge-blocking lane,
+where a 125 s case surfaces only as a late timeout. `ctest_label_exclusion_guard.py`
+(the `ctest-label-exclusion-guard` ctest, `gates.sh` and pre-push) fails when a
+`pulp_add_test_suite`, `catch_discover_tests` or `set_tests_properties`
+registration raises `TIMEOUT` above 120 without a label the gate excludes
+(`slow` in practice). Resolve it by shrinking the fixture or adding
+`LABELS slow`. Registrations that predate the rule are frozen under
+`timeout_allow` in `tools/scripts/ctest_label_exclusion_guard.json`; a stale
+entry fails the guard, so delete a line when its registration is fixed.
+
+With `--runtime-base REF` (gates and pre-push pass it) the guard also reads the
+local build's `Testing/Temporary/LastTest.log` and fails when a registration
+added or edited against `REF` ran over 30 s without such a label. With no timing
+data it prints a loud `SKIPPED ... NOT CHECKED` line and exits 0: a skip is not
+a pass, so run the suite locally before relying on it.
+
 ### Installed-SDK consumers on the macOS gate
 
 An installed-SDK consumer test runs `cmake --install` into a scratch prefix,

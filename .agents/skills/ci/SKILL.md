@@ -6168,6 +6168,11 @@ bisectable.
   not diff-scoped, because the condition is a property of a target's entire
   registration set and the rescuing sibling can live in a manifest the push never
   touched.
+  The same script also enforces the long-timeout rule: a registration that raises
+  `TIMEOUT` above the gate's `--timeout 120` default must carry `slow` (or another
+  gate-excluded label) or sit in `timeout_allow` in the same json with a reason;
+  `--runtime-base REF` adds a measured-runtime check (over 30 s) of newly added
+  tests from local `LastTest.log` data and SKIPs loudly when none exists.
 - **Release builds must pass `-DPULP_BUILD_EXAMPLES=OFF`.** The
   `pulp-design-tool` example hard-fails CMake configure when `PULP_HAS_SKIA`
   is FALSE (belt-and-suspenders, code 78). `sign-and-release.yml` builds on a

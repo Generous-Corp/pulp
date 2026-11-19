@@ -54,5 +54,548 @@
       "target": "pulp-test-yoga-layout-bench",
       "reason": "Dedicated layout benchmark. Carries timing and allocation measurements rather than a correctness contract the required gate would enforce."
     }
+  ],
+  "_timeout_comment": "Frozen backlog for the long-timeout rule in ctest_label_exclusion_guard.py. A registration that raises TIMEOUT above the required gate's `ctest --timeout 120` default declares a test that may run for minutes on the merge-blocking lane, so it must carry a label the gate excludes (for example `slow`). Every entry here predates the rule and is frozen so only NEW registrations are blocked. Entries are keyed by test or suite name. An entry whose registration no longer raises TIMEOUT unlabelled is REMOVED: the guard fails on a stale entry. To clear one, label the registration `slow` or shrink the fixture, and delete the line in the same change.",
+  "timeout_allow": [
+    {
+      "target": "${_e2e}",
+      "reason": "pre-existing"
+    },
+    {
+      "target": "${name}",
+      "reason": "pre-existing"
+    },
+    {
+      "target": "agent-capability-installed-sdk",
+      "reason": "pre-existing"
+    },
+    {
+      "target": "agent-capability-manifest-selftest",
+      "reason": "pre-existing"
+    },
+    {
+      "target": "agent-capability-rederive-selftest",
+      "reason": "pre-existing"
+    },
+    {
+      "target": "agent-panel-clipped-is-rejected",
+      "reason": "pre-existing"
+    },
+    {
+      "target": "agent-panel-native-invariants",
+      "reason": "pre-existing"
+    },
+    {
+      "target": "android-smoke",
+      "reason": "pre-existing"
+    },
+    {
+      "target": "apple-bundle-signing-check",
+      "reason": "pre-existing"
+    },
+    {
+      "target": "ccache-pch-isolation",
+      "reason": "pre-existing"
+    },
+    {
+      "target": "changed-surface-script-families-selftest",
+      "reason": "pre-existing"
+    },
+    {
+      "target": "check-panel-presence-selftest",
+      "reason": "pre-existing"
+    },
+    {
+      "target": "clean-build-cov-selftest",
+      "reason": "pre-existing"
+    },
+    {
+      "target": "clean-worktree-builds-selftest",
+      "reason": "pre-existing"
+    },
+    {
+      "target": "clean-worktree-planning-selftest",
+      "reason": "pre-existing"
+    },
+    {
+      "target": "clean-worktrees-selftest",
+      "reason": "pre-existing"
+    },
+    {
+      "target": "cmake-${_g3_consumer}",
+      "reason": "pre-existing"
+    },
+    {
+      "target": "cmake-a3-spectral-replay-sdk-consumer",
+      "reason": "pre-existing"
+    },
+    {
+      "target": "cmake-control-sdk-consumer",
+      "reason": "pre-existing"
+    },
+    {
+      "target": "cmake-control-shipping-matrix",
+      "reason": "pre-existing"
+    },
+    {
+      "target": "cmake-dev-shared-ui",
+      "reason": "pre-existing"
+    },
+    {
+      "target": "cmake-forge-catalog-install",
+      "reason": "pre-existing"
+    },
+    {
+      "target": "cmake-g2-processor-restore-sdk-consumer",
+      "reason": "pre-existing"
+    },
+    {
+      "target": "cmake-g4-voice-bank-sdk-consumer",
+      "reason": "pre-existing"
+    },
+    {
+      "target": "cmake-g6-voice-bank-sdk-consumer",
+      "reason": "pre-existing"
+    },
+    {
+      "target": "cmake-g6-voice-contract-sdk-consumer",
+      "reason": "pre-existing"
+    },
+    {
+      "target": "cmake-graph-control-event-probe-sdk-consumer",
+      "reason": "pre-existing"
+    },
+    {
+      "target": "cmake-graph-edge-probe-sdk-consumer",
+      "reason": "pre-existing"
+    },
+    {
+      "target": "cmake-graph-file-reload-sdk-consumer",
+      "reason": "pre-existing"
+    },
+    {
+      "target": "cmake-graph-patch-sdk-consumer",
+      "reason": "pre-existing"
+    },
+    {
+      "target": "cmake-ios-source-syntax",
+      "reason": "pre-existing"
+    },
+    {
+      "target": "cmake-link-floor-selftest",
+      "reason": "pre-existing"
+    },
+    {
+      "target": "cmake-native-sdk-consumer",
+      "reason": "pre-existing"
+    },
+    {
+      "target": "cmake-plugin-dead-strip-switch",
+      "reason": "pre-existing"
+    },
+    {
+      "target": "cmake-pulp-utils-compat",
+      "reason": "pre-existing"
+    },
+    {
+      "target": "cmake-rt-allocation-probe-sdk-consumer",
+      "reason": "pre-existing"
+    },
+    {
+      "target": "cmake-standalone-document-types",
+      "reason": "pre-existing"
+    },
+    {
+      "target": "cmake-test-group-discovery",
+      "reason": "pre-existing"
+    },
+    {
+      "target": "cmake-ui-script-embed",
+      "reason": "pre-existing"
+    },
+    {
+      "target": "commit-bound-cmake-selftest",
+      "reason": "pre-existing"
+    },
+    {
+      "target": "configure-tests-and-examples-both-on",
+      "reason": "pre-existing"
+    },
+    {
+      "target": "confirm-failure-harness",
+      "reason": "pre-existing"
+    },
+    {
+      "target": "control-scalar-installed-headers",
+      "reason": "pre-existing"
+    },
+    {
+      "target": "diff-cover-targets-selftest",
+      "reason": "pre-existing"
+    },
+    {
+      "target": "gate-python-imports",
+      "reason": "pre-existing"
+    },
+    {
+      "target": "gpu-audio-daw-continuity-v2-receipt-verifier-selftest",
+      "reason": "pre-existing"
+    },
+    {
+      "target": "gpu-dpr-runner-selftest",
+      "reason": "pre-existing"
+    },
+    {
+      "target": "gpu-dpr-v2-evidence-selftest",
+      "reason": "pre-existing"
+    },
+    {
+      "target": "gpu-first-visible-role-producers-selftest",
+      "reason": "pre-existing"
+    },
+    {
+      "target": "gpu-handoff-provenance-selftest",
+      "reason": "pre-existing"
+    },
+    {
+      "target": "gpu-health-run-attestation",
+      "reason": "pre-existing"
+    },
+    {
+      "target": "gpu-recipe-catalog-selftest",
+      "reason": "pre-existing"
+    },
+    {
+      "target": "gpu-runtime-carrier-cases",
+      "reason": "pre-existing"
+    },
+    {
+      "target": "gpu-trace-overhead-acceptance-selftest",
+      "reason": "pre-existing"
+    },
+    {
+      "target": "gpu-trace-overhead-verifier-selftest",
+      "reason": "pre-existing"
+    },
+    {
+      "target": "import-layout-parity-gate",
+      "reason": "pre-existing"
+    },
+    {
+      "target": "importer-lab-capture-scale",
+      "reason": "pre-existing"
+    },
+    {
+      "target": "ios-compile-gate-legs",
+      "reason": "pre-existing"
+    },
+    {
+      "target": "local-diff-cover-selftest",
+      "reason": "pre-existing"
+    },
+    {
+      "target": "merge-group-shadows-selftest",
+      "reason": "pre-existing"
+    },
+    {
+      "target": "prepush-receipt",
+      "reason": "pre-existing"
+    },
+    {
+      "target": "prepush-refresh-push",
+      "reason": "pre-existing"
+    },
+    {
+      "target": "pulp-browser-capture-node-integration",
+      "reason": "pre-existing"
+    },
+    {
+      "target": "pulp-browser-capture-node-unit",
+      "reason": "pre-existing"
+    },
+    {
+      "target": "pulp-gpu-audio-coreaudio-workgroup-benchmark",
+      "reason": "pre-existing"
+    },
+    {
+      "target": "pulp-gpu-dsp-skia-free",
+      "reason": "pre-existing"
+    },
+    {
+      "target": "pulp-gpu-dsp-wasm-build",
+      "reason": "pre-existing"
+    },
+    {
+      "target": "pulp-gpu-shared-io-paced-convolution-probe",
+      "reason": "pre-existing"
+    },
+    {
+      "target": "pulp-test-auto-ducked-send",
+      "reason": "pre-existing"
+    },
+    {
+      "target": "pulp-test-bridged-t-resonator",
+      "reason": "pre-existing"
+    },
+    {
+      "target": "pulp-test-character-delay",
+      "reason": "pre-existing"
+    },
+    {
+      "target": "pulp-test-control-dspx04-graph-product-e2e",
+      "reason": "pre-existing"
+    },
+    {
+      "target": "pulp-test-control-graph_file_reload-graph-product-e2e",
+      "reason": "pre-existing"
+    },
+    {
+      "target": "pulp-test-control-sample-region-e2e",
+      "reason": "pre-existing"
+    },
+    {
+      "target": "pulp-test-data-cmake-selftest",
+      "reason": "pre-existing"
+    },
+    {
+      "target": "pulp-test-de-esser",
+      "reason": "pre-existing"
+    },
+    {
+      "target": "pulp-test-decay-envelope",
+      "reason": "pre-existing"
+    },
+    {
+      "target": "pulp-test-drum-fm",
+      "reason": "pre-existing"
+    },
+    {
+      "target": "pulp-test-drum-kick",
+      "reason": "pre-existing"
+    },
+    {
+      "target": "pulp-test-drum-physical",
+      "reason": "pre-existing"
+    },
+    {
+      "target": "pulp-test-drum-voices",
+      "reason": "pre-existing"
+    },
+    {
+      "target": "pulp-test-dynamics-contract",
+      "reason": "pre-existing"
+    },
+    {
+      "target": "pulp-test-expander",
+      "reason": "pre-existing"
+    },
+    {
+      "target": "pulp-test-fdn-reverb",
+      "reason": "pre-existing"
+    },
+    {
+      "target": "pulp-test-fdn-reverb-portable-lanes",
+      "reason": "pre-existing"
+    },
+    {
+      "target": "pulp-test-gpu-dawn-shared-io-provider-conformance",
+      "reason": "pre-existing"
+    },
+    {
+      "target": "pulp-test-graph-gpu-resource-admission",
+      "reason": "pre-existing"
+    },
+    {
+      "target": "pulp-test-interaction-residual",
+      "reason": "pre-existing"
+    },
+    {
+      "target": "pulp-test-lfo-sampling",
+      "reason": "pre-existing"
+    },
+    {
+      "target": "pulp-test-lofi-chain",
+      "reason": "pre-existing"
+    },
+    {
+      "target": "pulp-test-lowpass-gate",
+      "reason": "pre-existing"
+    },
+    {
+      "target": "pulp-test-mod-utilities",
+      "reason": "pre-existing"
+    },
+    {
+      "target": "pulp-test-modal-analysis",
+      "reason": "pre-existing"
+    },
+    {
+      "target": "pulp-test-modal-bank",
+      "reason": "pre-existing"
+    },
+    {
+      "target": "pulp-test-modal-spec",
+      "reason": "pre-existing"
+    },
+    {
+      "target": "pulp-test-native-metal-audio-comparator",
+      "reason": "pre-existing"
+    },
+    {
+      "target": "pulp-test-noise-source",
+      "reason": "pre-existing"
+    },
+    {
+      "target": "pulp-test-particle-percussion",
+      "reason": "pre-existing"
+    },
+    {
+      "target": "pulp-test-screenshot-compare",
+      "reason": "pre-existing"
+    },
+    {
+      "target": "pulp-test-signal-adaa-iir",
+      "reason": "pre-existing"
+    },
+    {
+      "target": "pulp-test-signal-cross-feedback-multitap-delay",
+      "reason": "pre-existing"
+    },
+    {
+      "target": "pulp-test-signal-diffusion-network",
+      "reason": "pre-existing"
+    },
+    {
+      "target": "pulp-test-signal-distortion",
+      "reason": "pre-existing"
+    },
+    {
+      "target": "pulp-test-signal-early-reflections",
+      "reason": "pre-existing"
+    },
+    {
+      "target": "pulp-test-signal-feedforward-compressor",
+      "reason": "pre-existing"
+    },
+    {
+      "target": "pulp-test-signal-fir-design",
+      "reason": "pre-existing"
+    },
+    {
+      "target": "pulp-test-signal-fir-remez",
+      "reason": "pre-existing"
+    },
+    {
+      "target": "pulp-test-signal-fuzz-pair",
+      "reason": "pre-existing"
+    },
+    {
+      "target": "pulp-test-signal-graph-hot-reload-stress",
+      "reason": "pre-existing"
+    },
+    {
+      "target": "pulp-test-signal-headphone-crossfeed",
+      "reason": "pre-existing"
+    },
+    {
+      "target": "pulp-test-signal-nonlinear-shaping",
+      "reason": "pre-existing"
+    },
+    {
+      "target": "pulp-test-signal-parallel-dynamics",
+      "reason": "pre-existing"
+    },
+    {
+      "target": "pulp-test-signal-reverse-buffer",
+      "reason": "pre-existing"
+    },
+    {
+      "target": "pulp-test-signal-saturator",
+      "reason": "pre-existing"
+    },
+    {
+      "target": "pulp-test-signal-transfer-curve",
+      "reason": "pre-existing"
+    },
+    {
+      "target": "pulp-test-square-osc-bank",
+      "reason": "pre-existing"
+    },
+    {
+      "target": "pulp-test-stochastic-sources",
+      "reason": "pre-existing"
+    },
+    {
+      "target": "pulp-test-tempo-delay",
+      "reason": "pre-existing"
+    },
+    {
+      "target": "pulp-test-two-pole-resonator",
+      "reason": "pre-existing"
+    },
+    {
+      "target": "pulp-test-web-compat-react-shims",
+      "reason": "pre-existing"
+    },
+    {
+      "target": "pulp-view-audio-widgets-gate",
+      "reason": "pre-existing"
+    },
+    {
+      "target": "rack-generation-lock-selftest",
+      "reason": "pre-existing"
+    },
+    {
+      "target": "rack-generator-safety",
+      "reason": "pre-existing"
+    },
+    {
+      "target": "rack-inert-input-cause",
+      "reason": "pre-existing"
+    },
+    {
+      "target": "rack-plugin-loads",
+      "reason": "pre-existing"
+    },
+    {
+      "target": "rack-prompt-fidelity-selftest",
+      "reason": "pre-existing"
+    },
+    {
+      "target": "release-artifact-scan-sdk-libraries",
+      "reason": "pre-existing"
+    },
+    {
+      "target": "sample-region-compat-baseline",
+      "reason": "pre-existing"
+    },
+    {
+      "target": "script-test-inputs-selftest",
+      "reason": "pre-existing"
+    },
+    {
+      "target": "seed-build-dir-selftest",
+      "reason": "pre-existing"
+    },
+    {
+      "target": "setup-cache-lock",
+      "reason": "pre-existing"
+    },
+    {
+      "target": "test-link-determinism",
+      "reason": "pre-existing"
+    },
+    {
+      "target": "vellum-watch-preflight-selftest",
+      "reason": "pre-existing"
+    },
+    {
+      "target": "version-at-land-selftest",
+      "reason": "pre-existing"
+    },
+    {
+      "target": "wide-non-native-selftest",
+      "reason": "pre-existing"
+    }
   ]
 }
