@@ -57,9 +57,10 @@ class MatrixTest(unittest.TestCase):
     def test_pending_only_configuration_fails_closed(self):
         with tempfile.TemporaryDirectory() as tmp:
             cfg = Path(tmp) / "c.json"
+            (Path(tmp) / "x.py").write_text(PINNED, encoding="utf-8")
             cfg.write_text(json.dumps({
-                "zones": ["UTC"], "tests": [],
-                "pending": [{"path": "does/not/exist.py", "reason": "r"}]}), encoding="utf-8")
+                "zones": ZONES, "tests": [],
+                "pending": [{"path": "x.py", "reason": "r"}]}), encoding="utf-8")
             self.assertNotEqual(matrix.main(["--config", str(cfg)]), 0)
 
     def test_empty_zones_fail_closed(self):
@@ -71,7 +72,8 @@ class MatrixTest(unittest.TestCase):
     def test_utc_only_configuration_fails_closed(self):
         with tempfile.TemporaryDirectory() as tmp:
             cfg = Path(tmp) / "c.json"
-            cfg.write_text(json.dumps({"zones": ["UTC"], "tests": [{"path": "x.py"}]}), encoding="utf-8")
+            (Path(tmp) / "x.py").write_text(PINNED, encoding="utf-8")
+            cfg.write_text(json.dumps({"zones": ["UTC"], "tests": [{"path": "x.py", "reason": "fixture"}]}), encoding="utf-8")
             self.assertNotEqual(matrix.main(["--config", str(cfg)]), 0)
 
     def test_shipped_config_is_well_formed(self):

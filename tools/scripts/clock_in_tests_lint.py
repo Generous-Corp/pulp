@@ -113,7 +113,7 @@ def _git(args: list[str]) -> str:
 
 def added_lines(base: str, head: str | None) -> dict[str, list[tuple[int, str]]]:
     merge_base = _git(["merge-base", base, head or "HEAD"]).strip()
-    cmd = ["diff", "-U0", "--no-color", "--diff-filter=AM", merge_base]
+    cmd = ["diff", "-U0", "--no-color", "--no-renames", "--diff-filter=AM", merge_base]
     if head:
         cmd.append(head)
     result: dict[str, list[tuple[int, str]]] = {}
@@ -122,8 +122,6 @@ def added_lines(base: str, head: str | None) -> dict[str, list[tuple[int, str]]]
     for raw in _git(cmd).splitlines():
         if raw.startswith("+++ b/"):
             current = raw[6:]
-        elif raw.startswith("+++ "):
-            current = None
         elif raw.startswith("@@"):
             number = int(re.search(r"\+(\d+)", raw).group(1))
         elif raw.startswith("+") and current:
