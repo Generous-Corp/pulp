@@ -165,6 +165,39 @@ class BuildDirLockTest(unittest.TestCase):
                         pass
                 self.assertEqual(victim.read_text(encoding="utf-8"), "do not touch")
 
+    @unittest.skipIf(sys.platform == "win32", "uses POSIX directory permissions")
+    @unittest.skipIf(hasattr(os, "geteuid") and os.geteuid() == 0, "root ignores modes")
+    def test_unwritable_default_root_falls_back_to_temp(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            base = Path(directory)
+            readonly = base / "readonly"
+            readonly.mkdir()
+            readonly.chmod(0o500)
+            tmp = base / "tmp"
+            tmp.mkdir()
+            try:
+                env = {k: v for k, v in os.environ.items() if k != build_dir_lock.LOCK_ROOT_ENV}
+                with mock.patch.dict("os.environ", env, clear=True), mock.patch.object(
+                    build_dir_lock, "lock_root", return_value=readonly / "locks"
+                ), mock.patch.object(tempfile, "gettempdir", return_value=str(tmp)):
+                    with build_dir_lock.exclusive_build_dir(base / "build"):
+                        pass
+                    fallback = build_dir_lock.fallback_lock_root()
+                    self.assertTrue(any(fallback.glob("build-dir-*.lock")))
+                    self.assertTrue(str(fallback).startswith(str(tmp.resolve())))
+            finally:
+                readonly.chmod(0o700)
+
+    def test_explicit_root_is_not_replaced_by_fallback(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory) / "root"
+            with self.lock_root(root), mock.patch.object(
+                build_dir_lock, "_open_lock_in_root", side_effect=PermissionError("no")
+            ):
+                with self.assertRaises(PermissionError):
+                    with build_dir_lock.exclusive_build_dir(Path(directory) / "b"):
+                        pass
+
     def test_relative_override_is_rejected(self) -> None:
         with mock.patch.dict(
             "os.environ", {build_dir_lock.LOCK_ROOT_ENV: "relative"}, clear=False

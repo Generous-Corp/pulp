@@ -7,6 +7,10 @@ the process that holds it: two builds racing into one tree corrupt each other's
 objects and double the host load, and relaunching a build that is still running
 elsewhere is the common way that happens.
 
+If the default lock root is not writable (a confined sandbox) the lock falls
+back to a per-user directory under the system temp dir; set
+``PULP_BUILD_DIR_LOCK_ROOT`` to an absolute path to choose the root explicitly.
+
 The lock is a kernel ``flock``, so it is released the moment its holder exits,
 however it exits; a holder that was killed cannot leave a stale lock behind.
 The ``.holder`` sidecar only describes who holds it, and is read only when the
@@ -26,6 +30,7 @@ import socket
 import stat
 import subprocess
 import sys
+import tempfile
 import time
 from contextlib import contextmanager
 from pathlib import Path
@@ -96,6 +101,45 @@ def lock_root() -> Path:
     if state_home and Path(state_home).is_absolute():
         return Path(state_home) / "pulp" / "build-dir-locks"
     return Path.home() / ".local" / "state" / "pulp" / "build-dir-locks"
+
+
+def fallback_lock_root() -> Path:
+    """Per-user lock root under the system temp dir.
+
+    Used only when the default host-state root cannot be written (for example
+    a sandbox that confines writes to the workspace and temp directories).
+    """
+
+    uid = os.geteuid() if hasattr(os, "geteuid") else os.getpid()
+    return Path(tempfile.gettempdir()).resolve(strict=False) / f"pulp-build-dir-locks-{uid}"
+
+
+def _open_lock_in_root(build_dir: Path, root: Path) -> tuple[Path, BinaryIO]:
+    _ensure_lock_root(root)
+    path = lock_path_for(build_dir, root)
+    return path, _open_lock_file(path)
+
+
+def _open_lock(build_dir: Path) -> tuple[Path, BinaryIO]:
+    """Open the lock file, falling back to a temp root if the default is read-only.
+
+    An explicit ``PULP_BUILD_DIR_LOCK_ROOT`` is never second-guessed. The
+    fallback only serializes builds that also fall back, which is the best a
+    confined process can do.
+    """
+
+    root = lock_root()
+    try:
+        return _open_lock_in_root(build_dir, root)
+    except PermissionError:
+        if os.environ.get(LOCK_ROOT_ENV):
+            raise
+        fallback = fallback_lock_root()
+        print(
+            f"[build-dir-lock] {root} is not writable; using {fallback}",
+            file=sys.stderr,
+        )
+        return _open_lock_in_root(build_dir, fallback)
 
 
 def _ensure_lock_root(root: Path) -> None:
@@ -248,11 +292,9 @@ def exclusive_build_dir(
     if held_by_ancestor(build_dir):
         yield
         return
-    root = lock_root()
-    _ensure_lock_root(root)
-    path = lock_path_for(build_dir, root)
+    path, opened = _open_lock(build_dir)
     previous_held = os.environ.get(HELD_ENV)
-    with _open_lock_file(path) as lock_file:
+    with opened as lock_file:
         if os.name == "nt":
             import msvcrt
 

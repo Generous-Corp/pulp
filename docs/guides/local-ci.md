@@ -2986,6 +2986,10 @@ unlock so queued waiters keep one inode. Tests may set the trusted, absolute
 `PULP_BUILD_DIR_LOCK_ROOT` override; production uses durable per-user
 application state with owner-only permissions (or the user's inherited profile
 ACL on Windows), rather than an OS-purgeable cache or runtime directory.
+When that default root is not writable (for example a Codex workspace-write
+sandbox), the lock falls back to `pulp-build-dir-locks-<uid>` under the system
+temp directory instead of failing the build; an explicit
+`PULP_BUILD_DIR_LOCK_ROOT` is never replaced by the fallback.
 
 Interactive builds take the same lock without waiting. `tools/ci/governed-build.sh`
 runs every `cmake --build <dir>` under `build_dir_lock.py --no-wait`, which refuses a
