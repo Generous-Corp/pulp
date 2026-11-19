@@ -732,6 +732,13 @@ struct X11Window final : GlSurface::Impl {
             break;
         case FocusIn:
         case FocusOut:
+            // A key released while the child lacked focus sent its release
+            // elsewhere. Forget such keys when focus returns, so the next
+            // press is a new press, not a repeat with a stale routing. A
+            // release after focus left is still kept (it goes where the
+            // press went).
+            if (event.type == FocusIn && event.xfocus.window == child)
+                keys_down.clear();
             if (event.xfocus.window == child && event.xfocus.mode != NotifyGrab &&
                 event.xfocus.mode != NotifyUngrab && input.focus) {
                 FocusEvent focus;

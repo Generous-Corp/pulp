@@ -938,6 +938,48 @@ TEST_CASE("focus changes reach the handler", "[native][gl-surface][x11]") {
     REQUIRE(holder != child_of(*surface));
 }
 
+TEST_CASE("a key released while focus was elsewhere is a new press when focus returns",
+          "[native][gl-surface][x11]") {
+    HostConnection conn;
+    HostWindow host(conn.display);
+    auto surface = GlSurface::create(any_driver());
+    REQUIRE(surface->attach(host.handle()));
+    const Window child = child_of(*surface);
+    std::vector<KeyEvent> keys;
+    std::vector<bool> focus;
+    InputHandler handler;
+    handler.key = [&](const KeyEvent& e) {
+        keys.push_back(e);
+        return true;
+    };
+    handler.focus = [&](const FocusEvent& e) { focus.push_back(e.focused); };
+    surface->set_input_handler(handler);
+
+    surface->set_keyboard_focus(KeyboardFocus::keys);
+    REQUIRE(pump(*surface, conn.display, [&] { return !focus.empty(); }));
+    XEvent c_down = key_event(conn.display, child, KeyPress, XK_c);
+    send_to_client(conn.display, child, c_down);
+    REQUIRE(pump(*surface, conn.display, [&] { return keys.size() == 1; }));
+    REQUIRE_FALSE(keys[0].repeat);
+
+    // Focus leaves while C is held; its release goes elsewhere and never
+    // reaches the child.
+    surface->set_keyboard_focus(KeyboardFocus::none);
+    REQUIRE(pump(*surface, conn.display, [&] { return focus.size() >= 2; }));
+    REQUIRE_FALSE(focus.back());
+
+    // Focus returns and C is pressed again: a new press, not a repeat.
+    surface->set_keyboard_focus(KeyboardFocus::keys);
+    REQUIRE(pump(*surface, conn.display, [&] { return focus.size() >= 3; }));
+    REQUIRE(focus.back());
+    keys.clear();
+    send_to_client(conn.display, child, c_down);
+    REQUIRE(pump(*surface, conn.display, [&] { return keys.size() == 1; }));
+    REQUIRE(keys[0].kind == KeyKind::down);
+    REQUIRE(keys[0].key == Key::c);
+    REQUIRE_FALSE(keys[0].repeat);
+}
+
 #if defined(PULP_TEST_HAS_XTEST)
 TEST_CASE("a drag that leaves the window is still delivered to it", "[native][gl-surface][x11]") {
     HostConnection conn;
