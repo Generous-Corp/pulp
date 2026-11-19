@@ -1171,6 +1171,14 @@ never from the check run alone.
   as it is with `shipyard ship --pr <n>`. Refresh only for a real conflict or a
   failing required check (see "Do not refresh a `BEHIND` PR" below); the
   pre-push hook prints a hint when a push only re-bases an armed PR.
+- **The pre-push hook refuses a push under someone else's live claim.** Its
+  last step, on every allowed path (including `PULP_SKIP_PREPUSH`), reads the
+  branch's open PR once and refuses while another actor's `repair-claim:` is
+  live. Name your own claim with `PULP_REPAIR_CLAIM_ID`. A failed read warns and
+  allows. With `PULP_AGENT_OWNER` set, it also refuses a push from an active
+  worktree whose lineage owner is someone else
+  (`worktree_lineage.sh assert-owner`). Edit only worktrees you created, and
+  run review subagents read-only so they return a patch.
 - **A diff-coverage heartbeat is a build, not a hang.** If the work is already
   validated, stop and re-push with `PULP_SKIP_DIFF_COVER=1`. Never pipe
   `git push`, `shipyard pr`, or `shipyard ship` through `tail`/`head`: the pipe

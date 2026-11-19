@@ -1,0 +1,10 @@
+{
+ "name": "prepush-claim-check",
+ "record": {
+  "entry": "tools/scripts/test_prepush_claim_check.py",
+  "inputs": [
+   "tools/scripts/test_prepush_claim_check.py"
+  ],
+  "kind": "python"
+ }
+}
