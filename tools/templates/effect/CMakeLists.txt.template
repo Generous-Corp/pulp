@@ -6,6 +6,7 @@ target_include_directories({{TARGET_NAME}}-test PRIVATE ${CMAKE_CURRENT_SOURCE_D
 catch_discover_tests({{TARGET_NAME}}-test)
 
 {{VELLUM_FIND_LINE}}
+{{VELLUM_HELPER_LINE}}
 {{VELLUM_EDITOR_LINE}}
 
 pulp_add_plugin({{TARGET_NAME}}

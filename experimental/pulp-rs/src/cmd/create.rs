@@ -449,7 +449,10 @@ pub fn scaffold(
         format!("UI {class_name}_VellumEditor")
     } else { ui_mode_line.clone() };
     let vellum_find_line = if args.ui == "vellum" {
-        "find_package(Vellum CONFIG REQUIRED)\ninclude(\"${PULP_SDK_DIR}/lib/cmake/Pulp/PulpVellumEditorPackage.cmake\")".to_owned()
+        "find_package(Vellum CONFIG REQUIRED)".to_owned()
+    } else { String::new() };
+    let vellum_helper_line = if args.ui == "vellum" {
+        "include(\"${PULP_SDK_DIR}/lib/cmake/Pulp/PulpVellumEditorPackage.cmake\")".to_owned()
     } else { String::new() };
     let vars: Vec<(&str, &str)> = vec![
         ("PLUGIN_NAME", &args.name),
@@ -478,6 +481,7 @@ pub fn scaffold(
         ("VELLUM_EDITOR_LINE", &vellum_editor_line),
         ("UI_LINE", &ui_line),
         ("VELLUM_FIND_LINE", &vellum_find_line),
+        ("VELLUM_HELPER_LINE", &vellum_helper_line),
     ];
 
     // Pick template_key (prefer --template if supplied).

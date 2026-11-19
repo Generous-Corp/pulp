@@ -6,6 +6,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 {{VELLUM_FIND_LINE}}
 find_package(Pulp {{SDK_VERSION}} REQUIRED)
+{{VELLUM_HELPER_LINE}}
 
 # Tests
 include(FetchContent)

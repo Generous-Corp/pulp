@@ -86,6 +86,7 @@ KNOWN_TEMPLATE_VARS = frozenset({
     "VELLUM_EDITOR_LINE",
     "UI_LINE",
     "VELLUM_FIND_LINE",
+    "VELLUM_HELPER_LINE",
 })
 
 # Per-template-type minimum file set. Missing any of these fails — the
