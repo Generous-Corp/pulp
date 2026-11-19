@@ -15,7 +15,7 @@ native)`, target `Pulp::native`). Nothing in Pulp core links it.
 |---|---|
 | macOS | `MetalSurface`, `FramePump`, AppKit input, and an offscreen `GlSurface` for tests |
 | Windows | `GlSurface` over a child window with a WGL context |
-| Linux | the shared input and surface types; `GlSurface::create` returns null until the X11 backend lands |
+| Linux | `GlSurface` over a child window of the host's X11 window with a GLX context, and X11 input |
 
 ## The pieces
 
@@ -31,6 +31,60 @@ An editor is a `UI` package (`pulp_add_plugin(... UI <package>)`) whose
 `integrations/pulp-native/examples/metal-probe` is the worked example: a gain
 plug-in whose clear colour follows the gain and whose triangle follows the
 pointer. A vertical drag edits the gain as one host gesture.
+
+## OpenGL on Windows and X11
+
+`GlSurface` (`pulp/native/gl_surface.hpp`) is the OpenGL counterpart of
+`MetalSurface`: it owns a child window of the host's window and that window's GL
+context, hands the context to the client and leaves drawing and buffer swaps to
+it. `attach` takes an `HWND`, or an X `Window` id for a host that offers
+`NativeParentKind::x11_window`. The client lists the contexts it accepts, in
+order (`GlSurfaceOptions::requests`); a request the driver cannot honour falls
+through to the next. `GlContext::report()` says what it got, including
+`software` for a software rasterizer such as llvmpipe, which a client may prefer
+to replace with its CPU renderer.
+
+The context belongs to the client's render thread: `make_current` creates it on
+first use on the thread that calls it, so the host's UI thread never binds it.
+Teardown is two-phase, as for `MetalSurface`: `make_current` and `swap_buffers`
+refuse, then the release handler runs on the UI thread and returns once the
+client has stopped using the context, and only then is it destroyed.
+
+### X11
+
+The surface opens its own connection to the X server for the window and its
+events, and the context uses a second one opened on the render thread, because
+a plug-in cannot call `XInitThreads` before the host's first Xlib call. It
+starts no thread. Something on the UI thread has to pump it:
+
+```cpp
+// From the editor's idle tick:
+surface->dispatch_events();
+// Or register surface->event_fd() with the host's run loop (VST3 IRunLoop
+// fd handler, CLAP posix-fd-support) and call dispatch_events() when readable.
+```
+
+Until it is pumped nothing follows the host window's size and no input arrives.
+`dispatch_events` never blocks.
+
+- **Size.** The child fills the host window and follows its resizes. Each change
+  bumps `geometry().generation` and emits `geometry_changed`. The drawable is
+  the window's size in pixels.
+- **Scale.** `GlSurfaceOptions::scale` is the scale the host passes; 0 detects it
+  as `Xft.dpi` over 96 (1 when the server sets none). `set_scale` replaces it and
+  emits `geometry_changed`. Positions in input events are logical points: pixels
+  over the scale.
+- **Input.** `set_input_handler` takes the same `InputHandler` as the Metal
+  surface; pointer (with click counts, and drags that keep arriving after the
+  pointer leaves the window), wheel, key, text and focus are delivered. The host
+  keeps the keyboard unless the client holds it (`set_keyboard_focus`); a key the
+  client declines, and a wheel event with no wheel handler, is sent on to the
+  host window. Text covers ASCII and Latin-1 only, because a plug-in cannot set
+  the locale an input method needs. Drops and cursors are not provided.
+- **Errors.** A window that vanishes under the surface, or a context request the
+  server rejects, raises an X error. The surface contains the errors of its two
+  connections and leaves every other connection's errors to the handler that was
+  installed before, so a host window closing first never ends the host process.
 
 ## Rules
 
@@ -169,6 +223,12 @@ returns at once without touching RmlUi.
 - `pulp-test-native-metal-surface`, `-frame-pump`, `-input` and
   `-surface-input` cover the package on the real Metal device in offscreen
   windows. They skip, saying so, without one.
+- `pulp-test-native-gl-surface-x11` covers the X11 backend under a virtual
+  server (`xvfb-run`) on a software renderer: child lifecycle and resize
+  following, error containment, request fall-through, two-phase teardown, no
+  leaked connections or windows, and input from synthesized X events and the X
+  test extension. `pulp-test-native-x11-translate` covers the keysym, modifier
+  and button tables on every platform.
 - `pulp-test-rmlui-native-surface` and `pulp-test-rmlui-native-metal` cover the
   RmlUi adapter, including the first-frame preparation. They need an installed
   Vellum RmlUi SDK. The advisory `rmlui-native` lane builds that SDK from
