@@ -57,35 +57,44 @@ class MatrixTest(unittest.TestCase):
     def test_valid_temp_config_runs_from_config_root(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            (root / "pin.py").write_text(PINNED, encoding="utf-8")
+            (root / "tools/import-validation").mkdir(parents=True)
+            (root / "tools/import-validation/test_source_contracts.py").write_text(PINNED, encoding="utf-8")
             cfg = root / "c.json"
-            cfg.write_text(json.dumps({"zones": ZONES, "tests": [{"path": "pin.py", "reason": "fixture"}], "pending": []}), encoding="utf-8")
+            cfg.write_text(json.dumps({"zones": ZONES, "tests": [{"path": "tools/import-validation/test_source_contracts.py", "reason": "fixture"}], "pending": []}), encoding="utf-8")
             self.assertEqual(matrix.main(["--config", str(cfg)]), 0)
 
     def test_pending_only_configuration_fails_closed(self):
         with tempfile.TemporaryDirectory() as tmp:
             cfg = Path(tmp) / "c.json"
-            (Path(tmp) / "x.py").write_text(PINNED, encoding="utf-8")
+            (Path(tmp) / "tools/import-validation").mkdir(parents=True)
+            (Path(tmp) / "tools/import-validation/test_source_contracts.py").write_text(PINNED, encoding="utf-8")
             cfg.write_text(json.dumps({
                 "zones": ZONES, "tests": [],
-                "pending": [{"path": "x.py", "reason": "r"}]}), encoding="utf-8")
+                "pending": [{"path": "tools/import-validation/test_source_contracts.py", "reason": "r"}]}), encoding="utf-8")
             old_root = matrix.ROOT; matrix.ROOT = Path(tmp)
             try:
                 self.assertNotEqual(matrix.main(["--config", str(cfg)]), 0)
             finally:
                 matrix.ROOT = old_root
 
+    def test_untrusted_active_or_pending_path_fails_closed(self):
+        errors = matrix.validate_config(ZONES, ["tools/noop.py"], ["tools/import-validation/test_source_contracts.py"])
+        self.assertTrue(any("untrusted" in error for error in errors), errors)
+        errors = matrix.validate_config(ZONES, ["tools/import-validation/test_source_contracts.py"], ["../noop.py"])
+        self.assertTrue(any("untrusted" in error for error in errors), errors)
+
     def test_empty_zones_fail_closed(self):
         with tempfile.TemporaryDirectory() as tmp:
             cfg = Path(tmp) / "c.json"
-            cfg.write_text(json.dumps({"zones": [], "tests": [{"path": "x.py"}]}), encoding="utf-8")
+            cfg.write_text(json.dumps({"zones": [], "tests": [{"path": "tools/import-validation/test_source_contracts.py"}]}), encoding="utf-8")
             self.assertNotEqual(matrix.main(["--config", str(cfg)]), 0)
 
     def test_utc_only_configuration_fails_closed(self):
         with tempfile.TemporaryDirectory() as tmp:
             cfg = Path(tmp) / "c.json"
-            (Path(tmp) / "x.py").write_text(PINNED, encoding="utf-8")
-            cfg.write_text(json.dumps({"zones": ["UTC"], "tests": [{"path": "x.py", "reason": "fixture"}]}), encoding="utf-8")
+            (Path(tmp) / "tools/import-validation").mkdir(parents=True)
+            (Path(tmp) / "tools/import-validation/test_source_contracts.py").write_text(PINNED, encoding="utf-8")
+            cfg.write_text(json.dumps({"zones": ["UTC"], "tests": [{"path": "tools/import-validation/test_source_contracts.py", "reason": "fixture"}]}), encoding="utf-8")
             old_root = matrix.ROOT; matrix.ROOT = Path(tmp)
             try:
                 self.assertNotEqual(matrix.main(["--config", str(cfg)]), 0)

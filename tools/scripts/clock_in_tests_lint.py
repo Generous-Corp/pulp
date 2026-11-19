@@ -114,7 +114,7 @@ def _git(args: list[str]) -> str:
 
 def added_lines(base: str, head: str | None) -> dict[str, list[tuple[int, str]]]:
     merge_base = _git(["merge-base", base, head or "HEAD"]).strip()
-    cmd = ["-c", "core.quotePath=false", "-c", "diff.noprefix=false", "-c", "diff.mnemonicPrefix=false", "diff", "-U0", "--no-color", "--no-renames", "--diff-filter=AM", "--src-prefix=a/", "--dst-prefix=b/", merge_base]
+    cmd = ["-c", "core.quotePath=false", "-c", "diff.noprefix=false", "-c", "diff.mnemonicPrefix=false", "diff", "-U0", "--no-color", "--no-renames", "--no-ext-diff", "--no-textconv", "--text", "--diff-filter=AMT", "--src-prefix=a/", "--dst-prefix=b/", merge_base]
     if head:
         cmd.append(head)
     result: dict[str, list[tuple[int, str]]] = {}

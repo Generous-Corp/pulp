@@ -36,10 +36,15 @@ ROOT = Path(__file__).resolve().parents[2]
 CONFIG = ROOT / "tools/scripts/date_sensitive_selftests.json"
 TIMEOUT_S = 120
 REQUIRED_ZONES = {"Pacific/Kiritimati", "Pacific/Pago_Pago", "UTC"}
+# Only date-sensitive tests reviewed for this gate may be configured. Keep this
+# allowlist in code so a PR cannot replace the intended test with a passing
+# no-op or escape the repository through the mutable JSON configuration.
+TRUSTED_TEST_PATHS = {"tools/import-validation/test_source_contracts.py"}
 
 
-def validate_config(zones: list[str], tests: list[str]) -> list[str]:
+def validate_config(zones: list[str], tests: list[str], pending: list[str] | None = None) -> list[str]:
     errors = []
+    pending = pending or []
     if not zones:
         errors.append("zones must contain at least one timezone")
     if not tests:
@@ -48,6 +53,12 @@ def validate_config(zones: list[str], tests: list[str]) -> list[str]:
         errors.append("zones must contain non-empty strings")
     if set(zones) != REQUIRED_ZONES:
         errors.append("zones must be exactly Pacific/Kiritimati, Pacific/Pago_Pago and UTC")
+    for label, paths in (("tests", tests), ("pending", pending)):
+        for path in paths:
+            if (not isinstance(path, str) or Path(path).is_absolute()
+                    or "\\" in path or any(part in {"", ".", ".."} for part in Path(path).parts)
+                    or path not in TRUSTED_TEST_PATHS):
+                errors.append(f"{label} contains untrusted selftest path: {path!r}")
     return errors
 
 
@@ -86,7 +97,7 @@ def main(argv: list[str]) -> int:
     zones = config["zones"]
     tests = [e["path"] for e in config.get("tests", [])]
     pending = [e["path"] for e in config.get("pending", [])]
-    errors = validate_config(zones, tests)
+    errors = validate_config(zones, tests, pending)
     if errors:
         print("invalid date-sensitive selftest configuration: " + "; ".join(errors), file=sys.stderr)
         return 1
