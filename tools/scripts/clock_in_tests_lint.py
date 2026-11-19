@@ -96,11 +96,11 @@ def scan_lines(rel: str, lines: list[tuple[int, str]], baseline=None, *, consume
         # an embedded CR cannot hide an executable clock read.
         for logical in text.replace("\r", "\n").split("\n"):
             key = (rel, logical.strip())
-            exempt = key in (remaining if consume_baseline else entries)
-            if flagged(logical) and exempt:
-                if consume_baseline:
-                    remaining.remove(key)
-            elif flagged(logical):
+            # Diff scans have no stable base occurrence identity. Require an
+            # explicit marker for every added clock read; baseline entries are
+            # reserved for --all validation of existing tree occurrences.
+            exempt = key in entries and not consume_baseline
+            if flagged(logical) and not exempt:
                 out.append(f"{rel}:{number}: reads the real clock: {logical.strip()}")
     return out
 

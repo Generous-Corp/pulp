@@ -48,7 +48,7 @@ class FlaggedTest(unittest.TestCase):
         self.assertEqual(scan("# uses datetime.now() in prose\nx = time.monotonic()"), [])  # clock-ok: fixture text
 
     def test_baselined_line_passes_and_changed_line_fails(self):
-        base = ({}, {(TEST_FILE, "x = date.today()")})  # clock-ok: fixture text
+        base = ({}, {(TEST_FILE, "x = date.today()")})  # clock-ok: fixture text  # clock-ok: fixture text
         self.assertEqual(scan("    x = date.today()", base), [])  # clock-ok: fixture text
         self.assertEqual(len(scan("x = date.today() + one", base)), 1)  # clock-ok: fixture text
 
@@ -143,9 +143,9 @@ class DiffScopeTest(unittest.TestCase):
             self.assertEqual(added["tools/test_a.py"], [(2, "new = time.time()")])  # clock-ok: fixture text
 
     def test_duplicate_added_baseline_line_is_not_exempted_twice(self):
-        base = ({}, {(TEST_FILE, "x = date.today()")})
+        base = ({}, {(TEST_FILE, "x = date.today()")})  # clock-ok: fixture text
         lines = [(1, "x = date.today()"), (2, "x = date.today()")]  # clock-ok: fixture text
-        self.assertEqual(len(lint.scan_lines(TEST_FILE, lines, base, consume_baseline=True)), 1)
+        self.assertEqual(len(lint.scan_lines(TEST_FILE, lines, base, consume_baseline=True)), 2)
 
     def test_head_only_baseline_cannot_exempt_new_clock_read(self):
         with tempfile.TemporaryDirectory() as tmp:
