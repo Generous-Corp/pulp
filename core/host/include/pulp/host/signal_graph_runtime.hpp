@@ -2168,6 +2168,9 @@ class SignalGraph : public format::AudioWorkgroupClient {
     enum class CompileMode { Normal, SwapNoAnticipation };
     std::shared_ptr<CompiledGraph> compile_(double sample_rate, int max_block_size,
                                             CompileMode mode = CompileMode::Normal);
+    // compile_'s routed-executor, PDC-domain and anticipation-splice build.
+    bool build_routed_for_snapshot_(CompiledGraph& cg, double sample_rate, int max_block_size,
+                                    CompileMode mode);
     // Caller holds GraphMutationLock. Includes the live generation after source edits.
     static bool snapshot_has_isolated_plugins_(const CompiledGraph&) noexcept;
     bool has_isolated_plugins_locked_() const noexcept;
