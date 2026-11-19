@@ -16,6 +16,13 @@ modules:
     dependencies: [format]
     docs: reference/modules.md#pulp_vellum
 
+  - name: pulp_vellum_audio
+    path: integrations/pulp-vellum-audio
+    summary: A lock-free TripleBuffer provider that publishes Pulp audio-thread meter and scope frames to Vellum value feeds
+    status: experimental
+    dependencies: [runtime]
+    docs: reference/modules.md#pulp_vellum_audio
+
   - name: playback
     summary: Master transport optional session-tempo sync immutable incrementally compiled track and automation programs bounded deterministic cursors WAV-backed arrangement audio rendering block-coherent publication and stable renderer shells
     status: experimental

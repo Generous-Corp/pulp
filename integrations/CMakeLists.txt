@@ -48,3 +48,11 @@ if(PULP_ENABLE_PULP_VELLUM)
     set_property(GLOBAL APPEND PROPERTY PULP_INTEGRATION_TEST_DIRS
         "${CMAKE_CURRENT_SOURCE_DIR}/pulp-vellum/tests")
 endif()
+
+option(PULP_ENABLE_PULP_VELLUM_AUDIO
+    "Build integrations/pulp-vellum-audio (TripleBuffer audio meters/scopes for Vellum)" OFF)
+if(PULP_ENABLE_PULP_VELLUM_AUDIO)
+    add_subdirectory(pulp-vellum-audio)
+    set_property(GLOBAL APPEND PROPERTY PULP_INTEGRATION_TEST_DIRS
+        "${CMAKE_CURRENT_SOURCE_DIR}/pulp-vellum-audio/tests")
+endif()

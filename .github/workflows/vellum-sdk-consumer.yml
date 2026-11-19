@@ -29,6 +29,11 @@ on:
     paths:
       - 'test/editor_host_slice/**'
       - 'integrations/pulp-vellum/**'
+      - 'integrations/pulp-vellum-audio/**'
+      - 'tools/cmake/PulpVellumEditorPackage.cmake'
+      - 'test/test_pulp_vellum_editor.cpp'
+      - 'test/test_pulp_vellum_audio.cpp'
+      - 'test/cmake/test_pulp_vellum_editor_package.cmake'
       # The bridge's PULP_ENABLE_PULP_VELLUM option and test-directory
       # registration live in these two files, not under the package.
       - 'integrations/CMakeLists.txt'
@@ -145,8 +150,10 @@ jobs:
           cmake -S . -B build-vellum-bridge -G Ninja -DCMAKE_BUILD_TYPE=Release \
             -DPULP_BUILD_EXAMPLES=OFF -DPULP_BUILD_TESTS=ON \
             -DPULP_ENABLE_PULP_VELLUM=ON \
+            -DPULP_ENABLE_PULP_VELLUM_AUDIO=ON \
             -DCMAKE_PREFIX_PATH="${{ steps.sdk.outputs.prefix }}"
-          tools/ci/governed-build.sh cmake --build build-vellum-bridge --target pulp-test-pulp-vellum
+          tools/ci/governed-build.sh cmake --build build-vellum-bridge \
+            --target pulp-test-pulp-vellum pulp-test-pulp-vellum-editor pulp-test-pulp-vellum-audio
           ctest --test-dir build-vellum-bridge -L pulp-vellum --output-on-failure \
             | tee "$RUNNER_TEMP/vellum-sdk/bridge.log"
 
