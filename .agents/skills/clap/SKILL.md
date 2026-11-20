@@ -1505,3 +1505,8 @@ treat the parameter as touched and stop applying its envelope. `PulpClapPlugin::
 remembered per parameter and a non-host write inside `kWindowNs` is not
 reported unless a gesture is open on it. Do not report from a new listener
 without consulting the guard.
+
+The snapshot-output fallback uses audio-thread captured processor values, not a
+live store read: a concurrent suppressed main-thread mirror must not become an
+output event. Host decode is explicitly scoped separately from processor writes.
+`[echo-concurrent]` interleaves both writers and preserves processor output.

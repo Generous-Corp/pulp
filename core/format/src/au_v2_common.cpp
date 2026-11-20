@@ -432,13 +432,23 @@ void wire_host_parameter_bridge(state::StateStore& store,
                                 AudioUnit unit,
                                 state::ListenerToken& out_listener)
 {
+    wire_host_parameter_bridge(store, unit, out_listener, {});
+}
+
+void wire_host_parameter_bridge(state::StateStore& store,
+                                AudioUnit unit,
+                                state::ListenerToken& out_listener,
+                                HostParameterNotify notify)
+{
+    if (!notify)
+        notify = notify_host_parameter_event;
     store.set_gesture_callbacks(
-        [unit](state::ParamID id) {
-            notify_host_parameter_event(
+        [unit, notify](state::ParamID id) {
+            notify(
                 unit, kAudioUnitEvent_BeginParameterChangeGesture, id);
         },
-        [unit](state::ParamID id) {
-            notify_host_parameter_event(
+        [unit, notify](state::ParamID id) {
+            notify(
                 unit, kAudioUnitEvent_EndParameterChangeGesture, id);
         });
 
@@ -453,7 +463,7 @@ void wire_host_parameter_bridge(state::StateStore& store,
     // not reported as editing that parameter.
     auto guard = std::make_shared<HostWriteEchoGuard>();
     out_listener = store.add_listener(
-        [unit, guard, &store](state::ParamID id, float /*value*/) {
+        [unit, guard, &store, notify](state::ParamID id, float /*value*/) {
             const bool on_main = pthread_main_np() != 0;
             if (host_is_writing_param()) {
                 // Only a host write off the main thread (automation) is
@@ -464,7 +474,7 @@ void wire_host_parameter_bridge(state::StateStore& store,
             }
             if (on_main && guard->is_echo(store, id))
                 return;
-            notify_host_parameter_event(
+            notify(
                 unit, kAudioUnitEvent_ParameterValueChange, id);
         },
         state::ListenerThread::Audio);

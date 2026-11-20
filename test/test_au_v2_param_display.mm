@@ -15,6 +15,7 @@
 #include <pulp/format/au_v2_instrument.hpp>  // pulls the MusicDevice SDK bits
 #include <pulp/format/au_v2_midi_processor.hpp>
 #include <pulp/format/processor.hpp>
+#include <pulp/format/host_parameter_edit.hpp>
 #include <pulp/format/registry.hpp>
 #include "../examples/pulp-gain/pulp_gain.hpp"
 #include "support/generated_range_processor.hpp"
@@ -1069,4 +1070,55 @@ TEST_CASE("AU v2 generated-range control: the unwidened base range reads differe
             noErr);
     REQUIRE_THAT(info.maxValue, WithinAbs(127.0f, 1e-3f));
     REQUIRE(au_text_for(effect, 63.5f) == "0.6 st");
+}
+
+TEST_CASE("AU parameter bridge suppresses automation mirrors and preserves edits",
+          "[au][params][echo][echo-wiring]") {
+    using namespace pulp;
+    state::StateStore store;
+    store.add_parameter({.id = 1, .name = "Automated", .range = {0.0f, 1.0f, 0.0f}});
+    store.add_parameter({.id = 2, .name = "Untouched", .range = {0.0f, 1.0f, 0.0f}});
+    std::vector<std::pair<AudioUnitEventType, state::ParamID>> events;
+    state::ListenerToken listener;
+    format::au::wire_host_parameter_bridge(
+        store, nullptr, listener,
+        [&](AudioUnit unit, AudioUnitEventType type, state::ParamID id) {
+            CHECK(unit == nullptr);
+            events.emplace_back(type, id);
+        });
+    auto automate = [&] {
+        std::thread([&] {
+            format::au::ScopedHostParamWrite host;
+            store.set_value_rt(1, 0.43f);
+        }).join();
+    };
+    automate();
+    REQUIRE(events.empty());
+    store.set_value(1, 0.4f);
+    CHECK(events.empty());
+
+    store.set_value(2, 0.8f);
+    REQUIRE(events.size() == 1);
+    CHECK(events.front().first == kAudioUnitEvent_ParameterValueChange);
+    CHECK(events.front().second == 2);
+    events.clear();
+
+    automate();
+    store.begin_gesture(1);
+    store.set_value(1, 0.7f);
+    store.end_gesture(1);
+    REQUIRE(events.size() == 3);
+    CHECK(events[0].first == kAudioUnitEvent_BeginParameterChangeGesture);
+    CHECK(events[1].first == kAudioUnitEvent_ParameterValueChange);
+    CHECK(events[2].first == kAudioUnitEvent_EndParameterChangeGesture);
+    for (const auto& event : events) CHECK(event.second == 1);
+    events.clear();
+
+    automate();
+    std::this_thread::sleep_for(std::chrono::nanoseconds(
+        format::HostWriteEchoGuard::kWindowNs) + std::chrono::milliseconds(50));
+    store.set_value(1, 0.6f);
+    REQUIRE(events.size() == 1);
+    CHECK(events.front().first == kAudioUnitEvent_ParameterValueChange);
+    CHECK(events.front().second == 1);
 }

@@ -308,8 +308,18 @@ bool clap_init(const clap_plugin_t* plugin) {
             // so the plug-in mirroring it back on the main thread is not
             // reported as an edit.
             const bool on_main = std::this_thread::get_id() == self->main_thread_id;
-            if (g_clap_process_running || (g_clap_host_writing_param && !on_main)) {
+            if (g_clap_host_writing_param && (g_clap_process_running || !on_main)) {
                 self->host_write_echo_guard.note_host_write(id);
+                return;
+            }
+            if (g_clap_process_running) {
+                // Capture the processor's own value on the audio thread. A
+                // concurrent UI mirror can overwrite the store before output
+                // emission, so a live store read cannot prove provenance.
+                const auto params = self->store.all_params();
+                const auto index = boundary::find_param_index(params, id);
+                if (index < self->processor_param_values.size())
+                    self->processor_param_values[index] = value;
                 return;
             }
             if (g_clap_host_writing_param || !on_main)
@@ -490,6 +500,7 @@ bool clap_activate(const clap_plugin_t* plugin, double sr, uint32_t, uint32_t ma
     self->ump_buffer.reserve(kRealtimeMidiEventCapacity);
     self->ump_buffer.set_realtime_capacity_limit(true);
     self->param_snapshot.reserve(self->store.all_params().size());
+    self->processor_param_values.reserve(self->store.all_params().size());
     self->latest_param_value.assign(self->store.all_params().size(), 0.0f);
     self->latest_param_pending.assign(self->store.all_params().size(), 0);
     self->latest_param_touched.clear();
@@ -752,6 +763,7 @@ static bool clap_phase_validate_layout(PulpClapPlugin* self,
 
 static void clap_phase_decode_param_events(PulpClapPlugin* self,
                                            const clap_process_t* process) {
+    ScopedClapHostParamWrite host_write;
     // Reset per-buffer modulation offsets before applying new events
     self->store.reset_all_mod();
     self->param_events.clear();
@@ -1187,6 +1199,7 @@ static void clap_phase_snapshot_params(
     self->pre_process_generation = self->store.state_generation();
     boundary::refresh_param_snapshot(self->store, all_params, self->param_snapshot,
                                      self->snapshot_state, self->pre_process_generation);
+    self->processor_param_values.assign(self->param_snapshot.begin(), self->param_snapshot.end());
     self->output_param_has_event.assign(all_params.size(), 0);
 }
 
@@ -1608,7 +1621,9 @@ static void clap_phase_emit_output(
         }
         for (std::size_t i = 0; store_moved && i < all_params.size(); ++i) {
             if (self->output_param_has_event[i]) continue;
-            float current = self->store.get_value(all_params[i].id);
+            // Only values captured from this block's processor writes belong
+            // in the fallback. UI writes use the queue above (or were echoes).
+            const float current = self->processor_param_values[i];
             if (boundary::changed_since_snapshot(current,
                                                  self->param_snapshot[i])) {
                 clap_event_param_value_t ev{};

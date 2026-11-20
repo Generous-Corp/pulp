@@ -227,6 +227,9 @@ struct PulpClapPlugin {
     // Refreshed only when the store generation moved since it was taken; the
     // post-process diff only runs when the generation moved across process().
     std::vector<float> param_snapshot;
+    // Audio-thread-only copy: starts at the snapshot, then records inline
+    // processor writes, so concurrent suppressed UI writes cannot leak out.
+    std::vector<float> processor_param_values;
     // Processor::wants_sample_accurate_parameters(), asked in clap_init().
     bool sample_accurate_params = false;
     // Records an opted-out processor reading param_events(); see processor.hpp.

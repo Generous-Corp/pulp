@@ -1737,3 +1737,8 @@ treat the parameter as touched and stop applying its envelope. the listener in `
 remembered per parameter and a non-host write inside `kWindowNs` is not
 reported unless a gesture is open on it. Do not report from a new listener
 without consulting the guard.
+
+`wire_host_parameter_bridge` has an injectable notification sink overload for
+listener regression coverage; the production overload still uses
+`AUEventListenerNotify`. `[echo-wiring]` checks suppression, gestures, untouched
+parameters, and expiration through this actual listener.

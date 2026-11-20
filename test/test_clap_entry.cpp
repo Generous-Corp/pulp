@@ -24,6 +24,8 @@
 #include <cstring>
 #include <limits>
 #include <optional>
+#include <functional>
+#include <semaphore>
 #include <string>
 #include <stdexcept>
 #include <thread>
@@ -39,6 +41,7 @@ inline TestProcessor* g_last_processor = nullptr;
 class TestProcessor : public pulp::format::Processor {
 public:
     TestProcessor() { g_last_processor = this; }
+    std::function<void()> during_process;
 
     // Note names a test can publish after the plugin is created, so the
     // note-name extension can be exercised against a live adapter.
@@ -108,6 +111,7 @@ public:
                  const pulp::audio::BufferView<const float>& in,
                  pulp::midi::MidiBuffer&, pulp::midi::MidiBuffer&,
                  const pulp::format::ProcessContext&) override {
+        if (during_process) during_process();
         for (std::size_t ch = 0; ch < out.num_channels() && ch < in.num_channels(); ++ch) {
             auto ic = in.channel(ch);
             auto oc = out.channel(ch);
@@ -1437,6 +1441,53 @@ TEST_CASE("CLAP still reports plug-in edits next to host automation",
         std::chrono::milliseconds(pulp::format::HostWriteEchoGuard::kWindowNs / 1'000'000 + 50));
     store.set_value(1, -30.0f);
     CHECK(EchoFixture::count_values(fx.process_with(std::nullopt)) == 1);
+}
+
+TEST_CASE("CLAP concurrent mirrors cannot leak through snapshot output",
+          "[clap][params][automation][echo][echo-concurrent]") {
+    EchoFixture fx;
+    auto& store = fx.plugin->store;
+    (void)fx.process_with(std::nullopt);
+    const int flushes_before = fx.host.flush_requests;
+    bool processor_before = false;
+    bool processor_after = false;
+    SECTION("mirror alone") {}
+    SECTION("processor writes before mirror") { processor_before = true; }
+    SECTION("processor writes after mirror") { processor_after = true; }
+
+    std::binary_semaphore snapshot_reached{0};
+    std::binary_semaphore mirror_finished{0};
+    test_clap::g_last_processor->during_process = [&] {
+        if (processor_before) store.set_value_rt(1, 8.0f);
+        snapshot_reached.release();
+        mirror_finished.acquire();
+        if (processor_after) store.set_value_rt(1, 9.0f);
+    };
+    std::size_t values = 0;
+    double reported = 0.0;
+    std::thread audio([&] {
+        const auto out = fx.process_with(5.3);
+        values = EchoFixture::count_values(out);
+        for (std::size_t i = 0; i < out.events.size(); ++i) {
+            if (out.at(i)->type == CLAP_EVENT_PARAM_VALUE)
+                reported = reinterpret_cast<const clap_event_param_value_t*>(out.at(i))->value;
+        }
+    });
+    const bool reached = snapshot_reached.try_acquire_for(std::chrono::seconds(5));
+    if (reached) {
+        // Keep the timing policy deterministic even when this test is
+        // descheduled on a busy runner. The host write above armed the guard.
+        fx.plugin->host_write_echo_guard.note_host_write(1);
+        store.set_value(1, 5.0f);
+    }
+    mirror_finished.release();
+    audio.join();
+    test_clap::g_last_processor->during_process = {};
+    REQUIRE(reached);
+    CHECK(fx.host.flush_requests == flushes_before);
+    CHECK(values == (processor_before || processor_after ? 1 : 0));
+    if (processor_before) CHECK(reported == 8.0);
+    if (processor_after) CHECK(reported == 9.0);
 }
 
 // ── G1: CLAP resize-contract honoring (WS-1b) ────────────────────────────────
