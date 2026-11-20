@@ -65,8 +65,7 @@ class Win32FallbackLoop final : public HostRunLoop {
         return owner_.load(std::memory_order_acquire) == GetCurrentThreadId();
     }
 
-    std::uint64_t add_timer(std::chrono::milliseconds period,
-                            std::function<void()> tick) override {
+    std::uint64_t add_timer(std::chrono::milliseconds period, std::function<void()> tick) override {
         if (!on_ui_thread() || !tick)
             return 0;
         HWND window = hwnd_.load(std::memory_order_acquire);
@@ -181,8 +180,8 @@ class Win32FallbackLoop final : public HostRunLoop {
             return;
         // One class per binary: the module handle is unique among loaded
         // modules.
-        std::swprintf(class_name_, sizeof class_name_ / sizeof class_name_[0],
-                      L"PulpMainThread_%p", static_cast<void*>(this_module()));
+        std::swprintf(class_name_, sizeof class_name_ / sizeof class_name_[0], L"PulpMainThread_%p",
+                      static_cast<void*>(this_module()));
     }
 
     bool create() {

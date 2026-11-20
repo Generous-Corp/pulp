@@ -1,0 +1,13 @@
+{
+  "schema_version": 1,
+  "event_id": "20261120-win32-main-thread-fallback",
+  "kind": "exported-path-change",
+  "created_at": "2026-11-20T12:00:00Z",
+  "receipt_export_id": "20261107-f0ac0a4ff392",
+  "paths": [
+    "core/platform/include/pulp/platform/main_thread.hpp",
+    "core/platform/src/main_thread_host.cpp"
+  ],
+  "vellum_inherits": false,
+  "rationale": "On Windows with no registered HostRunLoop, MainThreadScope and MainThreadTimer now fall back to a message-only window on the creating thread (SetTimer and PostMessage), so plug-in editors in hosts that cannot lend a loop still get timers and posts. Windows-only platform-layer change; this is a Pulp-only edit because Vellum's framework transfer is in effect and its editors do not use the platform main-thread layer off Apple. macOS and Linux behaviour is unchanged."
+}
