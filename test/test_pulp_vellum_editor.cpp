@@ -130,6 +130,21 @@ class EmptyView final : public ::vellum::view::View {
     explicit EmptyView(pulp::vellum::EditorEnv&) {}
 };
 
+// Counts the editor's idle ticks and records the bounds it was laid out to.
+int g_idle_ticks = 0;
+float g_idle_width = 0.0f;
+float g_idle_height = 0.0f;
+
+class IdleProbeView final : public ::vellum::view::View {
+  public:
+    explicit IdleProbeView(pulp::vellum::EditorEnv&) {}
+    void editor_idle() {
+        ++g_idle_ticks;
+        g_idle_width = bounds().width;
+        g_idle_height = bounds().height;
+    }
+};
+
 // Clears any factory a test registers, even when an assertion stops it early.
 struct FactoryReset {
     ~FactoryReset() {
@@ -287,4 +302,32 @@ TEST_CASE("A Vellum editor clears the root's host pointer before freeing the hos
     seen = made;
     editor.reset();
     CHECK(seen == nullptr);
+}
+
+TEST_CASE("A Vellum editor lays out its root and ticks it on idle", "[pulp-vellum][editor][host]") {
+    using ::vellum::view::PluginViewHost;
+    FactoryReset reset;
+    PluginViewHost::set_factory([](::vellum::view::View&, const PluginViewHost::Options&) {
+        return std::unique_ptr<PluginViewHost>(std::make_unique<StubHost>());
+    });
+    g_idle_ticks = 0;
+
+    Fixture fixture;
+    Context context(*fixture.port);
+    Processor processor;
+    pulp::vellum::EditorFactory<IdleProbeView> factory;
+    auto editor = factory.create(processor, context, pulp::format::EditorRole::editor);
+    REQUIRE(editor);
+    CHECK(g_idle_ticks == 0);
+
+    editor->idle();
+    CHECK(g_idle_ticks == 1);
+    CHECK(g_idle_width == editor->size().width);
+    CHECK(g_idle_height == editor->size().height);
+
+    REQUIRE(editor->set_size({640, 480, 1.0}));
+    editor->idle();
+    CHECK(g_idle_ticks == 2);
+    CHECK(g_idle_width == 640.0f);
+    CHECK(g_idle_height == 480.0f);
 }

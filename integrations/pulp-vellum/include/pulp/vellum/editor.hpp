@@ -56,6 +56,7 @@ template <typename ViewType> class Editor final : public format::Editor {
             env_.visuals = visual_feed_.get();
         }
         root_ = std::make_unique<ViewType>(env_);
+        layout_root();
         std::string bootstrap_error;
         if (!register_editor_dawn_bootstrap(bundle_id, &bootstrap_error))
             return;
@@ -112,6 +113,7 @@ template <typename ViewType> class Editor final : public format::Editor {
         if (size.width == 0 || size.height == 0)
             return false;
         size_ = size;
+        layout_root();
         if (host_ != nullptr)
             host_->set_size(size.width, size.height);
         return true;
@@ -128,13 +130,29 @@ template <typename ViewType> class Editor final : public format::Editor {
 
     void idle() override {
         // ContractEditorSession pumps ParamPort listeners before this call.
-        // Repaint once per host tick so meter/scope snapshots are visible even
-        // when the Vellum tree has no parameter-driven damage of its own.
+        // A view that owns per-frame work (a scripted session pushing bound
+        // parameter values into widgets) gets its tick here, then the host
+        // repaints once so meter/scope snapshots are visible even when the
+        // Vellum tree has no parameter-driven damage of its own.
+        if constexpr (requires(ViewType& view) { view.editor_idle(); }) {
+            if (root_ != nullptr)
+                root_->editor_idle();
+        }
         if (host_ != nullptr)
             host_->repaint();
     }
 
   private:
+    // The GPU plug-in host draws the root at its current bounds and leaves
+    // layout to its owner, so the editor sizes the root to the editor.
+    void layout_root() {
+        if (root_ == nullptr)
+            return;
+        root_->set_bounds(
+            {0, 0, static_cast<float>(size_.width), static_cast<float>(size_.height)});
+        root_->layout_children();
+    }
+
     ParamPortModel model_;
     std::unique_ptr<VisualPortFeed> visual_feed_;
     EditorEnv env_;
