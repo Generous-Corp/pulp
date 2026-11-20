@@ -438,6 +438,7 @@ HOTSPOT_EDIT_GUARD="$ROOT/tools/scripts/hotspot_edit_guard.py"
 SURFACE_FAMILIES="$ROOT/tools/scripts/changed_surface_script_families.py"
 NEG_CAPABILITY="$ROOT/tools/scripts/negative_capability_check.py"
 LABEL_EXCLUSION="$ROOT/tools/scripts/ctest_label_exclusion_guard.py"
+CLOCK_IN_TESTS="$ROOT/tools/scripts/clock_in_tests_lint.py"
 VELLUM_HINT="$ROOT/tools/scripts/vellum_watch_preflight.py"
 CAPABILITY_CONTRACT="$ROOT/tools/scripts/agent_capability_manifest.py"
 
@@ -1145,6 +1146,22 @@ if [ -f "$LABEL_EXCLUSION" ]; then
         1) echo "[pre-push] ctest label-exclusion guard: a Catch2 suite reaches neither the required gate nor coverage, or a registration raises TIMEOUT above 120s without the slow label — run \`python3 tools/scripts/ctest_label_exclusion_guard.py\` for the target list." >&2; prepush_fail ;;
         3) echo "[pre-push] ctest label-exclusion guard: static checks passed; slow-test runtime NOT CHECKED (no local CTest timing data)." >&2 ;;
         *) gate_could_not_run "ctest_label_exclusion_guard" "$gate_rc"; prepush_fail ;;
+    esac
+fi
+
+# Clock-in-tests lint — a Python test under tools/ that reads the real clock
+# (datetime.now, date.today, time.time, ...) beside a pinned date passes until
+# the calendar crosses a window it assumed, then fails every run at once.
+# Diff-scoped over the pushed range; every added or edited line is judged,
+# including lines in the baseline. The baseline is used only by --all. Mark a
+# safe read with `# clock-ok: <reason>`.
+if [ -f "$CLOCK_IN_TESTS" ]; then
+    run_gate_captured "$PYTHON" "$CLOCK_IN_TESTS" --base "$BASE" \
+        --head "${_prepush_pushed_head_sha:-HEAD}"
+    gate_rc=$?; case $gate_rc in
+        0) ;;
+        1) echo "[pre-push] clock-in-tests lint: a test reads the real clock — pin the date or add \`# clock-ok: <reason>\`; run \`python3 tools/scripts/clock_in_tests_lint.py\` for the lines." >&2; prepush_fail ;;
+        *) gate_could_not_run "clock_in_tests_lint" "$gate_rc"; prepush_fail ;;
     esac
 fi
 
