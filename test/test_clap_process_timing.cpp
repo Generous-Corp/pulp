@@ -184,7 +184,9 @@ struct ClapHost {
         proc.steady_time = steady;
         proc.frames_count = frames;
         proc.audio_inputs = &in_bus;
-        proc.audio_inputs_count = malformed ? 0 : 1;
+        // A count above the declared one stays malformed; a count below it is
+        // padded with silence and processed (clap_process).
+        proc.audio_inputs_count = malformed ? 2 : 1;
         proc.audio_outputs = &out_bus;
         proc.audio_outputs_count = 1;
         proc.in_events = &in_events;
