@@ -723,7 +723,7 @@ commands:
         description: Configure the generated project with `CMAKE_BUILD_TYPE=Debug` instead of the default Release build.
       - name: --ui
         kind: option
-        description: "UI stack: none selects audio-only NO_EDITOR; vellum emits a root Vellum view and pulp-vellum editor package; rmlui remains reserved. Vellum requires an SDK that includes Vellum::MirrorView_core."
+        description: "UI stack: none selects audio-only NO_EDITOR; vellum emits a root Vellum view and pulp-vellum editor package; rmlui is refused until Pulp provides a supported pulp_add_rmlui_editor_package helper. Vellum requires an SDK that includes Vellum::MirrorView_core."
     docs: reference/cli.md#create
 
   - name: cache

@@ -431,11 +431,18 @@ pub fn scaffold(
     };
     let plugin_uri = format!("http://pulp.audio/plugins/{lower_name}");
     let vst3_uid = make_vst3_uid();
-    if !args.ui.is_empty() && args.ui != "none" && args.ui != "vellum" {
+    if !args.ui.is_empty() && args.ui != "none" && args.ui != "vellum" && args.ui != "rmlui" {
         return Err(CliError::BadUsage(format!(
             "--ui {} is not available yet: needs the pulp-vellum editor package",
             args.ui
         )));
+    }
+    if args.ui == "rmlui" {
+        return Err(CliError::BadUsage(
+            "--ui rmlui is not available yet: Pulp has no supported "
+                .to_owned()
+                + "pulp_add_rmlui_editor_package helper; refusing to generate a project that cannot build.",
+        ));
     }
 
     let ui_mode_line = if args.ui == "none" { "NO_EDITOR".to_owned() } else { String::new() };
@@ -893,6 +900,16 @@ mod tests {
         let out = td.path().join("out");
         let err = scaffold(&args, &out, &td.path().join("tools").join("templates"), None, "1.0.0", &mut Vec::new()).unwrap_err();
         assert!(err.to_string().contains("--ui vellum is not available for the effect template yet; it uses a script UI"));
+        assert!(!out.exists());
+    }
+
+    #[test]
+    fn rmlui_ui_is_refused_without_editor_package_helper() {
+        let td = tempfile::tempdir().unwrap();
+        let args = CreateArgs { name: "Gain".into(), ui: "rmlui".into(), ..Default::default() };
+        let out = td.path().join("out");
+        let err = scaffold(&args, &out, td.path(), None, "1.0.0", &mut Vec::new()).unwrap_err();
+        assert!(err.to_string().contains("pulp_add_rmlui_editor_package helper"));
         assert!(!out.exists());
     }
 

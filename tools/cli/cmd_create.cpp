@@ -389,9 +389,15 @@ int cmd_create(const std::vector<std::string>& args) {
         flush();
     }
 
-    if (!ui.empty() && ui != "none" && ui != "vellum") {
+    if (!ui.empty() && ui != "none" && ui != "vellum" && ui != "rmlui") {
         std::cerr << "Error: --ui " << ui
                   << " is not available yet: needs the pulp-vellum editor package\n";
+        return 1;
+    }
+    if (ui == "rmlui") {
+        std::cerr << "Error: --ui rmlui is not available yet: Pulp has no supported "
+                     "pulp_add_rmlui_editor_package helper; refusing to generate a "
+                     "project that cannot build.\n";
         return 1;
     }
     if (name.empty()) {

@@ -221,6 +221,8 @@
     "cli-maintenance": {
       "paths": [
         "tools/cli/**",
+        "experimental/pulp-rs/src/cmd/create.rs",
+        "docs/reference/cli.md",
         "experimental/pulp-rs/src/cmd/trace*.rs",
         "experimental/pulp-rs/tests/trace*.rs",
         "tools/mcp/pulp_mcp.cpp",

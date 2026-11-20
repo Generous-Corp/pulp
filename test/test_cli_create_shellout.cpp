@@ -987,6 +987,7 @@ TEST_CASE("pulp-cpp create rejects unavailable and unknown --ui values",
         REQUIRE(r.exit_code != 0);
         CHECK(r.stderr_output.find(std::string("--ui ") + mode) != std::string::npos);
         CHECK(r.stderr_output.find("not available yet") != std::string::npos);
+        CHECK(r.stderr_output.find("pulp_add_rmlui_editor_package helper") != std::string::npos);
         CHECK_FALSE(fs::exists(out_dir));
     }
 
