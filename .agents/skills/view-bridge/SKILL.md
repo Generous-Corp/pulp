@@ -305,12 +305,15 @@ error. Things that are easy to get wrong:
   and only the AU's post-build relocatable check notices.
   `_pulp_stage_ui_package_runtime()` copies them and sets an `@loader_path`-only
   rpath, and it must run before the module's own post-build checks.
-- Vellum declares `vellum::view::PluginViewHost::create()` and its factory
-  registry but no Vellum library defines them (plug-in embedding glue is
-  Pulp's). `pulp::vellum-host` defines them per plug-in image; without it a
-  `--ui vellum` plug-in compiles and fails to link. Its macOS host registers
-  its NSView subclass at run time under a per-image name, because a DAW loads
-  many plug-ins into one Objective-C runtime.
+- Vellum's SDK defines `vellum::view::PluginViewHost::create()`, its factory
+  registry and the macOS GPU host (Skia on Dawn into the view's
+  `CAMetalLayer`). Pulp defines none of them: a second definition in a
+  plug-in would win silently over the SDK's. A Vellum SDK without the export
+  fails at configure, not at link.
+- The process owns Dawn's proc table, so the editor glue registers the Dawn
+  bootstrap once per plug-in image, keyed by the bundle id, before the first
+  `create()`. Without it the host comes back null ("Dawn proc table
+  unavailable"), which reads like a GPU failure but is a missing bootstrap.
 
 ### The editor-host acceptance test is one command
 

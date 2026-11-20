@@ -12,9 +12,6 @@ if(NOT TARGET pulp::vellum AND EXISTS "${CMAKE_CURRENT_LIST_DIR}/PulpVellumTarge
     if(TARGET Pulp::vellum AND NOT TARGET pulp::vellum)
         add_library(pulp::vellum ALIAS Pulp::vellum)
     endif()
-    if(TARGET Pulp::vellum_host AND NOT TARGET pulp::vellum-host)
-        add_library(pulp::vellum-host ALIAS Pulp::vellum_host)
-    endif()
 endif()
 
 # The shared libraries in `root`'s link closure: the Vellum dylibs an editor
@@ -61,12 +58,11 @@ function(pulp_add_vellum_editor_package package)
             "Vellum::MirrorView_core, which this Vellum SDK does not provide "
             "(the v0.2.0 release lacks it; use a Vellum SDK that ships the view layer)")
     endif()
-    # The editor's PluginViewHost::create() is defined in pulp::vellum-host;
-    # without it a plug-in compiles and then fails to link.
-    if(NOT TARGET pulp::vellum-host)
-        message(FATAL_ERROR "${package}: pulp_add_vellum_editor_package needs "
-            "pulp::vellum-host, which defines PluginViewHost::create(); this Pulp "
-            "SDK was built without it")
+    # PluginViewHost::create(), its factory registry, and the GPU host are
+    # Vellum-owned. Refuse an SDK without the exported view implementation.
+    if(NOT TARGET Vellum::MirrorView_core)
+        message(FATAL_ERROR "${package}: requires a Vellum SDK exporting "
+            "Vellum::MirrorView_core and PluginViewHost::create(); the SDK is too old")
     endif()
     if(package MATCHES "::")
         string(REPLACE "::" "-" _package_target "${package}")
@@ -90,7 +86,7 @@ function(pulp_add_vellum_editor_package package)
     target_include_directories("${_package_target}" INTERFACE
         "${CMAKE_CURRENT_BINARY_DIR}" ${_vellum_pkg_VIEW_INCLUDE_DIRS})
     target_link_libraries("${_package_target}" INTERFACE
-        pulp::vellum pulp::vellum-host Vellum::MirrorView_core)
+        pulp::vellum Vellum::MirrorView_core)
     # The editor loads Vellum's dylibs; each plug-in module carries copies so
     # the bundle does not depend on where the Vellum SDK was installed.
     _pulp_vellum_runtime_libraries(_runtime_libraries "${_package_target}")

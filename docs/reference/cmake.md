@@ -174,11 +174,11 @@ pulp_add_plugin(MyPlugin FORMATS CLAP UI pulp::vellum-editor ...)
 
 The helper generates the ordinary factory function and links the Vellum view
 target only into this package; the parameter bridge remains view-free. The
-package also links `pulp::vellum-host`, which defines Vellum's
-`PluginViewHost::create()` (on macOS, a raster NSView host with mouse and
-wheel input and no keyboard input), and lists the Vellum dylibs in its link
-closure as `PULP_EDITOR_RUNTIME_LIBRARIES`, so each plug-in bundle carries
-them.
+package links Vellum's `Vellum::MirrorView_core`, which exports the
+GPU-backed `PluginViewHost::create()` and factory registry. Pulp registers the
+Dawn bootstrap once per plug-in bundle before creating the editor and lists the
+Vellum dylibs in its link closure as `PULP_EDITOR_RUNTIME_LIBRARIES`, so each
+plug-in bundle carries them. Configure fails closed when the SDK is too old.
 
 A plug-in that declares a package gets `NO_EDITOR`'s view-free link without
 saying so: its VST3, CLAP, AU v2 and LV2 modules link `Pulp::format-core`

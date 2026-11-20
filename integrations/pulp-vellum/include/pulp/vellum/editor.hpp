@@ -14,25 +14,59 @@
 #include <pulp/vellum/visual_port_feed.hpp>
 
 #include <vellum/view/plugin_view_host.hpp>
+#if __has_include(<gpu_runtime/dawn_native_bootstrap.hpp>)
+#include <gpu_runtime/dawn_native_bootstrap.hpp>
+#else
+#include <vellum/graphics/dawn_native_bootstrap.hpp>
+#endif
 #include <vellum/view/view.hpp>
 
 #include <memory>
 #include <type_traits>
+#include <mutex>
+#include <string>
+#include <string_view>
+#include <unordered_set>
 
 namespace pulp::vellum {
+
+/// Install Dawn's host proc table once for each plug-in bundle before Vellum
+/// creates its first GPU editor host. New SDKs provide the bundle-scoped
+/// gpu_runtime API; older SDKs use Vellum's process-scoped app-host fallback.
+inline bool register_editor_dawn_bootstrap(std::string_view bundle_id,
+                                           std::string* error = nullptr) {
+    static std::mutex mutex;
+    static std::unordered_set<std::string> registered;
+    std::lock_guard lock(mutex);
+    if (registered.contains(std::string(bundle_id)))
+        return true;
+#if __has_include(<gpu_runtime/dawn_native_bootstrap.hpp>)
+    if (!::gpu_runtime::register_native_dawn_bootstrap(bundle_id, error))
+        return false;
+#else
+    (void)bundle_id;
+    if (!::vellum::app_host::register_native_dawn_bootstrap(error))
+        return false;
+#endif
+    registered.emplace(bundle_id);
+    return true;
+}
 
 template <typename ViewType> class Editor final : public format::Editor {
     static_assert(std::is_base_of_v<::vellum::view::View, ViewType>,
                   "a Pulp Vellum editor must derive from vellum::view::View");
 
   public:
-    explicit Editor(format::EditorContext& context)
+    Editor(format::EditorContext& context, std::string bundle_id)
         : model_(context.params()), env_{context, model_, nullptr} {
         if (auto* visuals = context.visuals()) {
             visual_feed_ = std::make_unique<VisualPortFeed>(*visuals);
             env_.visuals = visual_feed_.get();
         }
         root_ = std::make_unique<ViewType>(env_);
+        std::string bootstrap_error;
+        if (!register_editor_dawn_bootstrap(bundle_id, &bootstrap_error))
+            return;
         root_->set_requires_gpu_host(true);
         ::vellum::view::PluginViewHost::Options options;
         options.size = {size_.width, size_.height};
@@ -118,9 +152,12 @@ template <typename ViewType> class EditorFactory final : public format::EditorFa
         return role == format::EditorRole::editor || role == format::EditorRole::inspector;
     }
 
-    std::unique_ptr<format::Editor> create(format::Processor&, format::EditorContext& context,
+    std::unique_ptr<format::Editor> create(format::Processor& processor,
+                                           format::EditorContext& context,
                                            format::EditorRole role) override {
-        return supports(role) ? std::make_unique<Editor<ViewType>>(context) : nullptr;
+        return supports(role)
+            ? std::make_unique<Editor<ViewType>>(context, processor.descriptor().bundle_id)
+            : nullptr;
     }
 };
 

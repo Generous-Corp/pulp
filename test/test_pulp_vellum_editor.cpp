@@ -4,7 +4,6 @@
 #include <pulp/format/processor.hpp>
 #include <pulp/state/store.hpp>
 #include <pulp/vellum/editor.hpp>
-#include <pulp/vellum/plugin_view_host.hpp>
 
 #include <vellum/value/param_model.hpp>
 #include <vellum/view/plugin_view_host.hpp>
@@ -161,19 +160,13 @@ TEST_CASE("PluginViewHost::create() gives a Vellum view a native editor host",
     PluginViewHost::Options options;
     options.size = {320, 200};
     options.use_gpu = true;
+    REQUIRE(pulp::vellum::register_editor_dawn_bootstrap("com.pulp.test-vellum"));
     auto host = PluginViewHost::create(root, options);
 
-    if (!pulp::vellum::detail::platform_plugin_view_host_available()) {
-        // No platform host on this OS: create() says so instead of faking one.
-        CHECK(host == nullptr);
-        return;
-    }
     REQUIRE(host != nullptr);
     CHECK(root.plugin_view_host() == host.get());
     CHECK(host->native_handle() != nullptr);
-    // The installed SDK exposes no GPU surface, so a GPU request opens the
-    // raster host rather than failing.
-    CHECK_FALSE(host->is_gpu_backed());
+    CHECK(host->is_gpu_backed());
     CHECK(host->get_size().width == 320);
     CHECK(host->get_size().height == 200);
     host->set_size(640, 480);
