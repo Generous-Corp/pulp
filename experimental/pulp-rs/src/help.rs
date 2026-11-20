@@ -104,6 +104,10 @@ pub const COMMANDS: &[Entry] = &[
         summary: "Find the native source of truth",
     },
     Entry {
+        name: "licenses",
+        summary: "Show a plug-in bundle's third-party notices",
+    },
+    Entry {
         name: "forge",
         summary: "Export Forge catalog integration data",
     },

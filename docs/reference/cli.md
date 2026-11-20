@@ -537,6 +537,7 @@ listed file.
 The optional `Control broker` row never contributes to a failing doctor exit.
 It uses the same connection-only probe as `pulp status`, performs no daemon or
 authority mutation, and reports an accepting socket without a trusted peer
+
 expectation as `reachable-unverified`, not healthy or verified.
 
 #### `gpu`
@@ -767,6 +768,13 @@ would be removed without touching the filesystem.
 The `status` field uses the lowercased label set above
 (`healthy`, `dangling-symlink`, `stale-commit`, `root-owned`,
 `unknown`).
+
+### licenses
+
+`pulp licenses <bundle-path> [--json] [--check]` reads the bundle's
+`ThirdPartyNotices.json` and displays its companion `ThirdPartyNotices.txt`.
+`--json` prints the generated document unchanged. `--check` returns a non-zero
+status when `sdks_without_manifest` or `unattributed_targets` is non-empty.
 
 ### projects
 
