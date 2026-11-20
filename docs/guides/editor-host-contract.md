@@ -89,6 +89,30 @@ one host process therefore never share or override each other's editor choice.
 A processor can also provide a factory by overriding
 `Processor::editor_factory()`.
 
+### Vellum editor roots
+
+`pulp::vellum::EditorFactory<Root>` constructs a Vellum root with
+`(EditorEnv&, format::Processor&)` when that constructor is available and with
+`(EditorEnv&)` otherwise. A root can return a `format::EditorSize` from
+`preferred_editor_size()` to set the initial window and root bounds. The default
+is 400×300. Use `env.request_resize(size)` to ask the host for a different
+size. The host applies accepted sizes through `Editor::set_size()`.
+
+Optional `editor_opened()` and `editor_closing()` methods run after successful
+native attachment and before detachment or invalidation, respectively. Use
+`editor_idle()` to poll a deferred scripted session. A root that publishes a
+session through processor state should check that the published session still
+belongs to that root before clearing it.
+
+For a root-owned `vellum::view::ScriptedUiSession`, construct the session with
+`env.params` and register the existing JSON dispatcher with
+`session.attach_native_message_handler(name, env.native_message_handler(dispatch))`.
+Link `Vellum::MirrorView_script` for this SDK API. Register before the first
+script load to serve messages during evaluation. Registrations stop dispatching
+when the editor closes. Detach them with
+`session.detach_native_message_handler(name)` before destroying their captures,
+and register fresh handlers when reopening the same root.
+
 ## Extending the contract
 
 `Editor` and `EditorContext` are implemented in different binaries (a UI

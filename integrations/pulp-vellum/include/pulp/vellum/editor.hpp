@@ -4,8 +4,8 @@
 /// Editor-host glue for a Vellum `view::View` tree.
 ///
 /// A plug-in editor type derives from `vellum::view::View` and accepts an
-/// `EditorEnv&` in its constructor. The environment owns the per-editor
-/// `ParamPortModel`, so each window has independent subscriptions and gesture
+/// `EditorEnv&` or `(EditorEnv&, format::Processor&)` in its constructor.
+/// Each window has its own `ParamPortModel` for subscriptions and gesture
 /// lifetime while all edits still use Pulp's existing parameter bridge.
 
 #include <pulp/format/editor_host.hpp>
@@ -18,12 +18,14 @@
 #include <vellum/graphics/dawn_native_bootstrap.hpp>
 #include <vellum/view/view.hpp>
 
+#include <concepts>
 #include <memory>
-#include <type_traits>
 #include <mutex>
 #include <string>
 #include <string_view>
+#include <type_traits>
 #include <unordered_set>
+#include <utility>
 
 namespace pulp::vellum {
 
@@ -51,12 +53,33 @@ template <typename ViewType> class Editor final : public format::Editor {
 
   public:
     Editor(format::EditorContext& context, std::string bundle_id)
+        : Editor(context, bundle_id,
+                 [](EditorEnv& env) { return std::make_unique<ViewType>(env); }) {}
+
+    Editor(format::EditorContext& context, format::Processor& processor)
+        : Editor(context, processor.descriptor().bundle_id, [&processor](EditorEnv& env) {
+              if constexpr (std::is_constructible_v<ViewType, EditorEnv&, format::Processor&>)
+                  return std::make_unique<ViewType>(env, processor);
+              else
+                  return std::make_unique<ViewType>(env);
+          }) {}
+
+  private:
+    template <typename MakeRoot>
+    Editor(format::EditorContext& context, std::string_view bundle_id, MakeRoot make_root)
         : model_(context.params()), env_{context, model_, nullptr} {
         if (auto* visuals = context.visuals()) {
             visual_feed_ = std::make_unique<VisualPortFeed>(*visuals);
             env_.visuals = visual_feed_.get();
         }
-        root_ = std::make_unique<ViewType>(env_);
+        root_ = make_root(env_);
+        if constexpr (requires(ViewType& view) {
+                          { view.preferred_editor_size() } -> std::convertible_to<format::EditorSize>;
+                      }) {
+            const format::EditorSize preferred = root_->preferred_editor_size();
+            if (preferred.width != 0 && preferred.height != 0)
+                size_ = preferred;
+        }
         layout_root();
         std::string bootstrap_error;
         if (!register_editor_dawn_bootstrap(bundle_id, &bootstrap_error))
@@ -68,6 +91,7 @@ template <typename ViewType> class Editor final : public format::Editor {
         host_ = ::vellum::view::PluginViewHost::create(*root_, options);
     }
 
+  public:
     // The root is destroyed after the host (member order), and its teardown
     // can still repaint: a ScriptedUiSession quarantines its realm and
     // requests a frame. A host is not required to clear the root's pointer to
@@ -88,20 +112,36 @@ template <typename ViewType> class Editor final : public format::Editor {
     }
 
     bool attach(const format::NativeParent& parent) override {
+        if (invalidated_)
+            return false;
         if (parent.kind == format::NativeParentKind::none)
             return true;
-        if (host_ == nullptr || parent.handle == nullptr || !supports_parent(parent.kind))
+        if (host_ == nullptr || parent.handle == nullptr || !supports_parent(parent.kind) ||
+            attached_ || closing_)
             return false;
-        return host_->try_attach_to_parent(parent.handle);
+        if (!host_->try_attach_to_parent(parent.handle))
+            return false;
+        if (!env_.lifetime_)
+            env_.lifetime_ = std::make_shared<EditorEnv::Attachment>();
+        attached_ = true;
+        if constexpr (requires(ViewType& view) { view.editor_opened(); })
+            root_->editor_opened();
+        return attached_;
     }
 
     void detach() override {
+        if (!attached_)
+            return;
+        close_attachment();
         if (host_ != nullptr)
             host_->detach();
     }
 
     void invalidate() override {
-        if (root_ != nullptr)
+        if (std::exchange(invalidated_, true))
+            return;
+        close_attachment();
+        if (host_ != nullptr && root_->plugin_view_host() == host_.get())
             root_->set_plugin_view_host(nullptr);
         host_.reset();
     }
@@ -111,7 +151,7 @@ template <typename ViewType> class Editor final : public format::Editor {
     }
 
     bool set_size(const format::EditorSize& size) override {
-        if (size.width == 0 || size.height == 0)
+        if (closing_ || invalidated_ || size.width == 0 || size.height == 0)
             return false;
         size_ = size;
         layout_root();
@@ -130,6 +170,8 @@ template <typename ViewType> class Editor final : public format::Editor {
     }
 
     void idle() override {
+        if (!env_.lifetime_)
+            return;
         // ContractEditorSession pumps ParamPort listeners before this call.
         // A view that owns per-frame work (a scripted session pushing bound
         // parameter values into widgets) gets its tick here, then the host
@@ -144,6 +186,18 @@ template <typename ViewType> class Editor final : public format::Editor {
     }
 
   private:
+    void close_attachment() {
+        if (env_.lifetime_)
+            env_.lifetime_->open = false;
+        env_.lifetime_.reset();
+        if (!std::exchange(attached_, false))
+            return;
+        closing_ = true;
+        if constexpr (requires(ViewType& view) { view.editor_closing(); })
+            root_->editor_closing();
+        closing_ = false;
+    }
+
     // The GPU plug-in host draws the root at its current bounds and leaves
     // layout to its owner, so the editor sizes the root to the editor.
     void layout_root() {
@@ -160,6 +214,9 @@ template <typename ViewType> class Editor final : public format::Editor {
     std::unique_ptr<ViewType> root_;
     std::unique_ptr<::vellum::view::PluginViewHost> host_;
     format::EditorSize size_{400, 300, 1.0};
+    bool attached_ = false;
+    bool closing_ = false;
+    bool invalidated_ = false;
 };
 
 template <typename ViewType> class EditorFactory final : public format::EditorFactory {
@@ -172,7 +229,7 @@ template <typename ViewType> class EditorFactory final : public format::EditorFa
                                            format::EditorContext& context,
                                            format::EditorRole role) override {
         return supports(role)
-                   ? std::make_unique<Editor<ViewType>>(context, processor.descriptor().bundle_id)
+                   ? std::make_unique<Editor<ViewType>>(context, processor)
                    : nullptr;
     }
 };
