@@ -290,7 +290,7 @@ bool XmlPropertiesFile::remove(std::string_view name) {
     return false;
 }
 
-bool XmlPropertiesFile::save(XmlPropertiesError* error) {
+bool XmlPropertiesFile::save(XmlPropertiesError* error, XmlPropertiesDurability durability) {
     if (!dirty())
         return true;
     const auto bytes = serialize(entries_);
@@ -306,7 +306,11 @@ bool XmlPropertiesFile::save(XmlPropertiesError* error) {
         set_error(error, XmlPropertiesError::Kind::io, "cannot write " + path_.string());
         return false;
     }
-    if (replacement->commit() == runtime::detail::DurableFileCommitOutcome::NotReplaced) {
+    const auto commit_durability = durability == XmlPropertiesDurability::full
+                                       ? runtime::detail::DurableFileDurability::full
+                                       : runtime::detail::DurableFileDurability::relaxed;
+    if (replacement->commit(commit_durability) ==
+        runtime::detail::DurableFileCommitOutcome::NotReplaced) {
         set_error(error, XmlPropertiesError::Kind::io, "cannot replace " + path_.string());
         return false;
     }
