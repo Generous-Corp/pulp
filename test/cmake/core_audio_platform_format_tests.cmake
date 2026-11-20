@@ -228,6 +228,10 @@ pulp_add_test_suite(pulp-test-midi GROUP pulp-test-group-cap-midi
 pulp_add_test_suite(pulp-test-midi-file GROUP pulp-test-group-cap-midi
     LIBRARIES pulp::midi)
 
+# Background warm-up of the platform MIDI backend's slow first call.
+pulp_add_test_suite(pulp-test-midi-warm-up GROUP pulp-test-group-cap-midi
+    LIBRARIES pulp::midi)
+
 # MIDI panic message generation, held-note offs and classification
 pulp_add_test_suite(pulp-test-midi-panic GROUP pulp-test-group-cap-midi
     LIBRARIES pulp::midi)
