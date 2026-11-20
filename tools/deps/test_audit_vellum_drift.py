@@ -722,6 +722,33 @@ class RendererLockDigestTests(unittest.TestCase):
         self.assertTrue(any("hashes to" in problem for problem in problems), problems)
 
 
+
+class PinTransitionTests(unittest.TestCase):
+    def transition(self, **overrides):
+        value = {"schema": "pulp.pin-transition.v1", "expires_at": "2026-12-04T00:00:00Z",
+                 "entries": [{"artifact_id": "renderer/mac-universal", "old_sha256": "a" * 64,
+                              "new_sha256": "b" * 64, "reason": "cycle", "owner": "danielraffel"}]}
+        value.update(overrides)
+        return value
+
+    def now(self):
+        return datetime.datetime(2026, 11, 20, tzinfo=datetime.timezone.utc)
+
+    def test_accepts_old_digest(self):
+        self.assertEqual(audit.validate_pin_transition(self.transition(), "renderer/mac-universal", "a" * 64, "b" * 64, now=self.now()), [])
+
+    def test_accepts_new_digest(self):
+        self.assertEqual(audit.validate_pin_transition(self.transition(), "renderer/mac-universal", "b" * 64, "a" * 64, now=self.now()), [])
+
+    def test_rejects_third_digest(self):
+        self.assertTrue(audit.validate_pin_transition(self.transition(), "renderer/mac-universal", "c" * 64, "b" * 64, now=self.now()))
+
+    def test_rejects_expired(self):
+        self.assertTrue(any("expired" in e for e in audit.validate_pin_transition(self.transition(expires_at="2026-11-19T00:00:00Z"), "renderer/mac-universal", "a" * 64, "b" * 64, now=self.now())))
+
+    def test_rejects_unjustified_entry(self):
+        self.assertTrue(audit.validate_pin_transition(self.transition(), "renderer/mac-universal", "a" * 64, "a" * 64, now=self.now()))
+
 if __name__ == "__main__":
     unittest.main(argv=[sys.argv[0], *(arg for arg in sys.argv[1:] if not arg.endswith(".lock"))])
 

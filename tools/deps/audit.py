@@ -1067,7 +1067,6 @@ def find_uncovered_declarations(
 VELLUM_DRIFT_FIELD = "vellum_renderer_drift_check"
 GPU_RUNTIME_ENTRY = "vellum-gpu-runtime"
 VELLUM_CHECKOUT_ENV = "PULP_VELLUM_CHECKOUT"
-PIN_TRANSITION_FILE = "tools/deps/pin_transition.json"
 VELLUM_ARCHIVE_SHA_RE = re.compile(
     r'set\(\s*_vellum_expected_archive_sha256\s+"([0-9A-Fa-f]{64})"\s*\)')
 VELLUM_TUPLE_RE = re.compile(r"(chrome/m\d+)\s+macOS universal tuple")
@@ -1108,16 +1107,6 @@ def validate_pin_transition(transition: dict, artifact_id: str, old_digest: str,
         errors.append(f"pin transition {artifact_id} has no owner")
     return errors
 
-
-def renderer_transition(artifact_id: str, old_digest: str, new_digest: str) -> list[str]:
-    path = Path(PIN_TRANSITION_FILE)
-    if not path.is_file():
-        return [f"{path} is required for a renderer pin transition"]
-    try:
-        transition = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError) as error:
-        return [f"{path} is unreadable: {error}"]
-    return validate_pin_transition(transition, artifact_id, old_digest, new_digest)
 
 
 class VellumPinUnavailable(RuntimeError):
@@ -1230,23 +1219,9 @@ def vellum_renderer_drift(manifest: list[dict], read_source=None) -> tuple[str, 
                 f"the renderer lock is read at {commit}, but Pulp pins {GPU_RUNTIME_ENTRY} "
                 f"at {pinned or 'nothing'}; they must be the same commit")
     if vellum_sha != pulp_sha.lower():
-        transition_errors = renderer_transition(
-            f"renderer/{asset_key}", vellum_sha, pulp_sha.lower())
-        if transition_errors:
-            problems.append(
-                f"archive digest differs: Vellum {vellum_sha} ({where}) vs Pulp {pulp_sha} "
-                f"(manifest Skia release_assets.{asset_key}); " + "; ".join(transition_errors))
-    elif Path(PIN_TRANSITION_FILE).is_file():
-        try:
-            transition = json.loads(Path(PIN_TRANSITION_FILE).read_text(encoding="utf-8"))
-            entries = transition.get("entries", []) if isinstance(transition, dict) else []
-            active = [e for e in entries if isinstance(e, dict)
-                      and e.get("artifact_id") == f"renderer/{asset_key}"
-                      and pulp_sha.lower() in {e.get("old_sha256"), e.get("new_sha256")}]
-            if active:
-                problems.append(f"{PIN_TRANSITION_FILE} is present without a renderer pin transition")
-        except (OSError, json.JSONDecodeError):
-            pass
+        problems.append(
+            f"archive digest differs: Vellum {vellum_sha} ({where}) vs Pulp {pulp_sha} "
+            f"(manifest Skia release_assets.{asset_key})")
     # Every macOS build forwards its device layer to gpu-runtime, whose lock
     # pins one macOS asset, so each mac-* selector must resolve that asset: an
     # x86_64-only build that fetched a thin archive fails the lock's Dawn check.

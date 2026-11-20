@@ -2,7 +2,7 @@
 
 ## Source
 - **Repository:** https://github.com/danielraffel/skia-builder (fork of olilarkin/skia-builder)
-- **Release:** chrome/m158
+- **Release:** chrome/m158-attested.1
 - **Release URL:** https://github.com/danielraffel/skia-builder/releases/tag/chrome%2Fm158-attested.1
 - **Downloaded:** 2026-11-19
 - **Skia branch:** chrome/m158 (Skia Graphite + Dawn)
