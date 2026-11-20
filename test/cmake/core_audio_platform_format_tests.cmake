@@ -228,6 +228,10 @@ pulp_add_test_suite(pulp-test-midi GROUP pulp-test-group-cap-midi
 pulp_add_test_suite(pulp-test-midi-file GROUP pulp-test-group-cap-midi
     LIBRARIES pulp::midi)
 
+# Background warm-up of the platform MIDI backend's slow first call.
+pulp_add_test_suite(pulp-test-midi-warm-up GROUP pulp-test-group-cap-midi
+    LIBRARIES pulp::midi)
+
 # MIDI panic message generation, held-note offs and classification
 pulp_add_test_suite(pulp-test-midi-panic GROUP pulp-test-group-cap-midi
     LIBRARIES pulp::midi)
@@ -397,6 +401,14 @@ if(UNIX AND NOT APPLE)
         LIBRARIES pulp::platform)
 endif()
 
+if(WIN32)
+    # MainThreadScope and MainThreadTimer with no host loop registered: the
+    # message-only window fallback, pumped by the test thread.
+    pulp_add_test_suite(pulp-test-platform-win32-main-thread
+        SOURCES test_platform_win32_main_thread.cpp
+        LIBRARIES pulp::platform)
+endif()
+
 if(UNIX AND NOT APPLE)
     # Stopping the hosted idle timer off-thread after the host loop is withdrawn.
     pulp_add_test_suite(pulp-test-main-thread-timer-host-loop
@@ -482,6 +494,10 @@ pulp_add_test_suite(pulp-test-pulpset-replay GROUP pulp-test-group-cap-format
 # Diagnostic reporter tests
 pulp_add_test_suite(pulp-test-diagnostic GROUP pulp-test-group-cap-format
     SOURCES test_diagnostic_reporter.cpp
+    LIBRARIES pulp::format)
+
+pulp_add_test_suite(pulp-test-third-party-notices GROUP pulp-test-group-cap-format
+    SOURCES test_third_party_notices.cpp
     LIBRARIES pulp::format)
 
 # CLAP entry point macro test

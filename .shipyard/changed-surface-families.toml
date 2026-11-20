@@ -2137,6 +2137,44 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
+name = "script-readers-e50c0541dc1c"
+paths = ["tools/scripts/test_bundle_vellum_sdk.py"]
+tests = [
+  "build-parallelism-guard",
+  "changed-surface-policy-inventory",
+  "changed-surface-policy-selftest",
+  "changed-surface-script-families-drift",
+  "changed-surface-script-families-selftest",
+  "changed-surface-shadow-plans-selftest",
+  "clean-worktree-planning-selftest",
+  "configure-only-selftest",
+  "flake-exoneration-selftest",
+  "gate-common-selftest",
+  "gpu-audio-provider-identity-selftest",
+  "gpu-dpr-runner-selftest",
+  "gpu-first-visible-acceptance-selftest",
+  "gpu-first-visible-campaign-selftest",
+  "gpu-first-visible-external-adapter-selftest",
+  "gpu-first-visible-role-producers-selftest",
+  "gpu-handoff-provenance-selftest",
+  "pr-head-affected-tests-selftest",
+  "pr-head-diff-scoped-registrations",
+  "prepush-receipt",
+  "prepush-refresh-push",
+  "reuse-policy-replay-selftest",
+  "sample-region-compat-baseline-selftest",
+  "vellum-sdk-bundle-selftest",
+  "vellum-watch-preflight-selftest",
+  "wide-non-native-selftest",
+]
+build_targets = ["pulp-cli"]
+supported_build_types = [
+  "debug",
+  "release",
+]
+risk_class = "low"
+
+[[families]]
 name = "script-readers-db4940dd6d3d"
 paths = ["tools/scripts/test_capability_contract_gate.py"]
 tests = [
@@ -2946,6 +2984,44 @@ tests = [
   "changed-surface-shadow-plans-selftest",
   "clean-worktree-planning-selftest",
   "clean-worktrees-selftest",
+  "configure-only-selftest",
+  "flake-exoneration-selftest",
+  "gate-common-selftest",
+  "gpu-audio-provider-identity-selftest",
+  "gpu-dpr-runner-selftest",
+  "gpu-first-visible-acceptance-selftest",
+  "gpu-first-visible-campaign-selftest",
+  "gpu-first-visible-external-adapter-selftest",
+  "gpu-first-visible-role-producers-selftest",
+  "gpu-handoff-provenance-selftest",
+  "pr-head-affected-tests-selftest",
+  "pr-head-diff-scoped-registrations",
+  "prepush-receipt",
+  "prepush-refresh-push",
+  "reuse-policy-replay-selftest",
+  "sample-region-compat-baseline-selftest",
+  "vellum-watch-preflight-selftest",
+  "wide-non-native-selftest",
+]
+build_targets = ["pulp-cli"]
+supported_build_types = [
+  "debug",
+  "release",
+]
+risk_class = "low"
+
+[[families]]
+name = "script-readers-bc6c8f790696"
+paths = ["tools/scripts/test_clock_in_tests_lint.py"]
+tests = [
+  "build-parallelism-guard",
+  "changed-surface-policy-inventory",
+  "changed-surface-policy-selftest",
+  "changed-surface-script-families-drift",
+  "changed-surface-script-families-selftest",
+  "changed-surface-shadow-plans-selftest",
+  "clean-worktree-planning-selftest",
+  "clock-in-tests-lint-selftest",
   "configure-only-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
@@ -9203,6 +9279,7 @@ paths = [
   "tools/scripts/test_build_time_report.py",
   "tools/scripts/test_build_workflow.py",
   "tools/scripts/test_bump_fastpath.py",
+  "tools/scripts/test_bundle_vellum_sdk.py",
   "tools/scripts/test_capability_contract_gate.py",
   "tools/scripts/test_catch_discover_timeout_guard.py",
   "tools/scripts/test_catch_multilabel_properties.py",
@@ -9240,6 +9317,7 @@ paths = [
   "tools/scripts/test_clean_worktrees.py",
   "tools/scripts/test_cli_sync_check.py",
   "tools/scripts/test_cli_sync_check_extra.py",
+  "tools/scripts/test_clock_in_tests_lint.py",
   "tools/scripts/test_clock_only_temp_key_guard.py",
   "tools/scripts/test_cmajor_external.py",
   "tools/scripts/test_cmake_manifest_parse.py",
@@ -9596,6 +9674,8 @@ tests = [
   "checkout-location-guard-selftest",
   "claude-md-sync-hook",
   "cli-package-registry-signing-helper",
+  "clock-guard-data-selftest",
+  "clock-in-tests-lint-selftest",
   "clock-only-temp-key-guard",
   "clock-only-temp-key-guard-selftest",
   "cmake-examples-reorder-init-guard",
@@ -9826,6 +9906,7 @@ paths = [
   "tools/scripts/test_build_time_report.py",
   "tools/scripts/test_build_workflow.py",
   "tools/scripts/test_bump_fastpath.py",
+  "tools/scripts/test_bundle_vellum_sdk.py",
   "tools/scripts/test_capability_contract_gate.py",
   "tools/scripts/test_catch_discover_timeout_guard.py",
   "tools/scripts/test_catch_multilabel_properties.py",
@@ -9863,6 +9944,7 @@ paths = [
   "tools/scripts/test_clean_worktrees.py",
   "tools/scripts/test_cli_sync_check.py",
   "tools/scripts/test_cli_sync_check_extra.py",
+  "tools/scripts/test_clock_in_tests_lint.py",
   "tools/scripts/test_clock_only_temp_key_guard.py",
   "tools/scripts/test_cmajor_external.py",
   "tools/scripts/test_cmake_manifest_parse.py",

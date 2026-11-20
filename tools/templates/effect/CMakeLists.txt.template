@@ -6,12 +6,13 @@ target_include_directories({{TARGET_NAME}}-test PRIVATE ${CMAKE_CURRENT_SOURCE_D
 catch_discover_tests({{TARGET_NAME}}-test)
 
 {{VELLUM_FIND_LINE}}
+{{VELLUM_HELPER_LINE}}
 {{VELLUM_EDITOR_LINE}}
 
 pulp_add_plugin({{TARGET_NAME}}
     # The processor body is compiled once and shared by every format, so an
     # edit to process() rebuilds one file before the relinks.
-    SOURCES         {{SOURCE_NAME}}
+    SOURCES         {{SOURCE_NAME}} {{VELLUM_SOURCE_LINE}}
     FORMATS         {{FORMATS}}
     PLUGIN_NAME     "{{PLUGIN_NAME}}"
     BUNDLE_ID       "{{BUNDLE_ID}}"

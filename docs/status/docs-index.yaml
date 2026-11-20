@@ -59,6 +59,11 @@ docs:
     kind: guide
     summary: Build your first plugin step by step
 
+  - slug: choosing-your-ui
+    path: getting-started/choosing-your-ui.md
+    kind: guide
+    summary: Choose Vellum, DSP-only, or the opt-in RmlUi path
+
   - slug: build
     path: guides/build.md
     kind: guide

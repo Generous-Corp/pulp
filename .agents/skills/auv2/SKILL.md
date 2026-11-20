@@ -1690,3 +1690,40 @@ generated values. Register final values before `define_parameters()` returns:
 registering the same ID twice keeps both entries in `all_params()`.
 `test/support/generated_range_processor.hpp` and the `[generated]` cases in
 `test_au_v2_param_display.mm` cover this.
+
+## Class-info state is a compact blob under `pulp-state-v2`
+
+`save_pulp_state()` writes one entry, `pulp-state-v2` (`au::compact_state`,
+`au_v2_common.hpp`): the parameters that differ from their declared default
+(varint id + f32, compared bit for bit), the processor payload, and a CRC-32.
+`restore_pulp_state()` reads `pulp-state-v2` first and falls back to the
+`pulp-state` PLST envelope that earlier versions wrote, so old sessions load.
+
+* **Why a second copy at all:** the entry restores parameters synchronously
+  inside `SetProperty(ClassInfo)`, and it carries values the processor's own
+  payload may not (a host that reads parameters right after setState needs
+  them). Do not drop it to save bytes.
+* **Unlisted means default** only when the saved `state_version` equals the
+  store's; for an older version the listed entries go through the store's
+  migrations and unlisted ones keep their current value, as in the legacy format.
+* **The key is new on purpose.** New bytes under `pulp-state` would make an older
+  build fail the whole restore (`InvalidPropertyValue`); an unknown key is
+  ignored. The cost is that a session saved by this version loses its Pulp state
+  when opened by an older build.
+* **Untrusted input:** `compact_state::decode` checks every length against the
+  bytes remaining, rejects duplicate ids and over-long varints, and writes
+  nothing to the store. The payload is limited to 4 GiB. Test fixture for the
+  legacy format: `test/fixtures/au_state/legacy_pulp_state.inc`.
+* **Tests that build a class info by hand** need the base class's identity keys
+  or `AUBase::RestoreState` rejects the dictionary before Pulp's entry is read;
+  start from a real `SaveState()` result (`make_class_info` in
+  `test_au_plugin_state.mm`). AUv3 `fullState` and VST3 keep the PLST envelope.
+* **A processor that owns its class-info state** overrides
+  `Processor::class_info_owns_plugin_state()` (default false). Save then writes
+  parameters only (flag bit 0) and skips `serialize_plugin_state()`; restore
+  applies the parameters and does not call `deserialize_plugin_state()`. Order:
+  `AUBase::RestoreState`, then the compact parameters, so an AU subclass that
+  restores its own key after calling the Pulp `RestoreState` sees parameters
+  already applied. Legacy `pulp-state` class infos still restore their payload.
+* **CRC-32** is `StateStore::crc32` (table driven, same value as the bitwise
+  definition); the parameter blob, PLST envelope and compact blob share it.

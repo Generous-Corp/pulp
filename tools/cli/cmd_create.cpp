@@ -596,20 +596,29 @@ int cmd_create(const std::vector<std::string>& args) {
         {"UI_MODE_LINE", ui == "none" ? "NO_EDITOR" : ""},
         {"VIEW_HEADER", lower_name_underscored + "_view.hpp"},
         {"VIEW_TYPE", ns + "::" + class_name + "View"},
-        {"VELLUM_EDITOR_LINE", ui == "vellum" ? "pulp_add_vellum_editor_package(" + class_name +
-                                                    "_VellumEditor\n"
-                                                    "    VIEW_HEADER \"" +
-                                                    lower_name_underscored +
-                                                    "_view.hpp\"\n"
-                                                    "    VIEW_TYPE " +
-                                                    ns + "::" + class_name +
-                                                    "View\n"
-                                                    ")"
-                                              : ""},
-        {"VELLUM_FIND_LINE",
+        {"VELLUM_SOURCE_LINE", ui == "vellum" ? lower_name_underscored + "_view.cpp" : ""},
+        {"VELLUM_EDITOR_LINE", ui == "vellum"
+                                   ? "pulp_add_vellum_editor_package(" + class_name +
+                                         "_VellumEditor\n"
+                                         "    VIEW_HEADER \"" +
+                                         lower_name_underscored +
+                                         "_view.hpp\"\n"
+                                         "    VIEW_TYPE " +
+                                         ns + "::" + class_name +
+                                         "View\n"
+                                         "    VIEW_INCLUDE_DIRS \"${CMAKE_CURRENT_SOURCE_DIR}\"\n"
+                                         ")"
+                                   : ""},
+        {"VELLUM_FIND_LINE", ui == "vellum" ? "find_package(Vellum CONFIG REQUIRED)" : ""},
+        {"VELLUM_HELPER_LINE",
          ui == "vellum"
-             ? "find_package(Vellum CONFIG REQUIRED)\n"
-               "include(\"${PULP_SDK_DIR}/lib/cmake/Pulp/PulpVellumEditorPackage.cmake\")"
+             ? "if(DEFINED PULP_ROOT_DIR)\n"
+               "    "
+               "include(\"${PULP_ROOT_DIR}/integrations/pulp-vellum/cmake/"
+               "PulpVellumEditorPackage.cmake\")\n"
+               "else()\n"
+               "    include(\"${PULP_SDK_DIR}/lib/cmake/Pulp/PulpVellumEditorPackage.cmake\")\n"
+               "endif()"
              : ""},
         {"UI_LINE",
          ui == "vellum" ? "UI " + class_name + "_VellumEditor" : (ui == "none" ? "NO_EDITOR" : "")},
@@ -684,8 +693,11 @@ int cmd_create(const std::vector<std::string>& args) {
 
     if (ui == "vellum") {
         const auto cmake_template = cmake_template_dir / "CMakeLists.txt.template";
+        const bool has_view_templates = fs::exists(source_template_dir / "view.hpp.template") &&
+                                        fs::exists(source_template_dir / "view.cpp.template");
         if (!fs::exists(cmake_template) ||
-            read_file_contents(cmake_template).find("{{UI_LINE}}") == std::string::npos) {
+            read_file_contents(cmake_template).find("{{UI_LINE}}") == std::string::npos ||
+            !has_view_templates) {
             std::cerr << "Error: --ui vellum is not available for the " << template_key
                       << " template yet; it uses a script UI\n";
             return 1;

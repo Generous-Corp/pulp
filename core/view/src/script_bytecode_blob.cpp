@@ -101,8 +101,12 @@ EmbeddedBytecodeRegistry& EmbeddedBytecodeRegistry::instance() {
 bool EmbeddedBytecodeRegistry::add(const std::uint8_t* blob, std::size_t size,
                                    std::string_view engine_fingerprint) {
     auto parsed = parse_script_bytecode_blob(blob, size);
-    if (!parsed)
+    if (!parsed) {
+        runtime::log_warn("JS bytecode: refusing malformed build-time bytecode blob ({} bytes); "
+                          "the script will compile from source",
+                          size);
         return false;
+    }
     if (parsed->fingerprint != engine_fingerprint) {
         runtime::log_warn("JS bytecode: ignoring build-time bytecode compiled by another "
                           "engine build ({} != {}); the script will compile from source",

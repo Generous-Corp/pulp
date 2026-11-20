@@ -6,6 +6,7 @@
 
 #include <chrono>
 #include <cstdlib>
+#include <cstring>
 #include <filesystem>
 #include <algorithm>
 #include <regex>
@@ -1012,7 +1013,6 @@ TEST_CASE("pulp-cpp create --ui vellum refuses templates that use a script UI",
     };
     const Case cases[] = {
         {"gain", {"--template", "gain"}, "gain"},
-        {"instrument", {"--type", "instrument"}, "instrument"},
     };
     for (const auto& c : cases) {
         const auto out_dir = tmp.path / (std::string("Refuse_") + c.label);
@@ -1042,20 +1042,60 @@ TEST_CASE("pulp-cpp create --ui vellum emits a Vellum editor package and configu
     const auto sdk = tmp.path / "sdk";
     const auto cfg = sdk / "lib" / "cmake" / "Pulp";
     const auto vellum_cfg = sdk / "lib" / "cmake" / "Vellum";
+    const auto fake_include = sdk / "include";
+    const auto source = native_path_string(source_root());
+    const auto include = native_path_string(fake_include);
+    REQUIRE(fs::exists(fs::path(PULP_CHOC_SOURCE_DIR) / "choc" / "audio" / "choc_MIDI.h"));
+    // choc_MIDI.h includes "../platform/choc_Assert.h", so both must be copied
+    // with their relative layout preserved.
+    REQUIRE(fs::exists(fs::path(PULP_CHOC_SOURCE_DIR) / "choc" / "platform" / "choc_Assert.h"));
+    for (const char* rel : {"audio/choc_MIDI.h", "platform/choc_Assert.h"}) {
+        fs::create_directories((fake_include / "choc" / rel).parent_path());
+        std::error_code choc_copy_ec;
+        fs::copy_file(fs::path(PULP_CHOC_SOURCE_DIR) / "choc" / rel, fake_include / "choc" / rel,
+                      fs::copy_options::overwrite_existing, choc_copy_ec);
+        REQUIRE_FALSE(choc_copy_ec);
+    }
+    write_file(fake_include / "pulp" / "vellum" / "editor.hpp", R"(
+#pragma once
+namespace pulp::format { class EditorFactory {}; }
+namespace pulp::vellum {
+struct EditorEnv {};
+template <typename ViewType> format::EditorFactory* editor_factory() { return nullptr; }
+}
+)");
+    write_file(fake_include / "vellum" / "view" / "view.hpp", R"(
+#pragma once
+namespace vellum::view { class View {}; }
+)");
     write_file(cfg / "PulpConfigVersion.cmake",
                "set(PACKAGE_VERSION \"" PULP_EXPECTED_SDK_VERSION "\")\n"
                "set(PACKAGE_VERSION_COMPATIBLE TRUE)\n");
-    write_file(cfg / "PulpConfig.cmake", "set(PULP_SDK_DIR \"" + native_path_string(sdk) +
-                                             "\")\n"
-                                             "add_library(Pulp::format INTERFACE IMPORTED)\n"
-                                             "add_library(pulp::vellum INTERFACE IMPORTED)\n"
-                                             "function(pulp_add_plugin target)\nendfunction()\n");
-    write_file(cfg / "PulpVellumEditorPackage.cmake",
-               "function(pulp_add_vellum_editor_package package)\n"
-               "  add_library(${package} INTERFACE)\n"
-               "endfunction()\n");
+    const auto pulp_include_dirs = include + ";" + source + "/core/format/include;" + source +
+                                   "/core/audio/include;" + source + "/core/runtime/include;" +
+                                   source + "/core/state/include;" + source + "/core/midi/include";
+    write_file(cfg / "PulpConfig.cmake",
+               "set(PULP_SDK_DIR \"" + native_path_string(sdk) +
+                   "\")\n"
+                   "add_library(Pulp::format INTERFACE IMPORTED)\n"
+                   "add_library(Pulp::format-core INTERFACE IMPORTED)\n"
+                   "add_library(Pulp::format-clap-core INTERFACE IMPORTED)\n"
+                   "add_library(Pulp::clap INTERFACE IMPORTED)\n"
+                   "add_library(Pulp::standalone-contract INTERFACE IMPORTED)\n"
+                   "add_library(pulp::vellum INTERFACE IMPORTED)\n"
+                   "set(_pulp_test_includes \"" +
+                   pulp_include_dirs +
+                   "\")\n"
+                   "set_target_properties(Pulp::format Pulp::format-core Pulp::format-clap-core "
+                   "Pulp::clap Pulp::standalone-contract pulp::vellum PROPERTIES "
+                   "INTERFACE_INCLUDE_DIRECTORIES \"${_pulp_test_includes}\")\n"
+                   "include(\"" +
+                   source + "/tools/cmake/PulpUtils.cmake\")\n");
     write_file(vellum_cfg / "VellumConfig.cmake",
-               "add_library(Vellum::MirrorView_core INTERFACE IMPORTED)\n");
+               "add_library(Vellum::MirrorView_core INTERFACE IMPORTED)\n"
+               "set_target_properties(Vellum::MirrorView_core PROPERTIES "
+               "INTERFACE_INCLUDE_DIRECTORIES \"" +
+                   include + "\")\n");
     write_file(vellum_cfg / "VellumConfigVersion.cmake",
                "set(PACKAGE_VERSION \"0.2.0\")\nset(PACKAGE_VERSION_COMPATIBLE TRUE)\n");
 
@@ -1074,6 +1114,10 @@ TEST_CASE("pulp-cpp create --ui vellum emits a Vellum editor package and configu
           std::string::npos);
     CHECK(cmake_lists.find("VIEW_HEADER \"vellumgain_view.hpp\"") != std::string::npos);
     CHECK(cmake_lists.find("VIEW_TYPE vellumgain::VellumGainView") != std::string::npos);
+    CHECK(cmake_lists.find("VIEW_INCLUDE_DIRS \"${CMAKE_CURRENT_SOURCE_DIR}\"") !=
+          std::string::npos);
+    CHECK(cmake_lists.find("SOURCES         vellumgain.cpp vellumgain_view.cpp") !=
+          std::string::npos);
     CHECK(cmake_lists.find("UI VellumGain_VellumEditor") != std::string::npos);
     const auto view_header = read_file(out_dir / "vellumgain_view.hpp");
     CHECK(view_header.find("class VellumGainView") != std::string::npos);
@@ -1082,6 +1126,32 @@ TEST_CASE("pulp-cpp create --ui vellum emits a Vellum editor package and configu
     CHECK(view_header.find("bind_parameter(*mix_knob_, env.params") != std::string::npos);
     CHECK(view_header.find("env.params.resolve(\"Mix\")") != std::string::npos);
 
+    // Use the production helper and pulp_add_plugin() from this checkout. The
+    // generated factory header and the emitted view.cpp both compile here,
+    // proving the source include path and SOURCES closure rather than merely
+    // checking that configure accepted no-op stubs.
+    auto configured_cmake = cmake_lists;
+    // The default format list is host-dependent (macOS adds VST3/AU), so
+    // replace the whole FORMATS value rather than matching one spelling.
+    const std::string formats_key = "FORMATS         ";
+    const auto formats_pos = configured_cmake.find(formats_key);
+    REQUIRE(formats_pos != std::string::npos);
+    const auto formats_value_pos = formats_pos + formats_key.size();
+    auto formats_eol = configured_cmake.find('\n', formats_value_pos);
+    if (formats_eol == std::string::npos)
+        formats_eol = configured_cmake.size();
+    configured_cmake.replace(formats_value_pos, formats_eol - formats_value_pos, "CLAP");
+    write_file(out_dir / "CMakeLists.txt",
+               configured_cmake + "\nfile(WRITE \"${CMAKE_CURRENT_BINARY_DIR}/"
+                                  "factory_compile.cpp\" \"#include <pulp-vellum/"
+                                  "editor-packages/VellumGain_VellumEditor.hpp>\\n"
+                                  "int main() { return pulp::vellum::generated::"
+                                  "VellumGain_VellumEditor() == nullptr; }\\n\")\n"
+                                  "add_executable(vellum-factory-compile "
+                                  "\"${CMAKE_CURRENT_BINARY_DIR}/factory_compile.cpp\")\n"
+                                  "target_link_libraries(vellum-factory-compile "
+                                  "PRIVATE VellumGain_VellumEditor)\n");
+
     pulp::platform::ProcessOptions options;
     options.working_directory = native_path_string(tmp.path);
     options.timeout_ms = pulp_test_cli::shellout_timeout_ms();
@@ -1089,6 +1159,7 @@ TEST_CASE("pulp-cpp create --ui vellum emits a Vellum editor package and configu
         PULP_CMAKE_COMMAND,
         {"-S", native_path_string(out_dir), "-B", native_path_string(out_dir / "build"),
          "-DCMAKE_PREFIX_PATH=" + native_path_string(sdk),
+         "-DPULP_ROOT_DIR=" + native_path_string(source_root()),
          "-DFETCHCONTENT_TRY_FIND_PACKAGE_MODE=NEVER",
          "-DFETCHCONTENT_SOURCE_DIR_CATCH2=" PULP_CATCH2_SOURCE_DIR,
          "-DFETCHCONTENT_FULLY_DISCONNECTED=ON"},
@@ -1097,6 +1168,15 @@ TEST_CASE("pulp-cpp create --ui vellum emits a Vellum editor package and configu
     INFO(configure.stderr_output);
     REQUIRE_FALSE(configure.timed_out);
     REQUIRE(configure.exit_code == 0);
+    auto built = pulp::platform::ChildProcess::run(
+        PULP_CMAKE_COMMAND,
+        {"--build", native_path_string(out_dir / "build"), "--target", "vellum-factory-compile",
+         "VellumGain_Core", "--parallel", "2"},
+        options);
+    INFO(built.stdout_output);
+    INFO(built.stderr_output);
+    REQUIRE_FALSE(built.timed_out);
+    REQUIRE(built.exit_code == 0);
 
     const auto missing_dir = tmp.path / "VellumMissing";
     auto missing = run_create({"create", "VellumMissing", "--ui", "vellum", "--type", "effect",

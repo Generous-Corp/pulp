@@ -40,7 +40,9 @@
 //   backup path (never overwriting an existing backup) and the error is
 //   returned, so the file is never wiped by the next save.
 // - save() replaces the file atomically and leaves no temporary file behind,
-//   whether it succeeds or fails, and reports failure.
+//   whether it succeeds or fails, and reports failure. By default it does not
+//   flush the drive cache (see XmlPropertiesDurability), so a save from a UI
+//   thread does not wait on the disk; the last write can be lost on power loss.
 // - A save when no entry changed since the load, construction or last save
 //   writes nothing: the file's bytes, modification time and inode are
 //   untouched, and a missing file stays missing until it has an entry (or an
@@ -63,6 +65,17 @@ struct XmlPropertiesError {
     /// For a parse error on load: where the unreadable bytes were copied, or
     /// empty if the copy could not be written.
     std::filesystem::path backup_path;
+};
+
+/// How hard save() pushes the bytes toward media. Either way the replacement is
+/// atomic: a reader sees the old file or the new one, never a torn file.
+enum class XmlPropertiesDurability {
+    /// fsync the file and its directory without flushing the drive cache. Cheap
+    /// enough for a UI thread; the last save can be lost on power loss.
+    relaxed,
+    /// Also flush the drive cache (F_FULLFSYNC on Apple platforms). Survives
+    /// power loss; a small file costs tens of milliseconds on the caller.
+    full,
 };
 
 class XmlPropertiesFile {
@@ -112,7 +125,11 @@ class XmlPropertiesFile {
     /// Writes the canonical bytes atomically if any entry changed since the
     /// load, construction or last save; otherwise writes nothing, not even a
     /// missing file. True when nothing needed writing or the write succeeded.
-    bool save(XmlPropertiesError* error = nullptr);
+    /// `durability` defaults to relaxed so a settings save from the main thread
+    /// does not wait on a drive-cache flush; pass `full` when losing the last
+    /// write to a power cut is not acceptable.
+    bool save(XmlPropertiesError* error = nullptr,
+              XmlPropertiesDurability durability = XmlPropertiesDurability::relaxed);
 
   private:
     std::filesystem::path path_;

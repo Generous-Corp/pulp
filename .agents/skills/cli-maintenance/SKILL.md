@@ -2677,6 +2677,16 @@ Gotchas:
 - `--audio-scope-json` cannot be combined with `--audio-inspector` because
   both consume the live capture FIFO.
 
+## `pulp licenses`: a built bundle's third-party notices
+
+`tools/cli/cmd_licenses.cpp` reads the `ThirdPartyNotices.json` that
+`pulp_add_plugin` writes into each bundle, through the same parser the
+runtime `pulp::format::third_party_notices()` uses, so the CLI and an About
+view can never disagree. `--check` exits non-zero when
+`sdks_without_manifest` or `unattributed_targets` is non-empty: a notice list
+with a gap must fail loudly, never print as complete. It takes a file path,
+so it is CLI-only in the MCP parity baseline.
+
 ## `pulp validate` — plugin-format validators
 
 Runs `clap-validator` / `pluginval` / `auval` / optional AAX validator
@@ -4420,3 +4430,10 @@ render callback only latches a request; `service_program_changes()` loads it on
 the main thread. Both built-in editors call it beside `service_state_persistence`
 from their idle hook. A standalone built without an editor must call it itself,
 or a Program Change is latched and never applied.
+
+## `pulp sdk install --local` validates `pulp.lock` first
+
+`local_sdk_install.cpp` runs `tools/deps/pulp_lock.py` from the source snapshot
+before building and refuses the install when the lock is missing or malformed.
+A snapshot without `tools/deps/pulp_lock.py` is treated as a failure, not
+skipped.

@@ -4,10 +4,17 @@
   "entry": "tools/deps/test_audit.py",
   "inputs": [
    "tools/ci/tart-provision.sh",
+   "tools/cmake",
    "tools/cmake/PulpDependencies.cmake",
+   "tools/cmake/PulpFetchContent.cmake",
    "tools/cmake/PulpGpuRuntime.cmake",
+   "tools/cmake/PulpGpuRuntimeRecord.cmake",
+   "tools/cmake/PulpVellumLock.cmake",
    "tools/cmake/PulpWclap.cmake",
    "tools/deps/audit.py",
+   "tools/deps/cmake_commands.py",
+   "tools/deps/gpu_runtime_driver.cmake",
+   "tools/deps/pulp_lock.py",
    "tools/deps/test_audit.py",
    "tools/deps/wgpu_native_digests.py",
    "tools/packages/test-stubs"

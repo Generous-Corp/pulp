@@ -195,6 +195,15 @@ if(TARGET pulp-native)
     list(APPEND PULP_SDK_TARGETS pulp-native)
 endif()
 
+# The optional Vellum editor bridge is part of the installed SDK when it was
+# enabled for this build. Generated `pulp create --ui vellum` projects link
+# against this exported target and its public headers.
+set(PULP_SDK_HAS_VELLUM_BRIDGE OFF)
+if(TARGET pulp-vellum)
+    list(APPEND PULP_SDK_TARGETS pulp-vellum)
+    set(PULP_SDK_HAS_VELLUM_BRIDGE ON)
+endif()
+
 # pulp-canvas links pulp-bundled-fonts privately when Skia is on.
 # CMake exports the canvas target through PulpTargets, and refuses unless
 # every PRIVATE-linked dependency is also in the export set.
@@ -377,6 +386,12 @@ foreach(subsystem IN LISTS _pulp_sdk_header_subsystems)
     endif()
 endforeach()
 unset(_pulp_sdk_header_subsystems)
+
+if(TARGET pulp-vellum)
+    install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/integrations/pulp-vellum/include/pulp/"
+        DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/pulp"
+        FILES_MATCHING PATTERN "*.hpp" PATTERN "*.h")
+endif()
 
 if(TARGET pulp-native)
     install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/integrations/pulp-native/include/pulp/"
@@ -874,26 +889,6 @@ configure_file("${PULP_ROOT_DIR}/tools/cmake/PulpStampSourceInstall.cmake.in"
     "${CMAKE_CURRENT_BINARY_DIR}/PulpStampSourceInstall.cmake" @ONLY)
 install(SCRIPT "${CMAKE_CURRENT_BINARY_DIR}/PulpStampSourceInstall.cmake")
 
-# The optional pulp-vellum bridge (PULP_ENABLE_PULP_VELLUM) links Vellum's
-# imported targets, so it goes in its own export file: PulpTargets.cmake must
-# load for consumers without a Vellum SDK. PulpVellumEditorPackage.cmake loads
-# PulpVellumTargets.cmake after the consumer's find_package(Vellum).
-if(TARGET pulp-vellum)
-    set_target_properties(pulp-vellum PROPERTIES EXPORT_NAME vellum)
-    set(_pulp_vellum_install_targets pulp-vellum)
-    install(TARGETS ${_pulp_vellum_install_targets}
-        EXPORT PulpVellumTargets
-        ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
-        INCLUDES DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
-    install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/integrations/pulp-vellum/include/pulp/"
-        DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/pulp"
-        FILES_MATCHING PATTERN "*.hpp")
-    install(EXPORT PulpVellumTargets
-        FILE PulpVellumTargets.cmake
-        NAMESPACE Pulp::
-        DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/Pulp)
-endif()
-
 # CMake config files for find_package(Pulp)
 install(EXPORT PulpTargets
     FILE PulpTargets.cmake
@@ -947,6 +942,10 @@ install(FILES
     # build-time finalize script relative to its own directory.
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpBuildInfo.cmake"
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpFinalizeBuildInfo.cmake"
+    # Included by PulpUtils.cmake: ThirdPartyNotices files in plug-in bundles.
+    # It measures an installed consumer's closure with PulpConsumerClosure.
+    "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpThirdPartyNotices.cmake"
+    "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpConsumerClosure.cmake"
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpDevSharedUi.cmake"
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpPluginFormats.cmake"
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpWindowsTargetArch.cmake"

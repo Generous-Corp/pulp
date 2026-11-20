@@ -31,6 +31,13 @@ set(PULP_FORMAT_SOURCE_DIR "${PULP_SDK_DIR}/src/pulp/format")
 set(PULP_AUV3_TEMPLATE_DIR "${PULP_SDK_DIR}/templates/auv3")
 set(PULP_IOS_AUV3_TEMPLATE_DIR "${PULP_SDK_DIR}/templates/ios-auv3")
 
+# Pulp's third-party notices manifest, which pulp_add_plugin() unions into each
+# bundle's ThirdPartyNotices files.
+if(EXISTS "${PULP_SDK_DIR}/share/pulp/notices/notices.json")
+    set_property(GLOBAL PROPERTY PULP_SDK_NOTICE_MANIFEST
+        "${PULP_SDK_DIR}/share/pulp/notices/notices.json")
+endif()
+
 # Platform detection → PULP_APPLE / PULP_LINUX / PULP_WINDOWS / etc.
 include("${CMAKE_CURRENT_LIST_DIR}/PulpPlatformConfig.cmake")
 
@@ -95,6 +102,14 @@ endif()
 # "target Threads::Threads not found". (Surfaced by the SDK smoke once
 # pulp-gpu-audio joined the export set.)
 find_dependency(Threads)
+
+# pulp-vellum (exported only when PULP_ENABLE_PULP_VELLUM was on) links
+# Vellum::Value PUBLIC, so PulpTargets.cmake needs the Vellum package loaded
+# first. Consumers of an SDK without the bridge never look for Vellum.
+set(PULP_SDK_HAS_VELLUM_BRIDGE "@PULP_SDK_HAS_VELLUM_BRIDGE@")
+if(PULP_SDK_HAS_VELLUM_BRIDGE)
+    find_dependency(Vellum CONFIG)
+endif()
 
 # The Pulp SDK is built and installed in the Release configuration only.
 # When a downstream plugin is built in Debug / MinSizeRel / RelWithDebInfo

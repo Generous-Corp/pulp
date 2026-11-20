@@ -104,6 +104,11 @@ app — also carries a `pulp-build-info.json` build-identity record
 (`pulp.build-info.v1`). Its layout, schema, and the SDK's
 `share/pulp/runtime-pins.json` it embeds are documented in the
 [shipping guide](../guides/shipping.md#build-identity-in-every-bundle).
+`pulp_add_plugin()` bundles also carry `ThirdPartyNotices.json` and
+`ThirdPartyNotices.txt`, computed from each bundle's link closure; see
+[third-party notices](../guides/shipping.md#third-party-notices-in-every-bundle).
+Another SDK registers its notices manifest with
+`pulp_add_notice_manifest(<path/to/notices.json>)`.
 
 Reviewed UI kits are consumed explicitly after `pulp kit apply` has generated
 `cmake/pulp-kits.cmake`. Include that file, declare the plugin, then attach the

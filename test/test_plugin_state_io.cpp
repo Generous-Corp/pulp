@@ -567,6 +567,56 @@ TEST_CASE("plugin_state_io rejects corrupt envelopes without touching live state
     REQUIRE(restored.processor.deserialize_calls == 0);
 }
 
+TEST_CASE("plugin_state_io restores already-split payloads and rolls both back on rejection",
+          "[format][plugin-state]") {
+    TestRig source;
+    source.store.set_value(1, -18.0f);
+    source.processor.plugin_state = "split-a";
+    const auto store_blob = source.store.serialize();
+    const auto payload = pulp::format::plugin_state_io::plugin_state_payload(source.processor);
+    REQUIRE(payload != nullptr);
+    REQUIRE(std::string(payload->begin(), payload->end()) == "split-a");
+
+    SECTION("applies both layers") {
+        TestRig restored;
+        restored.store.set_value(1, 3.0f);
+        REQUIRE(pulp::format::plugin_state_io::deserialize_parts(
+            store_blob, *payload, restored.store, restored.processor));
+        REQUIRE_THAT(restored.store.get_value(1), WithinAbs(-18.0, 0.01));
+        REQUIRE(restored.processor.plugin_state == "split-a");
+    }
+
+    SECTION("a rejected payload rolls the parameters back") {
+        TestRig restored;
+        restored.store.set_value(1, 3.0f);
+        restored.processor.plugin_state = "keep";
+        restored.processor.rejected_payload = "split-a";
+        REQUIRE_FALSE(pulp::format::plugin_state_io::deserialize_parts(
+            store_blob, *payload, restored.store, restored.processor));
+        REQUIRE_THAT(restored.store.get_value(1), WithinAbs(3.0, 0.01));
+        REQUIRE(restored.processor.plugin_state == "keep");
+    }
+
+    SECTION("a bad parameter blob never reaches the processor") {
+        TestRig restored;
+        restored.processor.plugin_state = "keep";
+        auto bad = store_blob;
+        bad.back() ^= 0xFF;
+        REQUIRE_FALSE(pulp::format::plugin_state_io::deserialize_parts(
+            bad, *payload, restored.store, restored.processor));
+        REQUIRE(restored.processor.deserialize_calls == 0);
+    }
+
+    SECTION("a published snapshot is shared, not serialized again") {
+        source.processor.publish_plugin_state_snapshot(std::vector<uint8_t>{1, 2, 3});
+        const int before = source.processor.serialize_calls;
+        const auto first = pulp::format::plugin_state_io::plugin_state_payload(source.processor);
+        const auto second = pulp::format::plugin_state_io::plugin_state_payload(source.processor);
+        REQUIRE(first == second);
+        REQUIRE(source.processor.serialize_calls == before);
+    }
+}
+
 TEST_CASE("plugin_state_io rejects malformed blobs without touching live state",
           "[format][plugin-state]") {
     TestRig reference;

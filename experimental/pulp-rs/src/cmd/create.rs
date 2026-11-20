@@ -442,14 +442,18 @@ pub fn scaffold(
     let view_header = format!("{lower_underscored}_view.hpp");
     let view_source = format!("{lower_underscored}_view.cpp");
     let view_type = format!("{ns}::{class_name}View");
+    let vellum_source_line = if args.ui == "vellum" { view_source.clone() } else { String::new() };
     let vellum_editor_line = if args.ui == "vellum" {
-        format!("pulp_add_vellum_editor_package({class_name}_VellumEditor\n    VIEW_HEADER \"{view_header}\"\n    VIEW_TYPE {view_type}\n)")
+        format!("pulp_add_vellum_editor_package({class_name}_VellumEditor\n    VIEW_HEADER \"{view_header}\"\n    VIEW_TYPE {view_type}\n    VIEW_INCLUDE_DIRS \"${{CMAKE_CURRENT_SOURCE_DIR}}\"\n)")
     } else { String::new() };
     let ui_line = if args.ui == "vellum" {
         format!("UI {class_name}_VellumEditor")
     } else { ui_mode_line.clone() };
     let vellum_find_line = if args.ui == "vellum" {
-        "find_package(Vellum CONFIG REQUIRED)\ninclude(\"${PULP_SDK_DIR}/lib/cmake/Pulp/PulpVellumEditorPackage.cmake\")".to_owned()
+        "find_package(Vellum CONFIG REQUIRED)".to_owned()
+    } else { String::new() };
+    let vellum_helper_line = if args.ui == "vellum" {
+        "if(DEFINED PULP_ROOT_DIR)\n    include(\"${PULP_ROOT_DIR}/integrations/pulp-vellum/cmake/PulpVellumEditorPackage.cmake\")\nelse()\n    include(\"${PULP_SDK_DIR}/lib/cmake/Pulp/PulpVellumEditorPackage.cmake\")\nendif()".to_owned()
     } else { String::new() };
     let vars: Vec<(&str, &str)> = vec![
         ("PLUGIN_NAME", &args.name),
@@ -475,9 +479,11 @@ pub fn scaffold(
         ("UI_MODE_LINE", &ui_mode_line),
         ("VIEW_HEADER", &view_header),
         ("VIEW_TYPE", &view_type),
+        ("VELLUM_SOURCE_LINE", &vellum_source_line),
         ("VELLUM_EDITOR_LINE", &vellum_editor_line),
         ("UI_LINE", &ui_line),
         ("VELLUM_FIND_LINE", &vellum_find_line),
+        ("VELLUM_HELPER_LINE", &vellum_helper_line),
     ];
 
     // Pick template_key (prefer --template if supplied).
@@ -504,7 +510,9 @@ pub fn scaffold(
         let supports_ui = fs::read_to_string(cmake_template_dir.join("CMakeLists.txt.template"))
             .map(|t| t.contains("{{UI_LINE}}"))
             .unwrap_or(false);
-        if !supports_ui {
+        let has_view_templates = source_template_dir.join("view.hpp.template").is_file()
+            && source_template_dir.join("view.cpp.template").is_file();
+        if !supports_ui || !has_view_templates {
             return Err(CliError::BadUsage(format!(
                 "--ui vellum is not available for the {template_key} template yet; it uses a script UI"
             )));
@@ -931,11 +939,18 @@ mod tests {
         write_minimal_effect_templates(td.path(), "processor {{LOWER_NAME}}\n");
         fs::write(
             td.path().join("tools").join("templates").join("effect").join("CMakeLists.txt.template"),
-            "project({{CLASS_NAME}})\n{{UI_LINE}}\n",
+            "project({{CLASS_NAME}})\n{{VELLUM_EDITOR_LINE}}\nSOURCES {{SOURCE_NAME}} {{VELLUM_SOURCE_LINE}}\n{{UI_LINE}}\n",
         )
         .unwrap();
-        let result = scaffold(&args, &td.path().join("out"), &td.path().join("tools").join("templates"), None, "1.0.0", &mut Vec::new());
+        let templates = td.path().join("tools").join("templates").join("effect");
+        fs::write(templates.join("view.hpp.template"), "struct {{CLASS_NAME}}View {};\n").unwrap();
+        fs::write(templates.join("view.cpp.template"), "// Vellum view\n").unwrap();
+        let out_dir = td.path().join("out");
+        let result = scaffold(&args, &out_dir, &td.path().join("tools").join("templates"), None, "1.0.0", &mut Vec::new());
         assert!(result.is_ok());
+        let cmake = fs::read_to_string(out_dir.join("CMakeLists.txt")).unwrap();
+        assert!(cmake.contains("SOURCES gain.cpp gain_view.cpp"));
+        assert!(cmake.contains("VIEW_INCLUDE_DIRS \"${CMAKE_CURRENT_SOURCE_DIR}\""));
     }
 
     #[test]

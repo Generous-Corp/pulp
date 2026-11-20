@@ -632,6 +632,22 @@ engine contract changes, update all three together; `python3 tools/deps/audit.py
 --strict` checks pins and notice coverage, not whether the prose matches the
 build.
 
+## Linked dependencies need `link_targets` for plug-in notices
+
+`pulp_add_plugin()` writes `ThirdPartyNotices.json`/`.txt` into every bundle
+from the bundle's link closure, using the notices manifest
+`tools/deps/notices.py` generates from `tools/deps/manifest.json`. Only entries
+with `link_targets` (the CMake targets that carry the dependency's code) take
+part, so a new dependency that plug-ins link needs that field, an optional
+`link_feature` when an option compiles it in or out, and a `## <name>` section
+in `NOTICE.md`; the generator fails the configure without the section. Use the
+target the code lands in: a vendored source compiled into `pulp-runtime` is
+claimed by `pulp-runtime`, not by a target name that never exists.
+`audit.py --strict` does not check `link_targets`; the
+`plugin-third-party-notices` ctest checks what the bundles name, and the
+`unattributed_targets` list in a bundle's JSON shows closure targets no entry
+claims.
+
 ## Prebuilt platform slices
 
 When a prebuilt Skia release gains a Windows platform slice, keep the exact
@@ -648,3 +664,7 @@ Pulp's build tools, but it is not redistributed by Pulp and does not belong in
 should run through `MISE_ENV=toolchain mise exec -- ...`; a host-toolchain run
 must be identified as such. Update `docs/reference/licensing.md` with the same
 boundary when the dependency row changes.
+
+The `vellum-gpu-runtime` row is derived from `pulp.lock`: its version and commit
+must match the lock's Vellum tag and sha, and `audit.py --strict` fails when they
+differ. Edit the lock and the row together.

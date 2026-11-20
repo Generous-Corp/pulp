@@ -1,0 +1,1070 @@
+{
+ "schema": "pulp.cutover-trial-report.v1",
+ "export_id": "20261107-f0ac0a4ff392",
+ "paths": {
+  "listed": 687,
+  "deleted": 687,
+  "already_absent": []
+ },
+ "configure": {
+  "ok": true,
+  "errors": []
+ },
+ "cutover_required_changes": [
+  {
+   "file": "core/render/CMakeLists.txt",
+   "line": 136,
+   "statement": "target_sources(pulp-render PRIVATE",
+   "why": "Cannot find source file: src/headless_surface.cpp",
+   "iteration": 18,
+   "class": "a-expected"
+  },
+  {
+   "file": "core/view/CMakeLists.txt",
+   "line": 16,
+   "statement": "add_library(pulp-view-core",
+   "why": "Cannot find source file: src/data_display.cpp",
+   "iteration": 18,
+   "class": "a-expected"
+  },
+  {
+   "file": "core/view/cmake/PulpViewSources.cmake",
+   "line": 196,
+   "statement": "target_sources(pulp-view-script PRIVATE",
+   "why": "Cannot find source file: src/js_quickjs_engine.cpp",
+   "iteration": 18,
+   "class": "a-expected"
+  },
+  {
+   "file": "core/view/cmake/PulpDesignUnits.cmake",
+   "line": 70,
+   "statement": "add_library(pulp-design-import STATIC",
+   "why": "Cannot find source file: src/anchor_strategy.cpp",
+   "iteration": 18,
+   "class": "a-expected"
+  },
+  {
+   "file": "test/cmake/script_canvas_render_tests.cmake",
+   "line": 521,
+   "statement": "add_executable(pulp-test-render-loop",
+   "why": "Cannot find source file: /Volumes/Atelier/Code/agent-worktrees/lanes/b7-cutover-trial/pulp-cutover-trial-scratch/core/render/src/render_loop.cpp",
+   "iteration": 18,
+   "class": "a-expected"
+  },
+  {
+   "file": "test/cmake/script_canvas_render_tests.cmake",
+   "line": 536,
+   "statement": "add_executable(pulp-test-sdl3-surface",
+   "why": "Cannot find source file: /Volumes/Atelier/Code/agent-worktrees/lanes/b7-cutover-trial/pulp-cutover-trial-scratch/core/render/src/sdl3_surface.cpp",
+   "iteration": 18,
+   "class": "a-expected"
+  },
+  {
+   "file": "test/cmake/script_canvas_render_tests.cmake",
+   "line": 575,
+   "statement": "add_executable(pulp-test-texture-atlas",
+   "why": "Cannot find source file: /Volumes/Atelier/Code/agent-worktrees/lanes/b7-cutover-trial/pulp-cutover-trial-scratch/core/render/src/texture_atlas.cpp",
+   "iteration": 18,
+   "class": "a-expected"
+  },
+  {
+   "file": "test/cmake/view_widget_bridge_tests.cmake",
+   "line": 895,
+   "statement": "add_library(pulp-bridge-exec-fixture-dev OBJECT ${_pulp_bridge_exec_fixture_src})",
+   "why": "Cannot find source file: /Volumes/Atelier/Code/agent-worktrees/lanes/b7-cutover-trial/pulp-cutover-trial-scratch/core/view/src/widget_bridge/platform_services_api.cpp",
+   "iteration": 18,
+   "class": "a-expected"
+  },
+  {
+   "file": "core/view/cmake/PulpViewSources.cmake",
+   "line": 265,
+   "statement": "target_sources(pulp-view-script PRIVATE",
+   "why": "Cannot find source file: src/widget_bridge/runtime_import_api.cpp",
+   "iteration": 40,
+   "class": "a-expected"
+  },
+  {
+   "file": "test/cmake/app_audio_host_tests.cmake",
+   "line": 1325,
+   "statement": "add_executable(pulp-test-multi-window",
+   "why": "Cannot find source file: /Volumes/Atelier/Code/agent-worktrees/lanes/b7-cutover-trial/pulp-cutover-trial-scratch/core/render/src/render_loop.cpp",
+   "iteration": 40,
+   "class": "a-expected"
+  }
+ ],
+ "stranded_dependencies": [
+  {
+   "restored": "core/view/cmake/PulpViewJsPreludes.cmake",
+   "class": "b-stranded-restored",
+   "consumer": "core/view/CMakeLists.txt:92",
+   "why": "include could not find requested file: /Volumes/Atelier/Code/agent-worktrees/lanes/b7-cutover-trial/pulp-cutover-trial-scratch/core/view/cmake/PulpViewJsPreludes.cmake",
+   "iteration": 1
+  },
+  {
+   "restored": "tools/cmake/PulpEmbedData.cmake",
+   "class": "b-stranded-restored",
+   "consumer": "test/cmake/core_runtime_canvas_signal_tests.cmake:301",
+   "why": "include could not find requested file: /Volumes/Atelier/Code/agent-worktrees/lanes/b7-cutover-trial/pulp-cutover-trial-scratch/tools/cmake/PulpEmbedData.cmake",
+   "iteration": 4
+  },
+  {
+   "path": "external/fonts/Inter-Regular.ttf",
+   "referenced_by": [
+    "examples/forge-modular/package.sh",
+    "examples/forge-modular/verify_package.sh",
+    "integrations/rmlui-native/tests/CMakeLists.txt",
+    "packages/pulp-web-player/src/theme/fonts.css",
+    "test/cmake/canvas_text_tests.cmake",
+    "test/cmake/design_import_native_codegen_tests.cmake",
+    "test/cmake/script_canvas_render_tests.cmake",
+    "test/ctest_script_inputs/executables/pulp-test-design-import.json",
+    "test/ctest_script_inputs/executables/pulp-test-group-canvas-text.json",
+    "test/ctest_script_inputs/executables/pulp-test-group-canvas.json"
+   ],
+   "count": 22
+  },
+  {
+   "path": "external/fonts/JetBrainsMono-Regular.ttf",
+   "referenced_by": [
+    "test/cmake/canvas_text_tests.cmake",
+    "test/cmake/render_gpu_surface_tests.cmake",
+    "test/ctest_script_inputs/executables/pulp-test-group-canvas-text.json",
+    "test/ctest_script_inputs/executables/pulp-test-text-raster-policy.json",
+    "test/fixtures/browser-capture-text-raster/README.md",
+    "tools/cmake/PulpWebUi.cmake",
+    "tools/deps/manifest.json",
+    "tools/harness/visual/pins.py",
+    "tools/scripts/versioning.json"
+   ],
+   "count": 9
+  },
+  {
+   "path": "external/fonts/Jost-Bold.ttf",
+   "referenced_by": [
+    "tools/cmake/PulpWebUi.cmake",
+    "tools/deps/manifest.json",
+    "tools/scripts/versioning.json"
+   ],
+   "count": 3
+  },
+  {
+   "path": "external/fonts/Jost-Medium.ttf",
+   "referenced_by": [
+    "tools/cmake/PulpWebUi.cmake",
+    "tools/deps/manifest.json",
+    "tools/scripts/versioning.json"
+   ],
+   "count": 3
+  },
+  {
+   "path": "external/fonts/Jost-Regular.ttf",
+   "referenced_by": [
+    "test/cmake/canvas_text_tests.cmake",
+    "test/cmake/design_import_native_codegen_tests.cmake",
+    "test/cmake/design_import_tool_cli_tests.cmake",
+    "test/ctest_script_inputs/executables/pulp-test-design-import-native-materializer.json",
+    "test/ctest_script_inputs/executables/pulp-test-group-canvas-text.json",
+    "test/test_design_import_native_materializer.cpp",
+    "tools/cmake/PulpWebUi.cmake",
+    "tools/deps/manifest.json",
+    "tools/scripts/versioning.json"
+   ],
+   "count": 9
+  },
+  {
+   "path": "external/fonts/Jost-SemiBold.ttf",
+   "referenced_by": [
+    "tools/cmake/PulpWebUi.cmake",
+    "tools/deps/manifest.json",
+    "tools/scripts/versioning.json"
+   ],
+   "count": 3
+  },
+  {
+   "path": "external/nanosvg/nanosvg.h",
+   "referenced_by": [
+    "tools/deps/manifest.json"
+   ],
+   "count": 1
+  },
+  {
+   "path": "external/nanosvg/nanosvgrast.h",
+   "referenced_by": [
+    "tools/deps/manifest.json",
+    "tools/scripts/test_version_bump_surfaces.py"
+   ],
+   "count": 2
+  }
+ ],
+ "stranded_consumers": [
+  {
+   "file": "core/format/CMakeLists.txt",
+   "line": 154,
+   "statement": "target_link_libraries(pulp-format-view",
+   "why": "Target \"pulp-format-view\" links to: pulp::view-core but the target was not found.  Possible reasons include: * There is a typo in the target name. * A find_package call is missing for an IMPORTED target. * An ALIAS target is missing.",
+   "iteration": 46,
+   "class": "b-stranded-consumer",
+   "consumer_target": "pulp-format-view",
+   "needs": "pulp::view-core"
+  },
+  {
+   "file": "core/view/CMakeLists.txt",
+   "line": 309,
+   "statement": "target_link_libraries(pulp-view-script PUBLIC pulp::view-core pulp::state)",
+   "why": "Target \"pulp-view-script\" links to: pulp::view-core but the target was not found.  Possible reasons include: * There is a typo in the target name. * A find_package call is missing for an IMPORTED target. * An ALIAS target is missing.",
+   "iteration": 46,
+   "class": "b-stranded-consumer",
+   "consumer_target": "pulp-view-script",
+   "needs": "pulp::view-core"
+  },
+  {
+   "file": "core/view/CMakeLists.txt",
+   "line": 272,
+   "statement": "target_link_libraries(pulp-view-audio PUBLIC pulp::view-core)",
+   "why": "Target \"pulp-view-audio\" links to: pulp::view-core but the target was not found.  Possible reasons include: * There is a typo in the target name. * A find_package call is missing for an IMPORTED target. * An ALIAS target is missing.",
+   "iteration": 46,
+   "class": "b-stranded-consumer",
+   "consumer_target": "pulp-view-audio",
+   "needs": "pulp::view-core"
+  },
+  {
+   "file": "core/view/CMakeLists.txt",
+   "line": 285,
+   "statement": "target_link_libraries(pulp-view-tooling PUBLIC pulp::view-core)",
+   "why": "Target \"pulp-view-tooling\" links to: pulp::view-core but the target was not found.  Possible reasons include: * There is a typo in the target name. * A find_package call is missing for an IMPORTED target. * An ALIAS target is missing.",
+   "iteration": 46,
+   "class": "b-stranded-consumer",
+   "consumer_target": "pulp-view-tooling",
+   "needs": "pulp::view-core"
+  },
+  {
+   "file": "core/view/cmake/PulpDesignUnits.cmake",
+   "line": 147,
+   "statement": "target_link_libraries(pulp-view-platform PUBLIC pulp::design-import)",
+   "why": "Target \"pulp-view-platform\" links to: pulp::design-import but the target was not found.  Possible reasons include: * There is a typo in the target name. * A find_package call is missing for an IMPORTED target. * An ALIAS target is missing.",
+   "iteration": 46,
+   "class": "b-stranded-consumer",
+   "consumer_target": "pulp-view-platform",
+   "needs": "pulp::design-import"
+  },
+  {
+   "file": "core/view/cmake/PulpDesignUnits.cmake",
+   "line": 140,
+   "statement": "target_link_libraries(pulp-design-import-audio-pack PUBLIC pulp::design-import)",
+   "why": "Target \"pulp-design-import-audio-pack\" links to: pulp::design-import but the target was not found.  Possible reasons include: * There is a typo in the target name. * A find_package call is missing for an IMPORTED target. * An ALIAS target is missing.",
+   "iteration": 46,
+   "class": "b-stranded-consumer",
+   "consumer_target": "pulp-design-import-audio-pack",
+   "needs": "pulp::design-import"
+  },
+  {
+   "file": "core/view/audio/CMakeLists.txt",
+   "line": 23,
+   "statement": "target_link_libraries(pulp-view-graph-editor PUBLIC pulp::view-core pulp::host)",
+   "why": "Target \"pulp-view-graph-editor\" links to: pulp::view-core but the target was not found.  Possible reasons include: * There is a typo in the target name. * A find_package call is missing for an IMPORTED target. * An ALIAS target is missing.",
+   "iteration": 46,
+   "class": "b-stranded-consumer",
+   "consumer_target": "pulp-view-graph-editor",
+   "needs": "pulp::view-core"
+  },
+  {
+   "file": "core/timeline_view/CMakeLists.txt",
+   "line": 33,
+   "statement": "target_link_libraries(pulp-timeline-view",
+   "why": "Target \"pulp-timeline-view\" links to: pulp::view-core but the target was not found.  Possible reasons include: * There is a typo in the target name. * A find_package call is missing for an IMPORTED target. * An ALIAS target is missing.",
+   "iteration": 46,
+   "class": "b-stranded-consumer",
+   "consumer_target": "pulp-timeline-view",
+   "needs": "pulp::view-core"
+  },
+  {
+   "file": "tools/cli/gpu_health/CMakeLists.txt",
+   "line": 21,
+   "statement": "target_link_libraries(pulp-tool-gpu-health-probes",
+   "why": "Target \"pulp-tool-gpu-health-probes\" links to: pulp::render but the target was not found.  Possible reasons include: * There is a typo in the target name. * A find_package call is missing for an IMPORTED target. * An ALIAS target is missing.",
+   "iteration": 46,
+   "class": "b-stranded-consumer",
+   "consumer_target": "pulp-tool-gpu-health-probes",
+   "needs": "pulp::render"
+  },
+  {
+   "file": "inspect/CMakeLists.txt",
+   "line": 270,
+   "statement": "target_link_libraries(pulp-inspect-telemetry",
+   "why": "Target \"pulp-inspect-telemetry\" links to: pulp::view-core but the target was not found.  Possible reasons include: * There is a typo in the target name. * A find_package call is missing for an IMPORTED target. * An ALIAS target is missing.",
+   "iteration": 46,
+   "class": "b-stranded-consumer",
+   "consumer_target": "pulp-inspect-telemetry",
+   "needs": "pulp::view-core"
+  },
+  {
+   "file": "inspect/CMakeLists.txt",
+   "line": 348,
+   "statement": "target_link_libraries(pulp-inspect",
+   "why": "Target \"pulp-inspect\" links to: pulp::render but the target was not found.  Possible reasons include: * There is a typo in the target name. * A find_package call is missing for an IMPORTED target. * An ALIAS target is missing.",
+   "iteration": 46,
+   "class": "b-stranded-consumer",
+   "consumer_target": "pulp-inspect",
+   "needs": "pulp::render"
+  },
+  {
+   "file": "test/cmake/view_host_tests.cmake",
+   "line": 45,
+   "statement": "pulp_add_test_group(pulp-test-group-view-host",
+   "why": "Target \"pulp-test-group-view-host\" links to: pulp::canvas but the target was not found.  Possible reasons include: * There is a typo in the target name. * A find_package call is missing for an IMPORTED target. * An ALIAS target is missing.",
+   "iteration": 46,
+   "class": "b-stranded-consumer",
+   "consumer_target": "pulp-test-group-view-host",
+   "needs": "pulp::canvas"
+  },
+  {
+   "file": "test/cmake/view_host_tests.cmake",
+   "line": 356,
+   "statement": "target_link_libraries(pulp-test-plugin-view-host-design-viewport PRIVATE",
+   "why": "Target \"pulp-test-plugin-view-host-design-viewport\" links to: pulp::canvas but the target was not found.  Possible reasons include: * There is a typo in the target name. * A find_package call is missing for an IMPORTED target. * An ALIAS target is missing.",
+   "iteration": 46,
+   "class": "b-stranded-consumer",
+   "consumer_target": "pulp-test-plugin-view-host-design-viewport",
+   "needs": "pulp::canvas"
+  },
+  {
+   "file": "test/cmake/view_host_tests.cmake",
+   "line": 925,
+   "statement": "target_link_libraries(pulp-test-view-core-plugin-host-seam",
+   "why": "Target \"pulp-test-view-core-plugin-host-seam\" links to: pulp::view-core but the target was not found.  Possible reasons include: * There is a typo in the target name. * A find_package call is missing for an IMPORTED target. * An ALIAS target is missing.",
+   "iteration": 46,
+   "class": "b-stranded-consumer",
+   "consumer_target": "pulp-test-view-core-plugin-host-seam",
+   "needs": "pulp::view-core"
+  },
+  {
+   "file": "test/cmake/view_host_tests.cmake",
+   "line": 980,
+   "statement": "target_link_libraries(pulp-test-sdl-native-input PRIVATE pulp::view-core SDL3::SDL3-static)",
+   "why": "Target \"pulp-test-sdl-native-input\" links to: pulp::view-core but the target was not found.  Possible reasons include: * There is a typo in the target name. * A find_package call is missing for an IMPORTED target. * An ALIAS target is missing.",
+   "iteration": 46,
+   "class": "b-stranded-consumer",
+   "consumer_target": "pulp-test-sdl-native-input",
+   "needs": "pulp::view-core"
+  },
+  {
+   "file": "test/cmake/canvas_text_tests.cmake",
+   "line": 250,
+   "statement": "pulp_add_test_group(pulp-test-group-canvas-text-view-gpu",
+   "why": "Target \"pulp-test-group-canvas-text-view-gpu\" links to: pulp::canvas but the target was not found.  Possible reasons include: * There is a typo in the target name. * A find_package call is missing for an IMPORTED target. * An ALIAS target is missing.",
+   "iteration": 46,
+   "class": "b-stranded-consumer",
+   "consumer_target": "pulp-test-group-canvas-text-view-gpu",
+   "needs": "pulp::canvas"
+  },
+  {
+   "file": "test/cmake/canvas_text_tests.cmake",
+   "line": 273,
+   "statement": "target_link_libraries(pulp-test-plugin-editor-headless-gpu PRIVATE",
+   "why": "Target \"pulp-test-plugin-editor-headless-gpu\" links to: pulp::canvas but the target was not found.  Possible reasons include: * There is a typo in the target name. * A find_package call is missing for an IMPORTED target. * An ALIAS target is missing.",
+   "iteration": 46,
+   "class": "b-stranded-consumer",
+   "consumer_target": "pulp-test-plugin-editor-headless-gpu",
+   "needs": "pulp::canvas"
+  },
+  {
+   "file": "test/cmake/canvas_text_tests.cmake",
+   "line": 308,
+   "statement": "pulp_add_test_suite(pulp-test-canvas-widget-layer-gpu",
+   "why": "Target \"pulp-test-canvas-widget-layer-gpu\" links to: pulp::canvas but the target was not found.  Possible reasons include: * There is a typo in the target name. * A find_package call is missing for an IMPORTED target. * An ALIAS target is missing.",
+   "iteration": 46,
+   "class": "b-stranded-consumer",
+   "consumer_target": "pulp-test-canvas-widget-layer-gpu",
+   "needs": "pulp::canvas"
+  },
+  {
+   "file": "test/cmake/canvas_text_tests.cmake",
+   "line": 324,
+   "statement": "pulp_add_test_suite(pulp-test-inline-image-cache-gpu",
+   "why": "Target \"pulp-test-inline-image-cache-gpu\" links to: pulp::canvas but the target was not found.  Possible reasons include: * There is a typo in the target name. * A find_package call is missing for an IMPORTED target. * An ALIAS target is missing.",
+   "iteration": 46,
+   "class": "b-stranded-consumer",
+   "consumer_target": "pulp-test-inline-image-cache-gpu",
+   "needs": "pulp::canvas"
+  },
+  {
+   "file": "test/cmake/canvas_text_tests.cmake",
+   "line": 337,
+   "statement": "pulp_add_test_suite(pulp-test-css-gradient-dither-gpu",
+   "why": "Target \"pulp-test-css-gradient-dither-gpu\" links to: pulp::canvas but the target was not found.  Possible reasons include: * There is a typo in the target name. * A find_package call is missing for an IMPORTED target. * An ALIAS target is missing.",
+   "iteration": 46,
+   "class": "b-stranded-consumer",
+   "consumer_target": "pulp-test-css-gradient-dither-gpu",
+   "needs": "pulp::canvas"
+  },
+  {
+   "file": "test/cmake/canvas_text_tests.cmake",
+   "line": 344,
+   "statement": "pulp_add_test_suite(pulp-test-css-gradient-interpolation-gpu",
+   "why": "Target \"pulp-test-css-gradient-interpolation-gpu\" links to: pulp::canvas but the target was not found.  Possible reasons include: * There is a typo in the target name. * A find_package call is missing for an IMPORTED target. * An ALIAS target is missing.",
+   "iteration": 46,
+   "class": "b-stranded-consumer",
+   "consumer_target": "pulp-test-css-gradient-interpolation-gpu",
+   "needs": "pulp::canvas"
+  },
+  {
+   "file": "test/cmake/canvas_text_tests.cmake",
+   "line": 374,
+   "statement": "target_link_libraries(pulp-test-plugin-editor-host-smoke-mac PRIVATE",
+   "why": "Target \"pulp-test-plugin-editor-host-smoke-mac\" links to: pulp::canvas but the target was not found.  Possible reasons include: * There is a typo in the target name. * A find_package call is missing for an IMPORTED target. * An ALIAS target is missing.",
+   "iteration": 46,
+   "class": "b-stranded-consumer",
+   "consumer_target": "pulp-test-plugin-editor-host-smoke-mac",
+   "needs": "pulp::canvas"
+  },
+  {
+   "file": "test/cmake/canvas_text_tests.cmake",
+   "line": 458,
+   "statement": "pulp_add_test_suite(pulp-test-canvas-drawlist-format LIBRARIES pulp::canvas)",
+   "why": "Target \"pulp-test-canvas-drawlist-format\" links to: pulp::canvas but the target was not found.  Possible reasons include: * There is a typo in the target name. * A find_package call is missing for an IMPORTED target. * An ALIAS target is missing.",
+   "iteration": 46,
+   "class": "b-stranded-consumer",
+   "consumer_target": "pulp-test-canvas-drawlist-format",
+   "needs": "pulp::canvas"
+  },
+  {
+   "file": "test/cmake/image_codec_tests.cmake",
+   "line": 6,
+   "statement": "pulp_add_test_suite(pulp-test-image-codecs-extended LIBRARIES pulp::canvas)",
+   "why": "Target \"pulp-test-image-codecs-extended\" links to: pulp::canvas but the target was not found.  Possible reasons include: * There is a typo in the target name. * A find_package call is missing for an IMPORTED target. * An ALIAS target is missing.",
+   "iteration": 46,
+   "class": "b-stranded-consumer",
+   "consumer_target": "pulp-test-image-codecs-extended",
+   "needs": "pulp::canvas"
+  },
+  {
+   "file": "test/cmake/core_runtime_canvas_signal_tests.cmake",
+   "line": 93,
+   "statement": "pulp_add_test_group(pulp-test-group-core-view",
+   "why": "Target \"pulp-test-group-core-view\" links to: pulp::canvas but the target was not found.  Possible reasons include: * There is a typo in the target name. * A find_package call is missing for an IMPORTED target. * An ALIAS target is missing.",
+   "iteration": 46,
+   "class": "b-stranded-consumer",
+   "consumer_target": "pulp-test-group-core-view",
+   "needs": "pulp::canvas"
+  },
+  {
+   "file": "test/cmake/timeline_tests.cmake",
+   "line": 24,
+   "statement": "pulp_add_test_group(pulp-test-group-timeline-view",
+   "why": "Target \"pulp-test-group-timeline-view\" links to: pulp::canvas but the target was not found.  Possible reasons include: * There is a typo in the target name. * A find_package call is missing for an IMPORTED target. * An ALIAS target is missing.",
+   "iteration": 46,
+   "class": "b-stranded-consumer",
+   "consumer_target": "pulp-test-group-timeline-view",
+   "needs": "pulp::canvas"
+  },
+  {
+   "file": "test/cmake/render_gpu_surface_tests.cmake",
+   "line": 55,
+   "statement": "target_link_libraries(pulp-test-gpu-surface PRIVATE pulp::render Catch2::Catch2WithMain)",
+   "why": "Target \"pulp-test-gpu-surface\" links to: pulp::render but the target was not found.  Possible reasons include: * There is a typo in the target name. * A find_package call is missing for an IMPORTED target. * An ALIAS target is missing.",
+   "iteration": 46,
+   "class": "b-stranded-consumer",
+   "consumer_target": "pulp-test-gpu-surface",
+   "needs": "pulp::render"
+  },
+  {
+   "file": "test/cmake/render_gpu_surface_tests.cmake",
+   "line": 62,
+   "statement": "target_link_libraries(pulp-test-skia-surface-readback-macos PRIVATE",
+   "why": "Target \"pulp-test-skia-surface-readback-macos\" links to: pulp::render but the target was not found.  Possible reasons include: * There is a typo in the target name. * A find_package call is missing for an IMPORTED target. * An ALIAS target is missing.",
+   "iteration": 46,
+   "class": "b-stranded-consumer",
+   "consumer_target": "pulp-test-skia-surface-readback-macos",
+   "needs": "pulp::render"
+  },
+  {
+   "file": "test/cmake/render_gpu_surface_tests.cmake",
+   "line": 74,
+   "statement": "target_link_libraries(pulp-test-gpu-surface-swapchain-macos PRIVATE",
+   "why": "Target \"pulp-test-gpu-surface-swapchain-macos\" links to: pulp::render but the target was not found.  Possible reasons include: * There is a typo in the target name. * A find_package call is missing for an IMPORTED target. * An ALIAS target is missing.",
+   "iteration": 46,
+   "class": "b-stranded-consumer",
+   "consumer_target": "pulp-test-gpu-surface-swapchain-macos",
+   "needs": "pulp::render"
+  },
+  {
+   "file": "test/cmake/render_gpu_surface_tests.cmake",
+   "line": 96,
+   "statement": "target_link_libraries(pulp-test-plugin-view-resize-macos PRIVATE",
+   "why": "Target \"pulp-test-plugin-view-resize-macos\" links to: pulp::render but the target was not found.  Possible reasons include: * There is a typo in the target name. * A find_package call is missing for an IMPORTED target. * An ALIAS target is missing.",
+   "iteration": 46,
+   "class": "b-stranded-consumer",
+   "consumer_target": "pulp-test-plugin-view-resize-macos",
+   "needs": "pulp::render"
+  },
+  {
+   "file": "test/cmake/render_gpu_surface_tests.cmake",
+   "line": 109,
+   "statement": "target_link_libraries(pulp-test-skia-surface PRIVATE pulp::render pulp::view Catch2::Catch2WithMain)",
+   "why": "Target \"pulp-test-skia-surface\" links to: pulp::render but the target was not found.  Possible reasons include: * There is a typo in the target name. * A find_package call is missing for an IMPORTED target. * An ALIAS target is missing.",
+   "iteration": 46,
+   "class": "b-stranded-consumer",
+   "consumer_target": "pulp-test-skia-surface",
+   "needs": "pulp::render"
+  },
+  {
+   "file": "test/cmake/render_gpu_surface_tests.cmake",
+   "line": 124,
+   "statement": "target_link_libraries(pulp-test-text-raster-policy PRIVATE",
+   "why": "Target \"pulp-test-text-raster-policy\" links to: pulp::render but the target was not found.  Possible reasons include: * There is a typo in the target name. * A find_package call is missing for an IMPORTED target. * An ALIAS target is missing.",
+   "iteration": 46,
+   "class": "b-stranded-consumer",
+   "consumer_target": "pulp-test-text-raster-policy",
+   "needs": "pulp::render"
+  },
+  {
+   "file": "test/cmake/render_gpu_surface_tests.cmake",
+   "line": 143,
+   "statement": "target_link_libraries(pulp-test-headless-surface PRIVATE",
+   "why": "Target \"pulp-test-headless-surface\" links to: pulp::render but the target was not found.  Possible reasons include: * There is a typo in the target name. * A find_package call is missing for an IMPORTED target. * An ALIAS target is missing.",
+   "iteration": 46,
+   "class": "b-stranded-consumer",
+   "consumer_target": "pulp-test-headless-surface",
+   "needs": "pulp::render"
+  },
+  {
+   "file": "test/cmake/render_gpu_surface_tests.cmake",
+   "line": 158,
+   "statement": "pulp_add_test_suite(pulp-test-gpu-capabilities",
+   "why": "Target \"pulp-test-gpu-capabilities\" links to: pulp::render but the target was not found.  Possible reasons include: * There is a typo in the target name. * A find_package call is missing for an IMPORTED target. * An ALIAS target is missing.",
+   "iteration": 46,
+   "class": "b-stranded-consumer",
+   "consumer_target": "pulp-test-gpu-capabilities",
+   "needs": "pulp::render"
+  },
+  {
+   "file": "test/cmake/render_gpu_surface_tests.cmake",
+   "line": 163,
+   "statement": "target_link_libraries(pulp-test-gpu-pass PRIVATE",
+   "why": "Target \"pulp-test-gpu-pass\" links to: pulp::render but the target was not found.  Possible reasons include: * There is a typo in the target name. * A find_package call is missing for an IMPORTED target. * An ALIAS target is missing.",
+   "iteration": 46,
+   "class": "b-stranded-consumer",
+   "consumer_target": "pulp-test-gpu-pass",
+   "needs": "pulp::render"
+  },
+  {
+   "file": "test/cmake/render_gpu_surface_tests.cmake",
+   "line": 206,
+   "statement": "target_link_libraries(pulp-test-runtime-effect-names-gpu PRIVATE",
+   "why": "Target \"pulp-test-runtime-effect-names-gpu\" links to: pulp::render but the target was not found.  Possible reasons include: * There is a typo in the target name. * A find_package call is missing for an IMPORTED target. * An ALIAS target is missing.",
+   "iteration": 46,
+   "class": "b-stranded-consumer",
+   "consumer_target": "pulp-test-runtime-effect-names-gpu",
+   "needs": "pulp::render"
+  },
+  {
+   "file": "test/cmake/render_gpu_surface_tests.cmake",
+   "line": 305,
+   "statement": "target_link_libraries(pulp-test-gpu-compute PRIVATE pulp::render pulp::signal Catch2::Catch2WithMain)",
+   "why": "Target \"pulp-test-gpu-compute\" links to: pulp::render but the target was not found.  Possible reasons include: * There is a typo in the target name. * A find_package call is missing for an IMPORTED target. * An ALIAS target is missing.",
+   "iteration": 46,
+   "class": "b-stranded-consumer",
+   "consumer_target": "pulp-test-gpu-compute",
+   "needs": "pulp::render"
+  },
+  {
+   "file": "test/cmake/render_gpu_surface_tests.cmake",
+   "line": 1028,
+   "statement": "target_link_libraries(pulp-gpu-roofline-harness PRIVATE pulp::render pulp::signal)",
+   "why": "Target \"pulp-gpu-roofline-harness\" links to: pulp::render but the target was not found.  Possible reasons include: * There is a typo in the target name. * A find_package call is missing for an IMPORTED target. * An ALIAS target is missing.",
+   "iteration": 46,
+   "class": "b-stranded-consumer",
+   "consumer_target": "pulp-gpu-roofline-harness",
+   "needs": "pulp::render"
+  },
+  {
+   "file": "test/cmake/render_gpu_surface_tests.cmake",
+   "line": 1035,
+   "statement": "target_link_libraries(pulp-gpu-wavenet-scaling-bench PRIVATE pulp::render pulp::runtime)",
+   "why": "Target \"pulp-gpu-wavenet-scaling-bench\" links to: pulp::render but the target was not found.  Possible reasons include: * There is a typo in the target name. * A find_package call is missing for an IMPORTED target. * An ALIAS target is missing.",
+   "iteration": 46,
+   "class": "b-stranded-consumer",
+   "consumer_target": "pulp-gpu-wavenet-scaling-bench",
+   "needs": "pulp::render"
+  },
+  {
+   "file": "test/cmake/render_gpu_diagnostics_tests.cmake",
+   "line": 7,
+   "statement": "target_link_libraries(pulp-test-gpu-diagnostics PRIVATE",
+   "why": "Target \"pulp-test-gpu-diagnostics\" links to: pulp::render but the target was not found.  Possible reasons include: * There is a typo in the target name. * A find_package call is missing for an IMPORTED target. * An ALIAS target is missing.",
+   "iteration": 46,
+   "class": "b-stranded-consumer",
+   "consumer_target": "pulp-test-gpu-diagnostics",
+   "needs": "pulp::render"
+  },
+  {
+   "file": "test/cmake/render_gpu_compute_pool_tests.cmake",
+   "line": 9,
+   "statement": "target_link_libraries(pulp-test-gpu-compute-pool",
+   "why": "Target \"pulp-test-gpu-compute-pool\" links to: pulp::render but the target was not found.  Possible reasons include: * There is a typo in the target name. * A find_package call is missing for an IMPORTED target. * An ALIAS target is missing.",
+   "iteration": 46,
+   "class": "b-stranded-consumer",
+   "consumer_target": "pulp-test-gpu-compute-pool",
+   "needs": "pulp::render"
+  },
+  {
+   "file": "test/cmake/render_gpu_compute_pool_tests.cmake",
+   "line": 32,
+   "statement": "pulp_add_test_suite(pulp-test-gpu-compute-async",
+   "why": "Target \"pulp-test-gpu-compute-async\" links to: pulp::render but the target was not found.  Possible reasons include: * There is a typo in the target name. * A find_package call is missing for an IMPORTED target. * An ALIAS target is missing.",
+   "iteration": 46,
+   "class": "b-stranded-consumer",
+   "consumer_target": "pulp-test-gpu-compute-async",
+   "needs": "pulp::render"
+  },
+  {
+   "file": "test/cmake/render_gpu_proc_installer_tests.cmake",
+   "line": 15,
+   "statement": "pulp_add_test_suite(pulp-test-gpu-proc-installer-host-policy",
+   "why": "Target \"pulp-test-gpu-proc-installer-host-policy\" links to: pulp::render but the target was not found.  Possible reasons include: * There is a typo in the target name. * A find_package call is missing for an IMPORTED target. * An ALIAS target is missing.",
+   "iteration": 46,
+   "class": "b-stranded-consumer",
+   "consumer_target": "pulp-test-gpu-proc-installer-host-policy",
+   "needs": "pulp::render"
+  },
+  {
+   "file": "test/cmake/render_gpu_tests.cmake",
+   "line": 39,
+   "statement": "pulp_add_test_suite(pulp-test-gpu-compute-kernel-override",
+   "why": "Target \"pulp-test-gpu-compute-kernel-override\" links to: pulp::render but the target was not found.  Possible reasons include: * There is a typo in the target name. * A find_package call is missing for an IMPORTED target. * An ALIAS target is missing.",
+   "iteration": 46,
+   "class": "b-stranded-consumer",
+   "consumer_target": "pulp-test-gpu-compute-kernel-override",
+   "needs": "pulp::render"
+  },
+  {
+   "file": "test/cmake/script_canvas_render_tests.cmake",
+   "line": 19,
+   "statement": "pulp_add_test_group(pulp-test-group-script-view LIBRARIES ${_pulp_script_view_group_libs})",
+   "why": "Target \"pulp-test-group-script-view\" links to: pulp::canvas but the target was not found.  Possible reasons include: * There is a typo in the target name. * A find_package call is missing for an IMPORTED target. * An ALIAS target is missing.",
+   "iteration": 46,
+   "class": "b-stranded-consumer",
+   "consumer_target": "pulp-test-group-script-view",
+   "needs": "pulp::canvas"
+  },
+  {
+   "file": "test/cmake/view_widget_bridge_tests.cmake",
+   "line": 82,
+   "statement": "target_link_libraries(pulp-test-inspector-domain-helpers PRIVATE",
+   "why": "Target \"pulp-test-inspector-domain-helpers\" links to: pulp::canvas but the target was not found.  Possible reasons include: * There is a typo in the target name. * A find_package call is missing for an IMPORTED target. * An ALIAS target is missing.",
+   "iteration": 46,
+   "class": "b-stranded-consumer",
+   "consumer_target": "pulp-test-inspector-domain-helpers",
+   "needs": "pulp::canvas"
+  },
+  {
+   "file": "test/cmake/view_widget_bridge_tests.cmake",
+   "line": 98,
+   "statement": "target_link_libraries(pulp-test-inspector-session PRIVATE",
+   "why": "Target \"pulp-test-inspector-session\" links to: pulp::canvas but the target was not found.  Possible reasons include: * There is a typo in the target name. * A find_package call is missing for an IMPORTED target. * An ALIAS target is missing.",
+   "iteration": 46,
+   "class": "b-stranded-consumer",
+   "consumer_target": "pulp-test-inspector-session",
+   "needs": "pulp::canvas"
+  },
+  {
+   "file": "test/cmake/design_import_native_codegen_tests.cmake",
+   "line": 218,
+   "statement": "target_link_libraries(pulp-test-view-core-link",
+   "why": "Target \"pulp-test-view-core-link\" links to: pulp::design-import but the target was not found.  Possible reasons include: * There is a typo in the target name. * A find_package call is missing for an IMPORTED target. * An ALIAS target is missing.",
+   "iteration": 46,
+   "class": "b-stranded-consumer",
+   "consumer_target": "pulp-test-view-core-link",
+   "needs": "pulp::design-import"
+  },
+  {
+   "file": "test/cmake/design_import_native_codegen_tests.cmake",
+   "line": 227,
+   "statement": "target_link_libraries(pulp-test-relative-point",
+   "why": "Target \"pulp-test-relative-point\" links to: pulp::view-core but the target was not found.  Possible reasons include: * There is a typo in the target name. * A find_package call is missing for an IMPORTED target. * An ALIAS target is missing.",
+   "iteration": 46,
+   "class": "b-stranded-consumer",
+   "consumer_target": "pulp-test-relative-point",
+   "needs": "pulp::view-core"
+  },
+  {
+   "file": "test/cmake/design_import_native_codegen_tests.cmake",
+   "line": 235,
+   "statement": "target_link_libraries(pulp-test-view-core-window-host-link",
+   "why": "Target \"pulp-test-view-core-window-host-link\" links to: pulp::view-core but the target was not found.  Possible reasons include: * There is a typo in the target name. * A find_package call is missing for an IMPORTED target. * An ALIAS target is missing.",
+   "iteration": 46,
+   "class": "b-stranded-consumer",
+   "consumer_target": "pulp-test-view-core-window-host-link",
+   "needs": "pulp::view-core"
+  },
+  {
+   "file": "test/cmake/design_import_runtime_bridge_tests.cmake",
+   "line": 115,
+   "statement": "target_link_libraries(pulp-test-design-swift-codegen",
+   "why": "Target \"pulp-test-design-swift-codegen\" links to: pulp::design-import but the target was not found.  Possible reasons include: * There is a typo in the target name. * A find_package call is missing for an IMPORTED target. * An ALIAS target is missing.",
+   "iteration": 46,
+   "class": "b-stranded-consumer",
+   "consumer_target": "pulp-test-design-swift-codegen",
+   "needs": "pulp::design-import"
+  },
+  {
+   "file": "test/web-compat/CMakeLists.txt",
+   "line": 136,
+   "statement": "target_link_libraries(pulp-test-webgpu-native-draw PRIVATE",
+   "why": "Target \"pulp-test-webgpu-native-draw\" links to: pulp::render but the target was not found.  Possible reasons include: * There is a typo in the target name. * A find_package call is missing for an IMPORTED target. * An ALIAS target is missing.",
+   "iteration": 46,
+   "class": "b-stranded-consumer",
+   "consumer_target": "pulp-test-webgpu-native-draw",
+   "needs": "pulp::render"
+  },
+  {
+   "file": "test/web-compat/CMakeLists.txt",
+   "line": 158,
+   "statement": "target_link_libraries(pulp-test-threejs-bridge PRIVATE",
+   "why": "Target \"pulp-test-threejs-bridge\" links to: pulp::render but the target was not found.  Possible reasons include: * There is a typo in the target name. * A find_package call is missing for an IMPORTED target. * An ALIAS target is missing.",
+   "iteration": 46,
+   "class": "b-stranded-consumer",
+   "consumer_target": "pulp-test-threejs-bridge",
+   "needs": "pulp::render"
+  },
+  {
+   "file": "tools/cli/gpu_probe/CMakeLists.txt",
+   "line": 56,
+   "statement": "target_link_libraries(pulp-tool-gpu-dpr-measurement",
+   "why": "Target \"pulp-tool-gpu-dpr-measurement\" links to: pulp::render but the target was not found.  Possible reasons include: * There is a typo in the target name. * A find_package call is missing for an IMPORTED target. * An ALIAS target is missing.",
+   "iteration": 46,
+   "class": "b-stranded-consumer",
+   "consumer_target": "pulp-tool-gpu-dpr-measurement",
+   "needs": "pulp::render"
+  },
+  {
+   "file": "tools/cli/gpu_probe/CMakeLists.txt",
+   "line": 97,
+   "statement": "target_link_libraries(pulp-tool-gpu-probe-recipes",
+   "why": "Target \"pulp-tool-gpu-probe-recipes\" links to: pulp::render but the target was not found.  Possible reasons include: * There is a typo in the target name. * A find_package call is missing for an IMPORTED target. * An ALIAS target is missing.",
+   "iteration": 46,
+   "class": "b-stranded-consumer",
+   "consumer_target": "pulp-tool-gpu-probe-recipes",
+   "needs": "pulp::render"
+  },
+  {
+   "file": "tools/cli/CMakeLists.txt",
+   "line": 222,
+   "statement": "target_link_libraries(pulp-cli PRIVATE",
+   "why": "Target \"pulp-cli\" links to: pulp::render but the target was not found.  Possible reasons include: * There is a typo in the target name. * A find_package call is missing for an IMPORTED target. * An ALIAS target is missing.",
+   "iteration": 46,
+   "class": "b-stranded-consumer",
+   "consumer_target": "pulp-cli",
+   "needs": "pulp::render"
+  },
+  {
+   "file": "tools/screenshot/CMakeLists.txt",
+   "line": 13,
+   "statement": "target_link_libraries(pulp-screenshot PRIVATE pulp::design-import)",
+   "why": "Target \"pulp-screenshot\" links to: pulp::design-import but the target was not found.  Possible reasons include: * There is a typo in the target name. * A find_package call is missing for an IMPORTED target. * An ALIAS target is missing. CMake Generate step failed.  Build files cannot be regenerated ",
+   "iteration": 46,
+   "class": "b-stranded-consumer",
+   "consumer_target": "pulp-screenshot",
+   "needs": "pulp::design-import"
+  },
+  {
+   "file": "core/view/cmake/PulpDesignUnits.cmake",
+   "line": 146,
+   "statement": "target_link_libraries(pulp-view-script PUBLIC pulp::design-import)",
+   "why": "Target \"pulp-view-script\" links to: pulp::design-import but the target was not found.  Possible reasons include: * There is a typo in the target name. * A find_package call is missing for an IMPORTED target. * An ALIAS target is missing.",
+   "iteration": 49,
+   "class": "b-stranded-consumer",
+   "consumer_target": "pulp-view-script",
+   "needs": "pulp::design-import"
+  },
+  {
+   "file": "core/view/cmake/PulpDesignUnits.cmake",
+   "line": 125,
+   "statement": "target_link_libraries(pulp-view-audio PUBLIC pulp::design-import)",
+   "why": "Target \"pulp-view-audio\" links to: pulp::design-import but the target was not found.  Possible reasons include: * There is a typo in the target name. * A find_package call is missing for an IMPORTED target. * An ALIAS target is missing.",
+   "iteration": 49,
+   "class": "b-stranded-consumer",
+   "consumer_target": "pulp-view-audio",
+   "needs": "pulp::design-import"
+  },
+  {
+   "file": "core/view/CMakeLists.txt",
+   "line": 452,
+   "statement": "target_link_libraries(pulp-view-tooling PRIVATE pulp::render",
+   "why": "Target \"pulp-view-tooling\" links to: pulp::render but the target was not found.  Possible reasons include: * There is a typo in the target name. * A find_package call is missing for an IMPORTED target. * An ALIAS target is missing.",
+   "iteration": 49,
+   "class": "b-stranded-consumer",
+   "consumer_target": "pulp-view-tooling",
+   "needs": "pulp::render"
+  },
+  {
+   "file": "test/cmake/view_host_tests.cmake",
+   "line": 359,
+   "statement": "target_link_libraries(pulp-test-plugin-view-host-design-viewport",
+   "why": "Target \"pulp-test-plugin-view-host-design-viewport\" links to: pulp::render but the target was not found.  Possible reasons include: * There is a typo in the target name. * A find_package call is missing for an IMPORTED target. * An ALIAS target is missing.",
+   "iteration": 49,
+   "class": "b-stranded-consumer",
+   "consumer_target": "pulp-test-plugin-view-host-design-viewport",
+   "needs": "pulp::render"
+  }
+ ],
+ "cascade_edits": 142,
+ "unclassified_edits": [
+  {
+   "file": "CMakeLists.txt",
+   "line": 514,
+   "statement": "add_subdirectory(core/canvas)",
+   "why": "The source directory /Volumes/Atelier/Code/agent-worktrees/lanes/b7-cutover-trial/pulp-cutover-trial-scratch/core/canvas does not contain a CMakeLists.txt file.",
+   "iteration": 1,
+   "class": "unclassified"
+  },
+  {
+   "file": "test/cmake/canvas_text_tests.cmake",
+   "line": 97,
+   "statement": "pulp_test_data(pulp-test-coretext-text NO_DEFINE PATHS external/fonts/Inter-Regular.ttf)",
+   "why": "pulp_test_data(pulp-test-coretext-text): 'external/fonts/Inter-Regular.ttf' matches nothing in the checkout",
+   "iteration": 1,
+   "class": "unclassified"
+  },
+  {
+   "file": "test/cmake/canvas_text_tests.cmake",
+   "line": 151,
+   "statement": "pulp_test_data(pulp-test-font-woff2 NO_DEFINE",
+   "why": "pulp_test_data(pulp-test-font-woff2): 'external/fonts/Inter-Regular.ttf' matches nothing in the checkout",
+   "iteration": 2,
+   "class": "unclassified"
+  },
+  {
+   "file": "test/cmake/canvas_text_tests.cmake",
+   "line": 227,
+   "statement": "pulp_test_data(pulp-test-paragraph-cache NO_DEFINE PATHS external/fonts/Jost-Regular.ttf)",
+   "why": "pulp_test_data(pulp-test-paragraph-cache): 'external/fonts/Jost-Regular.ttf' matches nothing in the checkout",
+   "iteration": 3,
+   "class": "unclassified"
+  },
+  {
+   "file": "test/cmake/core_runtime_canvas_signal_tests.cmake",
+   "line": 302,
+   "statement": "pulp_add_binary_data(pulp-test-embed-compress-data",
+   "why": "Unknown CMake command \"pulp_add_binary_data\".",
+   "iteration": 4,
+   "class": "unclassified"
+  },
+  {
+   "file": "test/cmake/core_runtime_canvas_signal_tests.cmake",
+   "line": 310,
+   "statement": "pulp_test_data(pulp-test-embed-compress NO_DEFINE PATHS core/view/js/css-colors.js)",
+   "why": "pulp_test_data(pulp-test-embed-compress): 'core/view/js/css-colors.js' matches nothing in the checkout",
+   "iteration": 5,
+   "class": "unclassified"
+  },
+  {
+   "file": "test/cmake/render_gpu_surface_tests.cmake",
+   "line": 132,
+   "statement": "pulp_test_data(pulp-test-text-raster-policy NO_DEFINE",
+   "why": "pulp_test_data(pulp-test-text-raster-policy): 'external/fonts/JetBrainsMono-Regular.ttf' matches nothing in the checkout",
+   "iteration": 6,
+   "class": "unclassified"
+  },
+  {
+   "file": "test/cmake/script_canvas_render_tests.cmake",
+   "line": 94,
+   "statement": "pulp_add_js_bytecode(js_bytecode_embed_fixture",
+   "why": "pulp_add_js_bytecode: encode_binary_data.py not found at /Volumes/Atelier/Code/agent-worktrees/lanes/b7-cutover-trial/pulp-cutover-trial-scratch/tools/cmake/scripts/encode_binary_data.py",
+   "iteration": 7,
+   "class": "unclassified"
+  },
+  {
+   "file": "test/cmake/script_canvas_render_tests.cmake",
+   "line": 96,
+   "statement": "pulp_add_js_bytecode(js_bytecode_embed_bridge_fixture",
+   "why": "pulp_add_js_bytecode: encode_binary_data.py not found at /Volumes/Atelier/Code/agent-worktrees/lanes/b7-cutover-trial/pulp-cutover-trial-scratch/tools/cmake/scripts/encode_binary_data.py",
+   "iteration": 8,
+   "class": "unclassified"
+  },
+  {
+   "file": "test/cmake/script_canvas_render_tests.cmake",
+   "line": 288,
+   "statement": "pulp_test_data(pulp-test-canvas-fonts NO_DEFINE",
+   "why": "pulp_test_data(pulp-test-canvas-fonts): 'external/fonts/Inter-Regular.ttf' matches nothing in the checkout",
+   "iteration": 9,
+   "class": "unclassified"
+  },
+  {
+   "file": "test/cmake/view_widget_bridge_tests.cmake",
+   "line": 942,
+   "statement": "pulp_test_data(pulp-test-widget-bridge-no-gpu-gates PATHS core/view/src/widget_bridge.cpp)",
+   "why": "pulp_test_data(pulp-test-widget-bridge-no-gpu-gates): 'core/view/src/widget_bridge.cpp' matches nothing in the checkout",
+   "iteration": 10,
+   "class": "unclassified"
+  },
+  {
+   "file": "test/cmake/design_import_native_codegen_tests.cmake",
+   "line": 17,
+   "statement": "pulp_test_data(pulp-test-design-import NO_DEFINE",
+   "why": "pulp_test_data(pulp-test-design-import): 'external/fonts/Inter-Regular.ttf' matches nothing in the checkout",
+   "iteration": 11,
+   "class": "unclassified"
+  },
+  {
+   "file": "test/cmake/design_import_native_codegen_tests.cmake",
+   "line": 54,
+   "statement": "pulp_test_data(pulp-test-design-import-parity NO_DEFINE",
+   "why": "pulp_test_data(pulp-test-design-import-parity): 'core/view/include/pulp/view/design_ir.hpp' matches nothing in the checkout",
+   "iteration": 12,
+   "class": "unclassified"
+  },
+  {
+   "file": "test/cmake/design_import_native_codegen_tests.cmake",
+   "line": 129,
+   "statement": "pulp_test_data(pulp-test-design-import-native-materializer NO_DEFINE",
+   "why": "pulp_test_data(pulp-test-design-import-native-materializer): 'external/fonts/Jost-Regular.ttf' matches nothing in the checkout",
+   "iteration": 13,
+   "class": "unclassified"
+  },
+  {
+   "file": "tools/cmake/PulpUiAssets.cmake",
+   "line": 345,
+   "statement": "_pulp_ui_script_embed_target(_embed_lib _embed_header",
+   "why": "UI_SCRIPT embedding: encode_binary_data.py not found at /Volumes/Atelier/Code/agent-worktrees/lanes/b7-cutover-trial/pulp-cutover-trial-scratch/tools/cmake/scripts/encode_binary_data.py. An installed SDK places it beside PulpUiAssets.cmake under lib/cmake/Pulp/scripts/; re-install Pulp.",
+   "iteration": 14,
+   "class": "unclassified"
+  },
+  {
+   "file": "test/cmake/core_audio_platform_format_tests.cmake",
+   "line": 1158,
+   "statement": "message(FATAL_ERROR",
+   "why": "format-core consumer closure: the walk did not reach pulp-canvas from pulp-view-core, so it cannot be trusted to find a UI edge",
+   "iteration": 15,
+   "class": "unclassified"
+  },
+  {
+   "file": "test/cmake/release_artifact_tests.cmake",
+   "line": 93,
+   "statement": "message(FATAL_ERROR",
+   "why": "release-artifact scan: PULP_SDK_TARGETS is undefined at the end of the root directory",
+   "iteration": 16,
+   "class": "unclassified"
+  },
+  {
+   "file": "test/cmake/release_artifact_tests.cmake",
+   "line": 108,
+   "statement": "message(FATAL_ERROR \"release-artifact scan: PULP_SDK_TARGETS names no library\")",
+   "why": "release-artifact scan: PULP_SDK_TARGETS names no library",
+   "iteration": 17,
+   "class": "unclassified"
+  },
+  {
+   "file": "tools/cmake/PulpTestSuite.cmake",
+   "line": 737,
+   "statement": "_pulp_test_group_attach(${P_GROUP} ${NAME} _spec_args",
+   "why": "pulp_add_test_suite(pulp-test-rendering-integration): links pulp::render, which group pulp-test-group-script-view does not.  Every member compiles against the group's LIBRARIES; add pulp::render to the group or keep pulp-test-rendering-integration out of it.",
+   "iteration": 36,
+   "class": "unclassified"
+  }
+ ],
+ "deleted_data_still_referenced": [
+  {
+   "path": "external/fonts/Inter-Regular.ttf",
+   "referenced_by": [
+    "examples/forge-modular/package.sh",
+    "examples/forge-modular/verify_package.sh",
+    "integrations/rmlui-native/tests/CMakeLists.txt",
+    "packages/pulp-web-player/src/theme/fonts.css",
+    "test/cmake/canvas_text_tests.cmake",
+    "test/cmake/design_import_native_codegen_tests.cmake",
+    "test/cmake/script_canvas_render_tests.cmake",
+    "test/ctest_script_inputs/executables/pulp-test-design-import.json",
+    "test/ctest_script_inputs/executables/pulp-test-group-canvas-text.json",
+    "test/ctest_script_inputs/executables/pulp-test-group-canvas.json"
+   ],
+   "count": 22
+  },
+  {
+   "path": "external/fonts/JetBrainsMono-Regular.ttf",
+   "referenced_by": [
+    "test/cmake/canvas_text_tests.cmake",
+    "test/cmake/render_gpu_surface_tests.cmake",
+    "test/ctest_script_inputs/executables/pulp-test-group-canvas-text.json",
+    "test/ctest_script_inputs/executables/pulp-test-text-raster-policy.json",
+    "test/fixtures/browser-capture-text-raster/README.md",
+    "tools/cmake/PulpWebUi.cmake",
+    "tools/deps/manifest.json",
+    "tools/harness/visual/pins.py",
+    "tools/scripts/versioning.json"
+   ],
+   "count": 9
+  },
+  {
+   "path": "external/fonts/Jost-Bold.ttf",
+   "referenced_by": [
+    "tools/cmake/PulpWebUi.cmake",
+    "tools/deps/manifest.json",
+    "tools/scripts/versioning.json"
+   ],
+   "count": 3
+  },
+  {
+   "path": "external/fonts/Jost-Medium.ttf",
+   "referenced_by": [
+    "tools/cmake/PulpWebUi.cmake",
+    "tools/deps/manifest.json",
+    "tools/scripts/versioning.json"
+   ],
+   "count": 3
+  },
+  {
+   "path": "external/fonts/Jost-Regular.ttf",
+   "referenced_by": [
+    "test/cmake/canvas_text_tests.cmake",
+    "test/cmake/design_import_native_codegen_tests.cmake",
+    "test/cmake/design_import_tool_cli_tests.cmake",
+    "test/ctest_script_inputs/executables/pulp-test-design-import-native-materializer.json",
+    "test/ctest_script_inputs/executables/pulp-test-group-canvas-text.json",
+    "test/test_design_import_native_materializer.cpp",
+    "tools/cmake/PulpWebUi.cmake",
+    "tools/deps/manifest.json",
+    "tools/scripts/versioning.json"
+   ],
+   "count": 9
+  },
+  {
+   "path": "external/fonts/Jost-SemiBold.ttf",
+   "referenced_by": [
+    "tools/cmake/PulpWebUi.cmake",
+    "tools/deps/manifest.json",
+    "tools/scripts/versioning.json"
+   ],
+   "count": 3
+  },
+  {
+   "path": "external/nanosvg/nanosvg.h",
+   "referenced_by": [
+    "tools/deps/manifest.json"
+   ],
+   "count": 1
+  },
+  {
+   "path": "external/nanosvg/nanosvgrast.h",
+   "referenced_by": [
+    "tools/deps/manifest.json",
+    "tools/scripts/test_version_bump_surfaces.py"
+   ],
+   "count": 2
+  }
+ ],
+ "build": {
+  "ran": true,
+  "ok": false,
+  "returncode": 1,
+  "failed_targets": []
+ },
+ "stranded_rows_total": 42,
+ "rows_without_paths": [
+  "C12",
+  "D16"
+ ],
+ "stranded_rows_hit": 0,
+ "by_row": {},
+ "ungrouped_targets": []
+}

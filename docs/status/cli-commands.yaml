@@ -1035,6 +1035,21 @@ commands:
             description: Emit stable routing and provenance JSON.
     docs: reference/cli.md#authority
 
+  - name: licenses
+    status: usable
+    summary: Show the third-party notices shipped by a plug-in bundle.
+    args:
+      - name: bundle-path
+        kind: positional
+        description: Path to a plug-in bundle or directory containing ThirdPartyNotices.json.
+      - name: --json
+        kind: flag
+        description: Print the generated ThirdPartyNotices.json document.
+      - name: --check
+        kind: flag
+        description: Exit non-zero when the document reports an SDK without a manifest or an unattributed target.
+    docs: reference/cli.md#licenses
+
   - name: forge
     status: experimental
     summary: Export the Forge-facing semantic DSP catalog with numeric ranges and defaults joined from baked nodes at runtime.

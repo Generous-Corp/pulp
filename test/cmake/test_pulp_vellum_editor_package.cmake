@@ -11,14 +11,13 @@ namespace pulp::vellum { template <typename T> pulp::format::EditorFactory* edit
 file(WRITE "${FIXTURE_DIR}/src/module.cpp" "int vellum_package_fixture_module() { return 0; }\n")
 file(WRITE "${FIXTURE_DIR}/src/CMakeLists.txt" "cmake_minimum_required(VERSION 3.24)\nproject(VellumPackage CXX)\n"
     "add_library(pulp-vellum INTERFACE)\nadd_library(pulp::vellum ALIAS pulp-vellum)\n"
+    "add_library(Pulp::vellum ALIAS pulp-vellum)\n"
     "add_library(vellum-dylib SHARED IMPORTED)\n"
     "set_target_properties(vellum-dylib PROPERTIES IMPORTED_LOCATION \"${FIXTURE_DIR}/libvellum-fixture.dylib\")\n"
     "add_library(vellum-static STATIC IMPORTED)\n"
     "set_target_properties(vellum-static PROPERTIES IMPORTED_LOCATION \"${FIXTURE_DIR}/libvellum-fixture.a\" "
     "INTERFACE_LINK_LIBRARIES \"\$<LINK_ONLY:vellum-dylib>\")\n"
-    "if(NOT PULP_FIXTURE_NO_HOST)\n"
-    " add_library(vellum-view INTERFACE)\nadd_library(Vellum::MirrorView_core ALIAS vellum-view)\n"
-    "endif()\n"
+    "add_library(vellum-view INTERFACE)\nadd_library(Vellum::MirrorView_core ALIAS vellum-view)\n"
     "target_link_libraries(vellum-view INTERFACE vellum-static)\n"
     "include(\"${PULP_SOURCE_DIR}/integrations/pulp-vellum/cmake/PulpVellumEditorPackage.cmake\")\n"
     "include(\"${PULP_SOURCE_DIR}/tools/cmake/PulpEditorPackage.cmake\")\n"
@@ -73,61 +72,41 @@ if(NOT error_flat MATCHES "needs Vellum::MirrorView_core")
 endif()
 message(STATUS "Vellum editor package refuses an SDK without the view layer")
 
-# Installed SDK: pulp::vellum comes from PulpVellumTargets.cmake beside the
-# helper, which may load only once find_package(Vellum) has defined its targets.
-set(_installed "${FIXTURE_DIR}/installed/lib/cmake/Pulp")
-file(MAKE_DIRECTORY "${_installed}")
-file(COPY "${PULP_SOURCE_DIR}/integrations/pulp-vellum/cmake/PulpVellumEditorPackage.cmake"
-    DESTINATION "${_installed}")
-file(WRITE "${_installed}/PulpVellumTargets.cmake"
-    "add_library(Pulp::vellum INTERFACE IMPORTED)\n"
-    "set_target_properties(Pulp::vellum PROPERTIES INTERFACE_LINK_LIBRARIES Vellum::Value)\n"
-)
+# Installed SDK: find_package(Pulp) has already imported Pulp::vellum from
+# PulpTargets.cmake. The helper gives it the in-tree spelling and links it.
 file(MAKE_DIRECTORY "${FIXTURE_DIR}/installed-consumer")
 file(WRITE "${FIXTURE_DIR}/installed-consumer/CMakeLists.txt" "cmake_minimum_required(VERSION 3.24)\nproject(VellumInstalled CXX)\n"
-    "add_library(vellum-value INTERFACE)\nadd_library(Vellum::Value ALIAS vellum-value)\n"
-    "if(NOT PULP_FIXTURE_NO_HOST)\n"
-    " add_library(vellum-view INTERFACE)\nadd_library(Vellum::MirrorView_core ALIAS vellum-view)\n"
-    "endif()\n"
-    "include(\"${_installed}/PulpVellumEditorPackage.cmake\")\n"
-    "if(NOT TARGET pulp::vellum)\n message(FATAL_ERROR \"installed pulp::vellum was not loaded\")\nendif()\n"
+    "add_library(Pulp::vellum INTERFACE IMPORTED)\n"
+    "add_library(Vellum::MirrorView_core INTERFACE IMPORTED)\n"
+    "include(\"${PULP_SOURCE_DIR}/integrations/pulp-vellum/cmake/PulpVellumEditorPackage.cmake\")\n"
     "get_target_property(A pulp::vellum ALIASED_TARGET)\n"
     "if(NOT A STREQUAL \"Pulp::vellum\")\n message(FATAL_ERROR \"pulp::vellum aliases \${A}\")\nendif()\n"
     "pulp_add_vellum_editor_package(InstalledEditor VIEW_HEADER root.hpp VIEW_TYPE test::RootView)\n"
     "get_target_property(L InstalledEditor INTERFACE_LINK_LIBRARIES)\n"
-    "if(NOT \"Vellum::MirrorView_core\" IN_LIST L)\n message(FATAL_ERROR \"the editor package does not link Vellum::MirrorView_core: \${L}\")\nendif()\n")
+    "if(NOT \"Pulp::vellum\" IN_LIST L OR NOT \"Vellum::MirrorView_core\" IN_LIST L)\n"
+    " message(FATAL_ERROR \"the installed editor package links: \${L}\")\nendif()\n")
 execute_process(COMMAND "${CMAKE_COMMAND}" -S "${FIXTURE_DIR}/installed-consumer"
     -B "${FIXTURE_DIR}/installed-consumer-build"
     RESULT_VARIABLE result OUTPUT_VARIABLE output ERROR_VARIABLE error)
 if(NOT result EQUAL 0)
     message(FATAL_ERROR "installed-SDK Vellum editor package configure failed:\n${output}${error}")
 endif()
-message(STATUS "Vellum editor package loads the installed pulp::vellum")
+message(STATUS "Vellum editor package uses the installed Pulp::vellum")
 
-file(MAKE_DIRECTORY "${FIXTURE_DIR}/installed-novellum")
-file(WRITE "${FIXTURE_DIR}/installed-novellum/CMakeLists.txt" "cmake_minimum_required(VERSION 3.24)\nproject(VellumInstalledNoVellum CXX)\n"
-    "include(\"${_installed}/PulpVellumEditorPackage.cmake\")\n")
-execute_process(COMMAND "${CMAKE_COMMAND}" -S "${FIXTURE_DIR}/installed-novellum"
-    -B "${FIXTURE_DIR}/installed-novellum-build"
+# An installed SDK that did not build the optional Pulp bridge must fail with
+# the same actionable explanation instead of generating an unresolved target.
+file(MAKE_DIRECTORY "${FIXTURE_DIR}/nopulp")
+file(WRITE "${FIXTURE_DIR}/nopulp/CMakeLists.txt" "cmake_minimum_required(VERSION 3.24)\nproject(VellumNoPulp CXX)\n"
+    "add_library(Vellum::MirrorView_core INTERFACE IMPORTED)\n"
+    "include(\"${PULP_SOURCE_DIR}/integrations/pulp-vellum/cmake/PulpVellumEditorPackage.cmake\")\n"
+    "pulp_add_vellum_editor_package(pulp::vellum-editor VIEW_HEADER root.hpp VIEW_TYPE test::RootView)\n")
+execute_process(COMMAND "${CMAKE_COMMAND}" -S "${FIXTURE_DIR}/nopulp" -B "${FIXTURE_DIR}/nopulp-build"
     RESULT_VARIABLE result OUTPUT_VARIABLE output ERROR_VARIABLE error)
 if(result EQUAL 0)
-    message(FATAL_ERROR "installed pulp::vellum loaded before find_package(Vellum)")
+    message(FATAL_ERROR "Vellum editor package configured without pulp-vellum")
 endif()
 string(REGEX REPLACE "[ \t\r\n]+" " " error_flat "${error}")
-if(NOT error_flat MATCHES "call find_package\\(Vellum\\) before including it")
-    message(FATAL_ERROR "missing-Vellum error was not the helper's message:\n${output}${error}")
+if(NOT error_flat MATCHES "optional pulp-vellum integration")
+    message(FATAL_ERROR "missing-pulp error was not the helper's message:\n${output}${error}")
 endif()
-message(STATUS "Vellum editor package refuses to load before find_package(Vellum)")
-
-# An installed SDK without Vellum's view target must fail at configure.
-execute_process(COMMAND "${CMAKE_COMMAND}" -S "${FIXTURE_DIR}/installed-consumer"
-    -B "${FIXTURE_DIR}/installed-nohost-build" -DPULP_FIXTURE_NO_HOST=ON
-    RESULT_VARIABLE result OUTPUT_VARIABLE output ERROR_VARIABLE error)
-if(result EQUAL 0)
-    message(FATAL_ERROR "Vellum editor package configured without Vellum::MirrorView_core")
-endif()
-string(REGEX REPLACE "[ \t\r\n]+" " " error_flat "${error}")
-if(NOT error_flat MATCHES "needs Vellum::MirrorView_core")
-    message(FATAL_ERROR "missing-view error was not the helper's message:\n${output}${error}")
-endif()
-message(STATUS "Vellum editor package refuses an SDK without Vellum's GPU view host")
+message(STATUS "Vellum editor package refuses an SDK without the Pulp bridge")
