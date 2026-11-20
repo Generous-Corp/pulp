@@ -27,6 +27,7 @@ class Lane:
     timeline_variable: str
     playback_variable: str
     target: str
+    adapter_dependencies: tuple[str, ...] = ()
 
 
 LANES = {
@@ -36,7 +37,8 @@ LANES = {
     "WebCLAP": Lane("tools/cmake/PulpWclap.cmake", "_PULP_WCLAP_CORE_SOURCES",
                     "_PULP_WCLAP_ROOT", "_PULP_WCLAP_TIMELINE_SOURCES",
                     "_PULP_WCLAP_PLAYBACK_SOURCES",
-                    "pulp-wclap-dsp"),
+                    "pulp-wclap-dsp",
+                    ("core/format/src/host_parameter_edit.cpp",)),
 }
 
 
@@ -231,7 +233,7 @@ def check_root(root: pathlib.Path) -> tuple[int, list[str]]:
         missing = sorted(expected - listed)
         if missing:
             failures.append(f"{lane_name}: missing " + ", ".join(missing))
-        missing_dependencies = sorted(set(PORTABLE_DEPENDENCIES) - all_listed)
+        missing_dependencies = sorted(set(PORTABLE_DEPENDENCIES + lane.adapter_dependencies) - all_listed)
         if missing_dependencies:
             failures.append(
                 f"{lane_name}: missing portable dependency " +

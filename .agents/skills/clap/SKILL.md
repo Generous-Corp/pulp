@@ -571,7 +571,10 @@ straight:
   host's scale; the contract GUI forwards it to the editor
   (`ContractEditorSession::set_scale`).
 - WebCLAP (`PULP_WCLAP`) leaves the contract GUI out; `PulpWclap.cmake`'s source
-  list carries no contract code.
+  list carries no contract code. It must still compile `host_parameter_edit.cpp`:
+  the adapter uses its `HostWriteEchoGuard` implementation, and the WebCLAP
+  subset does not link native `pulp::format`. The source-closure gate checks
+  this dependency; native adapter tests alone cannot detect its omission.
 
 ### Proportional resize with aspect lock
 
