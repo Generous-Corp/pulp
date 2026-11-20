@@ -2,7 +2,8 @@
 """Fail a push when any other actor holds a live `repair-claim:` on any of the branch's open PRs.
 
 Run by .githooks/pre-push as the last step before every allowed push. Paginated GraphQL reads;
-a failed read warns and allows. PULP_REPAIR_CLAIM_ID (or --own-claim) names your own claim.
+a failed read warns and allows. PULP_REPAIR_CLAIM_ID (or --own-claim), or the fleet runner's
+SHIPYARD_CLAIM_OWNER, names your own claim.
 """
 
 from __future__ import annotations
@@ -171,7 +172,11 @@ def main() -> int:
     parser.add_argument("--branch", required=True)
     parser.add_argument("--own-claim")
     args = parser.parse_args()
-    own = args.own_claim or os.environ.get("PULP_REPAIR_CLAIM_ID")
+    # A fleet repair lane's own claim is `repair-claim: <signer>/<tag>`, and its runner exports
+    # exactly that as SHIPYARD_CLAIM_OWNER; without it the hook refused the lane's own push
+    # (m3, 2026-11-19), and lanes released their claim just to push.
+    own = (args.own_claim or os.environ.get("PULP_REPAIR_CLAIM_ID")
+           or os.environ.get("SHIPYARD_CLAIM_OWNER"))
     if os.environ.get("PULP_SKIP_CLAIM_CHECK") == "1":
         print("⚠ pre-push: claim check skipped by PULP_SKIP_CLAIM_CHECK=1; CI and the repair lane still check.", file=sys.stderr)
         return 0

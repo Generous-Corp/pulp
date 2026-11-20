@@ -50,7 +50,7 @@ print(json.dumps({'data': {'repository': result}}))
     def tearDown(self):
         self.tmp.cleanup()
 
-    def run_check(self, comments, *, own=None, pr=True, prs=None):
+    def run_check(self, comments, *, own=None, pr=True, prs=None, extra_env=None):
         if prs is None:
             prs = [{"number": 42, "comments": comments}] if pr else []
         data = self.dir / "response.json"
@@ -58,12 +58,20 @@ print(json.dumps({'data': {'repository': result}}))
         env = os.environ.copy()
         env.pop("PULP_SKIP_CLAIM_CHECK", None)
         env.pop("PULP_REPAIR_CLAIM_ID", None)
+        env.pop("SHIPYARD_CLAIM_OWNER", None)
+        env.update(extra_env or {})
         env.update(PULP_CLAIM_CHECK_GH=shlex.join([sys.executable, str(self.stub)]),
                    PULP_CLAIM_JSON=str(data))
         command = [sys.executable, str(TOOL), "--repo", "OWNER/REPO", "--branch", "feature/test"]
         if own:
             command += ["--own-claim", own]
         return subprocess.run(command, env=env, text=True, encoding="utf-8", capture_output=True)
+
+    def test_a_fleet_lanes_own_claim_from_its_runner_passes(self):
+        claim = ["repair-claim: repair-lane/repair-3 until 2099-01-02T03:04Z"]
+        self.assertEqual(self.run_check(claim, extra_env={"SHIPYARD_CLAIM_OWNER": "repair-lane/repair-3"}).returncode, 0)
+        # another lane's runner identity does not unlock it
+        self.assertEqual(self.run_check(claim, extra_env={"SHIPYARD_CLAIM_OWNER": "repair-lane/repair"}).returncode, 1)
 
     def test_claim_on_second_pr_refuses(self):
         result = self.run_check([], prs=[
