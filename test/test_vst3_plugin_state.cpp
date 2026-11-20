@@ -244,6 +244,10 @@ class TestVst3Processor : public pulp::format::Processor {
     }
 
     void define_parameters(pulp::state::StateStore& store) override {
+        normalizer = store.add_listener([this, &store](pulp::state::ParamID id, float value) {
+            if (normalize_gain_writes && id == kGainParamId && value == -6.0f)
+                store.set_value_rt(id, -7.0f);
+        }, pulp::state::ListenerThread::Audio);
         if (const auto automated = config_.automation_during_editor_edit) {
             automation_listener_ = store.add_listener(
                 [&store, automated = *automated](pulp::state::ParamID id, float) {
@@ -326,6 +330,8 @@ class TestVst3Processor : public pulp::format::Processor {
     }
 
     std::function<void()> during_process;
+    bool normalize_gain_writes = false;
+    pulp::state::ListenerToken normalizer;
     std::string plugin_state;
     int prepare_count = 0;
     int release_count = 0;
@@ -1158,9 +1164,15 @@ TEST_CASE("VST3 concurrent mirrors do not become processor output",
     bool processor_before = false;
     bool processor_after = false;
     bool automate = true;
+    bool normalize = false;
     SECTION("mirror only") {}
     SECTION("processor writes before mirror") { processor_before = true; }
     SECTION("processor writes after mirror") { processor_after = true; }
+    SECTION("processor listener normalizes before mirror") {
+        processor_before = true;
+        normalize = true;
+        plugin->normalize_gain_writes = true;
+    }
     SECTION("processor output does not suppress a subsequent editor write") {
         processor_before = true;
         automate = false;
@@ -1193,7 +1205,7 @@ TEST_CASE("VST3 concurrent mirrors do not become processor output",
         Steinberg::Vst::ParamValue value = 0.0;
         REQUIRE(queue->getPoint(0, offset, value) == Steinberg::kResultTrue);
         CHECK(offset == 0);
-        CHECK_THAT(value, WithinAbs(range.normalize(processor_after ? -9.0f : -6.0f), 1e-6));
+        CHECK_THAT(value, WithinAbs(range.normalize(processor_after ? -9.0f : normalize ? -7.0f : -6.0f), 1e-6));
     }
     REQUIRE(processor.setActive(false) == Steinberg::kResultOk);
     REQUIRE(processor.terminate() == Steinberg::kResultOk);

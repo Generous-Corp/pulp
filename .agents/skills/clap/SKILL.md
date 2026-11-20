@@ -1510,3 +1510,7 @@ The snapshot-output fallback uses audio-thread captured processor values, not a
 live store read: a concurrent suppressed main-thread mirror must not become an
 output event. Host decode is explicitly scoped separately from processor writes.
 `[echo-concurrent]` interleaves both writers and preserves processor output.
+
+Register processor-output capture before exposing the store to the plug-in.
+Otherwise a reentrant normalizing listener can deliver the nested value first
+and let the outer notification overwrite it with an older value.

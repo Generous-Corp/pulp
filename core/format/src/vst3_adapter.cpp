@@ -926,6 +926,16 @@ tresult PLUGIN_API PulpVst3Processor::initialize(FUnknown* context) {
 
     auto desc = processor_->descriptor();
     trace.mark("after_descriptor");
+    // Capture before plug-in listeners can recursively normalize a write.
+    // Registration order then preserves outer -> nested write order.
+    processor_param_listener_ = store_.add_listener(
+        [this](state::ParamID id, float value) {
+            if (!ScopedProcessorParameterWrite::active() || ScopedHostParameterWrite::active())
+                return;
+            const auto index = boundary::find_param_index(store_.all_params(), id);
+            if (index < processor_param_values_.size())
+                processor_param_values_[index] = value;
+        }, state::ListenerThread::Audio);
     processor_->set_state_store(&store_);
     processor_->define_parameters(store_);
     trace.mark("after_define_parameters");
@@ -1011,15 +1021,6 @@ tresult PLUGIN_API PulpVst3Processor::initialize(FUnknown* context) {
                         setParamNormalized(static_cast<ParamID>(id), host_value);
                     },
                     [this](state::ParamID id) { endEdit(static_cast<ParamID>(id)); }});
-
-    processor_param_listener_ = store_.add_listener(
-        [this](state::ParamID id, float value) {
-            if (!ScopedProcessorParameterWrite::active() || ScopedHostParameterWrite::active())
-                return;
-            const auto index = boundary::find_param_index(store_.all_params(), id);
-            if (index < processor_param_values_.size())
-                processor_param_values_[index] = value;
-        }, state::ListenerThread::Audio);
 
     // Add audio buses from descriptor (supports multi-bus: main, sidechain, aux).
     // PluginDescriptor carries channel counts rather than speaker positions, so

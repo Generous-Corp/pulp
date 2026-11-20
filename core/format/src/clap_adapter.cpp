@@ -273,6 +273,17 @@ bool clap_init(const clap_plugin_t* plugin) {
     self->panic_state->attach(self->processor->descriptor().produces_midi);
     self->sample_accurate_params = self->processor->wants_sample_accurate_parameters();
     self->param_events_monitor.arm(!self->sample_accurate_params, &self->param_events);
+    // Register before giving the store to the plug-in: a listener may rewrite
+    // a value recursively, and capture must observe the outer write BEFORE
+    // the nested write so that the final processor value wins.
+    self->processor_param_listener = self->store.add_listener(
+        [self](state::ParamID id, float value) {
+            if (!g_clap_process_running || g_clap_host_writing_param)
+                return;
+            const auto index = boundary::find_param_index(self->store.all_params(), id);
+            if (index < self->processor_param_values.size())
+                self->processor_param_values[index] = value;
+        }, state::ListenerThread::Audio);
     self->processor->set_state_store(&self->store);
     self->processor->define_parameters(self->store);
     self->editor_factory = self->processor->editor_factory();
@@ -312,16 +323,8 @@ bool clap_init(const clap_plugin_t* plugin) {
                 self->host_write_echo_guard.note_host_write(id);
                 return;
             }
-            if (g_clap_process_running) {
-                // Capture the processor's own value on the audio thread. A
-                // concurrent UI mirror can overwrite the store before output
-                // emission, so a live store read cannot prove provenance.
-                const auto params = self->store.all_params();
-                const auto index = boundary::find_param_index(params, id);
-                if (index < self->processor_param_values.size())
-                    self->processor_param_values[index] = value;
+            if (g_clap_process_running)
                 return;
-            }
             if (g_clap_host_writing_param || !on_main)
                 return;
             if (self->host_write_echo_guard.is_echo(self->store, id))

@@ -1679,3 +1679,7 @@ Processor output values are captured inline under `ScopedProcessorParameterWrite
 for both f32 and f64 dispatch, including trigger resets. Snapshot output uses
 those captured values to prevent concurrent main-thread mirrors from escaping
 through `outputParameterChanges` after the edit bridge suppresses them.
+
+Register processor-output capture before exposing the store to the plug-in.
+Otherwise a reentrant normalizing listener can deliver the nested value first
+and let the outer notification overwrite it with an older value.

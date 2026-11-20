@@ -42,6 +42,8 @@ class TestProcessor : public pulp::format::Processor {
 public:
     TestProcessor() { g_last_processor = this; }
     std::function<void()> during_process;
+    bool normalize_gain_writes = false;
+    pulp::state::ListenerToken normalizer;
 
     // Note names a test can publish after the plugin is created, so the
     // note-name extension can be exercised against a live adapter.
@@ -69,6 +71,10 @@ public:
         };
     }
     void define_parameters(pulp::state::StateStore& store) override {
+        normalizer = store.add_listener([this, &store](pulp::state::ParamID id, float value) {
+            if (normalize_gain_writes && id == 1 && value == 8.0f)
+                store.set_value_rt(id, 7.0f);
+        }, pulp::state::ListenerThread::Audio);
         store.add_group({.id = 10, .name = "Oscillators"});
         store.add_group({.id = 11, .name = "Wavetable 1", .parent_id = 10});
         store.add_group({.id = 12, .name = std::string(1100, 'x')});
@@ -1451,9 +1457,15 @@ TEST_CASE("CLAP concurrent mirrors cannot leak through snapshot output",
     const int flushes_before = fx.host.flush_requests;
     bool processor_before = false;
     bool processor_after = false;
+    bool normalize = false;
     SECTION("mirror alone") {}
     SECTION("processor writes before mirror") { processor_before = true; }
     SECTION("processor writes after mirror") { processor_after = true; }
+    SECTION("processor listener normalizes before mirror") {
+        processor_before = true;
+        normalize = true;
+        test_clap::g_last_processor->normalize_gain_writes = true;
+    }
 
     std::binary_semaphore snapshot_reached{0};
     std::binary_semaphore mirror_finished{0};
@@ -1486,7 +1498,7 @@ TEST_CASE("CLAP concurrent mirrors cannot leak through snapshot output",
     REQUIRE(reached);
     CHECK(fx.host.flush_requests == flushes_before);
     CHECK(values == (processor_before || processor_after ? 1 : 0));
-    if (processor_before) CHECK(reported == 8.0);
+    if (processor_before) CHECK(reported == (normalize ? 7.0 : 8.0));
     if (processor_after) CHECK(reported == 9.0);
 }
 

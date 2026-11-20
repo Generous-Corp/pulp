@@ -230,6 +230,7 @@ struct PulpClapPlugin {
     // Audio-thread-only copy: starts at the snapshot, then records inline
     // processor writes, so concurrent suppressed UI writes cannot leak out.
     std::vector<float> processor_param_values;
+    state::ListenerToken processor_param_listener;
     // Processor::wants_sample_accurate_parameters(), asked in clap_init().
     bool sample_accurate_params = false;
     // Records an opted-out processor reading param_events(); see processor.hpp.
