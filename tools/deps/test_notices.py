@@ -111,6 +111,17 @@ class RepositoryTests(unittest.TestCase):
             notices.main(["--out", tmp])
             self.assertEqual(path.stat().st_mtime_ns, before)
 
+    def test_dawn_is_named_through_skia_when_skia_provides_it(self) -> None:
+        # Dawn ships inside skia::skia (libdawn_combined); FindSkia defines no
+        # skia::dawn target, so Dawn must be reachable from skia::skia and
+        # gated on the provider decision, or a Skia+Dawn plug-in omits it.
+        with tempfile.TemporaryDirectory() as tmp:
+            notices.main(["--out", tmp])
+            doc = json.loads((Path(tmp) / "notices.json").read_text(encoding="utf-8"))
+        dawn = next(e for e in doc["entries"] if e["name"] == "Dawn")
+        self.assertIn("skia::skia", dawn["required_by"])
+        self.assertEqual(dawn["feature"], "PULP_SKIA_PROVIDES_DAWN")
+
 
 if __name__ == "__main__":
     unittest.main()

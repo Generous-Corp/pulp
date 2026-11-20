@@ -240,7 +240,8 @@
       },
       "documented_in_dependencies_md": true,
       "documented_in_notice_md": true,
-      "link_targets": ["gpu-runtime-dawn", "skia::dawn"],
+      "link_targets": ["gpu-runtime-dawn", "skia::dawn", "skia::skia"],
+      "link_feature": "PULP_SKIA_PROVIDES_DAWN",
       "notes": "Bundled through the Skia chrome/m158 prebuilt toolchain (danielraffel/skia-builder fork). Exact Dawn revision tracks Skia's DEPS file at be7d7c3e996e567eda7dc9774274f7a0103cdb8c; the bundled build reports Dawn SHA1 1716e88cc9e58398fab5d4473f7f2e858667b677 (include/dawn/dawn_version.h).",
       "source_files": [
         "CMakeLists.txt",
