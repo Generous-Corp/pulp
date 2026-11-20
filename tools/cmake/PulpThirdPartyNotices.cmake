@@ -33,6 +33,9 @@
 include_guard(GLOBAL)
 
 
+set(_PULP_NOTICES_SYSTEM_NAMESPACES
+    ALSA CURL Fontconfig Freetype OpenGL PkgConfig Threads Vulkan Wayland X11 ZLIB)
+
 # Register an SDK's notices manifest for every plug-in in this configure.
 function(pulp_add_notice_manifest manifest)
     get_filename_component(_abs "${manifest}" ABSOLUTE)
@@ -386,6 +389,12 @@ function(_pulp_write_third_party_notices format_target)
         endif()
         if(_t MATCHES "^([A-Za-z0-9_]+)::")
             set(_ns "${CMAKE_MATCH_1}")
+            # Operating-system libraries found through CMake's own find
+            # modules are linked dynamically and not redistributed, the same
+            # line NOTICE.md draws, so they are not missing SDKs.
+            if(_ns IN_LIST _PULP_NOTICES_SYSTEM_NAMESPACES)
+                continue()
+            endif()
             if(NOT _ns IN_LIST _claimed_namespaces AND NOT _ns IN_LIST _missing_sdks)
                 list(APPEND _missing_sdks "${_ns}")
             endif()
