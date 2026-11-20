@@ -2,7 +2,6 @@
 
 #include <catch2/catch_test_macros.hpp>
 #include <pulp/format/editor_host.hpp>
-#include <pulp/format/processor.hpp>
 #include <pulp/state/store.hpp>
 #include <pulp/vellum/rmlui_editor.hpp>
 
@@ -36,14 +35,6 @@ class Context final : public pulp::format::EditorContext {
     pulp::format::ParamPort& params_;
 };
 
-class Processor final : public pulp::format::Processor {
-  public:
-    pulp::format::PluginDescriptor descriptor() const override {
-        return {};
-    }
-    void define_parameters(pulp::state::StateStore&) override {}
-    void prepare(const pulp::format::PrepareContext&) override {}
-};
 
 struct Fixture {
     pulp::state::StateStore store;
