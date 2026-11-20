@@ -543,6 +543,7 @@ COMPILED_SDK_MODULES = {
     "tools/cmake/PulpTracing.cmake": "defines pulp-tracing, which pulp-runtime links publicly and the SDK exports",
     "tools/cmake/PulpV8ConsumerDefines.cmake": "applies the V8 consumer defines the V8 engine compiles with",
     "tools/cmake/PulpV8Windows.cmake": "applies the Windows V8 consumer ABI contract",
+    "tools/cmake/PulpVellumLock.cmake": "validates pulp.lock, whose Vellum commit pins the gpu-runtime pulp-render links",
     "tools/cmake/PulpWgpuNative.cmake": "pins the wgpu-native archives by digest",
     "tools/cmake/PulpWgpuUniversal.cmake": "builds the universal libwgpu_native the macOS SDK ships",
     "tools/cmake/PulpWindowsSkiaProvider.cmake": "selects the Windows ARM64EC/ARM64X Skia and Dawn provider",
