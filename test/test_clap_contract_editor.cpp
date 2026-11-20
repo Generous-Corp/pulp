@@ -923,7 +923,12 @@ TEST_CASE("a CLAP host without timers leaves the platform layer without a loop",
     REQUIRE(p.gui->create(p.plugin, platform_api(), false));
     REQUIRE_FALSE(pulp::platform::main_thread_supported());
     pulp::platform::MainThreadScope scope;
+#if defined(_WIN32)
+    // Windows falls back to a message window on this thread.
+    REQUIRE(scope.post([] {}));
+#else
     REQUIRE_FALSE(scope.post([] {}));
+#endif
     p.gui->destroy(p.plugin);
 }
 
