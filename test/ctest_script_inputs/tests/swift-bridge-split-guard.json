@@ -1,0 +1,11 @@
+{
+ "name": "swift-bridge-split-guard",
+ "record": {
+  "entry": "tools/scripts/swift_bridge_split_guard.py",
+  "inputs": [
+   "apple/Sources/PulpSwift/PulpBridge.cpp",
+   "tools/scripts/swift_bridge_split_guard.py"
+  ],
+  "kind": "python"
+ }
+}
