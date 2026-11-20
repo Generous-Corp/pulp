@@ -633,6 +633,11 @@ class StateStore {
     /// shim.
     void add_listener(ParamChangeCallback callback);
 
+    /// CRC-32 (IEEE 802.3, reflected, init and final xor 0xFFFFFFFF) used by
+    /// the parameter blob and the host state envelope. Table driven, eight
+    /// bytes per step; the value is identical to the bitwise definition.
+    static std::uint32_t crc32(std::span<const std::uint8_t> bytes) noexcept;
+
     /// Serialize all parameter values to a binary blob for preset/state save.
     ///
     /// This is the parameter-only payload. Format adapters may wrap it in a

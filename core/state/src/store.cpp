@@ -1181,16 +1181,58 @@ void ListenerToken::reset() noexcept {
 //   Per-param: id (uint32) + value (float)
 //   Footer: CRC32 (uint32)
 
-static uint32_t crc32_simple(const uint8_t* data, std::size_t len) {
-    uint32_t crc = 0xFFFFFFFF;
-    for (std::size_t i = 0; i < len; ++i) {
-        crc ^= data[i];
-        for (int j = 0; j < 8; ++j) {
-            const uint32_t mask = (crc & 1u) ? 0xFFFFFFFFu : 0u;
-            crc = (crc >> 1) ^ (0xEDB88320u & mask);
+namespace {
+
+struct Crc32Tables {
+    std::uint32_t t[8][256];
+};
+
+constexpr Crc32Tables make_crc32_tables() {
+    Crc32Tables tables{};
+    for (std::uint32_t i = 0; i < 256; ++i) {
+        std::uint32_t c = i;
+        for (int j = 0; j < 8; ++j)
+            c = (c & 1u) ? (c >> 1) ^ 0xEDB88320u : (c >> 1);
+        tables.t[0][i] = c;
+    }
+    for (std::uint32_t i = 0; i < 256; ++i) {
+        std::uint32_t c = tables.t[0][i];
+        for (int k = 1; k < 8; ++k) {
+            c = tables.t[0][c & 0xFFu] ^ (c >> 8);
+            tables.t[k][i] = c;
         }
     }
+    return tables;
+}
+
+constexpr Crc32Tables kCrc32Tables = make_crc32_tables();
+
+std::uint32_t load_le32(const std::uint8_t* p) noexcept {
+    return choc::memory::readLittleEndian<std::uint32_t>(p);
+}
+
+} // namespace
+
+std::uint32_t StateStore::crc32(std::span<const std::uint8_t> bytes) noexcept {
+    const auto& t = kCrc32Tables.t;
+    std::uint32_t crc = 0xFFFFFFFFu;
+    const std::uint8_t* p = bytes.data();
+    std::size_t len = bytes.size();
+    while (len >= 8) {
+        const std::uint32_t a = load_le32(p) ^ crc;
+        const std::uint32_t b = load_le32(p + 4);
+        crc = t[7][a & 0xFFu] ^ t[6][(a >> 8) & 0xFFu] ^ t[5][(a >> 16) & 0xFFu] ^ t[4][a >> 24] ^
+              t[3][b & 0xFFu] ^ t[2][(b >> 8) & 0xFFu] ^ t[1][(b >> 16) & 0xFFu] ^ t[0][b >> 24];
+        p += 8;
+        len -= 8;
+    }
+    while (len-- > 0)
+        crc = t[0][(crc ^ *p++) & 0xFFu] ^ (crc >> 8);
     return ~crc;
+}
+
+static uint32_t crc32_simple(const uint8_t* data, std::size_t len) {
+    return StateStore::crc32({data, len});
 }
 
 std::vector<uint8_t> StateStore::serialize() const {

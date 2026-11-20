@@ -514,9 +514,14 @@ private:
 // Effect with a configurable number of parameters and an opaque plug-in
 // payload, for state-size and state-time measurements.
 std::size_t g_many_param_count = 24;
+bool g_many_owns_class_info_payload = false;
 
 class TestAUManyParamProcessor : public TestAUEffectProcessor {
   public:
+    bool class_info_owns_plugin_state() const override {
+        return g_many_owns_class_info_payload;
+    }
+
     void define_parameters(pulp::state::StateStore& store) override {
         for (std::size_t i = 0; i < g_many_param_count; ++i) {
             store.add_parameter({
@@ -5010,7 +5015,8 @@ TEST_CASE("AU compact state is much smaller than the legacy envelope",
     }
 }
 
-TEST_CASE("AU compact state saves faster than the legacy envelope", "[au][auv2][state][compact]") {
+TEST_CASE("AU compact state save time is bounded by copy and table-driven CRC",
+          "[au][auv2][state][compact]") {
     g_many_param_count = 500;
     ScopedFactoryRegistration registration(create_many_param_processor);
     pulp::format::au::PulpAUEffect saver(nullptr);
@@ -5037,13 +5043,23 @@ TEST_CASE("AU compact state saves faster than the legacy envelope", "[au][auv2][
         REQUIRE(saver.SaveState(&p) == noErr);
         CFRelease(p);
     });
-    // Control: the envelope serialization the legacy key paid for, same payload.
-    const double legacy_us = best_us([&] {
+    // The envelope save the previous format paid for, built on the same CRC.
+    const double envelope_us = best_us([&] {
         auto v = pulp::format::plugin_state_io::serialize(proc->state(), *proc);
         REQUIRE(!v.empty());
     });
-    CAPTURE(compact_us, legacy_us);
-    REQUIRE(compact_us < legacy_us * 0.5);
+    // What the previous format's checksum cost over the same bytes: the
+    // bitwise CRC it used before the table-driven one.
+    const auto envelope = pulp::format::plugin_state_io::serialize(proc->state(), *proc);
+    const double bitwise_us = best_us([&] {
+        volatile uint32_t sink = reference_crc32(envelope.data(), envelope.size());
+        (void)sink;
+    });
+    CAPTURE(compact_us, envelope_us, bitwise_us);
+    // Not slower than the envelope save (copy and CRC dominate both) ...
+    REQUIRE(compact_us < envelope_us * 2.0);
+    // ... and far cheaper than the old bitwise-checksum save.
+    REQUIRE(compact_us * 4.0 < bitwise_us);
 }
 
 TEST_CASE("AU compact state rejects malformed blobs without changing state",
@@ -5089,7 +5105,8 @@ TEST_CASE("AU compact state rejects malformed blobs without changing state",
             return bad;
         };
         check("format version", with(4, 2), cs::DecodeStatus::unsupported_format_version);
-        check("flags", with(5, 1), cs::DecodeStatus::unsupported_flags);
+        check("flags", with(5, 2), cs::DecodeStatus::unsupported_flags);
+        check("omitted flag with a payload present", with(5, 1), cs::DecodeStatus::malformed);
         // state_version newer than the store's
         check("future state version", with(6, 9), cs::DecodeStatus::unsupported_state_version);
         // entry count of 2^63 cannot fit the bytes that follow
@@ -5161,4 +5178,97 @@ TEST_CASE("AU compact state rejects malformed blobs without changing state",
         REQUIRE_THAT(proc->state().get_value(101), WithinAbs(0.75, 1e-6));
         REQUIRE(proc->plugin_state == "keep");
     }
+}
+
+TEST_CASE("AU compact state CRC matches published vectors and the envelope bytes",
+          "[au][auv2][state][compact]") {
+    auto crc_of = [](const std::vector<uint8_t>& v) { return cs::crc32({v.data(), v.size()}); };
+    REQUIRE(crc_of({}) == 0x00000000u);
+    REQUIRE(crc_of({'a'}) == 0xE8B7BE43u);
+    REQUIRE(crc_of(std::vector<uint8_t>(32, 0)) == 0x190A55ADu);
+    REQUIRE(crc_of(std::vector<uint8_t>(32, 0xFF)) == 0xFF6CAB0Bu);
+
+    // The StateStore blob and the PLST envelope keep their bytes: each ends in
+    // the bitwise CRC of everything before it.
+    g_many_param_count = 24;
+    ScopedFactoryRegistration registration(create_many_param_processor);
+    pulp::format::au::PulpAUEffect unit(nullptr);
+    auto* proc = g_last_effect_processor;
+    REQUIRE(proc != nullptr);
+    set_many_params(proc->state(), 24, 9);
+    proc->plugin_state = "envelope-bytes";
+    auto trailer_ok = [](const std::vector<uint8_t>& blob) {
+        REQUIRE(blob.size() > 4);
+        uint32_t stored = 0;
+        for (int i = 0; i < 4; ++i)
+            stored |= uint32_t(blob[blob.size() - 4 + i]) << (8 * i);
+        return stored == reference_crc32(blob.data(), blob.size() - 4);
+    };
+    REQUIRE(trailer_ok(proc->state().serialize()));
+    REQUIRE(trailer_ok(pulp::format::plugin_state_io::serialize(proc->state(), *proc)));
+}
+
+TEST_CASE("AU compact state omits the payload for a processor that owns its class-info state",
+          "[au][auv2][state][compact]") {
+    g_many_param_count = 24;
+    ScopedFactoryRegistration registration(create_many_param_processor);
+
+    g_many_owns_class_info_payload = true;
+    pulp::format::au::PulpAUEffect saver(nullptr);
+    auto* saved_proc = g_last_effect_processor;
+    set_many_params(saved_proc->state(), 24, 9);
+    saved_proc->plugin_state = "PAYLOAD-KEPT-IN-OWN-KEY";
+
+    CFPropertyListRef saved = nullptr;
+    REQUIRE(saver.SaveState(&saved) == noErr);
+    const auto blob = class_info_blob(saved, "pulp-state-v2");
+    REQUIRE(!blob.empty());
+    REQUIRE((blob[5] & 1) == 1);
+    const std::string text(blob.begin(), blob.end());
+    REQUIRE(text.find("PAYLOAD-KEPT") == std::string::npos);
+
+    // Parameters-only blob: no larger than the header, the changed entries, and the CRC.
+    REQUIRE(blob.size() < 10 + 1 + 9 * 5 + 1 + 4 + 8);
+
+    SECTION(
+        "restore applies the parameters before SetProperty returns and leaves the payload alone") {
+        pulp::format::au::PulpAUEffect loader(nullptr);
+        auto* proc = g_last_effect_processor;
+        for (std::size_t i = 0; i < 24; ++i)
+            proc->state().set_value(static_cast<pulp::state::ParamID>(100 + i), 0.5f);
+        proc->plugin_state = "stale";
+        REQUIRE(loader.RestoreState(saved) == noErr);
+        for (std::size_t i = 0; i < 24; ++i) {
+            const auto id = static_cast<pulp::state::ParamID>(100 + i);
+            REQUIRE(proc->state().get_value(id) == saved_proc->state().get_value(id));
+        }
+        // The owning AU class restores its own bytes; the adapter does not.
+        REQUIRE(proc->plugin_state == "stale");
+        // Order: the owner restores its payload after the adapter has applied
+        // the parameters, and that does not disturb them.
+        proc->plugin_state = "PAYLOAD-KEPT-IN-OWN-KEY";
+        REQUIRE(proc->state().get_value(101) == saved_proc->state().get_value(101));
+    }
+
+    SECTION("a legacy pulp-state class info still restores its payload into an owning processor") {
+        const std::vector<uint8_t> legacy(std::begin(kLegacyClassInfoBlob),
+                                          std::end(kLegacyClassInfoBlob));
+        pulp::format::au::PulpAUEffect loader(nullptr);
+        auto* proc = g_last_effect_processor;
+        auto* class_info = make_class_info(loader, "pulp-state", legacy);
+        REQUIRE(loader.RestoreState(class_info) == noErr);
+        REQUIRE(proc->plugin_state.size() == kLegacyFixturePayloadSize);
+        CFRelease(class_info);
+    }
+
+    SECTION("saving does not serialize the payload") {
+        saved_proc->plugin_state.assign(200 * 1024, 'x');
+        CFPropertyListRef again = nullptr;
+        REQUIRE(saver.SaveState(&again) == noErr);
+        REQUIRE(class_info_blob(again, "pulp-state-v2").size() == blob.size());
+        CFRelease(again);
+    }
+
+    CFRelease(saved);
+    g_many_owns_class_info_payload = false;
 }

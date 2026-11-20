@@ -760,7 +760,8 @@ private:
 ///
 ///     "PLCS"            magic
 ///     u8                format version (1)
-///     u8                flags (0; any other value is rejected)
+///     u8                flags: bit 0 = payload omitted (length must be 0);
+///                       any other bit is rejected
 ///     u32               StateStore state_version the values were saved under
 ///     varint n          number of parameter entries
 ///     n x (varint id, f32 value)
@@ -793,6 +794,7 @@ enum class DecodeStatus : std::uint8_t {
 /// What a compact blob expands to: a StateStore::serialize()-shaped parameter
 /// blob and a view of the processor payload inside the input bytes.
 struct Decoded {
+    bool payload_omitted = false;
     std::vector<std::uint8_t> store_blob;
     std::span<const std::uint8_t> plugin_payload;
 };
@@ -801,10 +803,13 @@ struct Decoded {
 /// computed eight bytes at a time.
 [[nodiscard]] std::uint32_t crc32(std::span<const std::uint8_t> bytes) noexcept;
 
-/// Encode @p store's current values and @p plugin_payload. Returns an empty
-/// vector when the payload is larger than the format can describe (4 GiB).
+/// Encode @p store's current values and @p plugin_payload. With
+/// @p omit_payload the payload is left out and flagged as omitted (see
+/// Processor::class_info_owns_plugin_state()). Returns an empty vector when the
+/// payload is larger than the format can describe (4 GiB).
 [[nodiscard]] std::vector<std::uint8_t> encode(const state::StateStore& store,
-                                               std::span<const std::uint8_t> plugin_payload);
+                                               std::span<const std::uint8_t> plugin_payload,
+                                               bool omit_payload = false);
 
 /// Parse untrusted @p bytes against @p store's schema. Every length is checked
 /// against the bytes that remain before it is used, and nothing is written to
@@ -814,6 +819,13 @@ struct Decoded {
 
 } // namespace compact_state
 
+/// Restore order: `AUBase::RestoreState` runs first, then this function applies
+/// the compact blob. When the processor opted into
+/// `class_info_owns_plugin_state()` the blob holds parameters only and the owning
+/// AU class restores its own key; a subclass that does so after calling the
+/// Pulp `RestoreState` sees the parameters already applied, which is the order
+/// the tests pin.
+///
 /// Attach Pulp's serialized state to the AU class-info dictionary the base
 /// class produced. Takes ownership semantics identical to `AUBase::SaveState`:
 /// `*out_data` is replaced with a dictionary carrying the compact state blob

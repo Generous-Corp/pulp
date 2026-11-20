@@ -672,35 +672,12 @@ constexpr std::size_t kMagicSize = sizeof(kMagic);
 // magic + format version + flags + state_version
 constexpr std::size_t kFixedHeaderSize = kMagicSize + 1 + 1 + 4;
 constexpr std::size_t kCrcSize = 4;
+constexpr std::uint8_t kFlagPayloadOmitted = 1;
 // Smallest legal blob: header, zero entries (1), zero-length payload (1), CRC.
 constexpr std::size_t kMinBlobSize = kFixedHeaderSize + 1 + 1 + kCrcSize;
 constexpr std::size_t kMaxVarintBytes = 10;
 // One entry is at least a 1-byte id and a 4-byte value.
 constexpr std::size_t kMinEntrySize = 1 + 4;
-
-struct Crc32Tables {
-    std::uint32_t t[8][256];
-};
-
-constexpr Crc32Tables make_crc32_tables() {
-    Crc32Tables tables{};
-    for (std::uint32_t i = 0; i < 256; ++i) {
-        std::uint32_t c = i;
-        for (int j = 0; j < 8; ++j)
-            c = (c & 1u) ? (c >> 1) ^ 0xEDB88320u : (c >> 1);
-        tables.t[0][i] = c;
-    }
-    for (std::uint32_t i = 0; i < 256; ++i) {
-        std::uint32_t c = tables.t[0][i];
-        for (int k = 1; k < 8; ++k) {
-            c = tables.t[0][c & 0xFFu] ^ (c >> 8);
-            tables.t[k][i] = c;
-        }
-    }
-    return tables;
-}
-
-constexpr Crc32Tables kCrc32Tables = make_crc32_tables();
 
 std::uint32_t load_u32(const std::uint8_t* p) noexcept {
     std::uint32_t v;
@@ -821,25 +798,13 @@ const char* decode_status_name(DecodeStatus status) noexcept {
 }
 
 std::uint32_t crc32(std::span<const std::uint8_t> bytes) noexcept {
-    const auto& t = kCrc32Tables.t;
-    std::uint32_t crc = 0xFFFFFFFFu;
-    const std::uint8_t* p = bytes.data();
-    std::size_t len = bytes.size();
-    while (len >= 8) {
-        const std::uint32_t a = load_u32(p) ^ crc;
-        const std::uint32_t b = load_u32(p + 4);
-        crc = t[7][a & 0xFFu] ^ t[6][(a >> 8) & 0xFFu] ^ t[5][(a >> 16) & 0xFFu] ^ t[4][a >> 24] ^
-              t[3][b & 0xFFu] ^ t[2][(b >> 8) & 0xFFu] ^ t[1][(b >> 16) & 0xFFu] ^ t[0][b >> 24];
-        p += 8;
-        len -= 8;
-    }
-    while (len-- > 0)
-        crc = t[0][(crc ^ *p++) & 0xFFu] ^ (crc >> 8);
-    return ~crc;
+    return state::StateStore::crc32(bytes);
 }
 
 std::vector<std::uint8_t> encode(const state::StateStore& store,
-                                 std::span<const std::uint8_t> plugin_payload) {
+                                 std::span<const std::uint8_t> plugin_payload, bool omit_payload) {
+    if (omit_payload)
+        plugin_payload = {};
     if (plugin_payload.size() > std::numeric_limits<std::uint32_t>::max())
         return {};
 
@@ -855,7 +820,7 @@ std::vector<std::uint8_t> encode(const state::StateStore& store,
     out.reserve(kMinBlobSize + changed.size() * 9 + kMaxVarintBytes + plugin_payload.size());
     out.insert(out.end(), kMagic, kMagic + kMagicSize);
     out.push_back(kFormatVersion);
-    out.push_back(0);
+    out.push_back(omit_payload ? kFlagPayloadOmitted : 0);
     put_u32(out, store.state_version());
     put_varint(out, changed.size());
     for (const auto& [id, value] : changed) {
@@ -878,8 +843,10 @@ DecodeStatus decode(std::span<const std::uint8_t> bytes, const state::StateStore
         return DecodeStatus::truncated;
     if (bytes[kMagicSize] != kFormatVersion)
         return DecodeStatus::unsupported_format_version;
-    if (bytes[kMagicSize + 1] != 0)
+    const std::uint8_t flags = bytes[kMagicSize + 1];
+    if ((flags & ~kFlagPayloadOmitted) != 0)
         return DecodeStatus::unsupported_flags;
+    const bool omitted = (flags & kFlagPayloadOmitted) != 0;
 
     const std::size_t body_size = bytes.size() - kCrcSize;
     if (load_u32(bytes.data() + body_size) != crc32(bytes.first(body_size)))
@@ -915,7 +882,8 @@ DecodeStatus decode(std::span<const std::uint8_t> bytes, const state::StateStore
     }
 
     std::uint64_t payload_size = 0;
-    if (!reader.read_varint(payload_size) || payload_size != reader.remaining())
+    if (!reader.read_varint(payload_size) || payload_size != reader.remaining() ||
+        (omitted && payload_size != 0))
         return DecodeStatus::malformed;
     const std::size_t payload_offset = reader.position();
 
@@ -936,6 +904,7 @@ DecodeStatus decode(std::span<const std::uint8_t> bytes, const state::StateStore
         entries.assign(saved.begin(), saved.end());
     }
 
+    out.payload_omitted = omitted;
     out.store_blob = build_store_blob(saved_version, entries);
     out.plugin_payload = bytes.subspan(payload_offset, static_cast<std::size_t>(payload_size));
     return DecodeStatus::ok;
@@ -949,8 +918,13 @@ OSStatus save_pulp_state(state::StateStore& store,
 {
     if (!out_data) return kAudioUnitErr_InvalidPropertyValue;
 
-    const auto payload = plugin_state_io::plugin_state_payload(processor);
-    auto data = compact_state::encode(store, *payload);
+    const bool owns = processor.class_info_owns_plugin_state();
+    std::shared_ptr<const std::vector<std::uint8_t>> payload;
+    if (!owns)
+        payload = plugin_state_io::plugin_state_payload(processor);
+    auto data = compact_state::encode(
+        store, payload ? std::span<const std::uint8_t>(*payload) : std::span<const std::uint8_t>{},
+        owns);
     CFDataRef cf_data = CFDataCreate(kCFAllocatorDefault, data.data(),
                                      static_cast<CFIndex>(data.size()));
     if (!cf_data) return noErr;
@@ -993,6 +967,9 @@ OSStatus restore_pulp_state(state::StateStore& store,
             return kAudioUnitErr_InvalidPropertyValue;
 
         auto restore_lock = gate.lock_for_restore();
+        if (decoded.payload_omitted)
+            return store.deserialize(decoded.store_blob) ? noErr
+                                                         : kAudioUnitErr_InvalidPropertyValue;
         if (!plugin_state_io::deserialize_parts(decoded.store_blob, decoded.plugin_payload, store,
                                                 processor))
             return kAudioUnitErr_InvalidPropertyValue;
