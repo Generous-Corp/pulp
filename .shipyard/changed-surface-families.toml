@@ -9190,6 +9190,7 @@ name = "script-readers-245b1112ed1f"
 paths = ["tools/scripts/date_sensitive_selftests_tz_matrix.py"]
 tests = [
   "build-parallelism-guard",
+  "changed-surface-policy-inventory",
   "changed-surface-policy-selftest",
   "changed-surface-script-families-drift",
   "changed-surface-script-families-selftest",
@@ -9228,6 +9229,7 @@ name = "script-readers-569475986e2f"
 paths = ["tools/scripts/test_date_sensitive_selftests_tz_matrix.py"]
 tests = [
   "build-parallelism-guard",
+  "changed-surface-policy-inventory",
   "changed-surface-policy-selftest",
   "changed-surface-script-families-drift",
   "changed-surface-script-families-selftest",
