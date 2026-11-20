@@ -30,6 +30,7 @@ import json
 import os
 import subprocess
 import sys
+from zoneinfo import ZoneInfo
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -55,6 +56,14 @@ def validate_config(zones: list[str], tests: list[str], pending: list[str] | Non
         errors.append("zones must not contain duplicates")
     if set(zones) != REQUIRED_ZONES:
         errors.append("zones must be exactly Pacific/Kiritimati, Pacific/Pago_Pago and UTC")
+    expected_offsets = {"Pacific/Kiritimati": 14 * 3600, "Pacific/Pago_Pago": -11 * 3600, "UTC": 0}
+    for zone, expected in expected_offsets.items():
+        try:
+            actual = ZoneInfo(zone).utcoffset(__import__("datetime").datetime.now()).total_seconds()
+            if actual != expected:
+                errors.append(f"timezone {zone} has unexpected UTC offset {actual}, expected {expected}")
+        except Exception as error:
+            errors.append(f"timezone {zone} is not resolvable: {error}")
     all_paths = tests + pending
     if len(all_paths) != len(set(all_paths)):
         errors.append("tests and pending must not contain duplicate execution paths")
@@ -73,10 +82,15 @@ def run_matrix(tests: list[str], zones: list[str], root: Path = ROOT) -> dict[st
         results[rel] = {}
         for zone in zones:
             env = dict(os.environ, TZ=zone)
-            proc = subprocess.run(
-                [sys.executable, str(root / rel)], cwd=root, env=env,
-                capture_output=True, text=True, encoding="utf-8", timeout=TIMEOUT_S,
-            )
+            try:
+                proc = subprocess.run(
+                    [sys.executable, str(root / rel)], cwd=root, env=env,
+                    capture_output=True, text=True, encoding="utf-8", timeout=TIMEOUT_S,
+                )
+            except subprocess.TimeoutExpired:
+                print(f"--- {rel} TZ={zone} timed out after {TIMEOUT_S}s", file=sys.stderr)
+                results[rel][zone] = 124
+                continue
             results[rel][zone] = proc.returncode
             if proc.returncode != 0:
                 tail = (proc.stdout + proc.stderr).strip().splitlines()[-8:]

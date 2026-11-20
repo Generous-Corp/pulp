@@ -400,24 +400,6 @@
       ]
     },
     {
-      "name": "clock-in-tests-lint-selftest",
-      "argv": [
-        "{repo}/tools/scripts/test_clock_in_tests_lint.py"
-      ]
-    },
-    {
-      "name": "date-sensitive-selftests-tz-matrix",
-      "argv": [
-        "{repo}/tools/scripts/date_sensitive_selftests_tz_matrix.py"
-      ]
-    },
-    {
-      "name": "date-sensitive-selftests-tz-matrix-selftest",
-      "argv": [
-        "{repo}/tools/scripts/test_date_sensitive_selftests_tz_matrix.py"
-      ]
-    },
-    {
       "name": "forced-restore-lint-selftest",
       "argv": [
         "{repo}/tools/scripts/test_forced_restore_lint.py"

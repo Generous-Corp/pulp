@@ -55,9 +55,9 @@ ROOT = Path(__file__).resolve().parents[2]
 BASELINE = ROOT / "tools/scripts/clock_in_tests_baseline.json"
 
 _CLOCK = re.compile(
-    r"\b(?:datetime\s*\.\s*(?:now|today|utcnow)|date\s*\.\s*today|time\s*\.\s*(?:time|time_ns|localtime))\s*\("
+    r"\b(?:datetime\s*\.\s*(?:now|today|utcnow)|date\s*\.\s*today|time\s*\.\s*(?:time|time_ns|localtime|gmtime|ctime|asctime|strftime))\s*\("
 )
-_MARKER = re.compile(r"clock-ok:\s*\S")
+_MARKER = re.compile(r"^\s*#\s*clock-ok:\s*\S")
 
 
 def in_scope(rel: str) -> bool:
@@ -100,7 +100,7 @@ def _clock_tokens(source: str):
     methods = {
         "datetime": {"now", "today", "utcnow"},
         "date": {"today"},
-        "time": {"time", "time_ns", "localtime"},
+        "time": {"time", "time_ns", "localtime", "gmtime", "ctime", "asctime", "strftime"},
     }
     spans = []
     def skip_trivia(cursor: int) -> int:
@@ -156,7 +156,7 @@ def _fstring_clock_spans(source: str) -> list[tuple[int, int]]:
     methods = {
         "datetime": {"now", "today", "utcnow"},
         "date": {"today"},
-        "time": {"time", "time_ns", "localtime"},
+        "time": {"time", "time_ns", "localtime", "gmtime", "ctime", "asctime", "strftime"},
     }
     spans: list[tuple[int, int]] = []
     for joined in (node for node in ast.walk(tree) if isinstance(node, ast.JoinedStr)):
@@ -228,7 +228,8 @@ def scan_lines(rel: str, lines: list[tuple[int, str]], baseline=None, *, consume
         # line; unchanged spans are validated against the trusted base. Direct
         # callers retain the older exact-baseline behavior for --all tests.
         if added_numbers is not None:
-            exempt = marker
+            exempt = any(line in marker_lines and line in added_numbers
+                         for line in range(start, end + 1))
         else:
             exempt = marker or (not consume_baseline and any(
                 (rel, logical_records[index][1].strip()) in entries for index in span_indexes))
@@ -246,7 +247,8 @@ def scan_lines(rel: str, lines: list[tuple[int, str]], baseline=None, *, consume
         span_numbers = {logical_records[index][0] for index in span_indexes}
         if added_numbers is not None and not (span_numbers & added_numbers):
             continue
-        if any(line in marker_lines for line in range(start, end + 1)):
+        if any(line in marker_lines and (added_numbers is None or line in added_numbers)
+               for line in range(start, end + 1)):
             continue
         report_index = next((index for index in span_indexes if added_numbers is None or logical_records[index][0] in added_numbers), start - 1)
         if report_index < len(logical_records):
@@ -256,6 +258,7 @@ def scan_lines(rel: str, lines: list[tuple[int, str]], baseline=None, *, consume
 
 
 def load_base_baseline(base: str) -> tuple[dict[str, str], set[tuple[str, str]]]:
+    _git(["rev-parse", "--verify", base])
     try:
         raw = _git(["show", f"{base}:tools/scripts/clock_in_tests_baseline.json"])
     except subprocess.CalledProcessError:
@@ -267,7 +270,10 @@ def load_base_baseline(base: str) -> tuple[dict[str, str], set[tuple[str, str]]]
 
 
 def _git(args: list[str]) -> str:
-    result = subprocess.run(["git", "-C", str(ROOT), *args], check=True, capture_output=True)
+    import os
+    env = dict(os.environ)
+    env.pop("GIT_DIFF_OPTS", None)
+    result = subprocess.run(["git", "-C", str(ROOT), *args], check=True, capture_output=True, env=env)
     # Preserve CR and form-feed bytes: Git patch records are LF-delimited, while
     # str.splitlines() would silently turn content bytes into fake records.
     return result.stdout.decode("utf-8", errors="surrogateescape")
@@ -275,7 +281,7 @@ def _git(args: list[str]) -> str:
 
 def added_lines(base: str, head: str | None) -> dict[str, list[tuple[int, str]]]:
     merge_base = _git(["merge-base", base, head or "HEAD"]).strip()
-    cmd = ["-c", "core.quotePath=false", "-c", "diff.noprefix=false", "-c", "diff.mnemonicPrefix=false", "diff", "-U0", "--no-color", "--no-renames", "--no-ext-diff", "--no-textconv", "--text", "--diff-filter=AMT", "--src-prefix=a/", "--dst-prefix=b/", merge_base]
+    cmd = ["-c", "core.quotePath=false", "-c", "diff.noprefix=false", "-c", "diff.mnemonicPrefix=false", "diff", "--inter-hunk-context=0", "-U0", "--no-color", "--no-renames", "--no-ext-diff", "--no-textconv", "--text", "--diff-filter=AMT", "--src-prefix=a/", "--dst-prefix=b/", merge_base]
     if head:
         cmd.append(head)
     result: dict[str, list[tuple[int, str]]] = {}
@@ -353,7 +359,11 @@ def main(argv: list[str]) -> int:
         source = tracked_lines()
         added_by_file: dict[str, set[int]] = {}
     else:
-        added = added_lines(args.base, args.head)
+        try:
+            added = added_lines(args.base, args.head)
+        except (subprocess.CalledProcessError, ValueError, AttributeError) as error:
+            print(f"clock_in_tests_lint: setup failed: {error}", file=sys.stderr)
+            return 2
         try:
             all_tracked = tracked_lines(args.head) if args.head else tracked_lines()
         except RuntimeError as error:
@@ -361,7 +371,11 @@ def main(argv: list[str]) -> int:
             return 1
         source = {rel: all_tracked[rel] for rel in added if rel in all_tracked}
         added_by_file = {rel: {number for number, _ in lines} for rel, lines in added.items()}
-    baseline = load_base_baseline(args.base) if not args.all else load_baseline()
+    try:
+        baseline = load_base_baseline(args.base) if not args.all else load_baseline()
+    except (subprocess.CalledProcessError, json.JSONDecodeError, KeyError, TypeError, ValueError) as error:
+        print(f"clock_in_tests_lint: setup failed: {error}", file=sys.stderr)
+        return 2
     for rel, lines in sorted(source.items()):
         found.extend(scan_lines(rel, lines, baseline, consume_baseline=not args.all,
                                 added_numbers=None if args.all else added_by_file[rel]))
