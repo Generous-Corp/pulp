@@ -1059,6 +1059,7 @@ inline const clap_plugin_t* create_plugin(const clap_plugin_factory_t*,
     // Cache this plugin's descriptor so pre-init extension queries (audio/note
     // ports) resolve per-plugin metadata without a shared global.
     instance->descriptor_snapshot = rec->desc;
+    instance->descriptor_is_static = rec->static_descriptor != nullptr;
     // Keep the host pointer so clap_on_main_thread() can republish
     // latency / tail changes the processor flagged.
     instance->host = host;

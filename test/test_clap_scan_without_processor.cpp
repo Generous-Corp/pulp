@@ -6,6 +6,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <pulp/format/clap_entry.hpp>
+#include <pulp/format/descriptor_agreement.hpp>
 #include <pulp/format/processor.hpp>
 
 #include <cstring>
@@ -33,6 +34,19 @@ pulp::format::PluginDescriptor make_descriptor(const char* name, const char* id)
 pulp::format::PluginDescriptor static_desc() {
     return make_descriptor("ScanSame", "com.pulp.test.scan.static");
 }
+// Advertises two outputs and MIDI input; the Processor below really has one
+// output and no MIDI.
+pulp::format::PluginDescriptor liar_static_desc() {
+    auto d = make_descriptor("ScanLiar", "com.pulp.test.scan.liar");
+    d.output_buses = {{"Out", 2}, {"Aux", 2}};
+    d.accepts_midi = true;
+    return d;
+}
+pulp::format::PluginDescriptor liar_real_desc() {
+    return make_descriptor("ScanLiar", "com.pulp.test.scan.liar");
+}
+int g_liar_built = 0;
+
 pulp::format::PluginDescriptor dynamic_desc() {
     return make_descriptor("ScanSame", "com.pulp.test.scan.dynamic");
 }
@@ -75,11 +89,48 @@ std::unique_ptr<pulp::format::Processor> create_dynamic() {
     return std::make_unique<CountingProcessor<g_dynamic_built, dynamic_desc>>();
 }
 
+std::unique_ptr<pulp::format::Processor> create_liar() {
+    return std::make_unique<CountingProcessor<g_liar_built, liar_real_desc>>();
+}
+
 } // namespace
 
+PULP_CLAP_BUNDLE_PLUGIN_WITH_DESCRIPTOR(ScanLiar, create_liar, liar_static_desc)
 PULP_CLAP_BUNDLE_PLUGIN_WITH_DESCRIPTOR(ScanStatic, create_static, static_desc)
 PULP_CLAP_BUNDLE_PLUGIN(ScanDynamic, create_dynamic)
 PULP_CLAP_BUNDLE_ENTRY()
+
+// Runs after the scan test in the same process: init is idempotent, so the
+// counters it checks are only meaningful in that order.
+void check_disagreement_detected() {
+    using namespace pulp::format;
+    // Pure comparison.
+    CHECK(descriptor_mismatch(liar_real_desc(), liar_real_desc()).empty());
+    const auto diff = descriptor_mismatch(liar_static_desc(), liar_real_desc());
+    CHECK(diff.find("output_buses") != std::string::npos);
+    CHECK(diff.find("accepts_midi") != std::string::npos);
+    CHECK(diff.find("name") == std::string::npos);
+
+    // Through the adapter: init builds the Processor and compares.
+    REQUIRE(clap_entry.init("test"));
+    auto* factory =
+        static_cast<const clap_plugin_factory_t*>(clap_entry.get_factory(CLAP_PLUGIN_FACTORY_ID));
+    const unsigned before = descriptor_disagreement_count().load();
+    const clap_plugin_t* p = factory->create_plugin(factory, nullptr, "com.pulp.test.scan.liar");
+    REQUIRE(p != nullptr);
+    REQUIRE(p->init(p));
+    CHECK(descriptor_disagreement_count().load() == before + 1);
+    p->destroy(p);
+
+    // A truthful static descriptor adds no disagreement.
+    const unsigned mid = descriptor_disagreement_count().load();
+    const clap_plugin_t* q = factory->create_plugin(factory, nullptr, "com.pulp.test.scan.static");
+    REQUIRE(q != nullptr);
+    REQUIRE(q->init(q));
+    CHECK(descriptor_disagreement_count().load() == mid);
+    q->destroy(q);
+    clap_entry.deinit();
+}
 
 TEST_CASE("CLAP scan builds no Processor when a static descriptor is given",
           "[clap][entry][scan]") {
@@ -90,11 +141,11 @@ TEST_CASE("CLAP scan builds no Processor when a static descriptor is given",
     auto* factory =
         static_cast<const clap_plugin_factory_t*>(clap_entry.get_factory(CLAP_PLUGIN_FACTORY_ID));
     REQUIRE(factory != nullptr);
-    REQUIRE(factory->get_plugin_count(factory) == 2);
+    REQUIRE(factory->get_plugin_count(factory) == 3);
 
     const clap_plugin_descriptor_t* ds = nullptr;
     const clap_plugin_descriptor_t* dd = nullptr;
-    for (uint32_t i = 0; i < 2; ++i) {
+    for (uint32_t i = 0; i < 3; ++i) {
         const auto* d = factory->get_plugin_descriptor(factory, i);
         REQUIRE(d != nullptr);
         if (std::strcmp(d->id, "com.pulp.test.scan.static") == 0)
@@ -120,7 +171,10 @@ TEST_CASE("CLAP scan builds no Processor when a static descriptor is given",
     pulp::format::clap_generic::ClapPluginRecord* rd = nullptr;
     for (uint32_t i = 0; i < pulp::format::clap_generic::g_clap_record_count; ++i) {
         auto& r = pulp::format::clap_generic::g_clap_records[i];
-        (r.static_descriptor ? rs : rd) = &r;
+        if (r.factory == create_static)
+            rs = &r;
+        if (r.factory == create_dynamic)
+            rd = &r;
     }
     REQUIRE(rs != nullptr);
     REQUIRE(rd != nullptr);
@@ -169,5 +223,11 @@ TEST_CASE("CLAP scan builds no Processor when a static descriptor is given",
     p->stop_processing(p);
     p->deactivate(p);
     p->destroy(p);
+
+    // A matching static descriptor is not reported as a disagreement.
+    CHECK(pulp::format::descriptor_disagreement_count().load() == 0);
+
     clap_entry.deinit();
+
+    check_disagreement_detected();
 }
