@@ -289,7 +289,7 @@ int cmd_create(const std::vector<std::string>& args) {
     }
 
     // Parse args
-    std::string name, type = "effect", manufacturer = "Pulp", output_path, tmpl, targets_arg;
+    std::string name, type = "effect", manufacturer = "Pulp", output_path, tmpl, targets_arg, ui;
     bool no_build = false;
     bool ci_mode = false;
     bool in_tree_mode = false;
@@ -318,6 +318,11 @@ int cmd_create(const std::vector<std::string>& args) {
         if (args[i] == "--template") { if (!take_value(tmpl, "--template")) return 2; continue; }
         if (args[i] == "--manufacturer") { if (!take_value(manufacturer, "--manufacturer")) return 2; continue; }
         if (args[i] == "--output") { if (!take_value(output_path, "--output")) return 2; continue; }
+        if (args[i] == "--ui") {
+            if (!take_value(ui, "--ui"))
+                return 2;
+            continue;
+        }
         if (args[i] == "--targets" || args[i] == "--target") {
             if (!take_value(targets_arg, args[i].c_str())) return 2;
             continue;
@@ -337,6 +342,8 @@ int cmd_create(const std::vector<std::string>& args) {
                          "agent-toolkit) or local template kit\n";
             std::cout << "  --manufacturer <name>                Manufacturer (default: Pulp)\n";
             std::cout << "  --output <dir>                       Override output directory\n";
+            std::cout << "  --ui <vellum|rmlui|none>              Select UI stack; none is "
+                         "audio-only (default: template behavior)\n";
             std::cout << "  --targets <list>                     Comma-separated extra targets (e.g. android)\n";
             std::cout << "  --in-tree, --example                 Add the project to examples/ using the local Pulp checkout\n";
             std::cout << "  --no-build                           Skip build after scaffolding\n";
@@ -382,6 +389,11 @@ int cmd_create(const std::vector<std::string>& args) {
         flush();
     }
 
+    if (!ui.empty() && ui != "none") {
+        std::cerr << "Error: --ui " << ui
+                  << " is not available yet: needs the pulp-vellum editor package\n";
+        return 1;
+    }
     if (name.empty()) {
         std::cerr << "Usage: pulp create <name> [--type effect|instrument|app|bare] [options]\n";
         return 1;
@@ -581,6 +593,7 @@ int cmd_create(const std::vector<std::string>& args) {
                                          : "A Pulp audio " + type},
         {"VST3_UID", make_vst3_uid()},
         {"SDK_VERSION", sdk_version},
+        {"UI_MODE_LINE", ui == "none" ? "NO_EDITOR" : ""},
     };
 
     auto source_template_dir = template_kit ? template_kit->template_dir

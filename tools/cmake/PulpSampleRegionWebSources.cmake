@@ -21,10 +21,13 @@ function(pulp_sample_region_web_sources ROOT OUT)
         "${ROOT}/core/runtime/src/base64.cpp"
         "${ROOT}/core/host/src/signal_graph_process.cpp"
         "${ROOT}/core/host/src/trigger_graph.cpp"
+        "${ROOT}/core/host/src/signal_graph_compile_nodes.cpp"
+        "${ROOT}/core/host/src/signal_graph_compile_routed.cpp"
         "${ROOT}/core/host/src/signal_graph_prepare.cpp"
         "${ROOT}/core/host/src/signal_graph_diagnostics.cpp"
         "${ROOT}/core/host/src/signal_graph_prepared_description_capture.cpp"
         "${ROOT}/core/host/src/signal_graph_prepared_edit_admission.cpp"
+        "${ROOT}/core/host/src/signal_graph_prepared_edit_adoption.cpp"
         "${ROOT}/core/host/src/signal_graph_prepared_topology_edit.cpp"
         "${ROOT}/core/host/src/signal_graph_live_swap.cpp"
         "${ROOT}/core/host/src/signal_graph_reference_walk.cpp"
@@ -38,6 +41,8 @@ function(pulp_sample_region_web_sources ROOT OUT)
         "${ROOT}/core/host/src/graph_serializer_regions.cpp"
         # Plugin node resolution; the web variant leaves plugin nodes unresolved.
         "${ROOT}/core/host/src/graph_serializer_plugin_resolver.cpp"
+        # The save path: writer selection, saved-identity documents and file writes.
+        "${ROOT}/core/host/src/graph_serializer_save.cpp"
         # graph_serializer.cpp validates voice-template declarations through
         # subgraph_voices.cpp, which instantiates templates via
         # subgraph_persistence.cpp.

@@ -721,6 +721,9 @@ commands:
       - name: --debug
         kind: flag
         description: Configure the generated project with `CMAKE_BUILD_TYPE=Debug` instead of the default Release build.
+      - name: --ui
+        kind: option
+        description: "UI stack: none selects audio-only NO_EDITOR; vellum and rmlui are reserved until the pulp-vellum editor package is available."
     docs: reference/cli.md#create
 
   - name: cache

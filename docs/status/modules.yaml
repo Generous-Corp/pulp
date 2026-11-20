@@ -4,7 +4,7 @@
 modules:
   - name: native
     path: integrations/pulp-native
-    summary: A native surface for an editor that brings its own renderer a child NSView backed by a CAMetalLayer with a display-linked frame pump and pointer and key input linking only the platform layer and system frameworks with no view canvas render GPU runtime Skia Dawn Vellum or RmlUi
+    summary: A native surface for an editor that brings its own renderer a child NSView backed by a CAMetalLayer with a display-linked frame pump on macOS and a child window with a GL context on Windows and X11 with pointer and key input linking only the platform layer and system libraries with no view canvas render GPU runtime Skia Dawn Vellum or RmlUi
     status: experimental
     dependencies: [platform]
     docs: reference/modules.md#native
@@ -15,6 +15,13 @@ modules:
     status: experimental
     dependencies: [format]
     docs: reference/modules.md#pulp_vellum
+
+  - name: pulp_vellum_audio
+    path: integrations/pulp-vellum-audio
+    summary: A lock-free TripleBuffer provider that publishes Pulp audio-thread meter and scope frames to Vellum value feeds
+    status: experimental
+    dependencies: [runtime]
+    docs: reference/modules.md#pulp_vellum_audio
 
   - name: playback
     summary: Master transport optional session-tempo sync immutable incrementally compiled track and automation programs bounded deterministic cursors WAV-backed arrangement audio rendering block-coherent publication and stable renderer shells

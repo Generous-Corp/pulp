@@ -52,6 +52,21 @@ test "$(git -C "${tmp}/repo" config branch.feature/example.pulpWorktreeOwner)" =
 test "$(git -C "${tmp}/repo" config branch.feature/example.pulpWorktreeDurableSha)" = \
     "$(git -C "${tmp}/worktree" rev-parse HEAD)"
 
+# assert-owner permits the recorded owner, refuses a different owner only while
+# the record is active, and fails open for absent/non-active records.
+(cd "${tmp}/worktree" && "${TOOL}" assert-owner --owner test-agent >/dev/null)
+if (cd "${tmp}/worktree" && "${TOOL}" assert-owner --owner other-agent >/dev/null 2>&1); then
+    echo "assert-owner accepted a different active owner unexpectedly" >&2
+    exit 1
+elif [ "$?" -ne 3 ]; then
+    echo "assert-owner mismatch did not exit 3" >&2
+    exit 1
+fi
+git -C "${tmp}/repo" branch feature/unrecorded
+(cd "${tmp}/repo" && "${TOOL}" assert-owner --branch feature/unrecorded --owner any-agent >/dev/null)
+(cd "${tmp}/repo" && "${TOOL}" mark --branch feature/unrecorded --status superseded --successor replacement >/dev/null)
+(cd "${tmp}/repo" && "${TOOL}" assert-owner --branch feature/unrecorded --owner any-agent >/dev/null)
+
 if (cd "${tmp}/worktree" && "${TOOL}" mark --status superseded >/dev/null 2>&1); then
     echo "superseded without successor unexpectedly succeeded" >&2
     exit 1

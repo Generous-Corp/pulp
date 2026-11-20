@@ -14,6 +14,8 @@ option(PULP_ENABLE_PULP_NATIVE
     "Build integrations/pulp-native, the native surface for editors that bring their own renderer"
     ${_pulp_native_default})
 unset(_pulp_native_default)
+option(PULP_NATIVE_REQUIRE_X11
+    "Fail configure when pulp-native cannot build its X11 GLX backend (release SDK builds)" OFF)
 
 if(PULP_ENABLE_PULP_NATIVE)
     if(NOT ((APPLE AND NOT IOS AND NOT PULP_IOS) OR WIN32 OR
@@ -47,4 +49,12 @@ if(PULP_ENABLE_PULP_VELLUM)
     add_subdirectory(pulp-vellum)
     set_property(GLOBAL APPEND PROPERTY PULP_INTEGRATION_TEST_DIRS
         "${CMAKE_CURRENT_SOURCE_DIR}/pulp-vellum/tests")
+endif()
+
+option(PULP_ENABLE_PULP_VELLUM_AUDIO
+    "Build integrations/pulp-vellum-audio (TripleBuffer audio meters/scopes for Vellum)" OFF)
+if(PULP_ENABLE_PULP_VELLUM_AUDIO)
+    add_subdirectory(pulp-vellum-audio)
+    set_property(GLOBAL APPEND PROPERTY PULP_INTEGRATION_TEST_DIRS
+        "${CMAKE_CURRENT_SOURCE_DIR}/pulp-vellum-audio/tests")
 endif()

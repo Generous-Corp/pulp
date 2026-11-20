@@ -19,6 +19,134 @@ function(pulp_check_gpu_runtime_record prefix commit)
     endif()
 endfunction()
 
+# _pulp_gpu_runtime_check_contained(<real-prefix> <prefix> <relative-path>)
+#
+# Refuses a listed path that is not a plain file reached through plain
+# directories beneath the prefix: no absolute or ".." component, no symlink at
+# any component from the prefix down, and a resolved path that still starts with
+# the resolved prefix. A symlinked directory would otherwise let the existence
+# and sha256 checks read files outside the prefix.
+function(_pulp_gpu_runtime_check_contained real_prefix prefix rel)
+    if(rel STREQUAL "" OR IS_ABSOLUTE "${rel}")
+        message(FATAL_ERROR
+            "Pulp: the gpu-runtime at ${prefix} lists '${rel}', which is not a path "
+            "beneath the prefix")
+    endif()
+    string(REPLACE "\\" "/" _norm "${rel}")
+    string(REPLACE "/" ";" _parts "${_norm}")
+    set(_walk "${prefix}")
+    foreach(_part IN LISTS _parts)
+        if(_part STREQUAL ".." OR _part STREQUAL "." OR _part STREQUAL "")
+            message(FATAL_ERROR
+                "Pulp: the gpu-runtime at ${prefix} lists '${rel}', which has a '${_part}' "
+                "component and can leave the prefix")
+        endif()
+        set(_walk "${_walk}/${_part}")
+        if(IS_SYMLINK "${_walk}")
+            message(FATAL_ERROR
+                "Pulp: ${_walk} in the gpu-runtime at ${prefix} is a symlink; every component "
+                "of a listed path must be a plain file or directory beneath the prefix")
+        endif()
+    endforeach()
+    if(NOT EXISTS "${_walk}" OR IS_DIRECTORY "${_walk}")
+        message(FATAL_ERROR
+            "Pulp: the gpu-runtime at ${prefix} lacks ${rel}; it does not match pulp.lock "
+            "vellum.gpu_runtime_digest")
+    endif()
+    file(REAL_PATH "${_walk}" _real)
+    string(FIND "${_real}" "${real_prefix}/" _at)
+    if(NOT _at EQUAL 0)
+        message(FATAL_ERROR
+            "Pulp: ${rel} in the gpu-runtime at ${prefix} resolves to ${_real}, outside the "
+            "prefix (${real_prefix})")
+    endif()
+endfunction()
+
+# pulp_check_gpu_runtime_archive(<prefix> <archive> <locked-digest>)
+#
+# Binds an installed gpu-runtime prefix to the archive digest pulp.lock names
+# (vellum.gpu_runtime_digest). The record's source_commit is self-reported, so
+# it cannot vouch for the bytes. The archive is the thing the lock hashes, so:
+#   1. the archive's own sha256 must equal the locked digest;
+#   2. the gpu-runtime-artifact.json inside the archive must be byte-identical
+#      to the prefix's, so the prefix claims exactly the locked archive's files;
+#   3. every file that record lists must exist in the prefix with its recorded
+#      sha256, and the prefix holds nothing else
+#      (no extra or symlinked file can ride along), and no listed path may pass
+#      through a symlink or resolve outside the prefix.
+# A prefix whose archive is not supplied, or does not match, stops configure.
+function(pulp_check_gpu_runtime_archive prefix archive locked_digest)
+    if(archive STREQUAL "")
+        message(FATAL_ERROR
+            "Pulp: PULP_GPU_RUNTIME_PREFIX (${prefix}) cannot be matched to pulp.lock "
+            "vellum.gpu_runtime_digest: set PULP_GPU_RUNTIME_ARCHIVE to the "
+            "gpu-runtime archive the prefix was extracted from")
+    endif()
+    if(NOT EXISTS "${archive}")
+        message(FATAL_ERROR "Pulp: gpu-runtime archive does not exist: ${archive}")
+    endif()
+    file(SHA256 "${archive}" _archive_digest)
+    if(NOT _archive_digest STREQUAL locked_digest)
+        message(FATAL_ERROR
+            "Pulp: gpu-runtime archive digest mismatch against pulp.lock "
+            "vellum.gpu_runtime_digest (lock ${locked_digest}, file ${_archive_digest})")
+    endif()
+    file(REAL_PATH "${prefix}" _real_prefix)
+    _pulp_gpu_runtime_check_contained("${_real_prefix}" "${prefix}" "gpu-runtime-artifact.json")
+    string(SHA256 _scratch_id "${archive}${prefix}")
+    set(_scratch "${CMAKE_BINARY_DIR}/pulp-gpu-runtime-archive-${_scratch_id}")
+    file(REMOVE_RECURSE "${_scratch}")
+    file(ARCHIVE_EXTRACT INPUT "${archive}" DESTINATION "${_scratch}"
+        PATTERNS gpu-runtime-artifact.json)
+    if(NOT EXISTS "${_scratch}/gpu-runtime-artifact.json")
+        message(FATAL_ERROR "Pulp: ${archive} carries no gpu-runtime-artifact.json")
+    endif()
+    file(SHA256 "${_scratch}/gpu-runtime-artifact.json" _archive_record)
+    file(SHA256 "${prefix}/gpu-runtime-artifact.json" _prefix_record)
+    file(REMOVE_RECURSE "${_scratch}")
+    if(NOT _archive_record STREQUAL _prefix_record)
+        message(FATAL_ERROR
+            "Pulp: the gpu-runtime at ${prefix} is not the pulp.lock vellum.gpu_runtime_digest "
+            "archive: its gpu-runtime-artifact.json differs from the archive's")
+    endif()
+    file(READ "${prefix}/gpu-runtime-artifact.json" _json)
+    string(JSON _count ERROR_VARIABLE _error LENGTH "${_json}" files)
+    if(_error OR _count EQUAL 0)
+        message(FATAL_ERROR "Pulp: ${prefix}/gpu-runtime-artifact.json lists no files to verify")
+    endif()
+    set(_listed "gpu-runtime-artifact.json")
+    math(EXPR _last "${_count} - 1")
+    foreach(_index RANGE ${_last})
+        string(JSON _path GET "${_json}" files ${_index} path)
+        string(JSON _sha GET "${_json}" files ${_index} sha256)
+        list(APPEND _listed "${_path}")
+        _pulp_gpu_runtime_check_contained("${_real_prefix}" "${prefix}" "${_path}")
+        file(SHA256 "${prefix}/${_path}" _actual)
+        if(NOT _actual STREQUAL _sha)
+            message(FATAL_ERROR
+                "Pulp: ${_path} in the gpu-runtime at ${prefix} was changed after extraction "
+                "(recorded ${_sha}, found ${_actual}); it does not match pulp.lock "
+                "vellum.gpu_runtime_digest")
+        endif()
+    endforeach()
+    file(GLOB_RECURSE _present RELATIVE "${prefix}" LIST_DIRECTORIES true "${prefix}/*")
+    foreach(_file IN LISTS _present)
+        if(IS_SYMLINK "${prefix}/${_file}")
+            message(FATAL_ERROR
+                "Pulp: the gpu-runtime at ${prefix} holds the symlink ${_file}; it does not "
+                "match pulp.lock vellum.gpu_runtime_digest")
+        endif()
+        if(IS_DIRECTORY "${prefix}/${_file}")
+            continue()
+        endif()
+        if(NOT _file IN_LIST _listed)
+            message(FATAL_ERROR
+                "Pulp: the gpu-runtime at ${prefix} holds ${_file}, which the locked archive "
+                "does not; it does not match pulp.lock vellum.gpu_runtime_digest")
+        endif()
+    endforeach()
+endfunction()
+
 # pulp_check_gpu_runtime_benchmark_flavour(<interface-defs> <pulp_benchmark>)
 #
 # gpu-runtime's benchmark hooks change its GpuCompute vtable, and an image links
@@ -58,10 +186,8 @@ endfunction()
 # checks that it carries the device layer Pulp forwards to. Sets <out-error>
 # to an empty string on success, or to the reason it cannot be used.
 #
-# Components are checked here rather than requested from find_package(): the
-# package marks a missing Dawn with VellumGpuRuntime_Device_FOUND FALSE but
-# never marks an installed component found, so check_required_components()
-# reports the whole package as not found as soon as any component is named.
+# Components are checked here rather than requested from find_package(), so the
+# reason a missing Dawn is refused names the Dawn build to fix.
 # GPU_RUNTIME_SKIA_DIR (or GPU_RUNTIME_RENDERER_ARCHIVE) must name the locked
 # Dawn build before the call.
 function(pulp_find_gpu_runtime_package version dir out_error)
@@ -75,7 +201,7 @@ function(pulp_find_gpu_runtime_package version dir out_error)
         endif()
     elseif(NOT VellumGpuRuntime_HAS_DEVICE OR
            (DEFINED VellumGpuRuntime_Device_FOUND AND NOT VellumGpuRuntime_Device_FOUND) OR
-           NOT TARGET gpu-runtime-dawn)
+           (NOT TARGET VellumGpuRuntime::Dawn AND NOT TARGET gpu-runtime-dawn))
         set(_error
             "the VellumGpuRuntime package in ${dir} has no usable device library: it was "
             "built without one, or GPU_RUNTIME_SKIA_DIR ('${GPU_RUNTIME_SKIA_DIR}') does not "
