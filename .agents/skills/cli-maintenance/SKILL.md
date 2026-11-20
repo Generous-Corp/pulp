@@ -2677,7 +2677,7 @@ Gotchas:
 - `--audio-scope-json` cannot be combined with `--audio-inspector` because
   both consume the live capture FIFO.
 
-## `pulp licenses` — a built bundle's third-party notices
+## `pulp licenses`: a built bundle's third-party notices
 
 `tools/cli/cmd_licenses.cpp` reads the `ThirdPartyNotices.json` that
 `pulp_add_plugin` writes into each bundle, through the same parser the
