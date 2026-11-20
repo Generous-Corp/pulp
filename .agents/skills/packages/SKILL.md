@@ -648,3 +648,7 @@ Pulp's build tools, but it is not redistributed by Pulp and does not belong in
 should run through `MISE_ENV=toolchain mise exec -- ...`; a host-toolchain run
 must be identified as such. Update `docs/reference/licensing.md` with the same
 boundary when the dependency row changes.
+
+The `vellum-gpu-runtime` row is derived from `pulp.lock`: its version and commit
+must match the lock's Vellum tag and sha, and `audit.py --strict` fails when they
+differ. Edit the lock and the row together.

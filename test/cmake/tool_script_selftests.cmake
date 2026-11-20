@@ -84,8 +84,14 @@ if(Python3_Interpreter_FOUND)
         "${CMAKE_SOURCE_DIR}/tools/deps/test_audit_extra.py")
     set_tests_properties(deps-audit-extra-selftest PROPERTIES LABELS "tools;selftest" TIMEOUT 120)
     add_test(NAME deps-audit-vellum-drift-selftest COMMAND ${Python3_EXECUTABLE}
-        "${CMAKE_SOURCE_DIR}/tools/deps/test_audit_vellum_drift.py")
+        "${CMAKE_SOURCE_DIR}/tools/deps/test_audit_vellum_drift.py" "${CMAKE_SOURCE_DIR}/pulp.lock")
     set_tests_properties(deps-audit-vellum-drift-selftest PROPERTIES LABELS "tools;selftest" TIMEOUT 120)
+    add_test(NAME deps-cmake-commands-selftest COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/deps/test_cmake_commands.py")
+    set_tests_properties(deps-cmake-commands-selftest PROPERTIES LABELS "tools;selftest" TIMEOUT 120)
+    add_test(NAME pulp-lock-selftest COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/deps/test_pulp_lock.py" "${CMAKE_SOURCE_DIR}/pulp.lock")
+    set_tests_properties(pulp-lock-selftest PROPERTIES LABELS "tools;selftest" TIMEOUT 120)
     add_test(NAME harness-adapters-base-selftest COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/harness/tests/test_adapters_base.py")
     set_tests_properties(harness-adapters-base-selftest PROPERTIES LABELS "tools;selftest" TIMEOUT 120)
