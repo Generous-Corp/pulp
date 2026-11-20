@@ -43,11 +43,21 @@ function(pulp_add_notice_manifest manifest)
     set_property(GLOBAL APPEND PROPERTY PULP_NOTICE_MANIFESTS "${_abs}")
 endfunction()
 
-# Generate Pulp's own manifest into the build tree and install it with the SDK.
-# Needs Python 3; without it plug-ins still get a notices file, which then lists
-# Pulp under `sdks_without_manifest`.
-function(pulp_generate_sdk_notices)
-    set(_root "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/../..")
+# Generate Pulp's own manifest into the build tree, once per configure, when
+# this module runs from a Pulp source tree. Plug-ins configured before the
+# top-level call below trigger it themselves. Needs Python 3; without it
+# plug-ins still get a notices file, which then lists Pulp under
+# `sdks_without_manifest`.
+function(_pulp_ensure_sdk_notices)
+    get_property(_done GLOBAL PROPERTY _PULP_SDK_NOTICES_GENERATED)
+    if(_done)
+        return()
+    endif()
+    set_property(GLOBAL PROPERTY _PULP_SDK_NOTICES_GENERATED ON)
+    get_filename_component(_root "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/../.." ABSOLUTE)
+    if(NOT EXISTS "${_root}/tools/deps/notices.py" OR NOT EXISTS "${_root}/tools/deps/manifest.json")
+        return()
+    endif()
     set(_out "${CMAKE_BINARY_DIR}/share/pulp/notices")
     set_property(DIRECTORY "${CMAKE_SOURCE_DIR}" APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
         "${_root}/tools/deps/manifest.json" "${_root}/NOTICE.md" "${_root}/tools/deps/notices.py")
@@ -60,13 +70,19 @@ function(pulp_generate_sdk_notices)
     endif()
     execute_process(
         COMMAND "${Python3_EXECUTABLE}" "${_root}/tools/deps/notices.py"
-            --out "${_out}" --sdk-version "${PROJECT_VERSION}"
+            --out "${_out}" --sdk-version "${Pulp_VERSION}"
         RESULT_VARIABLE _rc OUTPUT_VARIABLE _stdout ERROR_VARIABLE _stderr)
     if(NOT _rc EQUAL 0)
         message(FATAL_ERROR "tools/deps/notices.py failed:\n${_stderr}")
     endif()
     set_property(GLOBAL PROPERTY PULP_SDK_NOTICE_MANIFEST "${_out}/notices.json")
-    install(DIRECTORY "${_out}/" DESTINATION "share/pulp/notices" OPTIONAL)
+endfunction()
+
+# Generate Pulp's manifest and install it with the SDK.
+function(pulp_generate_sdk_notices)
+    _pulp_ensure_sdk_notices()
+    install(DIRECTORY "${CMAKE_BINARY_DIR}/share/pulp/notices/"
+        DESTINATION "share/pulp/notices" OPTIONAL)
 endfunction()
 
 # JSON string literal for an arbitrary text value.
@@ -211,6 +227,7 @@ function(_pulp_write_third_party_notices format_target)
     get_target_property(_product ${format_target} PULP_NOTICES_PRODUCT)
     get_target_property(_format ${format_target} PULP_NOTICES_FORMAT)
     get_target_property(_base ${format_target} PULP_NOTICES_BASE)
+    _pulp_ensure_sdk_notices()
 
     if(COMMAND pulp_link_closure)
         pulp_link_closure(${format_target} TARGETS_OUT _closure)
@@ -375,7 +392,7 @@ function(_pulp_write_third_party_notices format_target)
             if(_ns MATCHES "^(Pulp|pulp)$" OR NOT _ns IN_LIST _claimed_namespaces)
                 continue()
             endif()
-        elseif(_t MATCHES "^pulp-")
+        elseif(_t MATCHES "^pulp[-_]")
             continue()
         endif()
         list(APPEND _unattributed "${_t}")
