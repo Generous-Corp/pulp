@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <atomic>
 #include <cerrno>
+#include <cstdint>
 #include <cstdio>
 #include <cstring>
 #include <limits>
@@ -311,16 +312,26 @@ bool descriptor_matches_path(int descriptor, const std::filesystem::path& path) 
 #endif
 }
 
-bool sync_descriptor(int descriptor) noexcept {
+// Flushes that went through the drive cache; read by tests.
+std::atomic<std::uint64_t> g_full_sync_count{0};
+
+bool sync_descriptor(int descriptor, DurableFileDurability durability) noexcept {
 #if defined(_WIN32)
+    if (durability == DurableFileDurability::full)
+        g_full_sync_count.fetch_add(1, std::memory_order_relaxed);
     return _commit(descriptor) == 0;
 #elif defined(__APPLE__) && defined(F_FULLFSYNC)
+    if (durability == DurableFileDurability::relaxed)
+        return ::fsync(descriptor) == 0;
+    g_full_sync_count.fetch_add(1, std::memory_order_relaxed);
     if (::fcntl(descriptor, F_FULLFSYNC) == 0)
         return true;
     if (errno != ENOTSUP)
         return false;
     return ::fsync(descriptor) == 0;
 #else
+    if (durability == DurableFileDurability::full)
+        g_full_sync_count.fetch_add(1, std::memory_order_relaxed);
     return ::fsync(descriptor) == 0;
 #endif
 }
@@ -407,6 +418,10 @@ struct DurableFileReplacement::Impl {
     bool fail_parent_directory_sync = false;
 };
 
+std::uint64_t DurableFileReplacementTestAccess::full_sync_count() noexcept {
+    return g_full_sync_count.load(std::memory_order_relaxed);
+}
+
 void DurableFileReplacementTestAccess::fail_parent_directory_sync(
     DurableFileReplacement& replacement) noexcept {
     if (replacement.impl_)
@@ -485,7 +500,7 @@ bool DurableFileReplacement::write_all(std::span<const std::uint8_t> bytes) noex
     return true;
 }
 
-DurableFileCommitOutcome DurableFileReplacement::commit() noexcept {
+DurableFileCommitOutcome DurableFileReplacement::commit(DurableFileDurability durability) noexcept {
     bool replaced = false;
     try {
         if (!valid())
@@ -493,7 +508,7 @@ DurableFileCommitOutcome DurableFileReplacement::commit() noexcept {
         if (!descriptor_matches_path(impl_->descriptor, impl_->temporary) ||
             !destination_matches_metadata(impl_->destination, impl_->metadata) ||
             !apply_replacement_metadata(impl_->descriptor, impl_->metadata) ||
-            !sync_descriptor(impl_->descriptor)) {
+            !sync_descriptor(impl_->descriptor, durability)) {
             cancel();
             return DurableFileCommitOutcome::NotReplaced;
         }
