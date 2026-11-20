@@ -598,6 +598,18 @@ is, and its provenance belongs in `VERSION.md`. Any other content difference is
 a toolchain change and needs a full Windows build and smoke before the pin
 moves.
 
+## Plug-in notices follow the render targets
+
+Skia, ICU and Dawn reach plug-in bundles' `ThirdPartyNotices` through the
+`link_targets` of their `tools/deps/manifest.json` entries: `skia::skia` for
+Skia and ICU, `gpu-runtime-dawn` and `skia::dawn` for Dawn. If a toolchain update
+renames those imported targets or moves Dawn onto another one, update the
+fields in the same change, or every GPU editor bundle silently stops naming
+the renderer. The `plugin-third-party-notices` ctest is the check: its
+FULL_EDITOR control must name Skia and Dawn. Libraries the new archives bundle
+(HarfBuzz, libpng and the rest) are credited inside the Skia `NOTICE.md`
+section, which is the text that ships.
+
 ## One Skia identity across every platform
 
 Pulp records a single Skia identity for all platforms (manifest, V8 pairing,
