@@ -401,6 +401,14 @@ if(UNIX AND NOT APPLE)
         LIBRARIES pulp::platform)
 endif()
 
+if(WIN32)
+    # MainThreadScope and MainThreadTimer with no host loop registered: the
+    # message-only window fallback, pumped by the test thread.
+    pulp_add_test_suite(pulp-test-platform-win32-main-thread
+        SOURCES test_platform_win32_main_thread.cpp
+        LIBRARIES pulp::platform)
+endif()
+
 if(UNIX AND NOT APPLE)
     # Stopping the hosted idle timer off-thread after the host loop is withdrawn.
     pulp_add_test_suite(pulp-test-main-thread-timer-host-loop
