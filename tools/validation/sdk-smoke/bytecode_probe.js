@@ -1,0 +1,1 @@
+createLabel('bytecode-probe', 'ok', '');

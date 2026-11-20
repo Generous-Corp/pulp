@@ -41,6 +41,17 @@ set(PULP_SDK_SMOKE_REQUIRE_FORMATS ""
 
 find_package(Pulp REQUIRED CONFIG)
 
+# Installed-SDK QuickJS bytecode consumer. This deliberately uses the public
+# CMake helper from the installed SDK, links only installed Pulp targets, and
+# loads the resulting blob through the public scripted-session path.
+pulp_add_js_bytecode(PulpSDKSmokeBytecodeData
+    SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/bytecode_probe.js"
+    NAMESPACE bytecode_probe
+    WIDGET_BRIDGE_SCRIPT)
+add_executable(PulpSDKSmokeBytecodeProbe bytecode_probe.cpp)
+target_link_libraries(PulpSDKSmokeBytecodeProbe PRIVATE
+    Pulp::view PulpSDKSmokeBytecodeData)
+
 add_executable(PulpSDKSmokeSpectralBandMaskProbe spectral_band_mask_probe.cpp)
 target_link_libraries(PulpSDKSmokeSpectralBandMaskProbe PRIVATE Pulp::signal)
 
