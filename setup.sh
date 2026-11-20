@@ -25,6 +25,15 @@ NON_INTERACTIVE=false
 PRINT_SKIA_CI_DEST=false
 PRINT_PLAN=false
 ERRORS=0
+PULP_UI="${PULP_UI:-vellum}"
+
+case "$PULP_UI" in
+    vellum|none) ;;
+    *)
+        echo "setup.sh: unknown PULP_UI=$PULP_UI (expected vellum or none)" >&2
+        exit 2
+        ;;
+esac
 
 # Bootstrap builds Release without examples. Release is this repo's documented
 # default build type, and a from-scratch examples tree is a long cost nobody
@@ -78,6 +87,7 @@ if $PRINT_PLAN; then
     echo "build_type=$BUILD_TYPE"
     echo "examples=$BUILD_EXAMPLES"
     echo "deps_only=$DEPS_ONLY"
+    echo "ui=$PULP_UI"
     echo "generator=${GENERATOR:-default}"
     echo "configure=cmake ${GENERATOR:+-G $GENERATOR }-S $REPO_ROOT -B $REPO_ROOT/build -DCMAKE_BUILD_TYPE=$BUILD_TYPE -DPULP_BUILD_EXAMPLES=$BUILD_EXAMPLES"
     exit 0
@@ -1309,7 +1319,7 @@ step "Checking git-lfs files"
 # validates both the exact manifest digest and the expected library before it
 # accepts a cache hit.  Release x64/universal jobs remain isolated because they
 # call fetch_skia_for_release.py directly with their matrix-specific slice.
-if $CI_MODE && [ "$(uname -s)" = "Darwin" ] && [ "$(uname -m)" = "arm64" ]; then
+if [ "$PULP_UI" != "none" ] && $CI_MODE && [ "$(uname -s)" = "Darwin" ] && [ "$(uname -m)" = "arm64" ]; then
     step "Provisioning prebuilt Skia (CI macOS arm64)"
     if [ "${PULP_USE_BAKED_SKIA:-0}" = 1 ] && [ -n "${SKIA_DIR:-}" ]; then
         # Tart goldens already carry the pinned materialized Skia/Dawn bundle.
@@ -1352,7 +1362,9 @@ if $CI_MODE && [ "$(uname -s)" = "Darwin" ] && [ "$(uname -m)" = "arm64" ]; then
     fi
 fi
 
-# Check if Skia files are actual binaries or just LFS pointers
+# Check if Skia files are actual binaries or just LFS pointers. Audio-only
+# setup must not even pull a tracked Skia LFS pointer.
+if [ "$PULP_UI" != "none" ]; then
 SKIA_CHECK="${SKIA_CI_DEST:-$REPO_ROOT/external/skia-build}"
 if [ -d "$SKIA_CHECK" ]; then
     if skia_has_lfs_pointer "$SKIA_CHECK"; then
@@ -1376,6 +1388,9 @@ if [ -d "$SKIA_CHECK" ]; then
     fi
 else
     info "Skia build directory not found (GPU rendering stays disabled unless Skia is present)"
+fi
+else
+    info "PULP_UI=none: skipping Skia/Dawn provisioning"
 fi
 
 # ── Install agent-agnostic git hooks ───────────────────────────────────────
@@ -1429,15 +1444,68 @@ DEPENDENCY_ERRORS_START=$ERRORS
 FETCHCONTENT_CACHE_ROOT="$(fetchcontent_cache_root)"
 info "Shared FetchContent source cache: $FETCHCONTENT_CACHE_ROOT"
 
+vellum_lock_value() {
+    python3 - "$REPO_ROOT/pulp.lock" "$1" <<'PY'
+import json, sys
+print(json.load(open(sys.argv[1], encoding="utf-8"))["vellum"][sys.argv[2]])
+PY
+}
+
+if [ "$PULP_UI" = "vellum" ]; then
+    VELLUM_PLATFORM=""
+    if [ "$OS" = "Darwin" ] && [ "$ARCH" = "arm64" ]; then
+        VELLUM_PLATFORM="darwin-arm64"
+    fi
+    if [ "$VELLUM_PLATFORM" = "darwin-arm64" ]; then
+        step "Staging the pinned Vellum SDK"
+        VELLUM_SDK_URL="$(vellum_lock_value sdk_url)"
+        VELLUM_SDK_DIGEST="$(vellum_lock_value sdk_digest)"
+        VELLUM_SDK_CACHE="${PULP_VELLUM_SDK_CACHE:-${HOME}/.cache/pulp/vellum-sdk}"
+        VELLUM_SDK_ARCHIVE="$VELLUM_SDK_CACHE/$(basename "$VELLUM_SDK_URL")"
+        if dry "curl -L --fail --retry 5 --retry-all-errors --retry-delay 10 --connect-timeout 30 $VELLUM_SDK_URL -o $VELLUM_SDK_ARCHIVE"; then
+            :
+        else
+            mkdir -p "$VELLUM_SDK_CACHE"
+            if [ ! -f "$VELLUM_SDK_ARCHIVE" ] || [ "$(sha256_of_file "$VELLUM_SDK_ARCHIVE" 2>/dev/null || true)" != "$VELLUM_SDK_DIGEST" ]; then
+                curl -L --fail --retry 5 --retry-all-errors --retry-delay 10 --connect-timeout 30 \
+                    "$VELLUM_SDK_URL" -o "$VELLUM_SDK_ARCHIVE"
+            fi
+            if [ "$(sha256_of_file "$VELLUM_SDK_ARCHIVE")" != "$VELLUM_SDK_DIGEST" ]; then
+                fail "Vellum SDK archive digest does not match pulp.lock"
+            else
+                VELLUM_TAG="$(vellum_lock_value tag)"
+                VELLUM_PREFIX="${PULP_VELLUM_SDK_PREFIX:-${HOME}/.local/share/pulp/vellum/${VELLUM_TAG}}"
+                VELLUM_STAGED="$VELLUM_PREFIX/share/pulp/vellum-sdk/${VELLUM_TAG#v}"
+                if [ -f "$VELLUM_STAGED/pulp-sdk-digest.txt" ] && \
+                   [ "$(tr -d '[:space:]' < "$VELLUM_STAGED/pulp-sdk-digest.txt")" = "$VELLUM_SDK_DIGEST" ]; then
+                    info "Vellum SDK $VELLUM_TAG already staged in $VELLUM_STAGED"
+                elif python3 tools/scripts/bundle_vellum_sdk.py \
+                        --lock "$REPO_ROOT/pulp.lock" --prefix "$VELLUM_PREFIX" \
+                        --platform "$VELLUM_PLATFORM" --archive "$VELLUM_SDK_ARCHIVE" \
+                        --integrations "$REPO_ROOT/integrations"; then
+                    info "Vellum SDK $VELLUM_TAG staged in $VELLUM_STAGED"
+                else
+                    fail "Vellum SDK staging failed (set PULP_UI=none to continue audio-only)"
+                fi
+                info "Vellum UI projects find it with CMAKE_PREFIX_PATH=$VELLUM_STAGED/sdk"
+            fi
+        fi
+    else
+        info "Vellum SDK not yet available for $OS-$ARCH; continuing audio-only"
+    fi
+fi
+
 ensure_shared_git_source_with_retry "CHOC" "https://github.com/danielraffel/choc.git" \
     "b586f33d1c9e8bee98c2b420a5b20bf525c3c7be" "$(fetchcontent_cache_dir_name "choc" "b586f33d1c9e8bee98c2b420a5b20bf525c3c7be")"
 
-ensure_shared_git_source_with_retry "WebGPU-distribution" "https://github.com/eliemichel/WebGPU-distribution.git" \
-    "17dcd42a7683355e7a40ac4e97e77f36dff5b5ab" "$(fetchcontent_cache_dir_name "webgpu" "17dcd42a7683355e7a40ac4e97e77f36dff5b5ab")"
+if [ "$PULP_UI" != "none" ]; then
+    ensure_shared_git_source_with_retry "WebGPU-distribution" "https://github.com/eliemichel/WebGPU-distribution.git" \
+        "17dcd42a7683355e7a40ac4e97e77f36dff5b5ab" "$(fetchcontent_cache_dir_name "webgpu" "17dcd42a7683355e7a40ac4e97e77f36dff5b5ab")"
+fi
 
 WGPU_NATIVE_VERSION="v24.0.3.1"
 WGPU_RUNTIME_NAME="$(wgpu_runtime_url_name || true)"
-if [ -n "$WGPU_RUNTIME_NAME" ]; then
+if [ -n "$WGPU_RUNTIME_NAME" ] && [ "$PULP_UI" != "none" ]; then
     # Digest-pinned in tools/deps/manifest.json; configure verifies the same pin.
     if WGPU_RUNTIME_PINS="$(wgpu_native_pinned_sha256 "$WGPU_RUNTIME_NAME" "$WGPU_NATIVE_VERSION")" \
         && [ -n "$WGPU_RUNTIME_PINS" ]; then
