@@ -9,19 +9,21 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
 import shutil
+import sys
 import tarfile
 import tempfile
 import urllib.request
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 SUPPORTED_PLATFORMS = {"darwin-arm64"}
 
 
-def _lock(path: Path) -> tuple[str, str]:
+def _lock(path: Path) -> tuple[str, str, str]:
     data = json.loads(path.read_text(encoding="utf-8"))
     vellum = data["vellum"]
-    return vellum["tag"], vellum["sdk_digest"]
+    return vellum["tag"], vellum["sdk_digest"], vellum["sdk_url"]
 
 
 def archive_name(tag: str, platform: str) -> str:
@@ -30,7 +32,7 @@ def archive_name(tag: str, platform: str) -> str:
 
 def resolve_archive(lock_path: Path, platform: str, archive: Path | None,
                     archive_dir: Path | None, fetch: bool = False) -> tuple[Path | None, str]:
-    tag, digest = _lock(lock_path)
+    tag, digest, url = _lock(lock_path)
     if platform not in SUPPORTED_PLATFORMS:
         raise ValueError(
             f"Vellum publishes no SDK for {platform} yet; only darwin-arm64 is lock-pinned"
@@ -43,7 +45,6 @@ def resolve_archive(lock_path: Path, platform: str, archive: Path | None,
             return None, f"missing Vellum SDK archive for {tag}; expected sha256 vellum.sdk_digest {digest}"
         archive_dir.mkdir(parents=True, exist_ok=True)
         candidate = archive_dir / archive_name(tag, platform)
-        url = f"https://github.com/Generous-Corp/vellum/releases/download/{tag}/{candidate.name}"
         try:
             urllib.request.urlretrieve(url, candidate)
         except OSError as exc:
@@ -58,18 +59,60 @@ def resolve_archive(lock_path: Path, platform: str, archive: Path | None,
     return candidate, digest
 
 
+PUBLISH_PENDING = ".vellum-sdk-publish-pending"
+
+
+def _publish_step() -> None:
+    """Between the two publication renames; a test hook for interruption."""
+
+
+def _canonical(name: str) -> Path:
+    """Archive member name without "." segments or a leading "/"."""
+    return Path(*[part for part in PurePosixPath(name).parts if part not in (".", "/")])
+
+
 def _safe_extract(archive: Path, destination: Path) -> None:
     with tarfile.open(archive, "r:gz") as bundle:
         root = destination.resolve()
-        for member in bundle.getmembers():
+        members = bundle.getmembers()
+        symlinks: set[Path] = set()
+        for member in members:
             target = (destination / member.name).resolve()
             if target != root and root not in target.parents:
                 raise ValueError(f"archive member escapes destination: {member.name}")
-            if member.issym() or member.islnk():
+            if ".." in PurePosixPath(member.name).parts:
+                # A ".." segment can step back through a symlink member that
+                # the ancestor check below compares by canonical name.
+                raise ValueError(f"archive member name is not canonical: {member.name}")
+            parts = _canonical(member.name).parts
+            if any(Path(*parts[:index]) in symlinks for index in range(1, len(parts))):
+                raise ValueError(f"archive member follows symlink: {member.name}")
+            if not (member.isreg() or member.isdir() or member.issym() or member.islnk()):
+                # Python < 3.12 has no extraction filter, so refuse device
+                # files and FIFOs here on every interpreter.
+                raise ValueError(f"archive member is not a regular file, directory or link: {member.name}")
+            if member.islnk():
+                # Tar hardlink names are rooted at the archive extraction root.
+                link = (destination / member.linkname).resolve()
+                if link != root and root not in link.parents:
+                    raise ValueError(f"archive link escapes destination: {member.name}")
+                if ".." in PurePosixPath(member.linkname).parts:
+                    raise ValueError(f"archive hardlink name is not canonical: {member.name}")
+                if _canonical(member.linkname) in symlinks:
+                    raise ValueError(f"archive hardlink targets a symlink: {member.name}")
+            elif member.issym():
                 link = (target.parent / member.linkname).resolve()
                 if root not in link.parents and link != root:
                     raise ValueError(f"archive link escapes destination: {member.name}")
-        bundle.extractall(destination)
+                symlinks.add(_canonical(member.name))
+            if not member.issym():
+                # Match the "data" filter on every interpreter: no setuid,
+                # setgid or sticky bits, and no group/other write.
+                member.mode &= 0o755
+        if sys.version_info >= (3, 12):
+            bundle.extractall(destination, members=members, filter="data")
+        else:
+            bundle.extractall(destination, members=members)
 
 
 def _merge_notice(prefix: Path, vellum_root: Path) -> None:
@@ -98,16 +141,43 @@ def bundle(*, lock_path: Path, prefix: Path, platform: str, archive: Path | None
         unpacked.mkdir()
         _safe_extract(resolved, unpacked)
         sdk_root = prefix / "share" / "pulp" / "vellum-sdk" / _lock(lock_path)[0].removeprefix("v")
-        if sdk_root.exists():
-            raise FileExistsError(f"refusing to overwrite staged Vellum SDK: {sdk_root}")
         sdk_root.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copytree(unpacked, sdk_root, symlinks=True)
         integration_dest = prefix / "share" / "pulp" / "integrations"
-        if integration_dest.exists():
-            raise FileExistsError(f"refusing to overwrite staged integrations: {integration_dest}")
-        shutil.copytree(integrations, integration_dest, symlinks=True)
-        _merge_notice(prefix, sdk_root)
-        (sdk_root / "pulp-sdk-digest.txt").write_text(digest + "\n", encoding="utf-8")
+        # Publication renames the integrations, then the SDK, then writes the
+        # SDK digest marker that setup.sh treats as "staged". The pending
+        # marker spans that window, so a run interrupted inside it is redone
+        # here instead of being accepted (or refused) as a staged SDK.
+        pending = prefix / "share" / "pulp" / PUBLISH_PENDING
+        digest_marker = sdk_root / "pulp-sdk-digest.txt"
+        with tempfile.TemporaryDirectory(prefix=f".{sdk_root.name}-", dir=sdk_root.parent) as staging:
+            staging_root = Path(staging)
+            if pending.exists() and not digest_marker.exists():
+                for leftover, name in ((sdk_root, "stale-sdk"), (integration_dest, "stale-integrations")):
+                    if leftover.exists() or leftover.is_symlink():
+                        leftover.rename(staging_root / name)
+                pending.unlink()
+            if sdk_root.exists():
+                raise FileExistsError(f"refusing to overwrite staged Vellum SDK: {sdk_root}")
+            if integration_dest.exists():
+                raise FileExistsError(f"refusing to overwrite staged integrations: {integration_dest}")
+            staged_sdk = staging_root / sdk_root.name
+            staged_integrations = staging_root / "integrations"
+            shutil.copytree(unpacked, staged_sdk, symlinks=True)
+            shutil.copytree(integrations, staged_integrations, symlinks=True)
+            if (prefix / "NOTICE.md").exists():
+                shutil.copy2(prefix / "NOTICE.md", staging_root / "NOTICE.md")
+            _merge_notice(staging_root, staged_sdk)
+            staged_notice = staging_root / "NOTICE.md"
+            staged_digest = staging_root / "pulp-sdk-digest.txt"
+            staged_digest.write_text(digest + "\n", encoding="utf-8")
+            pending.write_text(sdk_root.name + "\n", encoding="utf-8")
+            staged_integrations.rename(integration_dest)
+            _publish_step()
+            staged_sdk.rename(sdk_root)
+            if staged_notice.exists():
+                os.replace(staged_notice, prefix / "NOTICE.md")
+            os.replace(staged_digest, digest_marker)
+            pending.unlink()
     return sdk_root
 
 

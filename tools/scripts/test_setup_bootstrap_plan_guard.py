@@ -63,6 +63,63 @@ class SetupBootstrapPlanGuardTest(unittest.TestCase):
         result = run_guard(SETUP)
         self.assertEqual(result.returncode, 0, f"{result.stdout}{result.stderr}")
 
+    def _deps_only_dry_run(self, ui: str) -> str:
+        env = os.environ.copy()
+        env["PULP_UI"] = ui
+        with tempfile.TemporaryDirectory(prefix=f"pulp-setup-ui-{ui}-") as cache:
+            env["PULP_SHARED_FETCHCONTENT_SOURCE_DIR"] = cache
+            env["PULP_VELLUM_SDK_CACHE"] = str(Path(cache) / "vellum-sdk")
+            result = subprocess.run(
+                ["bash", str(SETUP), "--deps-only", "--dry-run", "--non-interactive"],
+                cwd=REPO_ROOT, env=env, capture_output=True, text=True, encoding="utf-8", timeout=30,
+            )
+        # The isolated dry run intentionally has no VST3 cache, so dependency
+        # bootstrap may report that unrelated cache as incomplete; the UI
+        # selection is still fully exercised before that point.
+        self.assertIn(result.returncode, (0, 1), f"{result.stdout}{result.stderr}")
+        return result.stdout + result.stderr
+
+    # Exact strings the rendering provisioning paths print. Matching these
+    # (not a bare "Skia") keeps the test independent of the wording of the
+    # PULP_UI=none skip notice.
+    RENDERING_MARKERS = (
+        "Staging the pinned Vellum SDK",
+        "Vellum SDK not yet available for",
+        "vellum-sdk-",
+        "WebGPU-distribution",
+        "wgpu-native",
+        "Provisioning prebuilt Skia",
+        "Skia build directory",
+    )
+
+    def test_ui_none_skips_rendering_downloads(self) -> None:
+        output = self._deps_only_dry_run("none")
+        for marker in self.RENDERING_MARKERS:
+            self.assertNotIn(marker, output)
+
+    def test_ui_vellum_reaches_sdk_staging(self) -> None:
+        """Control for the PULP_UI=none test: the same dry run with the
+        default UI does enter the Vellum branch. On a host with a published
+        SDK it prints the staging step; elsewhere it prints the audio-only
+        notice. Either way PULP_UI=none must print neither."""
+        output = self._deps_only_dry_run("vellum")
+        staged = "Staging the pinned Vellum SDK" in output
+        unavailable = "Vellum SDK not yet available for" in output
+        self.assertTrue(staged or unavailable, output)
+        if staged:
+            self.assertIn("vellum-sdk-", output)
+            self.assertIn("WebGPU-distribution", output)
+
+    def test_unknown_ui_fails(self) -> None:
+        env = os.environ.copy()
+        env["PULP_UI"] = "mystery"
+        result = subprocess.run(
+            ["bash", str(SETUP), "--print-plan"],
+            cwd=REPO_ROOT, env=env, capture_output=True, text=True, encoding="utf-8", timeout=30,
+        )
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("unknown PULP_UI=mystery", result.stderr)
+
     def test_debug_default_is_rejected(self) -> None:
         self._assert_rejects("BUILD_TYPE=Release\n", "BUILD_TYPE=Debug\n", "default build type")
 

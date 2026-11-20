@@ -37,14 +37,17 @@ def validate(lock: dict[str, Any], *, tag_sha: str | None = None,
     vellum = lock.get("vellum")
     if not isinstance(vellum, dict):
         return [*errors, "vellum must be an object"]
-    required = {"tag", "sha", "sdk_digest", "gpu_runtime_digest"}
+    required = {"tag", "sha", "sdk_url", "sdk_digest", "gpu_runtime_digest"}
     if set(vellum) != required:
-        errors.append("vellum must contain exactly tag, sha, sdk_digest and gpu_runtime_digest")
+        errors.append("vellum must contain exactly tag, sha, sdk_url, sdk_digest and gpu_runtime_digest")
     tag, sha = vellum.get("tag"), vellum.get("sha")
     if not isinstance(tag, str) or not TAG.fullmatch(tag):
         errors.append("vellum.tag must be a release tag such as v0.2.0")
     if not isinstance(sha, str) or not HEX40.fullmatch(sha):
         errors.append("vellum.sha must be lowercase 40-hex")
+    sdk_url = vellum.get("sdk_url")
+    if not isinstance(sdk_url, str) or not sdk_url.startswith("https://"):
+        errors.append("vellum.sdk_url must be an https URL")
     for field in ("sdk_digest", "gpu_runtime_digest"):
         value = vellum.get(field)
         if not isinstance(value, str) or not HEX64.fullmatch(value):

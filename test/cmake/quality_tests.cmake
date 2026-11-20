@@ -796,6 +796,16 @@ if(Python3_Interpreter_FOUND)
     add_test(NAME ctest-label-exclusion-guard-selftest COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/scripts/test_ctest_label_exclusion_guard.py")
 
+    # Real-clock reads in Python tests. A test that builds an expectation from
+    # the real clock while the code under test runs on a pinned date passes
+    # until the calendar crosses a window it assumed, then fails every run at
+    # once -- the day it did, the required versioning check went red for every
+    # merge group. The lint rejects a newly added read (diff-scoped, in gates.sh
+    # and pre-push); the matrix runs the listed date-sensitive selftests under
+    # zones a day apart from UTC so a dependency shows up before the rollover.
+    add_test(NAME clock-in-tests-lint-selftest COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/scripts/test_clock_in_tests_lint.py")
+
     # Capability-contract gate wiring: `agent_capability_manifest.py --check`
     # answers a different question depending on which base it resolves -- left
     # alone it takes the merge base, CI forces the base tip, and the two have
