@@ -71,10 +71,12 @@ public:
         };
     }
     void define_parameters(pulp::state::StateStore& store) override {
-        normalizer = store.add_listener([this, &store](pulp::state::ParamID id, float value) {
-            if (normalize_gain_writes && id == 1 && value == 8.0f)
-                store.set_value_rt(id, 7.0f);
-        }, pulp::state::ListenerThread::Audio);
+        normalizer = store.add_listener(
+            [this, &store](pulp::state::ParamID id, float value) {
+                if (normalize_gain_writes && id == 1 && value == 8.0f)
+                    store.set_value_rt(id, 7.0f);
+            },
+            pulp::state::ListenerThread::Audio);
         store.add_group({.id = 10, .name = "Oscillators"});
         store.add_group({.id = 11, .name = "Wavetable 1", .parent_id = 10});
         store.add_group({.id = 12, .name = std::string(1100, 'x')});
@@ -117,7 +119,8 @@ public:
                  const pulp::audio::BufferView<const float>& in,
                  pulp::midi::MidiBuffer&, pulp::midi::MidiBuffer&,
                  const pulp::format::ProcessContext&) override {
-        if (during_process) during_process();
+        if (during_process)
+            during_process();
         for (std::size_t ch = 0; ch < out.num_channels() && ch < in.num_channels(); ++ch) {
             auto ic = in.channel(ch);
             auto oc = out.channel(ch);
@@ -1459,8 +1462,12 @@ TEST_CASE("CLAP concurrent mirrors cannot leak through snapshot output",
     bool processor_after = false;
     bool normalize = false;
     SECTION("mirror alone") {}
-    SECTION("processor writes before mirror") { processor_before = true; }
-    SECTION("processor writes after mirror") { processor_after = true; }
+    SECTION("processor writes before mirror") {
+        processor_before = true;
+    }
+    SECTION("processor writes after mirror") {
+        processor_after = true;
+    }
     SECTION("processor listener normalizes before mirror") {
         processor_before = true;
         normalize = true;
@@ -1470,10 +1477,12 @@ TEST_CASE("CLAP concurrent mirrors cannot leak through snapshot output",
     std::binary_semaphore snapshot_reached{0};
     std::binary_semaphore mirror_finished{0};
     test_clap::g_last_processor->during_process = [&] {
-        if (processor_before) store.set_value_rt(1, 8.0f);
+        if (processor_before)
+            store.set_value_rt(1, 8.0f);
         snapshot_reached.release();
         mirror_finished.acquire();
-        if (processor_after) store.set_value_rt(1, 9.0f);
+        if (processor_after)
+            store.set_value_rt(1, 9.0f);
     };
     std::size_t values = 0;
     double reported = 0.0;
@@ -1498,8 +1507,10 @@ TEST_CASE("CLAP concurrent mirrors cannot leak through snapshot output",
     REQUIRE(reached);
     CHECK(fx.host.flush_requests == flushes_before);
     CHECK(values == (processor_before || processor_after ? 1 : 0));
-    if (processor_before) CHECK(reported == (normalize ? 7.0 : 8.0));
-    if (processor_after) CHECK(reported == 9.0);
+    if (processor_before)
+        CHECK(reported == (normalize ? 7.0 : 8.0));
+    if (processor_after)
+        CHECK(reported == 9.0);
 }
 
 // ── G1: CLAP resize-contract honoring (WS-1b) ────────────────────────────────

@@ -244,10 +244,12 @@ class TestVst3Processor : public pulp::format::Processor {
     }
 
     void define_parameters(pulp::state::StateStore& store) override {
-        normalizer = store.add_listener([this, &store](pulp::state::ParamID id, float value) {
-            if (normalize_gain_writes && id == kGainParamId && value == -6.0f)
-                store.set_value_rt(id, -7.0f);
-        }, pulp::state::ListenerThread::Audio);
+        normalizer = store.add_listener(
+            [this, &store](pulp::state::ParamID id, float value) {
+                if (normalize_gain_writes && id == kGainParamId && value == -6.0f)
+                    store.set_value_rt(id, -7.0f);
+            },
+            pulp::state::ListenerThread::Audio);
         if (const auto automated = config_.automation_during_editor_edit) {
             automation_listener_ = store.add_listener(
                 [&store, automated = *automated](pulp::state::ParamID id, float) {
@@ -395,7 +397,8 @@ void TestVst3Processor::process(
     pulp::midi::MidiBuffer& midi_in,
     pulp::midi::MidiBuffer& midi_out,
     const pulp::format::ProcessContext& context) {
-    if (during_process) during_process();
+    if (during_process)
+        during_process();
     ++process_count;
     last_context = context;
     last_input_channels = audio_input.num_channels();
@@ -1086,7 +1089,8 @@ void process_gain_automation_block(pulp::format::vst3::PulpVst3Processor& proces
     data.outputParameterChanges = output;
     Steinberg::tresult processed = Steinberg::kResultFalse;
     std::thread audio([&] { processed = processor.process(data); });
-    if (main_during_process) main_during_process();
+    if (main_during_process)
+        main_during_process();
     audio.join();
     REQUIRE(processed == Steinberg::kResultOk);
 }
@@ -1166,8 +1170,12 @@ TEST_CASE("VST3 concurrent mirrors do not become processor output",
     bool automate = true;
     bool normalize = false;
     SECTION("mirror only") {}
-    SECTION("processor writes before mirror") { processor_before = true; }
-    SECTION("processor writes after mirror") { processor_after = true; }
+    SECTION("processor writes before mirror") {
+        processor_before = true;
+    }
+    SECTION("processor writes after mirror") {
+        processor_after = true;
+    }
     SECTION("processor listener normalizes before mirror") {
         processor_before = true;
         normalize = true;
@@ -1180,18 +1188,24 @@ TEST_CASE("VST3 concurrent mirrors do not become processor output",
     std::binary_semaphore snapshot_reached{0};
     std::binary_semaphore mirror_finished{0};
     plugin->during_process = [&] {
-        if (processor_before) store.set_value_rt(kGainParamId, -6.0f);
+        if (processor_before)
+            store.set_value_rt(kGainParamId, -6.0f);
         snapshot_reached.release();
         mirror_finished.acquire();
-        if (processor_after) store.set_value_rt(kGainParamId, -9.0f);
+        if (processor_after)
+            store.set_value_rt(kGainParamId, -9.0f);
     };
     bool reached = false;
     Steinberg::Vst::ParameterChanges output(4);
-    process_gain_automation_block(processor, range, 5.3f, [&] {
-        reached = snapshot_reached.try_acquire_for(std::chrono::seconds(5));
-        if (reached) store.set_value(kGainParamId, 5.0f);
-        mirror_finished.release();
-    }, &output, automate);
+    process_gain_automation_block(
+        processor, range, 5.3f,
+        [&] {
+            reached = snapshot_reached.try_acquire_for(std::chrono::seconds(5));
+            if (reached)
+                store.set_value(kGainParamId, 5.0f);
+            mirror_finished.release();
+        },
+        &output, automate);
     plugin->during_process = {};
     REQUIRE(reached);
     CHECK(recorder.edits.size() == (automate ? 0 : 1));
@@ -1205,7 +1219,10 @@ TEST_CASE("VST3 concurrent mirrors do not become processor output",
         Steinberg::Vst::ParamValue value = 0.0;
         REQUIRE(queue->getPoint(0, offset, value) == Steinberg::kResultTrue);
         CHECK(offset == 0);
-        CHECK_THAT(value, WithinAbs(range.normalize(processor_after ? -9.0f : normalize ? -7.0f : -6.0f), 1e-6));
+        CHECK_THAT(value, WithinAbs(range.normalize(processor_after ? -9.0f
+                                                    : normalize     ? -7.0f
+                                                                    : -6.0f),
+                                    1e-6));
     }
     REQUIRE(processor.setActive(false) == Steinberg::kResultOk);
     REQUIRE(processor.terminate() == Steinberg::kResultOk);

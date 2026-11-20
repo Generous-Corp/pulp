@@ -435,21 +435,16 @@ void wire_host_parameter_bridge(state::StateStore& store,
     wire_host_parameter_bridge(store, unit, out_listener, {});
 }
 
-void wire_host_parameter_bridge(state::StateStore& store,
-                                AudioUnit unit,
-                                state::ListenerToken& out_listener,
-                                HostParameterNotify notify)
-{
+void wire_host_parameter_bridge(state::StateStore& store, AudioUnit unit,
+                                state::ListenerToken& out_listener, HostParameterNotify notify) {
     if (!notify)
         notify = notify_host_parameter_event;
     store.set_gesture_callbacks(
         [unit, notify](state::ParamID id) {
-            notify(
-                unit, kAudioUnitEvent_BeginParameterChangeGesture, id);
+            notify(unit, kAudioUnitEvent_BeginParameterChangeGesture, id);
         },
         [unit, notify](state::ParamID id) {
-            notify(
-                unit, kAudioUnitEvent_EndParameterChangeGesture, id);
+            notify(unit, kAudioUnitEvent_EndParameterChangeGesture, id);
         });
 
     // Registered as an Audio listener so it runs INLINE, synchronously, on
@@ -474,8 +469,7 @@ void wire_host_parameter_bridge(state::StateStore& store,
             }
             if (on_main && guard->is_echo(store, id))
                 return;
-            notify(
-                unit, kAudioUnitEvent_ParameterValueChange, id);
+            notify(unit, kAudioUnitEvent_ParameterValueChange, id);
         },
         state::ListenerThread::Audio);
 }

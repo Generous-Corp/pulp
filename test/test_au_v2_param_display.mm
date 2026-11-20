@@ -1081,8 +1081,7 @@ TEST_CASE("AU parameter bridge suppresses automation mirrors and preserves edits
     std::vector<std::pair<AudioUnitEventType, state::ParamID>> events;
     state::ListenerToken listener;
     format::au::wire_host_parameter_bridge(
-        store, nullptr, listener,
-        [&](AudioUnit unit, AudioUnitEventType type, state::ParamID id) {
+        store, nullptr, listener, [&](AudioUnit unit, AudioUnitEventType type, state::ParamID id) {
             CHECK(unit == nullptr);
             events.emplace_back(type, id);
         });
@@ -1111,12 +1110,13 @@ TEST_CASE("AU parameter bridge suppresses automation mirrors and preserves edits
     CHECK(events[0].first == kAudioUnitEvent_BeginParameterChangeGesture);
     CHECK(events[1].first == kAudioUnitEvent_ParameterValueChange);
     CHECK(events[2].first == kAudioUnitEvent_EndParameterChangeGesture);
-    for (const auto& event : events) CHECK(event.second == 1);
+    for (const auto& event : events)
+        CHECK(event.second == 1);
     events.clear();
 
     automate();
-    std::this_thread::sleep_for(std::chrono::nanoseconds(
-        format::HostWriteEchoGuard::kWindowNs) + std::chrono::milliseconds(50));
+    std::this_thread::sleep_for(std::chrono::nanoseconds(format::HostWriteEchoGuard::kWindowNs) +
+                                std::chrono::milliseconds(50));
     store.set_value(1, 0.6f);
     REQUIRE(events.size() == 1);
     CHECK(events.front().first == kAudioUnitEvent_ParameterValueChange);

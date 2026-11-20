@@ -935,7 +935,8 @@ tresult PLUGIN_API PulpVst3Processor::initialize(FUnknown* context) {
             const auto index = boundary::find_param_index(store_.all_params(), id);
             if (index < processor_param_values_.size())
                 processor_param_values_[index] = value;
-        }, state::ListenerThread::Audio);
+        },
+        state::ListenerThread::Audio);
     processor_->set_state_store(&store_);
     processor_->define_parameters(store_);
     trace.mark("after_define_parameters");
@@ -2752,9 +2753,10 @@ void PulpVst3Processor::process_publish_output_params(
             if (output_param_has_event_[i]) {
                 // Keep the VST3 parameter system synced to the final value even
                 // though we reported the sample-accurate points above.
-                SingleComponentEffect::setParamNormalized(static_cast<ParamID>(all_params[i].id),
-                                   state::host_normalized_from_value(
-                                       all_params[i], store_.get_value(all_params[i].id)));
+                SingleComponentEffect::setParamNormalized(
+                    static_cast<ParamID>(all_params[i].id),
+                    state::host_normalized_from_value(all_params[i],
+                                                      store_.get_value(all_params[i].id)));
                 continue;
             }
             const float current = processor_param_values_[i];
@@ -2771,8 +2773,8 @@ void PulpVst3Processor::process_publish_output_params(
                 // Never write the captured output back over a newer UI value.
                 SingleComponentEffect::setParamNormalized(
                     static_cast<ParamID>(all_params[i].id),
-                    state::host_normalized_from_value(
-                        all_params[i], store_.get_value(all_params[i].id)));
+                    state::host_normalized_from_value(all_params[i],
+                                                      store_.get_value(all_params[i].id)));
             }
         }
     }

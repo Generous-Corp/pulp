@@ -283,7 +283,8 @@ bool clap_init(const clap_plugin_t* plugin) {
             const auto index = boundary::find_param_index(self->store.all_params(), id);
             if (index < self->processor_param_values.size())
                 self->processor_param_values[index] = value;
-        }, state::ListenerThread::Audio);
+        },
+        state::ListenerThread::Audio);
     self->processor->set_state_store(&self->store);
     self->processor->define_parameters(self->store);
     self->editor_factory = self->processor->editor_factory();

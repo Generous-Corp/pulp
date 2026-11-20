@@ -716,12 +716,9 @@ void wire_host_parameter_bridge(state::StateStore& store,
 
 /// Same listener wiring with an injectable host notification sink. An empty
 /// sink uses AUEventListenerNotify, as does the three-argument production API.
-using HostParameterNotify =
-    std::function<void(AudioUnit, AudioUnitEventType, state::ParamID)>;
-void wire_host_parameter_bridge(state::StateStore& store,
-                                AudioUnit unit,
-                                state::ListenerToken& out_listener,
-                                HostParameterNotify notify);
+using HostParameterNotify = std::function<void(AudioUnit, AudioUnitEventType, state::ParamID)>;
+void wire_host_parameter_bridge(state::StateStore& store, AudioUnit unit,
+                                state::ListenerToken& out_listener, HostParameterNotify notify);
 
 // ── Host-facing parameter-name publishing ────────────────────────────────
 

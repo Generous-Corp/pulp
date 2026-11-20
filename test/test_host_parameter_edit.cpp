@@ -428,8 +428,7 @@ TEST_CASE("the echo window closes", "[host-parameter-edit][echo]") {
     CHECK_FALSE(guard.is_echo_at(store, kGain + 1, after_write)); // other parameter
 }
 
-TEST_CASE("an unmarked background write is not host automation",
-          "[host-parameter-edit][echo]") {
+TEST_CASE("an unmarked background write is not host automation", "[host-parameter-edit][echo]") {
     StateStore store;
     add_unit_param(store, kGain, "Gain");
     EditLog log;
