@@ -101,6 +101,35 @@ class StubHost final : public ::vellum::view::PluginViewHost {
     Size size_;
 };
 
+// Records which host the root points at when its host starts being destroyed.
+class RecordingHost final : public ::vellum::view::PluginViewHost {
+  public:
+    RecordingHost(::vellum::view::View& root, ::vellum::view::PluginViewHost** seen)
+        : root_(root), seen_(seen) {}
+    ~RecordingHost() override {
+        *seen_ = root_.plugin_view_host();
+    }
+    ::vellum::view::NativeViewHandle native_handle() override {
+        return this;
+    }
+    void attach_to_parent(::vellum::view::NativeViewHandle) override {}
+    void detach() override {}
+    void repaint() override {}
+    void set_size(uint32_t, uint32_t) override {}
+    Size get_size() const override {
+        return {};
+    }
+
+  private:
+    ::vellum::view::View& root_;
+    ::vellum::view::PluginViewHost** seen_;
+};
+
+class EmptyView final : public ::vellum::view::View {
+  public:
+    explicit EmptyView(pulp::vellum::EditorEnv&) {}
+};
+
 // Clears any factory a test registers, even when an assertion stops it early.
 struct FactoryReset {
     ~FactoryReset() {
@@ -230,4 +259,32 @@ TEST_CASE("A Vellum editor attaches to a native parent view", "[pulp-vellum][edi
         {.kind = pulp::format::NativeParentKind::cocoa_view, .handle = parent->native_handle()}));
     editor->detach();
     editor->invalidate();
+}
+
+TEST_CASE("A Vellum editor clears the root's host pointer before freeing the host",
+          "[pulp-vellum][editor][host]") {
+    using ::vellum::view::PluginViewHost;
+    FactoryReset reset;
+    // The root is destroyed after its host, and its teardown can still request
+    // a repaint, so the root must stop pointing at the host first. A platform
+    // host is not required to clear that pointer, so the editor does.
+    PluginViewHost* made = nullptr;
+    PluginViewHost* seen = nullptr;
+    PluginViewHost::set_factory(
+        [&made, &seen](::vellum::view::View& root, const PluginViewHost::Options&) {
+            auto host = std::make_unique<RecordingHost>(root, &seen);
+            made = host.get();
+            return std::unique_ptr<PluginViewHost>(std::move(host));
+        });
+
+    Fixture fixture;
+    Context context(*fixture.port);
+    Processor processor;
+    pulp::vellum::EditorFactory<EmptyView> factory;
+    auto editor = factory.create(processor, context, pulp::format::EditorRole::editor);
+    REQUIRE(editor);
+    REQUIRE(made != nullptr);
+    seen = made;
+    editor.reset();
+    CHECK(seen == nullptr);
 }

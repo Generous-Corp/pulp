@@ -66,8 +66,13 @@ template <typename ViewType> class Editor final : public format::Editor {
         host_ = ::vellum::view::PluginViewHost::create(*root_, options);
     }
 
+    // The root is destroyed after the host (member order), and its teardown
+    // can still repaint: a ScriptedUiSession quarantines its realm and
+    // requests a frame. A host is not required to clear the root's pointer to
+    // it, so clear it here before the host goes away.
     ~Editor() override {
         detach();
+        invalidate();
     }
 
     // X11 is not offered: an X11 parent carries its window in window_id with a
