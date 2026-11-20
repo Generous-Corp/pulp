@@ -65,6 +65,7 @@ include("${CMAKE_CURRENT_LIST_DIR}/PulpFindPluginval.cmake")
 include("${CMAKE_CURRENT_LIST_DIR}/PulpMidiTuning.cmake")
 include("${CMAKE_CURRENT_LIST_DIR}/PulpPluginMetadata.cmake")
 include("${CMAKE_CURRENT_LIST_DIR}/PulpBuildInfo.cmake")
+include("${CMAKE_CURRENT_LIST_DIR}/PulpThirdPartyNotices.cmake")
 include("${CMAKE_CURRENT_LIST_DIR}/PulpReactRuntime.cmake")
 
 # Resolve PulpUtils.cmake's sibling helper dirs without reaching into

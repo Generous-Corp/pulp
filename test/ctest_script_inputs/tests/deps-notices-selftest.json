@@ -1,0 +1,11 @@
+{
+ "name": "deps-notices-selftest",
+ "record": {
+  "entry": "tools/deps/test_notices.py",
+  "inputs": [
+   "tools/deps/notices.py",
+   "tools/deps/test_notices.py"
+  ],
+  "kind": "python"
+ }
+}

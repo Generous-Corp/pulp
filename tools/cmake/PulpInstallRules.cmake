@@ -925,6 +925,10 @@ install(FILES
     # build-time finalize script relative to its own directory.
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpBuildInfo.cmake"
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpFinalizeBuildInfo.cmake"
+    # Included by PulpUtils.cmake: ThirdPartyNotices files in plug-in bundles.
+    # It measures an installed consumer's closure with PulpConsumerClosure.
+    "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpThirdPartyNotices.cmake"
+    "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpConsumerClosure.cmake"
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpDevSharedUi.cmake"
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpPluginFormats.cmake"
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpWindowsTargetArch.cmake"

@@ -996,6 +996,10 @@ endif()
 # a bound over them (examples/, tools/).
 include(PulpLinkFloor)
 
+# Pulp's own third-party notices manifest, unioned into each plug-in bundle's
+# ThirdPartyNotices files by pulp_add_plugin().
+pulp_generate_sdk_notices()
+
 # pulp::signal must reach the pulp-simd kernels without pulp-runtime, whose
 # archive carries the HTTP/TLS stack. pulp-test-simd-signal-link links only
 # pulp::signal, so its closure is the DSP layer's closure.
