@@ -223,6 +223,54 @@ TEST_CASE("Vellum AnalyzerScope keeps its mapping across stale periods and set_f
     CHECK(scope.column_count() == 3);
 }
 
+TEST_CASE("Vellum audio widgets resample after set_channel", "[pulp-vellum-audio]") {
+    pulp::vellum_audio::AudioDisplayProvider provider({
+        {.name = "level_a", .shape = ::vellum::value::ChannelShape::meter},
+        {.name = "level_b", .shape = ::vellum::value::ChannelShape::meter},
+        {.name = "spectrum_a", .shape = ::vellum::value::ChannelShape::vector},
+        {.name = "spectrum_b", .shape = ::vellum::value::ChannelShape::vector},
+    });
+    const auto level_a = provider.find("level_a", ::vellum::value::ChannelShape::meter);
+    const auto level_b = provider.find("level_b", ::vellum::value::ChannelShape::meter);
+    const auto spectrum_a = provider.find("spectrum_a", ::vellum::value::ChannelShape::vector);
+    const auto spectrum_b = provider.find("spectrum_b", ::vellum::value::ChannelShape::vector);
+    REQUIRE(level_a);
+    REQUIRE(level_b);
+    REQUIRE(spectrum_a);
+    REQUIRE(spectrum_b);
+
+    // Both channels publish once, so their publish counts are equal: a stale
+    // sampling cursor would treat the new channel as unchanged.
+    provider.publish_meter(*level_a, std::array{0.25f}, std::array{0.5f});
+    provider.publish_meter(*level_b, std::array{0.75f}, std::array{0.9f});
+    REQUIRE(provider.publish_count(*level_a) == provider.publish_count(*level_b));
+
+    pulp::vellum_audio::LevelMeter meter(&provider);
+    meter.set_channel(*level_a);
+    meter.sample();
+    REQUIRE(meter.rms() == 0.25f);
+    meter.set_channel(*level_b);
+    meter.sample();
+    CHECK_FALSE(meter.stale());
+    CHECK(meter.rms() == 0.75f);
+    CHECK(meter.peak() == 0.9f);
+
+    provider.publish_scope(*spectrum_a, std::array{-90.0f, -60.0f, -30.0f},
+                           {.floor_db = -96.0f, .sequence = 1});
+    provider.publish_scope(*spectrum_b, std::array{-80.0f, -50.0f, -20.0f},
+                           {.floor_db = -96.0f, .sequence = 7});
+    REQUIRE(provider.publish_count(*spectrum_a) == provider.publish_count(*spectrum_b));
+
+    pulp::vellum_audio::AnalyzerScope scope(&provider);
+    scope.set_channel(*spectrum_a);
+    scope.sample();
+    REQUIRE(scope.frame_info().sequence == 1);
+    scope.set_channel(*spectrum_b);
+    scope.sample();
+    CHECK_FALSE(scope.stale());
+    CHECK(scope.frame_info().sequence == 7);
+}
+
 TEST_CASE("Vellum LevelMeter feed changes are rendered inside its bounds",
           "[pulp-vellum-audio][render]") {
     if (!::vellum::view::raw_rgba_render_available())

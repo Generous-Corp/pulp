@@ -18,8 +18,10 @@ class LevelMeter final : public ::vellum::view::View, public ::vellum::view::Lev
   public:
     explicit LevelMeter(AudioDisplayProvider* feed = nullptr) noexcept : feed_(feed) {}
     void set_feed(AudioDisplayProvider* feed, std::size_t channel) noexcept;
+    /// Switches channel and resets the sampling cursor and displayed state,
+    /// exactly as set_feed does, so the next sample() reads the new channel.
     void set_channel(std::size_t channel) noexcept {
-        channel_ = channel;
+        set_feed(feed_, channel);
     }
     void sample() noexcept;
     void paint(::vellum::canvas::Canvas& canvas) override;
@@ -69,8 +71,10 @@ class AnalyzerScope final : public ::vellum::view::View, public ::vellum::view::
   public:
     explicit AnalyzerScope(AudioDisplayProvider* feed = nullptr) noexcept : feed_(feed) {}
     void set_feed(AudioDisplayProvider* feed, std::size_t channel) noexcept;
+    /// Switches channel and resets the sampling cursor and displayed state,
+    /// exactly as set_feed does, so the next sample() reads the new channel.
     void set_channel(std::size_t channel) noexcept {
-        channel_ = channel;
+        set_feed(feed_, channel);
     }
     void configure_mapping(const pulp::signal::SpectrumBinMappingConfig& config);
     void sample() noexcept;
