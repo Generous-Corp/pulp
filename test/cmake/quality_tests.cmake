@@ -605,6 +605,11 @@ if(Python3_Interpreter_FOUND)
     add_test(NAME build-parallelism-guard-selftest COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/scripts/test_build_parallelism_guard.py")
 
+    # The Swift C bridge's parameter/state shims must not include view headers;
+    # the motion shims live in PulpMotionBridge.cpp.
+    add_test(NAME swift-bridge-split-guard COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/scripts/swift_bridge_split_guard.py")
+
     # Temp-leak guard: wraps a test command in a private temp directory and
     # fails when the command leaves anything there (see its use on the Node
     # unit aggregate in design_import_tool_cli_tests.cmake).
