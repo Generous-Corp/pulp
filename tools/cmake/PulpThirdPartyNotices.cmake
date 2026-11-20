@@ -1,4 +1,4 @@
-# PulpThirdPartyNotices.cmake — one combined third-party notices file per bundle.
+# PulpThirdPartyNotices.cmake: one combined third-party notices file per bundle.
 #
 # Every SDK a plug-in links can describe its third-party code in a notices
 # manifest (schema pulp.notices.v1): one entry per dependency with its name,

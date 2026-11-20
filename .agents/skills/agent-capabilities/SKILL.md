@@ -1669,7 +1669,7 @@ the bypass trailer by reflex:
   `PULP_SDK_TARGETS` entry or release-matrix stem named the artifact; the
   provider was never one, so neither list moves.
 
-- **CMake modules a public command includes** — `PulpThirdPartyNotices.cmake`
+- **CMake modules a public command includes**: `PulpThirdPartyNotices.cmake`
   (behind `pulp_add_plugin()` and `pulp_add_notice_manifest()`) and the
   `PulpConsumerClosure.cmake` it uses to walk an installed consumer's closure
   are non-header payload. No covered root changes. The one runtime dependency
