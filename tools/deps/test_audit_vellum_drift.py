@@ -15,6 +15,9 @@ from unittest import mock
 
 
 ROOT = Path(__file__).resolve().parents[2]
+# The repository lock; ctest passes it so the input record declares it.
+LOCK_FILE = (Path(sys.argv[1]) if len(sys.argv) > 1 and sys.argv[1].endswith(".lock")
+             else ROOT / "pulp.lock")
 
 sys.path.insert(0, str(ROOT / "tools" / "deps"))
 import audit  # noqa: E402
@@ -130,18 +133,22 @@ class RendererLockTests(unittest.TestCase):
 
 
 class GpuRuntimePinTests(unittest.TestCase):
-    """The strict audit asserts the CMake fetches and version-checks from pulp.lock."""
+    """The strict audit evaluates the pin file with real CMake and asserts on what it does."""
 
     GPU = "tools/cmake/PulpGpuRuntime.cmake"
     LOCK = "tools/cmake/PulpVellumLock.cmake"
+    RECORD = "tools/cmake/PulpGpuRuntimeRecord.cmake"
+    URL = "https://github.com/Generous-Corp/vellum.git"
 
     def setUp(self) -> None:
         temporary = tempfile.TemporaryDirectory()
         self.addCleanup(temporary.cleanup)
         self.root = Path(temporary.name)
         (self.root / "tools/cmake").mkdir(parents=True)
-        for rel in (self.GPU, self.LOCK):
+        for rel in (self.GPU, self.LOCK, self.RECORD):
             (self.root / rel).write_text((ROOT / rel).read_text(encoding="utf-8"), encoding="utf-8")
+        (self.root / "pulp.lock").write_text(LOCK_FILE.read_text(encoding="utf-8"), encoding="utf-8")
+        self.original = (ROOT / self.GPU).read_text(encoding="utf-8")
 
     def edit(self, rel: str, old: str, new: str) -> None:
         path = self.root / rel
@@ -150,7 +157,7 @@ class GpuRuntimePinTests(unittest.TestCase):
         path.write_text(text.replace(old, new, 1), encoding="utf-8")
 
     def entry(self) -> list[dict]:
-        return [{"name": audit.GPU_RUNTIME_ENTRY, "version": "0.1.10 (cccccccc)",
+        return [{"name": audit.GPU_RUNTIME_ENTRY, "version": "0.2.0 (d361ea5b)",
                  "upstream": {"kind": "git-commit", "ref": COMMIT, "commit": COMMIT},
                  "source_files": [self.GPU]}]
 
@@ -161,6 +168,9 @@ class GpuRuntimePinTests(unittest.TestCase):
         found = self.problems()
         self.assertTrue(any(fragment in problem for problem in found), found)
 
+    def assertFails(self) -> None:
+        self.assertTrue(self.problems(), "the audit accepted an edit it must refuse")
+
     def test_the_copied_tree_passes(self) -> None:
         self.assertEqual(self.problems(), [])
 
@@ -169,135 +179,53 @@ class GpuRuntimePinTests(unittest.TestCase):
         manifest = json.loads((ROOT / "tools/deps/manifest.json").read_text(encoding="utf-8"))["dependencies"]
         self.assertEqual(audit.gpu_runtime_pin_agreement(manifest), [])
 
-    def test_a_literal_git_tag_fails(self) -> None:
-        self.edit(self.GPU, "GIT_TAG ${PULP_GPU_RUNTIME_COMMIT}", f"GIT_TAG {COMMIT}")
-        self.assertFlags("GIT_TAG must be exactly ${PULP_GPU_RUNTIME_COMMIT}")
+    def test_the_driver_records_what_cmake_evaluates(self) -> None:
+        run = audit.run_gpu_runtime_driver(self.root, self.GPU, "0.2.0")
+        (_, declare), = run.named("FetchContent_Declare")
+        self.assertEqual(declare, ["vellum_gpu_runtime", "GIT_REPOSITORY", self.URL, "GIT_TAG",
+                                   "d361ea5b855707391798b7315183d99b6cbe69b6", "SOURCE_SUBDIR",
+                                   "gpu-runtime"])
+        self.assertTrue(run.stopped)
 
-    def test_a_missing_git_tag_fails(self) -> None:
-        self.edit(self.GPU, "GIT_TAG ${PULP_GPU_RUNTIME_COMMIT}", "")
-        self.assertFlags("no GIT_TAG")
+    def test_cmake_missing_fails_closed(self) -> None:
+        with mock.patch.object(audit, "find_cmake", lambda: None):
+            self.assertFlags("cmake was not found")
 
-    def test_git_tag_survives_reordered_arguments_and_whitespace(self) -> None:
-        self.edit(self.GPU, "GIT_TAG ${PULP_GPU_RUNTIME_COMMIT}\n        SOURCE_SUBDIR gpu-runtime",
-                  "SOURCE_SUBDIR   gpu-runtime\n\n   GIT_TAG    ${PULP_GPU_RUNTIME_COMMIT}")
-        self.assertEqual(self.problems(), [])
-
-    def test_a_commented_out_git_tag_does_not_count(self) -> None:
-        self.edit(self.GPU, "GIT_TAG ${PULP_GPU_RUNTIME_COMMIT}",
-                  f"GIT_TAG {COMMIT} # GIT_TAG ${{PULP_GPU_RUNTIME_COMMIT}}")
-        self.assertFlags("GIT_TAG must be exactly")
-
-    def test_bracket_comment_fake_pin_does_not_count(self) -> None:
-        (self.root / self.GPU).write_text(
-            "#[=[\n"
-            "include(\"${CMAKE_CURRENT_LIST_DIR}/PulpVellumLock.cmake\")\n"
-            "FetchContent_Declare(vellum_gpu_runtime GIT_TAG ${PULP_GPU_RUNTIME_COMMIT})\n"
-            "if(NOT _pulp_gpu_runtime_version STREQUAL PULP_GPU_RUNTIME_VERSION)\n"
-            "pulp_find_gpu_runtime_package(${PULP_GPU_RUNTIME_VERSION})\n"
-            "]=]\n",
-            encoding="utf-8")
-        found = self.problems()
-        self.assertTrue(found, "bracket-comment-only pin must fail closed")
-        self.assertTrue(any("does not include PulpVellumLock.cmake" in item for item in found), found)
-
-    def test_quoted_fake_pin_does_not_count(self) -> None:
-        (self.root / self.GPU).write_text(
-            'set(_documentation "FetchContent_Declare(vellum_gpu_runtime GIT_TAG '
-            '${PULP_GPU_RUNTIME_COMMIT}) include(PulpVellumLock.cmake)")\n',
-            encoding="utf-8")
-        found = self.problems()
-        self.assertTrue(found, "quoted fake pin must fail closed")
-        self.assertTrue(any("does not include PulpVellumLock.cmake" in item for item in found), found)
-
-    def test_a_hand_set_commit_fails(self) -> None:
-        self.edit(self.GPU, 'include(FetchContent)',
-                  f'include(FetchContent)\nset(PULP_GPU_RUNTIME_COMMIT "{COMMIT}")')
-        self.assertFlags("sets PULP_GPU_RUNTIME_COMMIT")
-
-    def test_a_hand_set_version_fails(self) -> None:
-        self.edit(self.GPU, 'include(FetchContent)',
-                  'include(FetchContent)\nset(PULP_GPU_RUNTIME_VERSION "0.1.10" CACHE STRING "")')
-        self.assertFlags("sets PULP_GPU_RUNTIME_VERSION")
-
-    def test_the_lock_reader_must_derive_the_commit_from_the_lock_sha(self) -> None:
-        self.edit(self.LOCK, 'set(PULP_GPU_RUNTIME_COMMIT "${PULP_VELLUM_sha}")',
-                  f'set(PULP_GPU_RUNTIME_COMMIT "{COMMIT}")')
-        self.assertFlags("must set PULP_GPU_RUNTIME_COMMIT exactly once")
-
-    def test_the_lock_reader_must_derive_the_version_from_the_lock_tag(self) -> None:
-        self.edit(self.LOCK, 'set(PULP_GPU_RUNTIME_VERSION "${PULP_VELLUM_tag}")',
-                  'set(PULP_GPU_RUNTIME_VERSION "0.1.10")')
-        self.assertFlags("must set PULP_GPU_RUNTIME_VERSION exactly once")
-
-    def test_a_source_version_check_that_drops_the_pinned_version_fails(self) -> None:
-        self.edit(self.GPU, "_pulp_gpu_runtime_version STREQUAL PULP_GPU_RUNTIME_VERSION",
-                  '_pulp_gpu_runtime_version STREQUAL "0.1.10"')
-        self.assertFlags("check on the fetched source")
-
-    def test_a_prefix_package_found_by_a_literal_version_fails(self) -> None:
-        self.edit(self.GPU, "pulp_find_gpu_runtime_package(${PULP_GPU_RUNTIME_VERSION}",
-                  "pulp_find_gpu_runtime_package(0.1.10")
-        self.assertFlags("prefix package")
-
-    def test_dropping_the_lock_include_fails(self) -> None:
-        self.edit(self.GPU, 'include("${CMAKE_CURRENT_LIST_DIR}/PulpVellumLock.cmake")', "")
-        self.assertFlags("does not include PulpVellumLock.cmake")
-
-    def test_a_pin_set_in_another_cmake_file_fails(self) -> None:
-        (self.root / "tools/cmake/Other.cmake").write_text(
-            'set(PULP_GPU_RUNTIME_COMMIT "x" CACHE STRING "")\n', encoding="utf-8")
-        self.assertFlags("Other.cmake sets PULP_GPU_RUNTIME_COMMIT")
-
-    def test_a_cmake_without_the_fetch_declaration_fails(self) -> None:
-        (self.root / self.GPU).write_text("# no pin\n", encoding="utf-8")
-        self.assertTrue(self.problems())
-
-    def test_a_cmake_fetch_without_a_manifest_entry_fails(self) -> None:
-        problems = audit.gpu_runtime_pin_agreement([], self.root)
-        self.assertTrue(problems and "has no vellum-gpu-runtime entry" in problems[0])
-
-    def test_no_manifest_entry_and_no_fetch_passes(self) -> None:
-        self.assertEqual(audit.gpu_runtime_pin_agreement([], self.root / "empty"), [])
-        (self.root / self.GPU).write_text("# no pin\n", encoding="utf-8")
-        self.assertEqual(audit.gpu_runtime_pin_agreement([], self.root), [])
-
-
-    # Each pin assertion, with the real command removed and a fake one placed
-    # where the real one would count. "bare" is the control: the fake as real
-    # code must satisfy the assertion, so the hidden forms fail only because
-    # they are hidden.
+    # Each pin assertion, with the real code removed and a fake placed where
+    # the real code would count. "bare" is the control: the fake as real code
+    # must satisfy the audit, so the hidden forms fail only because CMake does
+    # not run them.
     REAL_DECLARE = ("    FetchContent_Declare(\n"
                     "        vellum_gpu_runtime\n"
                     "        GIT_REPOSITORY https://github.com/Generous-Corp/vellum.git\n"
                     "        GIT_TAG ${PULP_GPU_RUNTIME_COMMIT}\n"
                     "        SOURCE_SUBDIR gpu-runtime\n"
                     "    )\n")
-    MAKE_AVAILABLE = "FetchContent_MakeAvailable(vellum_gpu_runtime)\n"
+    REAL_CHECK = ("    if(NOT _pulp_gpu_runtime_version STREQUAL PULP_GPU_RUNTIME_VERSION)\n"
+                  "        message(FATAL_ERROR\n"
+                  "            \"Pulp: gpu-runtime at ${PULP_GPU_RUNTIME_COMMIT} is version \"\n"
+                  "            \"${_pulp_gpu_runtime_version}, not the pinned ${PULP_GPU_RUNTIME_VERSION}\")\n"
+                  "    endif()\n")
     PIN_CASES = {
-        "include": (
+        "lock include": (
             'include("${CMAKE_CURRENT_LIST_DIR}/PulpVellumLock.cmake")\n', "",
             "set(PULP_GPU_RUNTIME_PREFIX",
-            'include("${CMAKE_CURRENT_LIST_DIR}/PulpVellumLock.cmake")',
-            "does not include PulpVellumLock.cmake"),
-        "declare": (
+            'include("${CMAKE_CURRENT_LIST_DIR}/PulpVellumLock.cmake")'),
+        "declaration": (
             REAL_DECLARE, "", "    set(GPU_RUNTIME_SKIA_DIR \"${SKIA_DIR}\" CACHE",
             "FetchContent_Declare(vellum_gpu_runtime GIT_REPOSITORY "
             "https://github.com/Generous-Corp/vellum.git GIT_TAG ${PULP_GPU_RUNTIME_COMMIT} "
-            "SOURCE_SUBDIR gpu-runtime)",
-            "declare FetchContent vellum_gpu_runtime exactly once"),
+            "SOURCE_SUBDIR gpu-runtime)"),
         "version check": (
-            "if(NOT _pulp_gpu_runtime_version STREQUAL PULP_GPU_RUNTIME_VERSION)",
-            'if(NOT _pulp_gpu_runtime_version STREQUAL "0.0.0")',
-            "    get_directory_property(_pulp_gpu_runtime_version",
+            REAL_CHECK, "", "endif()\n\nforeach(_pulp_gpu_runtime_target",
             "if(NOT _pulp_gpu_runtime_version STREQUAL PULP_GPU_RUNTIME_VERSION)\n"
-            "message(FATAL_ERROR stop)\nendif()",
-            "check on the fetched source"),
+            "message(FATAL_ERROR stop)\nendif()"),
         "prefix package": (
-            "pulp_find_gpu_runtime_package(${PULP_GPU_RUNTIME_VERSION}",
-            "pulp_find_gpu_runtime_package(0.0.0",
-            "    set(GPU_RUNTIME_SKIA_DIR \"${SKIA_DIR}\")",
-            "pulp_find_gpu_runtime_package(${PULP_GPU_RUNTIME_VERSION} p e)",
-            "prefix package"),
+            "    pulp_find_gpu_runtime_package(${PULP_GPU_RUNTIME_VERSION} \"${PULP_GPU_RUNTIME_PREFIX}\"\n"
+            "        _pulp_gpu_runtime_error)\n", "",
+            "    if(_pulp_gpu_runtime_error)\n",
+            'pulp_find_gpu_runtime_package(${PULP_GPU_RUNTIME_VERSION} "${PULP_GPU_RUNTIME_PREFIX}" '
+            "_pulp_gpu_runtime_error)"),
     }
 
     @staticmethod
@@ -311,84 +239,267 @@ class GpuRuntimePinTests(unittest.TestCase):
             "bracket comment with equals": f"#[==[\n{fake}\n]==]",
             "quoted argument": f'set(_pulp_doc "\n{escaped}\n")',
             "bracket argument": f"set(_pulp_doc [=[\n{fake}\n]=])",
+            "escaped references": fake.replace("${", "\\${"),
             "constant-false branch": f"if(FALSE)\n{fake}\nendif()",
+            "else of a constant-true branch": f"if(TRUE)\nelse()\n{fake}\nendif()",
             "function body": f"function(_pulp_never_called)\n{fake}\nendfunction()",
+            "after a constant-true return": f"if(TRUE)\nreturn()\nendif()\n{fake}",
         }
 
-    def test_fake_pins_in_comments_strings_brackets_and_dead_code_do_not_count(self) -> None:
-        original = (ROOT / self.GPU).read_text(encoding="utf-8")
-        for assertion, (real, replacement, before, fake, fragment) in self.PIN_CASES.items():
-            self.assertIn(real, original)
-            self.assertIn(before, original)
+    def test_fake_pins_cmake_does_not_run_do_not_count(self) -> None:
+        for assertion, (real, replacement, before, fake) in self.PIN_CASES.items():
+            self.assertIn(real, self.original)
+            removed = self.original.replace(real, replacement, 1)
+            self.assertIn(before, removed)
             for form, hidden in self.hidden_forms(fake).items():
+                if form == "escaped references" and "${" not in fake:
+                    continue
                 with self.subTest(assertion=assertion, form=form):
-                    text = original.replace(real, replacement, 1)
-                    text = text.replace(before, f"{hidden or fake}\n{before}", 1)
+                    text = removed.replace(before, f"{hidden or fake}\n{before}", 1)
                     (self.root / self.GPU).write_text(text, encoding="utf-8")
                     found = self.problems()
                     if hidden is None:
                         self.assertEqual(found, [])
                     else:
-                        self.assertTrue(any(fragment in problem for problem in found), found)
+                        self.assertTrue(found, "a hidden fake satisfied the audit")
 
-    def test_a_top_level_return_before_the_include_fails(self) -> None:
+    def test_a_literal_pin_equal_to_the_lock_fails(self) -> None:
+        self.edit(self.GPU, "GIT_TAG ${PULP_GPU_RUNTIME_COMMIT}",
+                  "GIT_TAG d361ea5b855707391798b7315183d99b6cbe69b6")
+        self.assertFlags("GIT_TAG must be the lock's vellum.sha 0123456789abcdef")
+
+    def test_a_literal_prefix_version_equal_to_the_lock_fails(self) -> None:
+        self.edit(self.GPU, "pulp_find_gpu_runtime_package(${PULP_GPU_RUNTIME_VERSION}",
+                  "pulp_find_gpu_runtime_package(0.2.0")
+        self.assertFlags("find_package(VellumGpuRuntime 9.8.7 EXACT")
+
+    def test_the_declaration_must_name_the_canonical_repository(self) -> None:
+        for replacement in ("https://github.com/someone/vellum.git", self.URL + ".evil",
+                            '"${PULP_ELSEWHERE}"', ""):
+            with self.subTest(replacement=replacement):
+                self.setUp()
+                self.edit(self.GPU, f"GIT_REPOSITORY {self.URL}",
+                          f"GIT_REPOSITORY {replacement}" if replacement else "")
+                self.assertFlags("GIT_REPOSITORY must be exactly")
+
+    def test_every_alternate_source_option_is_rejected(self) -> None:
+        for option in ("URL https://example.invalid/v.tgz", "URL_HASH SHA256=00",
+                       "SOURCE_DIR /x", "DOWNLOAD_COMMAND true", "SVN_REPOSITORY x",
+                       "SVN_REVISION 1", "HG_REPOSITORY x", "HG_TAG x", "CVS_REPOSITORY x",
+                       "CVS_MODULE x", "PATCH_COMMAND true", "UPDATE_COMMAND true"):
+            with self.subTest(option=option):
+                self.setUp()
+                self.edit(self.GPU, "SOURCE_SUBDIR gpu-runtime",
+                          f"SOURCE_SUBDIR gpu-runtime\n        {option}")
+                self.assertFlags(f"carries {option.split()[0]}")
+
+    def test_a_source_override_in_the_pin_file_fails(self) -> None:
+        for override in ('set(FETCHCONTENT_SOURCE_DIR_VELLUM_GPU_RUNTIME "/x")',
+                         'set("FETCHCONTENT_FULLY_DISCONNECTED" ON)'):
+            with self.subTest(override=override):
+                self.setUp()
+                self.edit(self.GPU, "    include(FetchContent)",
+                          f"    include(FetchContent)\n    {override}")
+                self.assertFlags("FetchContent takes vellum_gpu_runtime from")
+
+    def test_an_include_the_driver_cannot_evaluate_fails(self) -> None:
+        (self.root / "tools/cmake/Other.cmake").write_text("set(_x 1)\n", encoding="utf-8")
+        self.edit(self.GPU, "    include(FetchContent)",
+                  '    include(FetchContent)\n    include("${CMAKE_CURRENT_LIST_DIR}/Other.cmake")')
+        self.assertFlags("which the audit cannot evaluate")
+
+    def test_the_lock_include_must_be_the_real_reader(self) -> None:
+        (self.root / "tools/other").mkdir(parents=True)
+        (self.root / "tools/other/PulpVellumLock.cmake").write_text(
+            (ROOT / self.LOCK).read_text(encoding="utf-8"), encoding="utf-8")
         self.edit(self.GPU, 'include("${CMAKE_CURRENT_LIST_DIR}/PulpVellumLock.cmake")',
-                  'return()\ninclude("${CMAKE_CURRENT_LIST_DIR}/PulpVellumLock.cmake")')
-        self.assertFlags("does not include PulpVellumLock.cmake")
+                  'include("${CMAKE_CURRENT_LIST_DIR}/../other/PulpVellumLock.cmake")')
+        self.assertFails()
 
-    def test_a_declaration_before_the_include_fails(self) -> None:
-        self.edit(self.GPU, 'include("${CMAKE_CURRENT_LIST_DIR}/PulpVellumLock.cmake")\n', "")
-        self.edit(self.GPU, "include(FetchContent)",
-                  'include(FetchContent)\ninclude("${CMAKE_CURRENT_LIST_DIR}/PulpVellumLock.cmake")')
-        self.assertFlags("does not include PulpVellumLock.cmake at top level")
+    def test_the_version_check_must_compare_the_fetched_version_with_the_pin(self) -> None:
+        check = "if(NOT _pulp_gpu_runtime_version STREQUAL PULP_GPU_RUNTIME_VERSION)"
+        for new in ("if(NOT PULP_GPU_RUNTIME_VERSION STREQUAL PULP_GPU_RUNTIME_VERSION)",
+                    "if(NOT _pulp_gpu_runtime_version STREQUAL _pulp_gpu_runtime_version)",
+                    'if(NOT _pulp_gpu_runtime_version STREQUAL "PULP_GPU_RUNTIME_VERSION")',
+                    "if(NOT _pulp_gpu_runtime_version VERSION_LESS PULP_GPU_RUNTIME_VERSION)",
+                    "if(_pulp_gpu_runtime_version STREQUAL PULP_GPU_RUNTIME_VERSION)",
+                    "if(FALSE)",
+                    'set(_pulp_gpu_runtime_version "${PULP_GPU_RUNTIME_VERSION}")\n    ' + check):
+            with self.subTest(new=new):
+                self.setUp()
+                self.edit(self.GPU, check, new)
+                self.assertFlags("does not stop configure with FATAL_ERROR when, and only when")
 
-    def test_a_git_tag_in_a_bracket_argument_does_not_expand(self) -> None:
-        self.edit(self.GPU, "GIT_TAG ${PULP_GPU_RUNTIME_COMMIT}", "GIT_TAG [[${PULP_GPU_RUNTIME_COMMIT}]]")
-        self.assertFlags("GIT_TAG must be exactly")
-
-    def test_a_declaration_that_takes_its_source_elsewhere_fails(self) -> None:
-        self.edit(self.GPU, "SOURCE_SUBDIR gpu-runtime", "SOURCE_SUBDIR gpu-runtime\n        SOURCE_DIR /x")
-        self.assertFlags("takes its source from SOURCE_DIR")
-
-    def test_a_version_check_that_does_not_stop_configure_fails(self) -> None:
+    def test_the_version_check_must_stop_configure_unconditionally(self) -> None:
         self.edit(self.GPU, "        message(FATAL_ERROR\n            \"Pulp: gpu-runtime at",
-                  "        message(WARNING\n            \"Pulp: gpu-runtime at")
-        self.assertFlags("check on the fetched source")
+                  "        if(PULP_NEVER_SET)\n        message(FATAL_ERROR\n            "
+                  "\"Pulp: gpu-runtime at")
+        self.edit(self.GPU, "not the pinned ${PULP_GPU_RUNTIME_VERSION}\")",
+                  "not the pinned ${PULP_GPU_RUNTIME_VERSION}\")\n        endif()")
+        self.assertFlags("does not stop configure with FATAL_ERROR when, and only when")
 
-    def test_pin_writes_are_found_by_command_not_text(self) -> None:
+    def test_an_indirect_write_of_the_pin_fails(self) -> None:
+        indirect = ('set(_suffix "")\nset(PULP_GPU_RUNTIME_COMMIT${_suffix} '
+                    '"d361ea5b855707391798b7315183d99b6cbe69b6")\n')
+        for rel, after in ((self.GPU, 'include("${CMAKE_CURRENT_LIST_DIR}/PulpVellumLock.cmake")\n'),
+                           (self.LOCK, "unset(_pulp_vellum_lock)\n")):
+            with self.subTest(rel=rel):
+                self.setUp()
+                self.edit(rel, after, after + indirect)
+                self.assertFlags("GIT_TAG must be the lock's vellum.sha 0123456789abcdef")
+
+    def test_a_return_before_the_version_fatal_fails(self) -> None:
+        self.edit(self.GPU, "        message(FATAL_ERROR\n            \"Pulp: gpu-runtime at",
+                  "        return()\n        message(FATAL_ERROR\n            \"Pulp: gpu-runtime at")
+        self.assertFlags("does not stop configure with FATAL_ERROR when, and only when")
+
+    def test_a_redefined_recorded_command_fails(self) -> None:
+        fake_version = ("macro(get_directory_property output)\n"
+                        "    set(${output} 0.2.0)\nendmacro()\n")
+        for label, code in (
+                ("macro", fake_version),
+                ("cmake_language(EVAL)",
+                 'cmake_language(EVAL CODE "macro(get_directory_property output)\n'
+                 '    set(\\${output} 0.2.0)\nendmacro()")\n'),
+                ("FetchContent_Declare",
+                 'cmake_language(EVAL CODE "function(FetchContent_Declare)\nendfunction()")\n'),
+                ("find_package",
+                 'cmake_language(EVAL CODE "function(find_package)\n'
+                 '    set(VellumGpuRuntime_FOUND TRUE PARENT_SCOPE)\nendfunction()")\n')):
+            with self.subTest(label=label):
+                self.setUp()
+                self.edit(self.GPU, "    include(FetchContent)\n", "    include(FetchContent)\n" + code)
+                self.edit(self.GPU, "if(PULP_GPU_RUNTIME_PREFIX)\n", code + "if(PULP_GPU_RUNTIME_PREFIX)\n")
+                self.assertFails()
+
+    def test_the_lock_reader_must_derive_the_pin_from_the_lock(self) -> None:
+        for old, new in (
+                ('set(PULP_GPU_RUNTIME_COMMIT "${PULP_VELLUM_sha}")',
+                 'set(PULP_GPU_RUNTIME_COMMIT "d361ea5b855707391798b7315183d99b6cbe69b6")'),
+                ('set(PULP_GPU_RUNTIME_VERSION "${PULP_VELLUM_tag}")',
+                 'set(PULP_GPU_RUNTIME_VERSION "v0.2.0")'),
+                ('file(READ "${PULP_VELLUM_LOCK_FILE}" _pulp_vellum_lock)',
+                 'file(READ "${CMAKE_CURRENT_LIST_DIR}/../../pulp.lock" _pulp_vellum_lock)'),
+                ('set(PULP_VELLUM_${_field} "${_value}")',
+                 'set(PULP_VELLUM_${_field} "${_value}")\n    if(_field STREQUAL "sha")\n'
+                 '        set(PULP_VELLUM_sha d361ea5b855707391798b7315183d99b6cbe69b6)\n    endif()')):
+            with self.subTest(new=new):
+                self.setUp()
+                self.edit(self.LOCK, old, new)
+                self.assertFails()
+
+    def test_reading_another_lock_fails(self) -> None:
+        import json
+        other = json.loads(LOCK_FILE.read_text(encoding="utf-8"))
+        other["vellum"]["sha"] = "f" * 40
+        (self.root / "other.lock").write_text(json.dumps(other), encoding="utf-8")
+        self.edit(self.LOCK, '"${CMAKE_CURRENT_LIST_DIR}/../../pulp.lock"',
+                  '"${CMAKE_CURRENT_LIST_DIR}/../../other.lock"')
+        self.assertFlags("read the pin from")
+
+    def test_the_lock_reader_refuses_a_tag_pulp_lock_py_refuses(self) -> None:
+        import json
+        for tag in ("0.2.0", "v0.2", "v0.2.0-rc1", "release-1"):
+            with self.subTest(tag=tag):
+                lock = json.loads(LOCK_FILE.read_text(encoding="utf-8"))
+                lock["vellum"]["tag"] = tag
+                path = self.root / "bad.lock"
+                path.write_text(json.dumps(lock), encoding="utf-8")
+                self.assertTrue(audit.validate_pulp_lock(lock))
+                run = audit.run_gpu_runtime_driver(self.root, self.GPU, "0.2.0", lock_file=path)
+                self.assertEqual(run.calls[-1][0], "message", run.output)
+                self.assertIn("vellum.tag is not a release tag", run.calls[-1][1][1])
+                self.assertEqual(run.named("FetchContent_Declare"), [])
+        lock = json.loads(LOCK_FILE.read_text(encoding="utf-8"))
+        path.write_text(json.dumps(lock), encoding="utf-8")
+        run = audit.run_gpu_runtime_driver(self.root, self.GPU, "0.2.0", lock_file=path)
+        self.assertTrue(run.named("FetchContent_Declare"), run.output)
+
+    def test_the_prefix_checks_must_use_the_lock(self) -> None:
+        for old, new, fragment in (
+                ('pulp_check_gpu_runtime_record("${PULP_GPU_RUNTIME_PREFIX}" "${PULP_GPU_RUNTIME_COMMIT}")',
+                 'pulp_check_gpu_runtime_record("${PULP_GPU_RUNTIME_PREFIX}" "x")', "prefix record"),
+                ('"${PULP_GPU_RUNTIME_ARCHIVE}" "${PULP_VELLUM_gpu_runtime_digest}")',
+                 '"${PULP_GPU_RUNTIME_ARCHIVE}" "' + "f0ed5c873c9513725044cbca30d3604fbcb6f6dfdca99ee588dca1050b3d857c" + '")',
+                 "prefix archive")):
+            with self.subTest(fragment=fragment):
+                self.setUp()
+                self.edit(self.GPU, old, new)
+                self.assertFlags(fragment)
+
+    def test_source_overrides_elsewhere_in_the_tree_fail(self) -> None:
         other = self.root / "tools/cmake/Other.cmake"
-        other.write_text('set(_doc "set(PULP_GPU_RUNTIME_COMMIT x)")\n'
-                         "set(_doc [[string(REPLACE a b PULP_GPU_RUNTIME_VERSION x)]])\n"
-                         "# set(PULP_VELLUM_sha x)\n", encoding="utf-8")
+        for override, fragment in (
+                ("set(FETCHCONTENT_SOURCE_DIR_VELLUM_GPU_RUNTIME /x)", "sets FETCHCONTENT_SOURCE_DIR"),
+                ('set("FETCHCONTENT_SOURCE_DIR_VELLUM_GPU_RUNTIME" /x CACHE PATH "")',
+                 "sets FETCHCONTENT_SOURCE_DIR"),
+                ("set([[FETCHCONTENT_FULLY_DISCONNECTED]] ON)", "sets FETCHCONTENT_FULLY_DISCONNECTED"),
+                ('set(PULP_VELLUM_LOCK_FILE "/tmp/other.lock" CACHE FILEPATH "" FORCE)',
+                 "sets PULP_VELLUM_LOCK_FILE"),
+                ('set([==[PULP_VELLUM_LOCK_FILE]==] "/tmp/other.lock")', "sets PULP_VELLUM_LOCK_FILE"),
+                ("pulp_register_fetchcontent_source(vellum_gpu_runtime DIR x REF y)",
+                 "registers a FetchContent source for vellum_gpu_runtime"),
+                ("cmake_language(SET_DEPENDENCY_PROVIDER p SUPPORTED_METHODS "
+                 "FETCHCONTENT_MAKEAVAILABLE_SERIAL)", "sets a dependency provider"),
+                ("macro(FetchContent_Declare)\nendmacro()", "redefines FetchContent_Declare()")):
+            with self.subTest(override=override):
+                other.write_text(override + "\n", encoding="utf-8")
+                self.assertFlags(fragment)
+        other.write_text("pulp_register_fetchcontent_source(Catch2 DIR catch2 REF v3)\n"
+                         'set(_doc "set(FETCHCONTENT_SOURCE_DIR_VELLUM_GPU_RUNTIME /x)")\n'
+                         "# set(PULP_VELLUM_LOCK_FILE /x)\n", encoding="utf-8")
         self.assertEqual(self.problems(), [])
-        for write in ('string(REPLACE a b PULP_GPU_RUNTIME_COMMIT "${PULP_GPU_RUNTIME_COMMIT}")',
-                      "unset(PULP_GPU_RUNTIME_VERSION)",
-                      'set("PULP_GPU_RUNTIME_COMMIT" x)',
-                      "set([[PULP_GPU_RUNTIME_VERSION]] x)",
-                      "set(PULP_VELLUM_sha 0)",
-                      "function(f)\nset(PULP_GPU_RUNTIME_COMMIT x PARENT_SCOPE)\nendfunction()"):
-            with self.subTest(write=write):
-                other.write_text(write + "\n", encoding="utf-8")
-                self.assertTrue(any("Other.cmake sets" in p for p in self.problems()), write)
 
-    def test_the_lock_reader_must_set_the_pin_after_reading_the_lock(self) -> None:
-        line = 'set(PULP_GPU_RUNTIME_COMMIT "${PULP_VELLUM_sha}")\n'
-        self.edit(self.LOCK, line, "")
-        self.edit(self.LOCK, "foreach(_field tag sha", line + "foreach(_field tag sha")
-        self.assertFlags("must set PULP_GPU_RUNTIME_COMMIT exactly once")
+    def test_the_pin_source_must_be_the_canonical_in_tree_file(self) -> None:
+        for source in ("tools/cmake/Other.cmake", "/abs/PulpGpuRuntime.cmake",
+                       "../PulpGpuRuntime.cmake", "tools/cmake/../cmake/PulpGpuRuntime.cmake"):
+            with self.subTest(source=source):
+                entry = self.entry()
+                entry[0]["source_files"] = [source]
+                found = audit.gpu_runtime_pin_agreement(entry, self.root)
+                self.assertTrue(any("must be exactly" in problem for problem in found), found)
 
-    def test_the_lock_reader_may_not_overwrite_a_lock_field(self) -> None:
-        self.edit(self.LOCK, "unset(_pulp_vellum_lock)", "set(PULP_VELLUM_sha 0)\nunset(_pulp_vellum_lock)")
-        self.assertFlags("writes PULP_VELLUM_sha")
+    def test_expanded_and_eval_writes_elsewhere_in_the_tree_fail(self) -> None:
+        other = self.root / "tools/cmake/Other.cmake"
+        for text, fragment in (
+                ("set(_name PULP_VELLUM_LOCK_FILE)\nset(${_name} /other.lock)", "sets PULP_VELLUM_LOCK_FILE"),
+                ("set(_name PULP_VELLUM_LOCK_${_s})\nset(${_name} /other.lock)", "named by an expansion"),
+                ("set(_a PULP_VELLUM)\nset(_b LOCK_FILE)\nset(${_a}_${_b} /x)", "named by an expansion"),
+                ("string(CONCAT _n PULP_VELLUM _LOCK_FILE)\nset(${_n} /x)", "named by an expansion"),
+                ("set(PULP_VELLUM_${_s} /other.lock CACHE FILEPATH \"\" FORCE)", "named by an expansion"),
+                ("set(FETCHCONTENT_SOURCE_DIR_${_u} /x)", "named by an expansion"),
+                ('cmake_language(EVAL CODE "set(PULP_VELLUM_LOCK_FILE /x)")', "sets PULP_VELLUM_LOCK_FILE"),
+                ('cmake_language(EVAL CODE "set(${_n} /x")', "cannot parse"),
+                ("cmake_language(CALL ${_c} PULP_VELLUM_LOCK_FILE /x)", "names its command by an expansion"),
+                ("cmake_language(EVAL ${_code})", "not in the form"),
+                ("cmake_language(CALL set PULP_VELLUM_LOCK_FILE /x)", "sets PULP_VELLUM_LOCK_FILE")):
+            with self.subTest(text=text):
+                other.write_text(text + "\n", encoding="utf-8")
+                self.assertFlags(fragment)
+        # Negative controls: PARENT_SCOPE out-parameters, deferred calls and
+        # expansions that cannot be a protected name stay clean.
+        other.write_text("function(f out)\n  set(${out} 1 PARENT_SCOPE)\nendfunction()\n"
+                         "set(FETCHCONTENT_SOURCE_DIR_${_u} /x PARENT_SCOPE)\n"
+                         "set(OTHER_${_u} 1)\ncmake_language(DEFER CALL message hi)\n",
+                         encoding="utf-8")
+        self.assertEqual(self.problems(), [])
 
-    def test_redefining_a_relied_on_command_fails(self) -> None:
-        (self.root / "tools/cmake/Other.cmake").write_text(
-            "macro(FetchContent_Declare)\nendmacro()\n", encoding="utf-8")
-        self.assertFlags("redefines FetchContent_Declare()")
-
-    def test_unparseable_cmake_fails_closed(self) -> None:
-        self.edit(self.GPU, "SOURCE_SUBDIR gpu-runtime", 'SOURCE_SUBDIR "gpu-runtime')
+    def test_unparseable_cmake_elsewhere_fails_closed(self) -> None:
+        (self.root / "tools/cmake/Other.cmake").write_text('set(x "unterminated)\n', encoding="utf-8")
         self.assertFlags("cannot parse")
+
+    def test_a_cmake_without_the_fetch_declaration_fails(self) -> None:
+        (self.root / self.GPU).write_text("# no pin\n", encoding="utf-8")
+        self.assertTrue(self.problems())
+
+    def test_a_cmake_fetch_without_a_manifest_entry_fails(self) -> None:
+        problems = audit.gpu_runtime_pin_agreement([], self.root)
+        self.assertTrue(problems and "has no vellum-gpu-runtime entry" in problems[0])
+
+    def test_no_manifest_entry_and_no_fetch_passes(self) -> None:
+        self.assertEqual(audit.gpu_runtime_pin_agreement([], self.root / "empty"), [])
+        (self.root / self.GPU).write_text("# no pin\n", encoding="utf-8")
+        self.assertEqual(audit.gpu_runtime_pin_agreement([], self.root), [])
 
 
 class VellumDriftTests(unittest.TestCase):
@@ -527,7 +638,7 @@ class RendererLockDigestTests(unittest.TestCase):
         self.addCleanup(temporary.cleanup)
         self.root = Path(temporary.name)
         import json
-        self.lock = json.loads((ROOT / "pulp.lock").read_text(encoding="utf-8"))
+        self.lock = json.loads(LOCK_FILE.read_text(encoding="utf-8"))
         self.sha = self.lock["vellum"]["sha"]
         self.manifest = json.loads(
             (ROOT / "tools/deps/manifest.json").read_text(encoding="utf-8"))["dependencies"]
@@ -599,7 +710,7 @@ class RendererLockDigestTests(unittest.TestCase):
     def test_pulp_lock_renderer_digest_is_bound_to_exact_lock_bytes(self) -> None:
         import hashlib
         import json
-        lock = json.loads((ROOT / "pulp.lock").read_text(encoding="utf-8"))
+        lock = json.loads(LOCK_FILE.read_text(encoding="utf-8"))
         real = json.loads((ROOT / "tools/deps/manifest.json").read_text(encoding="utf-8"))["dependencies"]
         payload = b"renderer lock bytes"
         lock["render_toolchain"]["lock_digest"] = hashlib.sha256(payload).hexdigest()
@@ -611,4 +722,4 @@ class RendererLockDigestTests(unittest.TestCase):
 
 
 if __name__ == "__main__":
-    unittest.main()
+    unittest.main(argv=[sys.argv[0], *(arg for arg in sys.argv[1:] if not arg.endswith(".lock"))])

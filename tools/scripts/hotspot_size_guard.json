@@ -11,14 +11,19 @@
   },
   "hotspots": [
     {
-      "path": "core/signal/include/pulp/signal/multi_channel_meter.hpp",
-      "max_loc": 1086,
-      "note": "Meter feature sets and their block kernels; new feature kernels belong in focused detail headers rather than growing this one"
+      "path": "CLAUDE.md",
+      "max_loc": 2051,
+      "note": "Always-resident agent context read on every turn; every line costs every session, so growth is a residency decision \u2014 declare it with a Hotspot-Grow: CLAUDE.md trailer"
     },
     {
-      "path": "core/host/include/pulp/host/signal_graph.hpp",
-      "max_loc": 9,
-      "note": "Compatibility umbrella for independently compilable custom-node, node, connection, and runtime contracts; declarations belong in the focused headers"
+      "path": "core/canvas/include/pulp/canvas/canvas.hpp",
+      "max_loc": 1534,
+      "note": "public canvas header trim candidate (+UTF-8 codepoint clamp in text_x_for_byte, prevents nil-NSString host-process crash)"
+    },
+    {
+      "path": "core/canvas/src/skia_canvas.cpp",
+      "max_loc": 1136,
+      "note": "Skia canvas split stabilization candidate"
     },
     {
       "path": "core/host/include/pulp/host/custom_node_type.hpp",
@@ -26,14 +31,19 @@
       "note": "Focused custom-node registration contract; execution and retained graph state belong in their focused headers"
     },
     {
-      "path": "core/host/include/pulp/host/signal_graph_node.hpp",
-      "max_loc": 130,
-      "note": "Focused SignalGraph node identity and retained-state contract"
+      "path": "core/host/include/pulp/host/signal_graph.hpp",
+      "max_loc": 9,
+      "note": "Compatibility umbrella for independently compilable custom-node, node, connection, and runtime contracts; declarations belong in the focused headers"
     },
     {
       "path": "core/host/include/pulp/host/signal_graph_connection.hpp",
       "max_loc": 55,
       "note": "Focused SignalGraph connection metadata contract"
+    },
+    {
+      "path": "core/host/include/pulp/host/signal_graph_node.hpp",
+      "max_loc": 130,
+      "note": "Focused SignalGraph node identity and retained-state contract"
     },
     {
       "path": "core/host/include/pulp/host/signal_graph_runtime.hpp",
@@ -42,8 +52,8 @@
     },
     {
       "path": "core/host/src/graph_serializer.cpp",
-      "max_loc": 3849,
-      "note": "GraphSerializer public entry points, document shape, save and load; persisted sample-region validation, plugin node resolution and later split concerns belong in focused graph_serializer_*.cpp units"
+      "max_loc": 3094,
+      "note": "GraphSerializer public entry points, document shape and load; persisted sample-region validation, plugin node resolution, the save path and later split concerns belong in focused graph_serializer_*.cpp units"
     },
     {
       "path": "core/host/src/graph_serializer_plugin_resolver.cpp",
@@ -56,24 +66,29 @@
       "note": "Persisted sample-region metadata, parser-shape and topology validation for serializer loads; reads the graph through public queries only"
     },
     {
-      "path": "core/host/src/signal_graph_prepared_topology_edit.cpp",
-      "max_loc": 2659,
-      "note": "Prepared-topology transaction lifecycle; prepared-description capture and other prepare() phases belong in focused signal_graph_prepared_*.cpp units"
+      "path": "core/host/src/graph_serializer_save.cpp",
+      "max_loc": 722,
+      "note": "Serializer save path: writer selection, plain and saved-identity v7 documents, the legacy v6 test writer and durable .pulpgraph file writes"
     },
     {
-      "path": "core/host/src/signal_graph_prepared_description_capture.cpp",
-      "max_loc": 672,
-      "note": "Prepared-description capture from one compiled serial routed snapshot, cross-checked against the authored candidate"
-    },
-    {
-      "path": "core/host/src/signal_graph_prepare.cpp",
-      "max_loc": 1664,
-      "note": "SignalGraph compile/prepare lifecycle; compile_ phases belong in focused signal_graph_compile_*.cpp units"
+      "path": "core/host/src/signal_graph_compile_nodes.cpp",
+      "max_loc": 397,
+      "note": "Per-node runtime, mailbox, custom-node and sample-region callback binding for one compiled snapshot"
     },
     {
       "path": "core/host/src/signal_graph_compile_routed.cpp",
       "max_loc": 306,
       "note": "Routed-executor snapshot build, PDC execution-domain choice and anticipation splice for one compiled snapshot"
+    },
+    {
+      "path": "core/host/src/signal_graph_prepare.cpp",
+      "max_loc": 1158,
+      "note": "SignalGraph compile/prepare lifecycle; compile_ phases belong in focused signal_graph_compile_*.cpp units"
+    },
+    {
+      "path": "core/host/src/signal_graph_prepared_description_capture.cpp",
+      "max_loc": 672,
+      "note": "Prepared-description capture from one compiled serial routed snapshot, cross-checked against the authored candidate"
     },
     {
       "path": "core/host/src/signal_graph_prepared_edit_admission.cpp",
@@ -84,6 +99,11 @@
       "path": "core/host/src/signal_graph_prepared_edit_adoption.cpp",
       "max_loc": 151,
       "note": "Prepared-topology runtime-state adoption from the live snapshot: ingress mailboxes, plugin sequence pointers and matching feed-forward PDC rings"
+    },
+    {
+      "path": "core/host/src/signal_graph_prepared_topology_edit.cpp",
+      "max_loc": 2659,
+      "note": "Prepared-topology transaction lifecycle; prepared-description capture and other prepare() phases belong in focused signal_graph_prepared_*.cpp units"
     },
     {
       "path": "core/host/src/timeline_graph_binding.cpp",
@@ -106,9 +126,74 @@
       "note": "Playback program compiler hotspot; subsequent sequencer lowering work cannot grow the monolith silently"
     },
     {
+      "path": "core/render/src/renderer3d.cpp",
+      "max_loc": 3071,
+      "note": "Renderer3D implementation hotspot after CPU value-type extraction; frame device-acquisition + readback/PNG tail shared via acquire_dawn_frame/finish_frame_readback (padded-row map+compaction in gpu_readback.cpp); scene shader in core/render/shaders/renderer3d_scene.wgsl; render_scene_data phase split + grouped SceneFeatureFlags (from_primitive/merge live in renderer3d_internal.hpp; only apply-to-result stays here)"
+    },
+    {
+      "path": "core/signal/include/pulp/signal/multi_channel_meter.hpp",
+      "max_loc": 1086,
+      "note": "Meter feature sets and their block kernels; new feature kernels belong in focused detail headers rather than growing this one"
+    },
+    {
+      "path": "core/view/CMakeLists.txt",
+      "max_loc": 434,
+      "note": "View target/link/platform policy hub after JS prelude generation, JS engine configuration, and declarative source ownership moved to focused core/view/cmake modules"
+    },
+    {
+      "path": "core/view/include/pulp/view/design_frame_view.hpp",
+      "max_loc": 1098,
+      "note": "DesignFrameView public header; ceiling set after DesignParamBinding extraction. New binding-cluster surface belongs in design_param_binding.hpp."
+    },
+    {
+      "path": "core/view/include/pulp/view/view.hpp",
+      "max_loc": 1742,
+      "note": "public view header trim candidate (+7 for View::start_file_drag outbound-drag public API + FileDragRequest fwd-decl; +7 from design-system branch additions; +16 for the FrameClock reachability hook \u2014 on_frame_clock_changed + out-of-line set_frame_clock + notify_frame_clock_changed \u2014 powering paint-safe meter sources; +35 for the bounded sub-view invalidation public API \u2014 request_repaint(Rect) plus the has_filter_effect / applies_child_paint_offset escalation predicates; +7 for generalized virtual-list layout/input routing hooks; +63 for the live host\u2192view value-source seam \u2014 set_meter_source / meter_frame / set_scalar_source / scalar_value / on_meter_frame plus the binding-enrolment members, of which 35 lines are the per-declaration docs an SDK consumer reads at the call site)"
+    },
+    {
       "path": "core/view/include/pulp/view/widget_bridge.hpp",
       "max_loc": 509,
       "note": "WidgetBridge public header. The ~75 sub-API registrar declarations moved out to the src-only widget_bridge/registrars.hpp (BridgeRegistrars friend), shrinking this header 571->509 and cutting the recompile blast radius of adding a bridge API. Keep new registrars out of this header; ceiling locks the win."
+    },
+    {
+      "path": "core/view/platform/mac/window_host_mac.mm",
+      "max_loc": 2459,
+      "note": "Mac window host lifecycle/capture/geometry hotspot (+set_app_key_monitor app-level key routing). Raised 2752->2770 for the two set_native_child_view_clip overrides (CPU + GPU WindowHost) that forward to the shared mac_geometry clip helper (R1 NativeViewHost). Lowered after the three hand-rolled CVDisplayLink drivers collapsed onto the shared MacDisplayLinkDriver. Lowered 2690->2551 (S33) after the CPU + GPU hosts' duplicated NSWindow construction/positioning/teardown collapsed onto shared mac_geometry helpers (create_configured_window / position_window_beside / detach_and_close_window) and scrollWheel routing moved to portable pulp::view::deliver_mouse_wheel (S31). Lowered 2551->2459 (S31) after mouseDown/mouseUp delivery (modern+legacy channels, W3C pointer bubble, same-target click suppression) moved to portable pulp::view::deliver_mouse_down / deliver_mouse_up and the dispatch_mouse_down_if_live helper was deleted."
+    },
+    {
+      "path": "core/view/src/design_codegen.cpp",
+      "max_loc": 1961,
+      "note": "generated JS bridge contract hotspot; lowered after comment-hygiene cleanup"
+    },
+    {
+      "path": "core/view/src/design_cpp_codegen.cpp",
+      "max_loc": 122,
+      "note": "DesignIR C++ codegen facade after binding, support, style, and tree emission moved into focused companion translation units"
+    },
+    {
+      "path": "core/view/src/design_frame_view.cpp",
+      "max_loc": 1623,
+      "note": "imported-design frame view; ceiling set after the host-param binding cluster (scale-mismatch diagnostic, bind grid, element scalar sources) moved to design_param_binding.cpp. Keep further host-param binding out of this file; the value channel + emit_* funnel + pointer/paint stay here by design."
+    },
+    {
+      "path": "core/view/src/design_import.cpp",
+      "max_loc": 2189,
+      "note": "design-import orchestration hotspot; lowered after comment-hygiene cleanup; PNG codec + pixel passes live in design_import_png.cpp"
+    },
+    {
+      "path": "core/view/src/design_import_native_common.cpp",
+      "max_loc": 1991,
+      "note": "native materialization/import boundary hotspot; +12 for the interactive-element param_key mapping + host-param routing auto-enable; owns the shared hit-policy + image-sizing lowering for the runtime and baked-C++ lanes; shared IR helpers in design_ir_helpers.hpp"
+    },
+    {
+      "path": "core/view/src/design_ir_json.cpp",
+      "max_loc": 2265,
+      "note": "DesignIR serialization contract hotspot; layer-name binding helper + Gate-2/3 resolve in normalize_figma_plugin_binding, plus interactive-element param_key parse/serialize"
+    },
+    {
+      "path": "core/view/src/ui_components.cpp",
+      "max_loc": 1500,
+      "note": "Composite UI component hotspot; split further before growing"
     },
     {
       "path": "core/view/src/widget_bridge.cpp",
@@ -126,14 +211,39 @@
       "note": "WidgetBridge GPU registrar split hotspot; lowered after removing the write-only native-buffer stubs"
     },
     {
-      "path": "core/view/CMakeLists.txt",
-      "max_loc": 434,
-      "note": "View target/link/platform policy hub after JS prelude generation, JS engine configuration, and declarative source ownership moved to focused core/view/cmake modules"
+      "path": "core/view/src/widgets.cpp",
+      "max_loc": 1884,
+      "note": "Core widget implementations hotspot; split further before growing"
     },
     {
-      "path": "tools/local-ci/local_ci.py",
-      "max_loc": 81,
-      "note": "legacy local CI runner (superseded by Shipyard, #120); ratcheted down after the file was gutted to a thin stub"
+      "path": "inspect/include/pulp/inspect/inspector_overlay.hpp",
+      "max_loc": 1584,
+      "note": "Inspector overlay public header hotspot; reduce private state deliberately; grew for the semantic-knob tweaks panel + send-to-agent field"
+    },
+    {
+      "path": "inspect/src/domain_handler.cpp",
+      "max_loc": 507,
+      "note": "Inspector protocol dispatch hub; preserve optional-source errors. Console/Runtime, Capture, and Inspector domains are extracted into owned modules"
+    },
+    {
+      "path": "inspect/src/inspector_overlay.cpp",
+      "max_loc": 2645,
+      "note": "Inspector overlay facade hotspot; extract companions per INSPECT_MODULE_MAP.md; grew for the semantic-knob tweaks panel + send-to-agent field"
+    },
+    {
+      "path": "inspect/src/inspector_overlay_paint.cpp",
+      "max_loc": 1541,
+      "note": "Inspector overlay paint hotspot; keep drawing separate from mutation; grew for the semantic-knob tweaks panel + send-to-agent field"
+    },
+    {
+      "path": "inspect/src/inspector_window.cpp",
+      "max_loc": 1301,
+      "note": "Inspector window UI hotspot; keep separate from canvas overlay state"
+    },
+    {
+      "path": "inspect/src/tweak_store.cpp",
+      "max_loc": 807,
+      "note": "Inspector tweak schema and disk contract hotspot"
     },
     {
       "path": "test/CMakeLists.txt",
@@ -141,29 +251,74 @@
       "note": "test manifest owner include hub after the per-area split; new registrations belong in focused test/cmake/*_tests.cmake manifests"
     },
     {
-      "path": "test/test_signal_mod_contract.cpp",
-      "max_loc": 537,
-      "note": "modulation toolkit cross-cutting alias, precision, fresh-state, and reset contracts"
+      "path": "test/fuzz/audio_decoder_seed_corpus.py",
+      "max_loc": 73,
+      "note": "seed corpus driver only; builders belong in test/fuzz/audio_decoder_seeds/<format>.py"
     },
     {
-      "path": "test/test_signal_mod_sources.cpp",
-      "max_loc": 760,
-      "note": "modulation toolkit RNG, LFO, and chaos source behavior"
+      "path": "test/fuzz/audio_decoder_seeds/aiff.py",
+      "max_loc": 71,
+      "note": "AIFF and AIFF-C seed builders"
     },
     {
-      "path": "test/test_signal_mod_tools.cpp",
-      "max_loc": 249,
-      "note": "modulation toolkit control-tool and general unit-conversion behavior"
+      "path": "test/fuzz/audio_decoder_seeds/common.py",
+      "max_loc": 125,
+      "note": "seed corpus signal, packers, encoder lookup and Corpus shared by every format"
     },
     {
-      "path": "test/test_signal_mod_events.cpp",
-      "max_loc": 669,
-      "note": "modulation toolkit trigger, event, and envelope behavior"
+      "path": "test/fuzz/audio_decoder_seeds/flac.py",
+      "max_loc": 133,
+      "note": "FLAC seed builders"
     },
     {
-      "path": "test/test_signal_mod_voice.cpp",
-      "max_loc": 792,
-      "note": "modulation toolkit VCA, LPG, matrix, and composition behavior"
+      "path": "test/fuzz/audio_decoder_seeds/mp3.py",
+      "max_loc": 141,
+      "note": "MP3 seed builders"
+    },
+    {
+      "path": "test/fuzz/audio_decoder_seeds/mp4.py",
+      "max_loc": 153,
+      "note": "MP4/M4A and CAF seed builders"
+    },
+    {
+      "path": "test/fuzz/audio_decoder_seeds/ogg.py",
+      "max_loc": 94,
+      "note": "Ogg Vorbis seed builders"
+    },
+    {
+      "path": "test/fuzz/audio_decoder_seeds/wav.py",
+      "max_loc": 176,
+      "note": "WAV, RF64, BW64 and Wave64 seed builders"
+    },
+    {
+      "path": "test/support/audio_decoder_corpus.hpp",
+      "max_loc": 119,
+      "note": "audio decoder corpus helpers shared by the per-format files"
+    },
+    {
+      "path": "test/support/audio_decoder_corpus_expectations.hpp",
+      "max_loc": 129,
+      "note": "one expectation row per committed audio decoder seed"
+    },
+    {
+      "path": "test/test_audio_decoder_corpus.cpp",
+      "max_loc": 106,
+      "note": "audio decoder corpus replay, cross-format cases; format-specific cases belong in test_audio_decoder_corpus_{wav,mp3,flac_ogg}.cpp"
+    },
+    {
+      "path": "test/test_audio_decoder_corpus_flac_ogg.cpp",
+      "max_loc": 99,
+      "note": "audio decoder corpus FLAC and Ogg cases; a format that outgrows this file gets its own"
+    },
+    {
+      "path": "test/test_audio_decoder_corpus_mp3.cpp",
+      "max_loc": 259,
+      "note": "audio decoder corpus MP3 cases"
+    },
+    {
+      "path": "test/test_audio_decoder_corpus_wav.cpp",
+      "max_loc": 252,
+      "note": "audio decoder corpus WAV cases"
     },
     {
       "path": "test/test_design_import_codegen.cpp",
@@ -186,9 +341,9 @@
       "note": "design-import source parser test split; +166 for the layer-name binding cases ([layer-name-binding])"
     },
     {
-      "path": "test/test_renderer3d_shared.hpp",
-      "max_loc": 2441,
-      "note": "Renderer3D shared test fixtures"
+      "path": "test/test_renderer3d_loading.cpp",
+      "max_loc": 564,
+      "note": "Renderer3D loading test split"
     },
     {
       "path": "test/test_renderer3d_materials.cpp",
@@ -201,69 +356,34 @@
       "note": "Renderer3D scene test split"
     },
     {
-      "path": "test/test_renderer3d_loading.cpp",
-      "max_loc": 564,
-      "note": "Renderer3D loading test split"
+      "path": "test/test_renderer3d_shared.hpp",
+      "max_loc": 2441,
+      "note": "Renderer3D shared test fixtures"
     },
     {
-      "path": "core/render/src/renderer3d.cpp",
-      "max_loc": 3071,
-      "note": "Renderer3D implementation hotspot after CPU value-type extraction; frame device-acquisition + readback/PNG tail shared via acquire_dawn_frame/finish_frame_readback (padded-row map+compaction in gpu_readback.cpp); scene shader in core/render/shaders/renderer3d_scene.wgsl; render_scene_data phase split + grouped SceneFeatureFlags (from_primitive/merge live in renderer3d_internal.hpp; only apply-to-result stays here)"
+      "path": "test/test_signal_mod_contract.cpp",
+      "max_loc": 537,
+      "note": "modulation toolkit cross-cutting alias, precision, fresh-state, and reset contracts"
     },
     {
-      "path": "tools/import-design/pulp_import_design.cpp",
-      "max_loc": 3579,
-      "note": "import-design CLI orchestration hotspot (+20 for the --fidelity-report arg/emit/help surface; ledger taxonomy + JSON live in design_fidelity_ledger.cpp; +24 for the --from fig lane arg/help surface, decode logic in fig_lane.cpp); grew with the recognition-resolver + installed-package custom-control wiring, the --validate faithful_svg honesty caveat, and the --fail-below similarity gate (arg parse + unit validation + help); ceiling lowered when the sprite/skin asset-resolution pass + PNG decoder moved to sprite_skins.cpp and main() was split into parse_cli_args / resolve_sprite_skins / run_fidelity_selfcheck seams"
+      "path": "test/test_signal_mod_events.cpp",
+      "max_loc": 669,
+      "note": "modulation toolkit trigger, event, and envelope behavior"
     },
     {
-      "path": "core/view/platform/mac/window_host_mac.mm",
-      "max_loc": 2459,
-      "note": "Mac window host lifecycle/capture/geometry hotspot (+set_app_key_monitor app-level key routing). Raised 2752->2770 for the two set_native_child_view_clip overrides (CPU + GPU WindowHost) that forward to the shared mac_geometry clip helper (R1 NativeViewHost). Lowered after the three hand-rolled CVDisplayLink drivers collapsed onto the shared MacDisplayLinkDriver. Lowered 2690->2551 (S33) after the CPU + GPU hosts' duplicated NSWindow construction/positioning/teardown collapsed onto shared mac_geometry helpers (create_configured_window / position_window_beside / detach_and_close_window) and scrollWheel routing moved to portable pulp::view::deliver_mouse_wheel (S31). Lowered 2551->2459 (S31) after mouseDown/mouseUp delivery (modern+legacy channels, W3C pointer bubble, same-target click suppression) moved to portable pulp::view::deliver_mouse_down / deliver_mouse_up and the dispatch_mouse_down_if_live helper was deleted."
+      "path": "test/test_signal_mod_sources.cpp",
+      "max_loc": 760,
+      "note": "modulation toolkit RNG, LFO, and chaos source behavior"
     },
     {
-      "path": "core/view/src/design_frame_view.cpp",
-      "max_loc": 1623,
-      "note": "imported-design frame view; ceiling set after the host-param binding cluster (scale-mismatch diagnostic, bind grid, element scalar sources) moved to design_param_binding.cpp. Keep further host-param binding out of this file; the value channel + emit_* funnel + pointer/paint stay here by design."
+      "path": "test/test_signal_mod_tools.cpp",
+      "max_loc": 249,
+      "note": "modulation toolkit control-tool and general unit-conversion behavior"
     },
     {
-      "path": "core/view/include/pulp/view/design_frame_view.hpp",
-      "max_loc": 1098,
-      "note": "DesignFrameView public header; ceiling set after DesignParamBinding extraction. New binding-cluster surface belongs in design_param_binding.hpp."
-    },
-    {
-      "path": "core/view/src/design_import.cpp",
-      "max_loc": 2189,
-      "note": "design-import orchestration hotspot; lowered after comment-hygiene cleanup; PNG codec + pixel passes live in design_import_png.cpp"
-    },
-    {
-      "path": "core/view/src/design_ir_json.cpp",
-      "max_loc": 2265,
-      "note": "DesignIR serialization contract hotspot; layer-name binding helper + Gate-2/3 resolve in normalize_figma_plugin_binding, plus interactive-element param_key parse/serialize"
-    },
-    {
-      "path": "core/view/src/design_cpp_codegen.cpp",
-      "max_loc": 122,
-      "note": "DesignIR C++ codegen facade after binding, support, style, and tree emission moved into focused companion translation units"
-    },
-    {
-      "path": "core/view/src/design_import_native_common.cpp",
-      "max_loc": 1991,
-      "note": "native materialization/import boundary hotspot; +12 for the interactive-element param_key mapping + host-param routing auto-enable; owns the shared hit-policy + image-sizing lowering for the runtime and baked-C++ lanes; shared IR helpers in design_ir_helpers.hpp"
-    },
-    {
-      "path": "core/view/src/design_codegen.cpp",
-      "max_loc": 1961,
-      "note": "generated JS bridge contract hotspot; lowered after comment-hygiene cleanup"
-    },
-    {
-      "path": "core/view/include/pulp/view/view.hpp",
-      "max_loc": 1742,
-      "note": "public view header trim candidate (+7 for View::start_file_drag outbound-drag public API + FileDragRequest fwd-decl; +7 from design-system branch additions; +16 for the FrameClock reachability hook \u2014 on_frame_clock_changed + out-of-line set_frame_clock + notify_frame_clock_changed \u2014 powering paint-safe meter sources; +35 for the bounded sub-view invalidation public API \u2014 request_repaint(Rect) plus the has_filter_effect / applies_child_paint_offset escalation predicates; +7 for generalized virtual-list layout/input routing hooks; +63 for the live host\u2192view value-source seam \u2014 set_meter_source / meter_frame / set_scalar_source / scalar_value / on_meter_frame plus the binding-enrolment members, of which 35 lines are the per-declaration docs an SDK consumer reads at the call site)"
-    },
-    {
-      "path": "core/canvas/include/pulp/canvas/canvas.hpp",
-      "max_loc": 1534,
-      "note": "public canvas header trim candidate (+UTF-8 codepoint clamp in text_x_for_byte, prevents nil-NSString host-process crash)"
+      "path": "test/test_signal_mod_voice.cpp",
+      "max_loc": 792,
+      "note": "modulation toolkit VCA, LPG, matrix, and composition behavior"
     },
     {
       "path": "tools/cli/cli_common.cpp",
@@ -276,124 +396,14 @@
       "note": "kit/package trust-boundary monolith; split per tools/cli/KIT_COMMANDS_MODULE_MAP.md (manifest validation, shared JSON accessors, archive-safety path checks, and validation-profile verification are extracted into focused modules)"
     },
     {
-      "path": "inspect/src/inspector_overlay.cpp",
-      "max_loc": 2645,
-      "note": "Inspector overlay facade hotspot; extract companions per INSPECT_MODULE_MAP.md; grew for the semantic-knob tweaks panel + send-to-agent field"
+      "path": "tools/import-design/pulp_import_design.cpp",
+      "max_loc": 3579,
+      "note": "import-design CLI orchestration hotspot (+20 for the --fidelity-report arg/emit/help surface; ledger taxonomy + JSON live in design_fidelity_ledger.cpp; +24 for the --from fig lane arg/help surface, decode logic in fig_lane.cpp); grew with the recognition-resolver + installed-package custom-control wiring, the --validate faithful_svg honesty caveat, and the --fail-below similarity gate (arg parse + unit validation + help); ceiling lowered when the sprite/skin asset-resolution pass + PNG decoder moved to sprite_skins.cpp and main() was split into parse_cli_args / resolve_sprite_skins / run_fidelity_selfcheck seams"
     },
     {
-      "path": "inspect/src/inspector_overlay_paint.cpp",
-      "max_loc": 1541,
-      "note": "Inspector overlay paint hotspot; keep drawing separate from mutation; grew for the semantic-knob tweaks panel + send-to-agent field"
-    },
-    {
-      "path": "inspect/include/pulp/inspect/inspector_overlay.hpp",
-      "max_loc": 1584,
-      "note": "Inspector overlay public header hotspot; reduce private state deliberately; grew for the semantic-knob tweaks panel + send-to-agent field"
-    },
-    {
-      "path": "inspect/src/inspector_window.cpp",
-      "max_loc": 1301,
-      "note": "Inspector window UI hotspot; keep separate from canvas overlay state"
-    },
-    {
-      "path": "inspect/src/domain_handler.cpp",
-      "max_loc": 507,
-      "note": "Inspector protocol dispatch hub; preserve optional-source errors. Console/Runtime, Capture, and Inspector domains are extracted into owned modules"
-    },
-    {
-      "path": "inspect/src/tweak_store.cpp",
-      "max_loc": 807,
-      "note": "Inspector tweak schema and disk contract hotspot"
-    },
-    {
-      "path": "core/canvas/src/skia_canvas.cpp",
-      "max_loc": 1136,
-      "note": "Skia canvas split stabilization candidate"
-    },
-    {
-      "path": "core/view/src/widgets.cpp",
-      "max_loc": 1884,
-      "note": "Core widget implementations hotspot; split further before growing"
-    },
-    {
-      "path": "core/view/src/ui_components.cpp",
-      "max_loc": 1500,
-      "note": "Composite UI component hotspot; split further before growing"
-    },
-    {
-      "path": "CLAUDE.md",
-      "max_loc": 2051,
-      "note": "Always-resident agent context read on every turn; every line costs every session, so growth is a residency decision — declare it with a Hotspot-Grow: CLAUDE.md trailer"
-    },
-    {
-      "path": "test/test_audio_decoder_corpus.cpp",
-      "max_loc": 106,
-      "note": "audio decoder corpus replay, cross-format cases; format-specific cases belong in test_audio_decoder_corpus_{wav,mp3,flac_ogg}.cpp"
-    },
-    {
-      "path": "test/test_audio_decoder_corpus_wav.cpp",
-      "max_loc": 252,
-      "note": "audio decoder corpus WAV cases"
-    },
-    {
-      "path": "test/test_audio_decoder_corpus_mp3.cpp",
-      "max_loc": 259,
-      "note": "audio decoder corpus MP3 cases"
-    },
-    {
-      "path": "test/test_audio_decoder_corpus_flac_ogg.cpp",
-      "max_loc": 99,
-      "note": "audio decoder corpus FLAC and Ogg cases; a format that outgrows this file gets its own"
-    },
-    {
-      "path": "test/support/audio_decoder_corpus.hpp",
-      "max_loc": 119,
-      "note": "audio decoder corpus helpers shared by the per-format files"
-    },
-    {
-      "path": "test/support/audio_decoder_corpus_expectations.hpp",
-      "max_loc": 129,
-      "note": "one expectation row per committed audio decoder seed"
-    },
-    {
-      "path": "test/fuzz/audio_decoder_seed_corpus.py",
-      "max_loc": 73,
-      "note": "seed corpus driver only; builders belong in test/fuzz/audio_decoder_seeds/<format>.py"
-    },
-    {
-      "path": "test/fuzz/audio_decoder_seeds/common.py",
-      "max_loc": 125,
-      "note": "seed corpus signal, packers, encoder lookup and Corpus shared by every format"
-    },
-    {
-      "path": "test/fuzz/audio_decoder_seeds/wav.py",
-      "max_loc": 176,
-      "note": "WAV, RF64, BW64 and Wave64 seed builders"
-    },
-    {
-      "path": "test/fuzz/audio_decoder_seeds/aiff.py",
-      "max_loc": 71,
-      "note": "AIFF and AIFF-C seed builders"
-    },
-    {
-      "path": "test/fuzz/audio_decoder_seeds/flac.py",
-      "max_loc": 133,
-      "note": "FLAC seed builders"
-    },
-    {
-      "path": "test/fuzz/audio_decoder_seeds/ogg.py",
-      "max_loc": 94,
-      "note": "Ogg Vorbis seed builders"
-    },
-    {
-      "path": "test/fuzz/audio_decoder_seeds/mp3.py",
-      "max_loc": 141,
-      "note": "MP3 seed builders"
-    },
-    {
-      "path": "test/fuzz/audio_decoder_seeds/mp4.py",
-      "max_loc": 153,
-      "note": "MP4/M4A and CAF seed builders"
+      "path": "tools/local-ci/local_ci.py",
+      "max_loc": 81,
+      "note": "legacy local CI runner (superseded by Shipyard, #120); ratcheted down after the file was gutted to a thin stub"
     }
   ]
 }

@@ -9,6 +9,56 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
      release's bullet block. See docs/guides/versioning.md § Release pipeline
      for the full end-to-end flow. -->
 
+<a id="v11721"></a>
+## [1.172.1] - 2026-11-19
+
+- release/version bump ([#12623](https://github.com/Generous-Corp/pulp/pull/12623))
+- tools/push owner claim guard ([#12606](https://github.com/Generous-Corp/pulp/pull/12606))
+- fix/installed vellum dawn target 20261118 ([#12584](https://github.com/Generous-Corp/pulp/pull/12584))
+- release/version bump ([#12621](https://github.com/Generous-Corp/pulp/pull/12621))
+- fix/build lock dir fallback ([#12615](https://github.com/Generous-Corp/pulp/pull/12615))
+
+<a id="v11720"></a>
+## [1.172.0] - 2026-11-19
+
+- release/version bump ([#12620](https://github.com/Generous-Corp/pulp/pull/12620))
+
+<a id="v11710"></a>
+## [1.171.0] - 2026-11-19
+
+- release/version bump ([#12617](https://github.com/Generous-Corp/pulp/pull/12617))
+- feature/pulp vellum audio editor glue ([#12594](https://github.com/Generous-Corp/pulp/pull/12594))
+- fix/capability regen 20261119 ([#12593](https://github.com/Generous-Corp/pulp/pull/12593))
+- graph/refactor compile3 20261119 ([#12613](https://github.com/Generous-Corp/pulp/pull/12613))
+
+<a id="v11700"></a>
+## [1.170.0] - 2026-11-19
+
+- release/version bump ([#12614](https://github.com/Generous-Corp/pulp/pull/12614))
+
+<a id="v11690"></a>
+## [1.169.0] - 2026-11-19
+
+- release/version bump ([#12612](https://github.com/Generous-Corp/pulp/pull/12612))
+- feature/linux x11 gl surface ([#12548](https://github.com/Generous-Corp/pulp/pull/12548))
+- graph/refactor compile2 20261119 ([#12609](https://github.com/Generous-Corp/pulp/pull/12609))
+- graph/refactor serializer3 20261119 ([#12600](https://github.com/Generous-Corp/pulp/pull/12600))
+- fix/main thread scope shared source ([#12605](https://github.com/Generous-Corp/pulp/pull/12605))
+
+<a id="v11680"></a>
+## [1.168.0] - 2026-11-19
+
+- release/version bump ([#12608](https://github.com/Generous-Corp/pulp/pull/12608))
+- fix/mergetree timeout 20261119 ([#12590](https://github.com/Generous-Corp/pulp/pull/12590))
+- fix/gates exit77 20261119 ([#12604](https://github.com/Generous-Corp/pulp/pull/12604))
+- fix/control shipping paren names ([#12602](https://github.com/Generous-Corp/pulp/pull/12602))
+- feature/pulp ui vellum none ([#12591](https://github.com/Generous-Corp/pulp/pull/12591))
+- release/version bump ([#12601](https://github.com/Generous-Corp/pulp/pull/12601))
+- graph/refactor compile1 20261118 ([#12549](https://github.com/Generous-Corp/pulp/pull/12549))
+- fix/slowctest guard 20261119 ([#12592](https://github.com/Generous-Corp/pulp/pull/12592))
+- graph/refactor prepare3 20261118 ([#12583](https://github.com/Generous-Corp/pulp/pull/12583))
+- feature/linux vst3 bundle ([#12547](https://github.com/Generous-Corp/pulp/pull/12547))
+
 <a id="v11661"></a>
 ## [1.166.1] - 2026-11-19
 
@@ -13340,6 +13390,12 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/Generous-Corp/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/Generous-Corp/pulp/pull/2))
 
+[1.172.1]: https://github.com/Generous-Corp/pulp/releases/tag/v1.172.1
+[1.172.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.172.0
+[1.171.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.171.0
+[1.170.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.170.0
+[1.169.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.169.0
+[1.168.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.168.0
 [1.166.1]: https://github.com/Generous-Corp/pulp/releases/tag/v1.166.1
 [1.166.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.166.0
 [1.165.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.165.0

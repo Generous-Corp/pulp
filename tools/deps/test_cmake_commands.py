@@ -18,10 +18,6 @@ def names(text: str) -> list[str]:
     return [command.name for command in cc.tokenize(text)]
 
 
-def live(text: str) -> list[str]:
-    return [command.name for command in cc.executable_commands(text)]
-
-
 class TokenizeTests(unittest.TestCase):
     def test_commands_and_argument_kinds(self) -> None:
         (command,) = cc.tokenize('Set(a "b c" [[d]] e)\n')
@@ -44,7 +40,6 @@ class TokenizeTests(unittest.TestCase):
         for label, text in cases.items():
             with self.subTest(label):
                 self.assertNotIn("fetchcontent_declare", names(text))
-                self.assertNotIn("fetchcontent_declare", live(text))
 
     def test_bracket_close_must_match_the_opener(self) -> None:
         (command,) = cc.tokenize("set(x [=[a]]b]==]c]=])\n")
@@ -61,6 +56,10 @@ class TokenizeTests(unittest.TestCase):
     def test_escapes_and_continuations(self) -> None:
         (command,) = cc.tokenize('set(x a\\(b\\) "c\\\nd" "e\\"f" g\\;h)\n')
         self.assertEqual(command.values(), ["x", "a(b)", "cd", 'e"f', "g\\;h"])
+
+    def test_an_escaped_dollar_keeps_its_escape(self) -> None:
+        (command,) = cc.tokenize('set(x "\\${A}" \\${B} ${C})\n')
+        self.assertEqual(command.values(), ["x", "\\${A}", "\\${B}", "${C}"])
 
     def test_nested_parentheses_stay_in_one_command(self) -> None:
         (command,) = cc.tokenize("if((A OR B) AND (C))\n")
@@ -83,59 +82,18 @@ class TokenizeTests(unittest.TestCase):
             "unterminated argument list": "set(x (a)\n",
             "text that is not a command": "set(x 1)\nstray\n",
             "two commands on one line": "set(x 1) set(y 2)\n",
-            "unbalanced block": "if(A)\nset(x 1)\n",
-            "stray endif": "endif()\n",
         }.items():
             with self.subTest(label), self.assertRaises(cc.CMakeSyntaxError):
-                cc.executable_commands(text)
+                cc.tokenize(text)
 
 
-class ExecutableTests(unittest.TestCase):
-    def test_constant_false_branches_are_dropped(self) -> None:
-        for label, text in {
-            "if(FALSE)": f"if(FALSE)\n{FAKE}\nendif()\n",
-            "if(0)": f"if(0)\n{FAKE}\nendif()\n",
-            "if(NOT ON)": f"if(NOT ON)\n{FAKE}\nendif()\n",
-            "if quoted empty": f'if("")\n{FAKE}\nendif()\n',
-            "-NOTFOUND": f"if(X-NOTFOUND)\n{FAKE}\nendif()\n",
-            "else after if(TRUE)": f"if(TRUE)\nset(x 1)\nelse()\n{FAKE}\nendif()\n",
-            "elseif after if(1)": f"if(1)\nset(x 1)\nelseif(A)\n{FAKE}\nendif()\n",
-            "elseif(OFF)": f"if(A)\nset(x 1)\nelseif(OFF)\n{FAKE}\nendif()\n",
-            "while(FALSE)": f"while(FALSE)\n{FAKE}\nendwhile()\n",
-            "nested inside dead": f"if(NO)\nif(A)\n{FAKE}\nendif()\nendif()\n",
-            "function body": f"function(f)\n{FAKE}\nendfunction()\n",
-            "macro body": f"macro(m)\n{FAKE}\nendmacro()\n",
-            "after top-level return": f"return()\n{FAKE}\n",
-        }.items():
-            with self.subTest(label):
-                self.assertIn("fetchcontent_declare", names(text))
-                self.assertNotIn("fetchcontent_declare", live(text))
-
-    def test_variable_conditions_stay_live(self) -> None:
-        for label, text in {
-            "if(VAR)": f"if(VAR)\n{FAKE}\nendif()\n",
-            "else of a variable": f"if(VAR)\nset(x 1)\nelse()\n{FAKE}\nendif()\n",
-            "if(${X})": f"if(${{X}})\n{FAKE}\nendif()\n",
-            "else after if(FALSE)": f"if(FALSE)\nset(x 1)\nelse()\n{FAKE}\nendif()\n",
-            "conditional return": f"if(A)\nreturn()\nendif()\n{FAKE}\n",
-            "foreach body": f"foreach(x a b)\n{FAKE}\nendforeach()\n",
-        }.items():
-            with self.subTest(label):
-                self.assertIn("fetchcontent_declare", live(text))
-
-    def test_blocks_record_the_branch(self) -> None:
-        commands = cc.executable_commands("if(A)\nset(x 1)\nelse()\nset(y 2)\nendif()\n")
-        opener, first, second = commands
-        self.assertEqual(opener.opens, 0)
-        self.assertEqual(first.blocks, ((0, 0),))
-        self.assertEqual(second.blocks, ((0, 1),))
-
+class RepositoryTests(unittest.TestCase):
     def test_the_repository_cmake_parses(self) -> None:
         for rel in ("tools/cmake/PulpGpuRuntime.cmake",
                     "tools/cmake/PulpGpuRuntimeRecord.cmake", "tools/cmake/PulpVellumLock.cmake"):
             path = ROOT / rel
             with self.subTest(path.name):
-                self.assertTrue(cc.executable_commands(path.read_text(encoding="utf-8")))
+                self.assertTrue(cc.tokenize(path.read_text(encoding="utf-8")))
 
 
 if __name__ == "__main__":

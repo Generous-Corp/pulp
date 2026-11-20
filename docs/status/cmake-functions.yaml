@@ -2,6 +2,16 @@
 # Vocabulary: stable, usable, experimental, partial, planned, unsupported
 
 functions:
+  - name: pulp_add_vellum_editor_package
+    status: experimental
+    summary: Generate a concrete Vellum View editor package for pulp_add_plugin UI.
+    required:
+      - VIEW_HEADER
+      - VIEW_TYPE
+    creates:
+      - "<package>"
+    docs: reference/cmake.md#pulp_add_plugin
+
   - name: pulp_add_plugin
     status: usable
     summary: Create plugin targets for multiple formats from a single declaration.
