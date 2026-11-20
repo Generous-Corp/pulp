@@ -20,6 +20,10 @@ class ClockGuardDataTest(unittest.TestCase):
         self.assertEqual(set(data), {"files", "lines"})
         self.assertIsInstance(data["files"], list)
         self.assertIsInstance(data["lines"], list)
+        for entry in data["files"]:
+            self.assertEqual(set(entry), {"path", "reason"})
+            self.assertTrue(entry["path"].startswith("tools/"))
+            self.assertTrue(entry["reason"])
         for entry in data["lines"]:
             self.assertEqual(set(entry), {"path", "line", "reason"})
             self.assertTrue(entry["path"].startswith("tools/"))
