@@ -15,7 +15,7 @@ import sys
 import tarfile
 import tempfile
 import urllib.request
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 SUPPORTED_PLATFORMS = {"darwin-arm64"}
 
@@ -59,6 +59,11 @@ def resolve_archive(lock_path: Path, platform: str, archive: Path | None,
     return candidate, digest
 
 
+def _canonical(name: str) -> Path:
+    """Archive member name without "." segments or a leading "/"."""
+    return Path(*[part for part in PurePosixPath(name).parts if part not in (".", "/")])
+
+
 def _safe_extract(archive: Path, destination: Path) -> None:
     with tarfile.open(archive, "r:gz") as bundle:
         root = destination.resolve()
@@ -68,7 +73,11 @@ def _safe_extract(archive: Path, destination: Path) -> None:
             target = (destination / member.name).resolve()
             if target != root and root not in target.parents:
                 raise ValueError(f"archive member escapes destination: {member.name}")
-            parts = Path(member.name).parts
+            if ".." in PurePosixPath(member.name).parts:
+                # A ".." segment can step back through a symlink member that
+                # the ancestor check below compares by canonical name.
+                raise ValueError(f"archive member name is not canonical: {member.name}")
+            parts = _canonical(member.name).parts
             if any(Path(*parts[:index]) in symlinks for index in range(1, len(parts))):
                 raise ValueError(f"archive member follows symlink: {member.name}")
             if not (member.isreg() or member.isdir() or member.issym() or member.islnk()):
@@ -76,17 +85,19 @@ def _safe_extract(archive: Path, destination: Path) -> None:
                 # files and FIFOs here on every interpreter.
                 raise ValueError(f"archive member is not a regular file, directory or link: {member.name}")
             if member.islnk():
-                if Path(member.linkname) in symlinks:
-                    raise ValueError(f"archive hardlink targets a symlink: {member.name}")
                 # Tar hardlink names are rooted at the archive extraction root.
                 link = (destination / member.linkname).resolve()
                 if link != root and root not in link.parents:
                     raise ValueError(f"archive link escapes destination: {member.name}")
+                if ".." in PurePosixPath(member.linkname).parts:
+                    raise ValueError(f"archive hardlink name is not canonical: {member.name}")
+                if _canonical(member.linkname) in symlinks:
+                    raise ValueError(f"archive hardlink targets a symlink: {member.name}")
             elif member.issym():
                 link = (target.parent / member.linkname).resolve()
                 if root not in link.parents and link != root:
                     raise ValueError(f"archive link escapes destination: {member.name}")
-                symlinks.add(Path(member.name))
+                symlinks.add(_canonical(member.name))
             if not member.issym():
                 # Match the "data" filter on every interpreter: no setuid,
                 # setgid or sticky bits, and no group/other write.

@@ -137,6 +137,49 @@ class BundleVellumSdkTests(unittest.TestCase):
         mode = (destination / "sdk" / "tool").stat().st_mode & 0o7777
         self.assertEqual(mode & 0o7022, 0, oct(mode))
 
+    def test_parent_segment_cannot_bypass_symlink_check(self):
+        archive = self.root / "dotdot.tar.gz"
+        with tarfile.open(archive, "w:gz") as tar:
+            link = tarfile.TarInfo("sdk/link")
+            link.type = tarfile.SYMTYPE
+            link.linkname = "real"
+            tar.addfile(link)
+            directory = tarfile.TarInfo("sdk/x")
+            directory.type = tarfile.DIRTYPE
+            tar.addfile(directory)
+            data = tarfile.TarInfo("sdk/x/../link/file")
+            data.size = 1
+            tar.addfile(data, io.BytesIO(b"x"))
+        with self.assertRaisesRegex(ValueError, "not canonical"):
+            bundle._safe_extract(archive, self.root / "destination")
+
+    def test_dot_segment_cannot_bypass_symlink_check(self):
+        archive = self.root / "dot.tar.gz"
+        with tarfile.open(archive, "w:gz") as tar:
+            link = tarfile.TarInfo("./sdk/link")
+            link.type = tarfile.SYMTYPE
+            link.linkname = "real"
+            tar.addfile(link)
+            data = tarfile.TarInfo("sdk/./link/file")
+            data.size = 1
+            tar.addfile(data, io.BytesIO(b"x"))
+        with self.assertRaisesRegex(ValueError, "follows symlink"):
+            bundle._safe_extract(archive, self.root / "destination")
+
+    def test_hardlink_parent_segment_is_refused(self):
+        archive = self.root / "hardlink-dotdot.tar.gz"
+        with tarfile.open(archive, "w:gz") as tar:
+            link = tarfile.TarInfo("sdk/link")
+            link.type = tarfile.SYMTYPE
+            link.linkname = "real"
+            tar.addfile(link)
+            hard = tarfile.TarInfo("sdk/hard")
+            hard.type = tarfile.LNKTYPE
+            hard.linkname = "sdk/x/../link"
+            tar.addfile(hard)
+        with self.assertRaisesRegex(ValueError, "not canonical"):
+            bundle._safe_extract(archive, self.root / "destination")
+
     def test_failed_staging_leaves_no_partial_sdk(self):
         prefix = self.root / "prefix"
         original = bundle._merge_notice

@@ -11,7 +11,6 @@ from __future__ import annotations
 
 import shutil
 import os
-import platform
 import subprocess
 import sys
 import tempfile
@@ -85,6 +84,7 @@ class SetupBootstrapPlanGuardTest(unittest.TestCase):
     # PULP_UI=none skip notice.
     RENDERING_MARKERS = (
         "Staging the pinned Vellum SDK",
+        "Vellum SDK not yet available for",
         "vellum-sdk-",
         "WebGPU-distribution",
         "wgpu-native",
@@ -97,17 +97,18 @@ class SetupBootstrapPlanGuardTest(unittest.TestCase):
         for marker in self.RENDERING_MARKERS:
             self.assertNotIn(marker, output)
 
-    @unittest.skipUnless(
-        sys.platform == "darwin" and platform.machine() == "arm64",
-        "the Vellum SDK is staged on darwin-arm64 only",
-    )
     def test_ui_vellum_reaches_sdk_staging(self) -> None:
         """Control for the PULP_UI=none test: the same dry run with the
-        default UI does print the markers it asserts are absent."""
+        default UI does enter the Vellum branch. On a host with a published
+        SDK it prints the staging step; elsewhere it prints the audio-only
+        notice. Either way PULP_UI=none must print neither."""
         output = self._deps_only_dry_run("vellum")
-        self.assertIn("Staging the pinned Vellum SDK", output)
-        self.assertIn("vellum-sdk-", output)
-        self.assertIn("WebGPU-distribution", output)
+        staged = "Staging the pinned Vellum SDK" in output
+        unavailable = "Vellum SDK not yet available for" in output
+        self.assertTrue(staged or unavailable, output)
+        if staged:
+            self.assertIn("vellum-sdk-", output)
+            self.assertIn("WebGPU-distribution", output)
 
     def test_unknown_ui_fails(self) -> None:
         env = os.environ.copy()
