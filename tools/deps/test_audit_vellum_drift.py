@@ -450,6 +450,40 @@ class GpuRuntimePinTests(unittest.TestCase):
                          "# set(PULP_VELLUM_LOCK_FILE /x)\n", encoding="utf-8")
         self.assertEqual(self.problems(), [])
 
+    def test_the_pin_source_must_be_the_canonical_in_tree_file(self) -> None:
+        for source in ("tools/cmake/Other.cmake", "/abs/PulpGpuRuntime.cmake",
+                       "../PulpGpuRuntime.cmake", "tools/cmake/../cmake/PulpGpuRuntime.cmake"):
+            with self.subTest(source=source):
+                entry = self.entry()
+                entry[0]["source_files"] = [source]
+                found = audit.gpu_runtime_pin_agreement(entry, self.root)
+                self.assertTrue(any("must be exactly" in problem for problem in found), found)
+
+    def test_expanded_and_eval_writes_elsewhere_in_the_tree_fail(self) -> None:
+        other = self.root / "tools/cmake/Other.cmake"
+        for text, fragment in (
+                ("set(_name PULP_VELLUM_LOCK_FILE)\nset(${_name} /other.lock)", "sets PULP_VELLUM_LOCK_FILE"),
+                ("set(_name PULP_VELLUM_LOCK_${_s})\nset(${_name} /other.lock)", "named by an expansion"),
+                ("set(_a PULP_VELLUM)\nset(_b LOCK_FILE)\nset(${_a}_${_b} /x)", "named by an expansion"),
+                ("string(CONCAT _n PULP_VELLUM _LOCK_FILE)\nset(${_n} /x)", "named by an expansion"),
+                ("set(PULP_VELLUM_${_s} /other.lock CACHE FILEPATH \"\" FORCE)", "named by an expansion"),
+                ("set(FETCHCONTENT_SOURCE_DIR_${_u} /x)", "named by an expansion"),
+                ('cmake_language(EVAL CODE "set(PULP_VELLUM_LOCK_FILE /x)")', "sets PULP_VELLUM_LOCK_FILE"),
+                ('cmake_language(EVAL CODE "set(${_n} /x")', "cannot parse"),
+                ("cmake_language(CALL ${_c} PULP_VELLUM_LOCK_FILE /x)", "names its command by an expansion"),
+                ("cmake_language(EVAL ${_code})", "not in the form"),
+                ("cmake_language(CALL set PULP_VELLUM_LOCK_FILE /x)", "sets PULP_VELLUM_LOCK_FILE")):
+            with self.subTest(text=text):
+                other.write_text(text + "\n", encoding="utf-8")
+                self.assertFlags(fragment)
+        # Negative controls: PARENT_SCOPE out-parameters, deferred calls and
+        # expansions that cannot be a protected name stay clean.
+        other.write_text("function(f out)\n  set(${out} 1 PARENT_SCOPE)\nendfunction()\n"
+                         "set(FETCHCONTENT_SOURCE_DIR_${_u} /x PARENT_SCOPE)\n"
+                         "set(OTHER_${_u} 1)\ncmake_language(DEFER CALL message hi)\n",
+                         encoding="utf-8")
+        self.assertEqual(self.problems(), [])
+
     def test_unparseable_cmake_elsewhere_fails_closed(self) -> None:
         (self.root / "tools/cmake/Other.cmake").write_text('set(x "unterminated)\n', encoding="utf-8")
         self.assertFlags("cannot parse")

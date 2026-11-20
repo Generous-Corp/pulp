@@ -1527,6 +1527,156 @@ def _named_writes(command: cmake_commands.Command, names: tuple[str, ...]) -> li
             if argument.value.upper() in upper]
 
 
+CMAKE_EXPANSION = re.compile(r"\$\{[^}]*\}|\$ENV\{[^}]*\}|@[A-Za-z_][A-Za-z0-9_]*@|\$<[^>]*>")
+CMAKE_VARIABLE_REFERENCE = re.compile(r"\$\{([A-Za-z0-9_]+)\}")
+# Commands whose first argument is the variable they write.
+CMAKE_DESTINATION_COMMANDS = {"set", "unset", "option"}
+CMAKE_SET_KEYWORDS = {"CACHE", "PARENT_SCOPE", "FORCE", "INTERNAL", "BOOL", "FILEPATH", "PATH",
+                      "STRING"}
+
+
+def _expand_known(value: str, known: dict[str, set[str]]) -> set[str]:
+    """Every text `value` can have, substituting the literal variables seen so far."""
+    results = {""}
+    position = 0
+    for match in CMAKE_VARIABLE_REFERENCE.finditer(value):
+        options = known.get(match.group(1).upper()) or {match.group(0)}
+        results = {prefix + value[position:match.start()] + option
+                   for prefix in results for option in sorted(options)[:8]}
+        position = match.end()
+        if len(results) > 64:
+            return {value}
+    return {prefix + value[position:] for prefix in results}
+
+
+def _record_literal(command: cmake_commands.Command, known: dict[str, set[str]]) -> None:
+    """Remember the literal text set(NAME text) and string(CONCAT NAME ...) give a variable."""
+    values = command.values()
+    if command.name == "set" and len(values) >= 2:
+        parts = [value for value in values[1:] if value not in CMAKE_SET_KEYWORDS]
+        if len(parts) == 1 and "PARENT_SCOPE" not in values and "CACHE" not in values:
+            known.setdefault(values[0].upper(), set()).update(_expand_known(parts[0], known))
+    elif command.name == "string" and len(values) >= 3 and values[0].upper() == "CONCAT":
+        text = {""}
+        for part in values[2:]:
+            text = {prefix + option for prefix in text for option in _expand_known(part, known)}
+        known.setdefault(values[1].upper(), set()).update(sorted(text)[:8])
+
+
+def _expanded_destination_writes(command: cmake_commands.Command, names: tuple[str, ...],
+                                 known: dict[str, set[str]]) -> list[str]:
+    """The `names` an expanded destination could be: set(${n} v), set(PULP_${n} v).
+
+    A destination is resolved through the literal set()/string(CONCAT) values seen
+    earlier in the same file; what stays unresolved is treated as every name its
+    literal text allows, so set(PULP_VELLUM_${s} v) fails closed. A destination
+    that is only an unresolved expansion is the out-parameter idiom
+    (set(${out} v)) the tree uses everywhere, and is not flagged: the name it
+    receives must come from a literal argument or a resolved expansion elsewhere,
+    which is flagged. A write with PARENT_SCOPE targets the caller's variable
+    and is skipped for the same reason.
+    """
+    if (command.name not in CMAKE_DESTINATION_COMMANDS or not command.arguments
+            or "PARENT_SCOPE" in command.values()):
+        return []
+    if not CMAKE_EXPANSION.search(command.arguments[0].value):
+        return []
+    found: list[str] = []
+    for destination in _expand_known(command.arguments[0].value, known):
+        if not CMAKE_EXPANSION.search(destination):
+            found += [name for name in names if name.upper() == destination.upper()]
+            continue
+        parts = CMAKE_EXPANSION.split(destination)
+        if not any(parts):
+            continue
+        pattern = ".*".join(re.escape(part) for part in parts)
+        found += [name for name in names if re.fullmatch(pattern, name, re.IGNORECASE)]
+    return sorted(set(found))
+
+
+GPU_RUNTIME_SOURCE_HELPER_FILE = "tools/cmake/PulpFetchContent.cmake"
+CMAKE_EVAL_DEPTH = 4
+
+
+def _unescape_cmake(text: str) -> str:
+    """The text a quoted CMake argument holds: \\n, \\t and \\r become characters."""
+    escapes = {"n": "\n", "t": "\t", "r": "\r"}
+    return re.sub(r"\\(.)", lambda m: escapes.get(m.group(1), m.group(1)), text, flags=re.DOTALL)
+
+
+def _scan_tree_commands(rel: str, commands: list[cmake_commands.Command],
+                        protected: tuple[str, ...], known: dict[str, set[str]],
+                        problems: list[str], depth: int) -> None:
+    """Flag what `commands` could do to the gpu-runtime fetch.
+
+    cmake_language(EVAL CODE ...) is evaluated: its code text is tokenized and
+    scanned as commands too, so the text is not an opaque string. A CALL is
+    scanned as the command it calls. Code that cannot be read fails closed.
+    """
+    for command in commands:
+        if rel != GPU_RUNTIME_SOURCE_HELPER_FILE:
+            # The helper file builds FETCHCONTENT_SOURCE_DIR_<name> for any dependency;
+            # a call registering vellum_gpu_runtime through it is flagged below.
+            expanded_names = _expanded_destination_writes(command, protected, known)
+        else:
+            expanded_names = [name for name in _expanded_destination_writes(command, protected, known)
+                              if name not in GPU_RUNTIME_SOURCE_OVERRIDE_VARS]
+        for name in expanded_names:
+            problems.append(f"{rel}:{command.line} sets a variable named by an expansion that "
+                            f"can be {name}, with {command.name}(), which can make the "
+                            "gpu-runtime fetch use another source or lock")
+        _record_literal(command, known)
+        for name in _named_writes(command, protected):
+            problems.append(f"{rel}:{command.line} sets {name} with {command.name}(), which "
+                            "can make the gpu-runtime fetch use another source or lock")
+        if command.name == "cmake_language" and command.arguments:
+            mode = command.arguments[0].value.upper()
+            values = command.values()
+            if mode == "EVAL":
+                if len(values) < 3 or values[1].upper() != "CODE" or depth >= CMAKE_EVAL_DEPTH:
+                    problems.append(f"{rel}:{command.line} cmake_language(EVAL) is not in the "
+                                    "form EVAL CODE <text> the audit can read")
+                else:
+                    try:
+                        embedded = cmake_commands.tokenize(_unescape_cmake("".join(values[2:])))
+                    except cmake_commands.CMakeSyntaxError as error:
+                        problems.append(f"{rel}:{command.line} cmake_language(EVAL) runs code the "
+                                        f"audit cannot parse as CMake: {error}")
+                    else:
+                        _scan_tree_commands(f"{rel}:{command.line} EVAL", embedded, protected,
+                                            known, problems, depth + 1)
+            elif mode == "CALL":
+                if len(values) < 2:
+                    problems.append(f"{rel}:{command.line} cmake_language(CALL) names no command")
+                else:
+                    called = cmake_commands.Command(values[1].lower(), command.arguments[2:],
+                                                    command.line)
+                    if not CMAKE_EXPANSION.search(values[1]):
+                        _scan_tree_commands(f"{rel} CALL", [called], protected, known,
+                                            problems, depth + 1)
+                    else:
+                        problems.append(f"{rel}:{command.line} cmake_language(CALL) names its "
+                                        f"command by an expansion, {values[1]}, so the audit "
+                                        "cannot tell what it runs")
+            elif "SET_DEPENDENCY_PROVIDER" in values:
+                problems.append(f"{rel}:{command.line} sets a dependency provider, which can "
+                                "replace the pinned gpu-runtime fetch")
+        if (command.name in GPU_RUNTIME_SOURCE_HELPERS and command.arguments
+                and command.arguments[0].value.lower() == "vellum_gpu_runtime"):
+            problems.append(f"{rel}:{command.line} registers a FetchContent source for "
+                            f"vellum_gpu_runtime with {command.name}(), so it may not build "
+                            "from the pinned commit")
+        if command.name in ("function", "macro") and command.arguments:
+            defined = command.arguments[0].value
+            if defined.lower() in GPU_RUNTIME_RELIED_COMMANDS or (
+                    CMAKE_EXPANSION.search(defined) and any(CMAKE_EXPANSION.split(defined))
+                    and any(re.fullmatch(".*".join(re.escape(part) for part in
+                                                   CMAKE_EXPANSION.split(defined)), name, re.IGNORECASE)
+                            for name in GPU_RUNTIME_RELIED_COMMANDS)):
+                problems.append(f"{rel}:{command.line} redefines {defined}() "
+                                "with " + command.name + "(), which the gpu-runtime pin relies on")
+
+
 def gpu_runtime_tree_problems(root: Path) -> list[str]:
     """What the rest of the tree could do to the gpu-runtime fetch before the pin file runs.
 
@@ -1556,22 +1706,7 @@ def gpu_runtime_tree_problems(root: Path) -> list[str]:
         protected = GPU_RUNTIME_SOURCE_OVERRIDE_VARS
         if rel != GPU_RUNTIME_LOCK_READER:
             protected = (*protected, GPU_RUNTIME_LOCK_PATH_VAR)
-        for command in commands:
-            for name in _named_writes(command, protected):
-                problems.append(f"{rel}:{command.line} sets {name} with {command.name}(), which "
-                                "can make the gpu-runtime fetch use another source or lock")
-            if (command.name in GPU_RUNTIME_SOURCE_HELPERS and command.arguments
-                    and command.arguments[0].value.lower() == "vellum_gpu_runtime"):
-                problems.append(f"{rel}:{command.line} registers a FetchContent source for "
-                                f"vellum_gpu_runtime with {command.name}(), so it may not build "
-                                "from the pinned commit")
-            if command.name == "cmake_language" and "SET_DEPENDENCY_PROVIDER" in command.values():
-                problems.append(f"{rel}:{command.line} sets a dependency provider, which can "
-                                "replace the pinned gpu-runtime fetch")
-            if (command.name in ("function", "macro") and command.arguments
-                    and command.arguments[0].value.lower() in GPU_RUNTIME_RELIED_COMMANDS):
-                problems.append(f"{rel}:{command.line} redefines {command.arguments[0].value}() "
-                                "with " + command.name + "(), which the gpu-runtime pin relies on")
+        _scan_tree_commands(rel, commands, protected, {}, problems, depth=0)
     return problems
 
 
@@ -1603,6 +1738,9 @@ def gpu_runtime_pin_agreement(manifest: list[dict], root: Path = ROOT) -> list[s
     sources = entry.get("source_files") or []
     if len(sources) != 1:
         return [f"{GPU_RUNTIME_ENTRY} must name exactly one source file, the CMake pin"]
+    if sources[0] != GPU_RUNTIME_PIN_FILE:
+        return [f"{GPU_RUNTIME_ENTRY} source_files must be exactly {GPU_RUNTIME_PIN_FILE}, "
+                f"not {sources[0]!r}: the audit evaluates only that file"]
     return [*gpu_runtime_cmake_problems(root, sources[0]), *gpu_runtime_tree_problems(root)]
 
 

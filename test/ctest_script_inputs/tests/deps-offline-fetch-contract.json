@@ -5,6 +5,7 @@
   "inputs": [
    "tools/ci/tart-provision.sh",
    "tools/cmake",
+   "tools/cmake/PulpFetchContent.cmake",
    "tools/cmake/PulpGpuRuntime.cmake",
    "tools/cmake/PulpGpuRuntimeRecord.cmake",
    "tools/cmake/PulpVellumLock.cmake",
