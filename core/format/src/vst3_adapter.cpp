@@ -2751,7 +2751,7 @@ void PulpVst3Processor::process_publish_output_params(
             if (output_param_has_event_[i]) {
                 // Keep the VST3 parameter system synced to the final value even
                 // though we reported the sample-accurate points above.
-                setParamNormalized(static_cast<ParamID>(all_params[i].id),
+                SingleComponentEffect::setParamNormalized(static_cast<ParamID>(all_params[i].id),
                                    state::host_normalized_from_value(
                                        all_params[i], store_.get_value(all_params[i].id)));
                 continue;
@@ -2766,9 +2766,12 @@ void PulpVst3Processor::process_publish_output_params(
                     queue->addPoint(0, state::host_normalized_from_value(all_params[i], current),
                                     pt_index);
                 }
-                // Sync to VST3 parameter system too
-                setParamNormalized(static_cast<ParamID>(all_params[i].id),
-                                   state::host_normalized_from_value(all_params[i], current));
+                // This is controller synchronization, not a new host write.
+                // Never write the captured output back over a newer UI value.
+                SingleComponentEffect::setParamNormalized(
+                    static_cast<ParamID>(all_params[i].id),
+                    state::host_normalized_from_value(
+                        all_params[i], store_.get_value(all_params[i].id)));
             }
         }
     }

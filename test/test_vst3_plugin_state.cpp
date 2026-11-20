@@ -1183,6 +1183,7 @@ TEST_CASE("VST3 concurrent mirrors do not become processor output",
     plugin->during_process = {};
     REQUIRE(reached);
     CHECK(recorder.edits.size() == (automate ? 0 : 1));
+    CHECK(store.get_value(kGainParamId) == (processor_after ? -9.0f : 5.0f));
     REQUIRE(output.getParameterCount() == (processor_before || processor_after ? 1 : 0));
     if (output.getParameterCount() != 0) {
         auto* queue = output.getParameterData(0);
