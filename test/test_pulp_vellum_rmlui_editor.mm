@@ -16,20 +16,31 @@ namespace {
 class Context final : public pulp::format::EditorContext {
   public:
     explicit Context(pulp::format::ParamPort& params) : params_(params) {}
-    pulp::format::ParamPort& params() override { return params_; }
-    pulp::format::VisualPort* visuals() override { return nullptr; }
-    bool request_resize(const pulp::format::EditorSize&) override { return false; }
-    bool host_action(const pulp::format::HostActionRequest&) override { return false; }
+    pulp::format::ParamPort& params() override {
+        return params_;
+    }
+    pulp::format::VisualPort* visuals() override {
+        return nullptr;
+    }
+    bool request_resize(const pulp::format::EditorSize&) override {
+        return false;
+    }
+    bool host_action(const pulp::format::HostActionRequest&) override {
+        return false;
+    }
     pulp::format::EditorHostKind host_kind() const override {
         return pulp::format::EditorHostKind::plugin;
     }
+
   private:
     pulp::format::ParamPort& params_;
 };
 
 class Processor final : public pulp::format::Processor {
   public:
-    pulp::format::PluginDescriptor descriptor() const override { return {}; }
+    pulp::format::PluginDescriptor descriptor() const override {
+        return {};
+    }
     void define_parameters(pulp::state::StateStore&) override {}
     void prepare(const pulp::format::PrepareContext&) override {}
 };
@@ -71,13 +82,16 @@ TEST_CASE("RmlUi package editor attaches, repaints and writes a StateStore param
     @autoreleasepool {
         Fixture fixture;
         Context context(*fixture.port);
-        pulp::vellum::rmlui::PackageAssets assets{
-            (fixture.root / "editor.rml").string(), (fixture.root / "editor.rcss").string(),
-            {fixture.root.string()}};
-        auto editor = std::make_unique<pulp::vellum::rmlui::Editor<pulp::vellum::rmlui::PackageAssets>>(context, assets);
+        pulp::vellum::rmlui::PackageAssets assets{(fixture.root / "editor.rml").string(),
+                                                  (fixture.root / "editor.rcss").string(),
+                                                  {fixture.root.string()}};
+        auto editor =
+            std::make_unique<pulp::vellum::rmlui::Editor<pulp::vellum::rmlui::PackageAssets>>(
+                context, assets);
         REQUIRE(editor);
         NSView* parent = [[NSView alloc] initWithFrame:NSMakeRect(0, 0, 32, 32)];
-        REQUIRE(editor->attach({pulp::format::NativeParentKind::cocoa_view, (__bridge void*)parent}));
+        REQUIRE(
+            editor->attach({pulp::format::NativeParentKind::cocoa_view, (__bridge void*)parent}));
         editor->idle();
         REQUIRE(parent.subviews.count == 1);
         REQUIRE(editor->set_size({32, 32, 1.0}));

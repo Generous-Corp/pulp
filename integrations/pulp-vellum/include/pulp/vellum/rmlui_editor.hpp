@@ -29,10 +29,9 @@ class AssetProvider final : public ::vellum::rmlui::AssetProvider {
   public:
     explicit AssetProvider(PackageAssets assets) : assets_(std::move(assets)) {}
 
-    ::vellum::rmlui::Status load(std::string_view path,
-                                 ::vellum::rmlui::Asset& out) override {
-        if (path.empty() || path.find("..") != std::string_view::npos ||
-            path.front() == '/' || path.find('\\') != std::string_view::npos)
+    ::vellum::rmlui::Status load(std::string_view path, ::vellum::rmlui::Asset& out) override {
+        if (path.empty() || path.find("..") != std::string_view::npos || path.front() == '/' ||
+            path.find('\\') != std::string_view::npos)
             return ::vellum::rmlui::Status::missing_asset;
         const std::filesystem::path relative(path);
         std::vector<std::filesystem::path> candidates;
@@ -65,7 +64,9 @@ class AssetProvider final : public ::vellum::rmlui::AssetProvider {
 /// The RmlUi data-model field for a parameter: `p` then its decimal id
 /// (`p1`). RmlUi variable names must be identifiers, so a bare id cannot be
 /// one.
-inline std::string param_field(std::uint32_t id) { return "p" + std::to_string(id); }
+inline std::string param_field(std::uint32_t id) {
+    return "p" + std::to_string(id);
+}
 
 /// The parameter id a `param_field` names, or the field unchanged when it is
 /// not one, so ParamPortModel can still resolve a parameter by name.
@@ -103,7 +104,9 @@ class ModelHost final : public ::vellum::rmlui::ModelHost {
         return ::vellum::rmlui::Status::ok;
     }
 
-    ParamPortModel& model() noexcept { return model_; }
+    ParamPortModel& model() noexcept {
+        return model_;
+    }
 
   private:
     ParamPortModel model_;
@@ -113,10 +116,10 @@ class ModelHost final : public ::vellum::rmlui::ModelHost {
 template <typename Assets> class Editor final : public format::Editor {
   public:
     Editor(format::EditorContext& context, Assets assets)
-        : assets_(std::move(assets)), provider_(assets_), host_(provider_), model_host_(context.params(), host_) {
-        model_subscription_ = context.params().add_listener([this](state::ParamID id, float) {
-            host_.dirty_model("params", param_field(id));
-        });
+        : assets_(std::move(assets)), provider_(assets_), host_(provider_),
+          model_host_(context.params(), host_) {
+        model_subscription_ = context.params().add_listener(
+            [this](state::ParamID id, float) { host_.dirty_model("params", param_field(id)); });
         host_.open(size_.width, size_.height);
         std::vector<std::string> fields;
         for (const auto& info : context.params().params())
@@ -126,10 +129,13 @@ template <typename Assets> class Editor final : public format::Editor {
         host_.load_document(std::filesystem::path(assets_.document).filename().string());
     }
 
-    ~Editor() override { detach(); }
+    ~Editor() override {
+        detach();
+    }
 
     bool supports_parent(format::NativeParentKind kind) const override {
-        return kind == format::NativeParentKind::none || kind == format::NativeParentKind::cocoa_view;
+        return kind == format::NativeParentKind::none ||
+               kind == format::NativeParentKind::cocoa_view;
     }
 
     bool attach(const format::NativeParent& parent) override {
@@ -140,10 +146,16 @@ template <typename Assets> class Editor final : public format::Editor {
         return host_.attach({::vellum::rmlui::NativeParentKind::cocoa_view, parent.handle});
     }
 
-    void detach() override { host_.detach(); }
-    void invalidate() override { host_.invalidate(); }
+    void detach() override {
+        host_.detach();
+    }
+    void invalidate() override {
+        host_.invalidate();
+    }
 
-    format::EditorSize size() const override { return size_; }
+    format::EditorSize size() const override {
+        return size_;
+    }
 
     bool set_size(const format::EditorSize& size) override {
         if (size.width == 0 || size.height == 0 || size.scale <= 0.0)
@@ -153,13 +165,21 @@ template <typename Assets> class Editor final : public format::Editor {
     }
 
     format::ViewSize size_hints() const override {
-        return {.preferred_width = size_.width, .preferred_height = size_.height,
-                .min_width = 1, .min_height = 1};
+        return {.preferred_width = size_.width,
+                .preferred_height = size_.height,
+                .min_width = 1,
+                .min_height = 1};
     }
 
-    void idle() override { host_.idle(); }
-    void visibility_changed(bool visible) override { host_.visibility_changed(visible); }
-    void focus_changed(bool focused) override { host_.focus_changed(focused); }
+    void idle() override {
+        host_.idle();
+    }
+    void visibility_changed(bool visible) override {
+        host_.visibility_changed(visible);
+    }
+    void focus_changed(bool focused) override {
+        host_.focus_changed(focused);
+    }
 
     ::vellum::rmlui::Status process_mouse_move(int x, int y) {
         return host_.process_mouse_move(x, y);
