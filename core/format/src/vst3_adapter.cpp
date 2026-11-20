@@ -1012,6 +1012,15 @@ tresult PLUGIN_API PulpVst3Processor::initialize(FUnknown* context) {
                     },
                     [this](state::ParamID id) { endEdit(static_cast<ParamID>(id)); }});
 
+    processor_param_listener_ = store_.add_listener(
+        [this](state::ParamID id, float value) {
+            if (!ScopedProcessorParameterWrite::active() || ScopedHostParameterWrite::active())
+                return;
+            const auto index = boundary::find_param_index(store_.all_params(), id);
+            if (index < processor_param_values_.size())
+                processor_param_values_[index] = value;
+        }, state::ListenerThread::Audio);
+
     // Add audio buses from descriptor (supports multi-bus: main, sidechain, aux).
     // PluginDescriptor carries channel counts rather than speaker positions, so
     // advertise a deterministic conventional VST3 topology for each common
@@ -1254,6 +1263,7 @@ tresult PLUGIN_API PulpVst3Processor::terminate() {
         pulp::events::unregister_plugin_backend(main_thread_token_);
         main_thread_token_ = 0;
     }
+    processor_param_listener_ = {};
     processor_.reset();
     return SingleComponentEffect::terminate();
 }
@@ -1667,6 +1677,7 @@ tresult PLUGIN_API PulpVst3Processor::setupProcessing(ProcessSetup& setup) {
     // one count per sample offset in the largest block.
     param_sort_scratch_.resize(state::ParameterEventQueue::kCapacity);
     param_writes_.clear();
+    processor_param_values_.reserve(store_.all_params().size());
     param_writes_.reserve(std::max<std::size_t>(store_.all_params().size(), 1));
     param_offset_counts_.resize(
         ctx.max_buffer_size > 0 ? static_cast<std::size_t>(ctx.max_buffer_size) : 1u);
@@ -1949,6 +1960,7 @@ void PulpVst3Processor::queue_param_write(state::ParamID id, float value) {
 }
 
 void PulpVst3Processor::process_decode_input_parameters(ProcessData& data) {
+    const ScopedHostParameterWrite host_write;
     param_events_.clear();
     // Each automated parameter's value is collected here and written to the
     // store as one batch after the queues are read.
@@ -2744,7 +2756,7 @@ void PulpVst3Processor::process_publish_output_params(
                                        all_params[i], store_.get_value(all_params[i].id)));
                 continue;
             }
-            float current = store_.get_value(all_params[i].id);
+            const float current = processor_param_values_[i];
             if (boundary::changed_since_snapshot(current, param_snapshot_[i])) {
                 int32 index = 0;
                 auto* queue = data.outputParameterChanges->addParameterData(
@@ -3133,6 +3145,10 @@ tresult PLUGIN_API PulpVst3Processor::process(ProcessData& data) {
     pre_process_generation_ = store_.state_generation();
     boundary::refresh_param_snapshot(store_, all_params, param_snapshot_, snapshot_state_,
                                      pre_process_generation_);
+    processor_param_values_.assign(param_snapshot_.begin(), param_snapshot_.end());
+    // Covers f32/f64 processing and adapter-owned trigger resets. Host writes
+    // carry their own scope and are excluded by the inline capture listener.
+    const ScopedProcessorParameterWrite processor_write;
     processor_->set_param_events(&param_events_);
     output_param_events_.clear();
     processor_->set_output_param_events(&output_param_events_);

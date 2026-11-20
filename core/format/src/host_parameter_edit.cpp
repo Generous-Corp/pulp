@@ -91,11 +91,10 @@ void HostParameterEditBridge::on_value(state::ParamID id, float plain) {
     // thread's automation, one write per block, is what a plug-in mirrors back.
     // A host write on the editor thread (setParamNormalized, a state restore)
     // is a discrete event, and by thread alone it cannot be told from the
-    // user's edit that follows it, so it arms nothing. A write on another
-    // thread that is not the processor's own output is the host's too: the
-    // audio thread applies only host automation to the store.
+    // user's edit that follows it, so it arms nothing. Thread identity alone
+    // cannot identify automation: processors also write from the audio thread.
     if (std::this_thread::get_id() != editor_thread_) {
-        if (!ScopedProcessorParameterWrite::active())
+        if (ScopedHostParameterWrite::active())
             echo_guard_.note_host_write(id);
         return;
     }

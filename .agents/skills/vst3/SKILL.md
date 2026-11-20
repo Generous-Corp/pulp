@@ -1672,3 +1672,10 @@ that is already current is ignored on purpose, so a host that replays the
 restored selection cannot undo restored edits. A plug-in with no presets publishes no list and
 no extra parameter. `set_factory_presets_directory()` re-points discovery and
 must run before `initialize()`. Tests: test_vst3_program_list.cpp.
+
+Host automation decode must carry `ScopedHostParameterWrite`; the audio thread
+also runs processor writes, so its thread identity is not host provenance.
+Processor output values are captured inline under `ScopedProcessorParameterWrite`
+for both f32 and f64 dispatch, including trigger resets. Snapshot output uses
+those captured values to prevent concurrent main-thread mirrors from escaping
+through `outputParameterChanges` after the edit bridge suppresses them.

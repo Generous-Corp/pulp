@@ -356,7 +356,10 @@ TEST_CASE("gestures on different parameters keep their own streams",
 namespace {
 // Host automation as an audio thread applies it: a write on another thread.
 void host_writes_on_audio_thread(StateStore& store, ParamID id, float value) {
-    std::thread([&] { store.set_value_rt(id, value); }).join();
+    std::thread([&] {
+        const ScopedHostParameterWrite host_write;
+        store.set_value_rt(id, value);
+    }).join();
 }
 } // namespace
 
@@ -423,4 +426,15 @@ TEST_CASE("the echo window closes", "[host-parameter-edit][echo]") {
     CHECK_FALSE(
         guard.is_echo_at(store, kGain, after_write + HostWriteEchoGuard::kWindowNs + 1'000'000));
     CHECK_FALSE(guard.is_echo_at(store, kGain + 1, after_write)); // other parameter
+}
+
+TEST_CASE("an unmarked background write is not host automation",
+          "[host-parameter-edit][echo]") {
+    StateStore store;
+    add_unit_param(store, kGain, "Gain");
+    EditLog log;
+    HostParameterEditBridge bridge(store, log.callbacks());
+    std::thread([&] { store.set_value_rt(kGain, 0.2f); }).join();
+    store.set_value(kGain, 0.3f);
+    REQUIRE(log.count(EditLog::Entry::Kind::value) == 1);
 }
