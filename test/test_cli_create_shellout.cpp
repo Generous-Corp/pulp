@@ -1123,7 +1123,8 @@ namespace vellum::view { class View {}; }
     REQUIRE(formats_pos != std::string::npos);
     const auto formats_value_pos = formats_pos + formats_key.size();
     auto formats_eol = configured_cmake.find('\n', formats_value_pos);
-    if (formats_eol == std::string::npos) formats_eol = configured_cmake.size();
+    if (formats_eol == std::string::npos)
+        formats_eol = configured_cmake.size();
     configured_cmake.replace(formats_value_pos, formats_eol - formats_value_pos, "CLAP");
     write_file(out_dir / "CMakeLists.txt",
                configured_cmake + "\nfile(WRITE \"${CMAKE_CURRENT_BINARY_DIR}/"
