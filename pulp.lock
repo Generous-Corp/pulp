@@ -3,6 +3,7 @@
   "vellum": {
     "tag": "v0.2.0",
     "sha": "d361ea5b855707391798b7315183d99b6cbe69b6",
+    "sdk_url": "https://github.com/Generous-Corp/vellum/releases/download/v0.2.0/vellum-sdk-0.2.0-darwin-arm64.tar.gz",
     "sdk_digest": "cd7d443591115a6e4b8680f6eb125cce45b048f00869fb6b8eeff5a04d6f6fc7",
     "gpu_runtime_digest": "f0ed5c873c9513725044cbca30d3604fbcb6f6dfdca99ee588dca1050b3d857c"
   },
