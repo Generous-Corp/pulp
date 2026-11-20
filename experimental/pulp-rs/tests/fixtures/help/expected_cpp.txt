@@ -59,6 +59,7 @@ Commands:
   suggest        Context-aware package recommendations
   target         Manage project platform targets
   tool           Manage third-party developer tools
+  licenses       Show a plug-in bundle's third-party notices
   help           Show this help
 
 Examples:

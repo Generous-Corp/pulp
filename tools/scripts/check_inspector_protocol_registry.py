@@ -42,7 +42,7 @@ NON_PROTOCOL_LITERALS = {
     "PulpAccessibility.kt", "PulpConfig.cmake", "PulpDelay.lv2", "PulpGain.clap",
     "PulpReleaseArtifactScan.cmake", "PulpReverb.component", "PulpTargets.cmake", "PulpWobble.vst3", "README.md",
     "ReactDOM.createRoot", "ReactDOM.flushSync", "Reflect.ownKeys", "SKILL.md", "Same.clap",
-    "Sparkle.framework", "StringUtilities.h", "Symbol.iterator", "TARGETS.join", "Three.js", "Tools.x86", "TransportBar.tsx",
+    "Sparkle.framework", "StringUtilities.h", "Symbol.iterator", "TARGETS.join", "Three.js", "ThirdPartyNotices.json", "ThirdPartyNotices.txt", "Tools.x86", "TransportBar.tsx",
     "UIAutomation.h", "Value.h", "WebView2Loader.dll", "WheelEvent.deltaY", "Xcode.app",
     "Xft.dpi",
 }

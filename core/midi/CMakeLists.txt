@@ -25,6 +25,8 @@ target_sources(pulp-midi PRIVATE
     src/port_identity.cpp
     src/running_status.cpp
     src/tuning.cpp
+    # Background warm-up of the platform backend's first (slow) call.
+    src/warm_up.cpp
     # macOS plan 8.1 — UMP Session + Endpoint + VirtualEndpoint.
     # Cross-platform virtual-endpoint registry; platform .mm/.cpp adds
     # the OS-backed half via an explicit registration anchor.

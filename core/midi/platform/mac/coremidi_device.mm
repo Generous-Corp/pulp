@@ -738,6 +738,9 @@ class CoreMidiSystem : public MidiSystem {
 namespace pulp::midi {
 
 std::unique_ptr<MidiSystem> create_midi_system() {
+    // Connect to the MIDI server on a worker so the first enumeration does not
+    // wait for it on the caller's thread.
+    warm_up();
     return std::make_unique<mac::CoreMidiSystem>();
 }
 

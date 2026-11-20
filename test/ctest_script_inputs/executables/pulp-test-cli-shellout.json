@@ -16,6 +16,7 @@
   "sources": [
    "test/test_cli_audio_heritage.cpp",
    "test/test_cli_fmt_shellout.cpp",
+   "test/test_cli_licenses.cpp",
    "test/test_cli_shellout.cpp",
    "test/test_cli_timeline_render_shellout.cpp"
   ],

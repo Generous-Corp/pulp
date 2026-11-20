@@ -3,6 +3,7 @@
 // no-change-no-write.
 #include <pulp/state/xml_properties_file.hpp>
 
+#include "../core/runtime/src/durable_file_replacement_test_access.hpp"
 #include "support/unique_temp_dir.hpp"
 
 #include <catch2/catch_test_macros.hpp>
@@ -18,6 +19,8 @@
 #include <sys/stat.h>
 #endif
 
+using pulp::runtime::detail::DurableFileReplacementTestAccess;
+using pulp::state::XmlPropertiesDurability;
 using pulp::state::XmlPropertiesError;
 using pulp::state::XmlPropertiesFile;
 using Entries = std::vector<XmlPropertiesFile::Entry>;
@@ -377,4 +380,27 @@ TEST_CASE("XmlPropertiesFile writes each invalid UTF-8 byte as U+FFFD",
     CHECK(XmlPropertiesFile::serialize(entries) ==
           canonical("  <VALUE name=\"bad\" "
                     "val=\"a&#65533;b&#65533;c&#65533;&#65533;&#65533;&#65533;\"/>\r\n"));
+}
+
+TEST_CASE("XmlPropertiesFile saves without a drive-cache flush unless asked",
+          "[state][xml-properties][durability]") {
+    Scratch dir;
+    const auto path = dir.root / "Product.xml";
+    XmlPropertiesFile file(path);
+    file.set("a", "1");
+
+    // Default: atomic replacement, no F_FULLFSYNC on the caller's thread.
+    const auto before_default = DurableFileReplacementTestAccess::full_sync_count();
+    REQUIRE(file.save());
+    CHECK(DurableFileReplacementTestAccess::full_sync_count() == before_default);
+    CHECK(slurp(path) == canonical("  <VALUE name=\"a\" val=\"1\"/>\r\n"));
+    CHECK(entries_in(dir.root) == 1);
+
+    // Opt-in durability flushes exactly once per save.
+    file.set("a", "2");
+    const auto before_full = DurableFileReplacementTestAccess::full_sync_count();
+    REQUIRE(file.save(nullptr, XmlPropertiesDurability::full));
+    CHECK(DurableFileReplacementTestAccess::full_sync_count() == before_full + 1);
+    CHECK(slurp(path) == canonical("  <VALUE name=\"a\" val=\"2\"/>\r\n"));
+    CHECK(entries_in(dir.root) == 1);
 }
