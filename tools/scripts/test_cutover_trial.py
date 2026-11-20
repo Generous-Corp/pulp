@@ -374,6 +374,21 @@ class RepairRegressionTests(unittest.TestCase):
                     self.assertEqual(data["build"]["ran"], ok)
                     self.assertEqual((root / "cutover-configure.log").read_text(encoding="utf-8"), 'configure output')
 
+    def test_build_wrapper_is_used_for_trial_build(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            report = root / "report.json"
+            configure = subprocess.CompletedProcess([], 0, 'configure output', '')
+            built = subprocess.CompletedProcess([], 0, 'build output', '')
+            with mock.patch.object(ct, "make_scratch"), mock.patch.object(ct, "delete_paths", return_value=(0, [])), \
+                 mock.patch.object(ct, "deleted_data_still_referenced", return_value=[]), \
+                 mock.patch.object(ct, "run", side_effect=[configure, built]) as run_mock:
+                self.assertEqual(ct.main(["--scratch", str(root / "source"), "--report", str(report),
+                                          "--no-repair", "--build-wrapper", "/usr/local/bin/leased-build"]), 0)
+            build_call = run_mock.call_args_list[1]
+            self.assertEqual(build_call.args[0][0], "/usr/local/bin/leased-build")
+            self.assertEqual(build_call.args[0][1:3], ["cmake", "--build"])
+
 
 class InputTests(unittest.TestCase):
     def test_shipped_inputs_hold_the_687_paths(self):

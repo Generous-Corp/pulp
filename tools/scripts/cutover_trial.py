@@ -511,6 +511,8 @@ def main(argv: list[str] | None = None) -> int:
                         help="report configure errors as they are; apply no cutover edits")
     parser.add_argument("--prepare", help="shell command run in the scratch checkout "
                         "after the deletion and before configure (dependency bootstrap)")
+    parser.add_argument("--build-wrapper", type=Path,
+                        help="wrapper used for the build command (default: governed-build.sh)")
     parser.add_argument("--analyze-log", type=Path,
                         help="parse an existing build log instead of building")
     args = parser.parse_args(argv)
@@ -549,9 +551,9 @@ def main(argv: list[str] | None = None) -> int:
             (log_dir / "cutover-configure.log").write_text(configure_text, encoding="utf-8")
             build_text, ran, build_returncode = "", False, None
             if configure_ok:
-                governed = args.scratch / "tools/ci/governed-build.sh"
-                built = run([str(governed), "cmake", "--build", str(build_dir), "--",
-                             "-k", "0"], cwd=args.scratch)
+                wrapper = args.build_wrapper or (args.scratch / "tools/ci/governed-build.sh")
+                build_command = [str(wrapper), "cmake", "--build", str(build_dir), "--", "-k", "0"]
+                built = run(build_command, cwd=args.scratch)
                 build_text, ran = built.stdout + built.stderr, True
                 build_returncode = built.returncode
                 (log_dir / "cutover-build.log").write_text(build_text, encoding="utf-8")
