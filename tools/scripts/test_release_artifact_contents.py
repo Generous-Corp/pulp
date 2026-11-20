@@ -831,8 +831,9 @@ class ReleaseArtifactContentsTests(unittest.TestCase):
     def test_installed_sdk_archives_match_release_matrix(self) -> None:
         install_text = INSTALL_RULES.read_text(encoding="utf-8")
         archive_targets = installed_sdk_targets(install_text) - interface_library_targets()
-        if conditional_sdk_target_append(install_text, "pulp-vellum"):
-            archive_targets.discard("pulp-vellum")
+        for optional in ("pulp-vellum", "pulp-vellum-audio"):
+            if conditional_sdk_target_append(install_text, optional):
+                archive_targets.discard(optional)
         matrix_targets = set(rac.DEFAULT_MATRIX.pulp_library_stems)
         for platform_targets in rac.DEFAULT_MATRIX.platform_library_stems.values():
             matrix_targets.update(platform_targets)
@@ -850,6 +851,7 @@ class ReleaseArtifactContentsTests(unittest.TestCase):
         text = "if(TARGET pulp-vellum)\nendif()\nlist(APPEND PULP_SDK_TARGETS pulp-vellum)\n"
         self.assertFalse(conditional_sdk_target_append(text, "pulp-vellum"))
         self.assertNotIn("pulp-vellum", rac.DEFAULT_MATRIX.pulp_library_stems)
+        self.assertNotIn("pulp-vellum-audio", rac.DEFAULT_MATRIX.pulp_library_stems)
 
     def test_native_surface_is_expected_on_every_sdk_platform(self) -> None:
         # PulpInstallRules.cmake installs pulp-native wherever the target
