@@ -1072,8 +1072,8 @@ namespace vellum::view { class View {}; }
                "set(PACKAGE_VERSION \"" PULP_EXPECTED_SDK_VERSION "\")\n"
                "set(PACKAGE_VERSION_COMPATIBLE TRUE)\n");
     const auto pulp_include_dirs = include + ";" + source + "/core/format/include;" + source +
-                                   "/core/audio/include;" + source + "/core/state/include;" +
-                                   source + "/core/midi/include";
+                                   "/core/audio/include;" + source + "/core/runtime/include;" +
+                                   source + "/core/state/include;" + source + "/core/midi/include";
     write_file(cfg / "PulpConfig.cmake",
                "set(PULP_SDK_DIR \"" + native_path_string(sdk) +
                    "\")\n"
