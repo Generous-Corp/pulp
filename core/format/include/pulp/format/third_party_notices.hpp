@@ -29,7 +29,9 @@ struct ThirdPartyNotices {
     std::vector<std::string> unattributed_targets;
     std::string reason;
 
-    bool available() const noexcept { return reason.empty(); }
+    bool available() const noexcept {
+        return reason.empty();
+    }
 };
 
 // Loads and parses one Contents/Resources/ThirdPartyNotices.json file.
@@ -42,4 +44,4 @@ ThirdPartyNotices parse_third_party_notices(std::string_view json);
 // I/O and parsing on first use, so callers must keep it off the audio thread.
 const ThirdPartyNotices& third_party_notices();
 
-}  // namespace pulp::format
+} // namespace pulp::format

@@ -2,8 +2,8 @@
 
 #include <choc/text/choc_JSON.h>
 
-#include <fstream>
 #include <cstdint>
+#include <fstream>
 #include <sstream>
 #include <system_error>
 
@@ -23,26 +23,33 @@ std::string string_member(const choc::value::ValueView& object, const char* name
 std::vector<std::string> string_array_member(const choc::value::ValueView& object,
                                              const char* name) {
     std::vector<std::string> result;
-    if (!object.hasObjectMember(name) || !object[name].isArray()) return result;
+    if (!object.hasObjectMember(name) || !object[name].isArray())
+        return result;
     const auto values = object[name];
     for (uint32_t i = 0; i < values.size(); ++i) {
         auto item = values[i];
-        if (item.isString()) result.emplace_back(item.getString());
+        if (item.isString())
+            result.emplace_back(item.getString());
     }
     return result;
 }
 
 std::filesystem::path resource_path_for_image(const std::filesystem::path& image) {
-    if (image.empty()) return {};
+    if (image.empty())
+        return {};
     auto current = image;
-    if (current.has_filename()) current = current.parent_path();
+    if (current.has_filename())
+        current = current.parent_path();
     for (;;) {
         const auto candidate = current / "Contents" / "Resources" / "ThirdPartyNotices.json";
-        if (std::filesystem::is_regular_file(candidate)) return candidate;
+        if (std::filesystem::is_regular_file(candidate))
+            return candidate;
         const auto direct = current / "ThirdPartyNotices.json";
-        if (std::filesystem::is_regular_file(direct)) return direct;
+        if (std::filesystem::is_regular_file(direct))
+            return direct;
         const auto parent = current.parent_path();
-        if (parent == current) break;
+        if (parent == current)
+            break;
         current = parent;
     }
     return {};
@@ -57,7 +64,7 @@ std::filesystem::path loaded_image_path() {
     return {};
 }
 
-}  // namespace
+} // namespace
 
 ThirdPartyNotices parse_third_party_notices(std::string_view json) {
     ThirdPartyNotices result;
@@ -77,7 +84,8 @@ ThirdPartyNotices parse_third_party_notices(std::string_view json) {
             const auto values = root["notices"];
             for (uint32_t i = 0; i < values.size(); ++i) {
                 auto item = values[i];
-                if (!item.isObject()) continue;
+                if (!item.isObject())
+                    continue;
                 ThirdPartyNotice notice;
                 notice.name = string_member(item, "name");
                 notice.version = string_member(item, "version");
@@ -130,4 +138,4 @@ const ThirdPartyNotices& third_party_notices() {
     return cached;
 }
 
-}  // namespace pulp::format
+} // namespace pulp::format

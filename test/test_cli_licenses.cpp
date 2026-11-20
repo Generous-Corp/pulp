@@ -17,10 +17,12 @@ TEST_CASE("licenses CLI prints JSON and checks manifest gaps", "[cli][licenses]"
     std::filesystem::create_directories(resources);
     std::ofstream(resources / "ThirdPartyNotices.json")
         << R"JSON({"schema":"pulp.third-party-notices.v1","product":"Demo","format":"VST3","notices":[],"sdks_without_manifest":["Vellum"],"unattributed_targets":[]})JSON";
-    const auto result = pulp_test_cli::run_pulp({"licenses", (root / "Demo.vst3").string(), "--json"});
+    const auto result =
+        pulp_test_cli::run_pulp({"licenses", (root / "Demo.vst3").string(), "--json"});
     REQUIRE(result.exit_code == 0);
     REQUIRE(result.stdout_output.find("pulp.third-party-notices.v1") != std::string::npos);
-    const auto checked = pulp_test_cli::run_pulp({"licenses", (root / "Demo.vst3").string(), "--check"});
+    const auto checked =
+        pulp_test_cli::run_pulp({"licenses", (root / "Demo.vst3").string(), "--check"});
     REQUIRE(checked.exit_code != 0);
 #endif
 }
