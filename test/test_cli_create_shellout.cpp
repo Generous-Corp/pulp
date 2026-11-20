@@ -1045,6 +1045,13 @@ TEST_CASE("pulp-cpp create --ui vellum emits a Vellum editor package and configu
     const auto fake_include = sdk / "include";
     const auto source = native_path_string(source_root());
     const auto include = native_path_string(fake_include);
+    REQUIRE(fs::exists(fs::path(PULP_CHOC_SOURCE_DIR) / "choc" / "audio" / "choc_MIDI.h"));
+    fs::create_directories(fake_include / "choc" / "audio");
+    std::error_code choc_copy_ec;
+    fs::copy_file(fs::path(PULP_CHOC_SOURCE_DIR) / "choc" / "audio" / "choc_MIDI.h",
+                  fake_include / "choc" / "audio" / "choc_MIDI.h",
+                  fs::copy_options::overwrite_existing, choc_copy_ec);
+    REQUIRE_FALSE(choc_copy_ec);
     write_file(fake_include / "pulp" / "vellum" / "editor.hpp", R"(
 #pragma once
 namespace pulp::format { class EditorFactory {}; }
