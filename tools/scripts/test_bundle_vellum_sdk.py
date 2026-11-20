@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import hashlib
+import io
 import json
 import tarfile
 import tempfile
@@ -28,7 +29,7 @@ class BundleVellumSdkTests(unittest.TestCase):
             tar.add(source / "sdk", arcname="sdk")
         digest = hashlib.sha256(self.archive.read_bytes()).hexdigest()
         self.lock = self.root / "pulp.lock"
-        self.lock.write_text(json.dumps({"vellum": {"tag": "v0.2.0", "sdk_digest": digest}}), encoding="utf-8")
+        self.lock.write_text(json.dumps({"vellum": {"tag": "v0.2.0", "sdk_digest": digest, "sdk_url": "https://example.invalid/vellum-sdk.tar.gz"}}), encoding="utf-8")
 
     def tearDown(self):
         self.tmp.cleanup()
@@ -77,6 +78,159 @@ class BundleVellumSdkTests(unittest.TestCase):
             tar.addfile(info)
         with self.assertRaisesRegex(ValueError, "link escapes destination"):
             bundle._safe_extract(archive, self.root / "destination")
+
+    def test_hardlink_name_is_resolved_from_extraction_root(self):
+        archive = self.root / "hardlink.tar.gz"
+        with tarfile.open(archive, "w:gz") as tar:
+            info = tarfile.TarInfo("sdk/link")
+            info.type = tarfile.LNKTYPE
+            info.linkname = "../outside"
+            tar.addfile(info)
+        with self.assertRaisesRegex(ValueError, "link escapes destination"):
+            bundle._safe_extract(archive, self.root / "destination")
+
+    def test_member_written_through_symlink_is_refused(self):
+        archive = self.root / "symlink-follow.tar.gz"
+        with tarfile.open(archive, "w:gz") as tar:
+            link = tarfile.TarInfo("sdk/link")
+            link.type = tarfile.SYMTYPE
+            link.linkname = "real"
+            tar.addfile(link)
+            data = tarfile.TarInfo("sdk/link/file")
+            data.size = 1
+            tar.addfile(data, io.BytesIO(b"x"))
+        with self.assertRaisesRegex(ValueError, "follows symlink"):
+            bundle._safe_extract(archive, self.root / "destination")
+
+    def test_special_member_is_refused_on_every_python(self):
+        archive = self.root / "fifo.tar.gz"
+        with tarfile.open(archive, "w:gz") as tar:
+            info = tarfile.TarInfo("sdk/pipe")
+            info.type = tarfile.FIFOTYPE
+            tar.addfile(info)
+        with self.assertRaisesRegex(ValueError, "not a regular file"):
+            bundle._safe_extract(archive, self.root / "destination")
+
+    def test_hardlink_to_symlink_member_is_refused(self):
+        archive = self.root / "hardlink-symlink.tar.gz"
+        with tarfile.open(archive, "w:gz") as tar:
+            link = tarfile.TarInfo("sdk/link")
+            link.type = tarfile.SYMTYPE
+            link.linkname = "real"
+            tar.addfile(link)
+            hard = tarfile.TarInfo("sdk/hard")
+            hard.type = tarfile.LNKTYPE
+            hard.linkname = "sdk/link"
+            tar.addfile(hard)
+        with self.assertRaisesRegex(ValueError, "hardlink targets a symlink"):
+            bundle._safe_extract(archive, self.root / "destination")
+
+    def test_setuid_and_world_write_bits_are_stripped(self):
+        archive = self.root / "setuid.tar.gz"
+        with tarfile.open(archive, "w:gz") as tar:
+            info = tarfile.TarInfo("sdk/tool")
+            info.size = 1
+            info.mode = 0o6777
+            tar.addfile(info, io.BytesIO(b"x"))
+        destination = self.root / "destination"
+        bundle._safe_extract(archive, destination)
+        mode = (destination / "sdk" / "tool").stat().st_mode & 0o7777
+        self.assertEqual(mode & 0o7022, 0, oct(mode))
+
+    def test_parent_segment_cannot_bypass_symlink_check(self):
+        archive = self.root / "dotdot.tar.gz"
+        with tarfile.open(archive, "w:gz") as tar:
+            link = tarfile.TarInfo("sdk/link")
+            link.type = tarfile.SYMTYPE
+            link.linkname = "real"
+            tar.addfile(link)
+            directory = tarfile.TarInfo("sdk/x")
+            directory.type = tarfile.DIRTYPE
+            tar.addfile(directory)
+            data = tarfile.TarInfo("sdk/x/../link/file")
+            data.size = 1
+            tar.addfile(data, io.BytesIO(b"x"))
+        with self.assertRaisesRegex(ValueError, "not canonical"):
+            bundle._safe_extract(archive, self.root / "destination")
+
+    def test_dot_segment_cannot_bypass_symlink_check(self):
+        archive = self.root / "dot.tar.gz"
+        with tarfile.open(archive, "w:gz") as tar:
+            link = tarfile.TarInfo("./sdk/link")
+            link.type = tarfile.SYMTYPE
+            link.linkname = "real"
+            tar.addfile(link)
+            data = tarfile.TarInfo("sdk/./link/file")
+            data.size = 1
+            tar.addfile(data, io.BytesIO(b"x"))
+        with self.assertRaisesRegex(ValueError, "follows symlink"):
+            bundle._safe_extract(archive, self.root / "destination")
+
+    def test_hardlink_parent_segment_is_refused(self):
+        archive = self.root / "hardlink-dotdot.tar.gz"
+        with tarfile.open(archive, "w:gz") as tar:
+            link = tarfile.TarInfo("sdk/link")
+            link.type = tarfile.SYMTYPE
+            link.linkname = "real"
+            tar.addfile(link)
+            hard = tarfile.TarInfo("sdk/hard")
+            hard.type = tarfile.LNKTYPE
+            hard.linkname = "sdk/x/../link"
+            tar.addfile(hard)
+        with self.assertRaisesRegex(ValueError, "not canonical"):
+            bundle._safe_extract(archive, self.root / "destination")
+
+    def test_failed_staging_leaves_no_partial_sdk(self):
+        prefix = self.root / "prefix"
+        original = bundle._merge_notice
+
+        def fail(*args, **kwargs):
+            raise ValueError("synthetic notice failure")
+
+        bundle._merge_notice = fail
+        try:
+            with self.assertRaisesRegex(ValueError, "synthetic notice failure"):
+                bundle.bundle(lock_path=self.lock, prefix=prefix, platform="darwin-arm64",
+                              archive=self.archive, archive_dir=None, integrations=self.integration)
+        finally:
+            bundle._merge_notice = original
+        self.assertFalse((prefix / "share/pulp/vellum-sdk/0.2.0").exists())
+        # A rerun must be able to stage the SDK after the failed attempt.
+        self.assertTrue(bundle.bundle(lock_path=self.lock, prefix=prefix, platform="darwin-arm64",
+                                      archive=self.archive, archive_dir=None, integrations=self.integration).is_dir())
+
+    def test_interrupted_publication_is_not_marked_staged_and_recovers(self):
+        prefix = self.root / "prefix"
+        original = bundle._publish_step
+
+        def interrupt():
+            raise OSError("synthetic interruption between renames")
+
+        bundle._publish_step = interrupt
+        try:
+            with self.assertRaisesRegex(OSError, "synthetic interruption"):
+                bundle.bundle(lock_path=self.lock, prefix=prefix, platform="darwin-arm64",
+                              archive=self.archive, archive_dir=None, integrations=self.integration)
+        finally:
+            bundle._publish_step = original
+        sdk_root = prefix / "share/pulp/vellum-sdk/0.2.0"
+        # setup.sh skips staging only when this marker exists.
+        self.assertFalse((sdk_root / "pulp-sdk-digest.txt").exists())
+        self.assertTrue((prefix / "share/pulp" / bundle.PUBLISH_PENDING).exists())
+        staged = bundle.bundle(lock_path=self.lock, prefix=prefix, platform="darwin-arm64",
+                               archive=self.archive, archive_dir=None, integrations=self.integration)
+        self.assertTrue((staged / "pulp-sdk-digest.txt").is_file())
+        self.assertTrue((prefix / "share/pulp/integrations/pulp-vellum/bridge.hpp").is_file())
+        self.assertFalse((prefix / "share/pulp" / bundle.PUBLISH_PENDING).exists())
+
+    def test_foreign_integrations_without_pending_marker_are_not_replaced(self):
+        prefix = self.root / "prefix"
+        foreign = prefix / "share/pulp/integrations"
+        foreign.mkdir(parents=True)
+        with self.assertRaisesRegex(FileExistsError, "refusing to overwrite staged integrations"):
+            bundle.bundle(lock_path=self.lock, prefix=prefix, platform="darwin-arm64",
+                          archive=self.archive, archive_dir=None, integrations=self.integration)
+        self.assertTrue(foreign.is_dir())
 
     def test_existing_staged_sdk_is_not_overwritten(self):
         prefix = self.root / "prefix"
