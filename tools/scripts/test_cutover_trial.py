@@ -157,6 +157,33 @@ class RepairRegressionTests(unittest.TestCase):
             self.assertEqual(restored[0]["restored"], "core/view/js/css-colors.js")
             self.assertEqual(source.read_text(encoding="utf-8"), "var __cssColors__ = {};\n")
 
+    def test_restore_binary_font_is_byte_exact(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "fonts").mkdir()
+            font = root / "fonts/a.ttf"
+            payload = bytes([0x00, 0x01, 0xff, 0xfe, 0x80, 0x0d, 0x0a, 0xc3])
+            font.write_bytes(payload)
+            (root / "CMakeLists.txt").write_text("fonts/a.ttf\n", encoding="utf-8")
+            for args in (["init", "-q"], ["add", "."],
+                         ["-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid",
+                          "commit", "-qm", "fixture"]):
+                done = ct.run(["git", "-C", str(root), *args])
+                self.assertEqual(done.returncode, 0, done.stderr)
+            font.unlink()
+            restored = ct.restore_deleted_inputs(root, ["fonts/a.ttf"])
+            self.assertEqual(restored[0]["restored"], "fonts/a.ttf")
+            self.assertEqual(font.read_bytes(), payload)
+
+    def test_report_keeps_restored_inputs_separate(self):
+        inputs = {"stranded_rows": [], "delete_paths": []}
+        restored = [{"restored": "x.js", "referenced_by": ["CMakeLists.txt"], "count": 1}]
+        still = [{"path": "y.js", "referenced_by": ["CMakeLists.txt"], "count": 1}]
+        report = ct.build_report(inputs, "", "", 0, [], True, False, None, [], still, restored)
+        self.assertEqual(report["deleted_data_still_referenced"], still)
+        self.assertEqual(report["restored_deleted_inputs"], restored)
+        self.assertEqual(report["stranded_dependencies"], restored)
+
     def test_external_and_symlink_diagnostics_cannot_write_outside_scratch(self):
         with tempfile.TemporaryDirectory() as tmp:
             parent = Path(tmp)

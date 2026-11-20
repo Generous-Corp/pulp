@@ -421,11 +421,13 @@ def restore_deleted_inputs(scratch: Path, paths: list[str]) -> list[dict]:
         referenced_by = sorted(referenced_by)
         if not referenced_by:
             continue
-        shown = run(["git", "-C", str(scratch), "show", f"HEAD:{rel}"])
+        # Bytes, not text: restored fonts must round-trip exactly.
+        shown = subprocess.run(["git", "-C", str(scratch), "show", f"HEAD:{rel}"],
+                               capture_output=True, check=False)
         if shown.returncode:
             continue
         target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_text(shown.stdout, encoding="utf-8")
+        target.write_bytes(shown.stdout)
         restored.append({"restored": rel, "referenced_by": referenced_by[:10],
                          "count": len(referenced_by)})
     return restored
@@ -478,7 +480,8 @@ def build_report(inputs: dict, configure_text: str, build_text: str,
                  deleted: int, missing: list[str], configure_ok: bool,
                  build_ran: bool, build_returncode: int | None = None,
                  edits: list[dict] | None = None,
-                 data_refs: list[dict] | None = None) -> dict:
+                 data_refs: list[dict] | None = None,
+                 restored_inputs: list[dict] | None = None) -> dict:
     rows = inputs["stranded_rows"]
     failures = parse_build_log(build_text) if build_ran else []
     configure_errors = [] if configure_ok else parse_configure_log(configure_text)
@@ -509,7 +512,7 @@ def build_report(inputs: dict, configure_text: str, build_text: str,
         "configure": {"ok": configure_ok, "errors": configure_errors},
         "cutover_required_changes": [e for e in edits or [] if e.get("class") == "a-expected"],
         "stranded_dependencies": [e for e in edits or [] if e.get("class") == "b-stranded-restored"]
-                                 + (data_refs or []),
+                                 + (restored_inputs or []),
         "stranded_consumers": [
             dict(e, consumer_target=LINKS_MISSING.search(e["why"]).group(1),
                  needs=LINKS_MISSING.search(e["why"]).group(2))
@@ -517,6 +520,7 @@ def build_report(inputs: dict, configure_text: str, build_text: str,
         "cascade_edits": sum(1 for e in edits or [] if e.get("class") == "cascade"),
         "unclassified_edits": [e for e in edits or [] if e.get("class") == "unclassified"],
         "deleted_data_still_referenced": data_refs or [],
+        "restored_deleted_inputs": restored_inputs or [],
         "build": {"ran": build_ran,
                   "ok": (build_returncode == 0
                          if build_returncode is not None else None),
@@ -612,7 +616,7 @@ def main(argv: list[str] | None = None) -> int:
                     args.scratch, configure_once,
                     deleted=set(inputs["delete_paths"]) - set(missing))
             data_refs = deleted_data_still_referenced(args.scratch, inputs["delete_paths"])
-            data_refs.extend(restore_deleted_inputs(args.scratch, inputs["delete_paths"]))
+            restored_inputs = restore_deleted_inputs(args.scratch, inputs["delete_paths"])
             (log_dir / "cutover-configure.log").write_text(configure_text, encoding="utf-8")
             build_text, ran, build_returncode = "", False, None
             if configure_ok:
@@ -627,7 +631,8 @@ def main(argv: list[str] | None = None) -> int:
                 build_returncode = built.returncode
                 (log_dir / "cutover-build.log").write_text(build_text, encoding="utf-8")
             report = build_report(inputs, configure_text, build_text, deleted, missing,
-                                  configure_ok, ran, build_returncode, edits, data_refs)
+                                  configure_ok, ran, build_returncode, edits, data_refs,
+                                  restored_inputs)
         args.report.parent.mkdir(parents=True, exist_ok=True)
         args.report.write_text(json.dumps(report, indent=1) + "\n", encoding="utf-8")
     except (InputError, OSError) as error:
