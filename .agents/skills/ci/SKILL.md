@@ -6196,12 +6196,8 @@ bisectable.
   `clock_in_tests_lint.py` (in `gates.sh` and pre-push, diff-scoped, baseline in
   `clock_in_tests_baseline.json`) rejects a newly added `datetime.now`,
   `date.today`, `time.time` and similar line in `tools/**/test_*.py` unless it
-  carries `# clock-ok: <reason>`. The `date-sensitive-selftests-tz-matrix` ctest
-  runs the selftests in `date_sensitive_selftests.json` under
-  `TZ=Pacific/Kiritimati`, `Pacific/Pago_Pago` and `UTC`, the method that
-  reproduced the outage in about a second per zone. A selftest that takes a date
-  belongs in that list; reproduce a suspected date bug with `TZ=Pacific/Kiritimati`
-  before waiting for midnight UTC.
+  carries `# clock-ok: <reason>`. The timezone matrix is delivered separately
+  in the follow-up B2 PR after this clock-lint rule lands.
 - **Release builds must pass `-DPULP_BUILD_EXAMPLES=OFF`.** The
   `pulp-design-tool` example hard-fails CMake configure when `PULP_HAS_SKIA`
   is FALSE (belt-and-suspenders, code 78). `sign-and-release.yml` builds on a

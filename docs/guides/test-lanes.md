@@ -485,13 +485,8 @@ Two guards cover the class:
   `# clock-ok: <reason>`. Existing uses are frozen in
   `tools/scripts/clock_in_tests_baseline.json`, so only the diff is judged.
   Pin the date instead whenever the code under test accepts one.
-- The `date-sensitive-selftests-tz-matrix` ctest runs each selftest listed in
-  `tools/scripts/date_sensitive_selftests.json` under `TZ=Pacific/Kiritimati`
-  (UTC+14), `TZ=Pacific/Pago_Pago` (UTC-11) and `TZ=UTC` and fails if any zone
-  differs. At every moment one of those zones is a calendar day from UTC, so a
-  local-clock dependency fails now instead of at the next rollover. Add a
-  selftest to `tests` when it takes a date; `pending` entries are listed but not
-  run. It does not catch a test that reads the UTC clock on both sides.
+- The timezone matrix is delivered separately in the follow-up B2 PR after this clock-lint rule lands.
+
 
 ## Why example validators are off the required gate
 
