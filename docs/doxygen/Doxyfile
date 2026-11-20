@@ -62,7 +62,8 @@ INPUT                  = ../../core/audio/include \
                          ../../tools/testing/rt_allocation_probe/include \
                          ../../inspect/include \
                          ../../integrations/pulp-native/include \
-                         ../../integrations/pulp-vellum/include
+                         ../../integrations/pulp-vellum/include \
+                         ../../integrations/pulp-vellum-audio/include
 RECURSIVE              = YES
 FILE_PATTERNS          = *.hpp *.h *.inc *.hpp.in
 
