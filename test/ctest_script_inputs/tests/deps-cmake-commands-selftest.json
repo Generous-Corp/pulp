@@ -1,0 +1,14 @@
+{
+ "name": "deps-cmake-commands-selftest",
+ "record": {
+  "entry": "tools/deps/test_cmake_commands.py",
+  "inputs": [
+   "tools/cmake/PulpGpuRuntime.cmake",
+   "tools/cmake/PulpGpuRuntimeRecord.cmake",
+   "tools/cmake/PulpVellumLock.cmake",
+   "tools/deps/cmake_commands.py",
+   "tools/deps/test_cmake_commands.py"
+  ],
+  "kind": "python"
+ }
+}
