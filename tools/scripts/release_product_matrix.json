@@ -1,8 +1,7 @@
 {
     "contract_floor": "0.759.1",
     "checksum_manifest_floor": "0.663.1",
-    "checksum_manifest_floor_note":
-        "SHA256SUMS is verified whenever a release carries it; this floor governs only absence. It is the first release whose publish step guaranteed the manifest (--exact-required), so a missing manifest is refused from here and warned about below.",
+    "checksum_manifest_floor_note": "SHA256SUMS is verified whenever a release carries it; this floor governs only absence. It is the first release whose publish step guaranteed the manifest (--exact-required), so a missing manifest is refused from here and warned about below.",
     "sdk_provenance_floor": "0.764.0",
     "capability_handoff_floor": "0.790.1",
     "inspector_sdk_floor": "0.772.0",
@@ -18,10 +17,8 @@
     "gpu_probe_contract_floor": "0.819.0",
     "gpu_recipe_catalog_floor": "0.819.0",
     "gpu_recipe_catalog_sha256": {
-        "pulp-sdk/share/pulp/gpu-recipes.yaml":
-            "d1b42bc7015153e92f3bb33801e91d89da2f9038a43e05fbc37b946aa5c23439",
-        "pulp-sdk/share/pulp/gpu-recipes.schema.json":
-            "dceb222837361e0fa255ae628989754c3afe5c3f17398e1c5b823202f99b7a4c"
+        "pulp-sdk/share/pulp/gpu-recipes.yaml": "d1b42bc7015153e92f3bb33801e91d89da2f9038a43e05fbc37b946aa5c23439",
+        "pulp-sdk/share/pulp/gpu-recipes.schema.json": "dceb222837361e0fa255ae628989754c3afe5c3f17398e1c5b823202f99b7a4c"
     },
     "threejs_runtime_floor": "0.819.0",
     "gpu_health_read_contract_floor": "0.819.0",
@@ -132,8 +129,6 @@
         "pulp-timeline-agent-view",
         "pulp-timeline-editor",
         "pulp-tool-gpu-health-model",
-        "pulp-vellum",
-        "pulp-vellum-audio",
         "pulp-view",
         "pulp-view-audio",
         "pulp-view-graph-editor",
