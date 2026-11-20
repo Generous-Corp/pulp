@@ -23,6 +23,16 @@
 
 namespace pulp::vellum_audio {
 
+struct AudioFrameInfo {
+    float viewport_min_hz = 20.0f;
+    float viewport_max_hz = 20000.0f;
+    float floor_db = -120.0f;
+    double sample_rate = 48000.0;
+    std::uint64_t epoch = 0;
+    std::uint32_t sequence = 0;
+    std::uint32_t dropped_frames = 0;
+};
+
 class AudioDisplayProvider final : public ::vellum::value::ValueFeed {
   public:
     static constexpr std::size_t kMaxMeterChannels = 32;
@@ -44,8 +54,15 @@ class AudioDisplayProvider final : public ::vellum::value::ValueFeed {
     /// Audio-thread publication. `index` is resolved once from `find()`.
     void publish_meter(std::size_t index, std::span<const float> rms,
                        std::span<const float> peak) noexcept;
+    void publish_meter(std::size_t index, std::span<const float> rms, std::span<const float> peak,
+                       AudioFrameInfo info) noexcept;
     /// Audio-thread publication. Samples beyond kMaxScopeSamples are dropped.
     void publish_scope(std::size_t index, std::span<const float> samples) noexcept;
+    void publish_scope(std::size_t index, std::span<const float> samples,
+                       AudioFrameInfo info) noexcept;
+
+    /// Reads the latest frame metadata. False means the channel has never been published.
+    bool read_info(std::size_t index, AudioFrameInfo& info) noexcept;
 
     [[nodiscard]] std::size_t channel_count() const noexcept override;
     [[nodiscard]] ::vellum::value::ChannelInfo channel(std::size_t index) const noexcept override;
@@ -63,11 +80,13 @@ class AudioDisplayProvider final : public ::vellum::value::ValueFeed {
         std::array<float, kMaxMeterChannels> peak{};
         std::uint32_t count = 0;
         std::uint32_t sequence = 0;
+        AudioFrameInfo info;
     };
     struct ScopeFrame {
         std::array<float, kMaxScopeSamples> samples{};
         std::uint32_t count = 0;
         std::uint32_t sequence = 0;
+        AudioFrameInfo info;
     };
     struct Channel {
         std::string name;

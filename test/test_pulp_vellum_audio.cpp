@@ -1,4 +1,5 @@
 #include <pulp/vellum_audio/audio_display_provider.hpp>
+#include <pulp/vellum_audio/audio_widgets.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -67,6 +68,71 @@ TEST_CASE("Vellum audio provider refuses wrong channel shapes", "[pulp-vellum-au
     CHECK_FALSE(provider.read_scalar(0, value));
     CHECK(provider.read_vector(0, std::span<float>{&value, 1}) == 0);
     CHECK(provider.publish_count(99) == 0);
+}
+
+TEST_CASE("Vellum audio feed reports stale and dropped-frame metadata", "[pulp-vellum-audio]") {
+    using Provider = pulp::vellum_audio::AudioDisplayProvider;
+    Provider provider({{.name = "scope", .shape = ::vellum::value::ChannelShape::vector}});
+    const auto scope = provider.find("scope", ::vellum::value::ChannelShape::vector);
+    REQUIRE(scope);
+    pulp::vellum_audio::AudioFrameInfo info;
+    CHECK_FALSE(provider.read_info(*scope, info));
+
+    const std::array first{-90.0f, -80.0f, -70.0f};
+    info.viewport_min_hz = 30.0f;
+    info.viewport_max_hz = 18000.0f;
+    info.floor_db = -96.0f;
+    info.sample_rate = 44100.0;
+    info.epoch = 7;
+    info.sequence = 12;
+    info.dropped_frames = 3;
+    provider.publish_scope(*scope, first, info);
+
+    pulp::vellum_audio::AudioFrameInfo observed;
+    REQUIRE(provider.read_info(*scope, observed));
+    CHECK(observed.viewport_min_hz == 30.0f);
+    CHECK(observed.viewport_max_hz == 18000.0f);
+    CHECK(observed.floor_db == -96.0f);
+    CHECK(observed.sample_rate == 44100.0);
+    CHECK(observed.epoch == 7);
+    CHECK(observed.sequence == 12);
+    CHECK(observed.dropped_frames == 3);
+}
+
+TEST_CASE("Vellum audio widgets snapshot feed values", "[pulp-vellum-audio]") {
+    pulp::vellum_audio::AudioDisplayProvider provider({
+        {.name = "level", .shape = ::vellum::value::ChannelShape::meter},
+        {.name = "spectrum", .shape = ::vellum::value::ChannelShape::vector},
+    });
+    const auto level = provider.find("level", ::vellum::value::ChannelShape::meter);
+    const auto spectrum = provider.find("spectrum", ::vellum::value::ChannelShape::vector);
+    REQUIRE(level);
+    REQUIRE(spectrum);
+
+    pulp::vellum_audio::LevelMeter meter(&provider);
+    meter.set_channel(*level);
+    meter.sample();
+    CHECK(meter.stale());
+    provider.publish_meter(*level, std::array{0.25f}, std::array{0.75f});
+    meter.sample();
+    CHECK_FALSE(meter.stale());
+    CHECK(meter.rms() == 0.25f);
+    CHECK(meter.peak() == 0.75f);
+
+    pulp::vellum_audio::AnalyzerScope scope(&provider);
+    scope.set_channel(*spectrum);
+    pulp::signal::SpectrumBinMappingConfig mapping;
+    mapping.fft_size = 4;
+    mapping.columns = 3;
+    mapping.min_hz = 20.0;
+    mapping.max_hz = 18000.0;
+    mapping.floor_db = -96.0f;
+    scope.configure_mapping(mapping);
+    provider.publish_scope(*spectrum, std::array{-90.0f, -60.0f, -30.0f},
+                           {.floor_db = -96.0f, .sequence = 2});
+    scope.sample();
+    CHECK_FALSE(scope.stale());
+    CHECK(scope.column_count() == 3);
 }
 
 TEST_CASE("Vellum audio provider never exposes a torn frame", "[pulp-vellum-audio][threading]") {

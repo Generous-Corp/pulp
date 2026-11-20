@@ -66,7 +66,7 @@ foreach(_fmt IN LISTS _no_editor_formats)
     # The UI stacks a project chooses with `pulp create --ui`: an audio-only
     # (--ui none) plug-in reaches neither the Vellum bridge nor RmlUi, under
     # any of their Pulp or installed-SDK target names.
-    foreach(_forbidden pulp-vellum pulp-rmlui-native pulp-rmlui-native-metal
+    foreach(_forbidden pulp-vellum pulp-vellum-audio pulp-rmlui-native pulp-rmlui-native-metal
                        pulp-view-rmlui-importer-adapter)
         if(_forbidden IN_LIST _no_editor_closure)
             message(FATAL_ERROR

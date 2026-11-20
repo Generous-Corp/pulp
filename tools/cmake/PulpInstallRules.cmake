@@ -99,6 +99,16 @@ if(TARGET pulp-signal-mufft AND NOT APPLE)
     list(APPEND PULP_SDK_TARGETS pulp-signal-mufft)
 endif()
 
+# Optional Vellum integration packages. They remain absent from the SDK unless
+# the corresponding UI option was selected, while an enabled package is
+# exported alongside the other Pulp targets for installed Vellum consumers.
+if(TARGET pulp-vellum)
+    list(APPEND PULP_SDK_TARGETS pulp-vellum)
+endif()
+if(TARGET pulp-vellum-audio)
+    list(APPEND PULP_SDK_TARGETS pulp-vellum-audio)
+endif()
+
 # Modal-spec JSON parsing has a source-bearing library separate from the
 # header-only signal umbrella. Export it or installed consumers can include
 # modal_spec.hpp but cannot link parse_modal_spec()/to_json().
@@ -193,6 +203,17 @@ endif()
 # on Windows, and the shared input and surface types on every platform.
 if(TARGET pulp-native)
     list(APPEND PULP_SDK_TARGETS pulp-native)
+endif()
+
+if(TARGET pulp-vellum)
+    install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/integrations/pulp-vellum/include/pulp/"
+        DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/pulp"
+        FILES_MATCHING PATTERN "*.hpp" PATTERN "*.h")
+endif()
+if(TARGET pulp-vellum-audio)
+    install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/integrations/pulp-vellum-audio/include/pulp/"
+        DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/pulp"
+        FILES_MATCHING PATTERN "*.hpp" PATTERN "*.h")
 endif()
 
 # pulp-canvas links pulp-bundled-fonts privately when Skia is on.
