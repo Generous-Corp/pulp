@@ -134,6 +134,10 @@ add_test(NAME deps-patches-selftest
     COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/deps/test_check_patches.py")
 set_tests_properties(deps-patches-selftest PROPERTIES TIMEOUT 120)
+add_test(NAME deps-notices-selftest
+    COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/deps/test_notices.py")
+set_tests_properties(deps-notices-selftest PROPERTIES TIMEOUT 120)
 add_test(NAME dead-test-guard
     COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/scripts/dead_test_guard.py")

@@ -1,0 +1,28 @@
+{
+  "schema": "pulp.notices.v1",
+  "sdk": "NoticesProbe",
+  "sdk_version": "1.0.0",
+  "namespaces": ["NoticesProbe"],
+  "entries": [
+    {
+      "name": "Notices Probe Component",
+      "version": "1.0.0",
+      "license": "MIT",
+      "copyright": "Copyright (c) 2026 Notices Probe Authors",
+      "source": "https://example.invalid/notices-probe",
+      "license_text": "licenses/notices-probe-component.txt",
+      "required_by": ["NoticesProbe::probe"],
+      "feature": ""
+    },
+    {
+      "name": "Notices Probe Disabled Feature",
+      "version": "1.0.0",
+      "license": "MIT",
+      "copyright": "Copyright (c) 2026 Notices Probe Authors",
+      "source": "https://example.invalid/notices-probe",
+      "license_text": "licenses/notices-probe-component.txt",
+      "required_by": ["NoticesProbe::probe"],
+      "feature": "PULP_NOTICES_PROBE_DISABLED_FEATURE"
+    }
+  ]
+}

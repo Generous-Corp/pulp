@@ -559,7 +559,6 @@ NON_SDK_MODULES = {
     "tools/cmake/PulpCheckoutLocation.cmake": "refuses checkouts under a temporary directory",
     "tools/cmake/PulpCollectTargets.cmake": "lists configured targets for build tooling",
     "tools/cmake/PulpConfigureCheckCache.cmake": "caches configure-check results",
-    "tools/cmake/PulpConsumerClosure.cmake": "measures what an installed SDK costs a consumer",
     "tools/cmake/PulpCppStringChunks.cmake": "string chunking for tools/mcp, which is not on the sdk surface",
     "tools/cmake/PulpDefaultBuildType.cmake": "defaults an empty build type for the top-level project only",
     "tools/cmake/PulpEmbed.cmake": "nothing in the tree includes it",
