@@ -79,6 +79,26 @@ without a stated reason, and never put a Dawn device and a privately owned GPU
 device in the same editor. The `rmlui` agent skill
 (`.agents/skills/rmlui/SKILL.md`) says where RmlUi work lives.
 
+### RmlUi package status
+
+`pulp_add_rmlui_editor_package` records an RML document and RCSS stylesheet
+around a supplied native-parent editor target. The target must provide the
+normal `PULP_EDITOR_FACTORY_FUNCTION` and `PULP_EDITOR_FACTORY_HEADER`
+properties, so the package still enters `pulp_add_plugin(... UI <package>)`
+through the ordinary editor-host contract.
+
+The installed VellumRmlUi SDK inspected for this contract exports
+`VellumRmlUi::Core`, `::SoftRenderer` and `::DevAssets`. Its renderer-neutral
+`vellum::rmlui::Backend` has `ModelHost` and `bind_model`, which is the right
+parameter seam for `pulp::vellum::ParamPortModel`, and `SoftRenderer` needs no
+Skia or Dawn. It does not export a native-parent Editor or a surface that can
+attach a Backend to `NativeParent`. Pulp's `integrations/rmlui-native` supplies
+the Metal surface and `VellumRmlUi::Metal` adapter for a newer SDK's
+`VellumRmlUi::Native` component, but it does not provide the Editor or the
+Backend-to-surface binding. The helper therefore fails closed until Vellum
+exports that missing host layer; a package cannot claim editor support from a
+document and stylesheet alone.
+
 ## How a plug-in gets its default editor
 
 A plug-in's editor is wired per plug-in, never by a process-wide registration.

@@ -2,6 +2,16 @@
 # Vocabulary: stable, usable, experimental, partial, planned, unsupported
 
 functions:
+  - name: pulp_add_rmlui_editor_package
+    status: partial
+    summary: Wrap a supplied native-parent RmlUi editor host and record its RML/RCSS assets.
+    required:
+      - DOCUMENT
+      - STYLESHEET
+      - EDITOR_TARGET
+    creates:
+      - "<package>"
+
   - name: pulp_add_vellum_editor_package
     status: experimental
     summary: Generate a concrete Vellum View editor package for pulp_add_plugin UI.

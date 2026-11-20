@@ -1501,6 +1501,14 @@ add_test(NAME cmake-pulp-vellum-editor-package
 set_tests_properties(cmake-pulp-vellum-editor-package PROPERTIES
     LABELS "cmake;format;vellum" TIMEOUT 120)
 
+add_test(NAME cmake-pulp-rmlui-editor-package
+    COMMAND ${CMAKE_COMMAND}
+        -DPULP_SOURCE_DIR=${CMAKE_SOURCE_DIR}
+        -DFIXTURE_DIR=${CMAKE_CURRENT_BINARY_DIR}/pulp-rmlui-editor-package
+        -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/test_pulp_rmlui_editor_package.cmake)
+set_tests_properties(cmake-pulp-rmlui-editor-package PROPERTIES
+    LABELS "cmake;format;vellum;rmlui;link-contract" TIMEOUT 120)
+
 add_test(NAME cmake-control-shipping-matrix
     COMMAND ${CMAKE_COMMAND}
         -DPULP_SOURCE_DIR=${CMAKE_SOURCE_DIR}
