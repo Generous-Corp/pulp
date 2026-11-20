@@ -378,8 +378,17 @@ class GpuRuntimePinTests(unittest.TestCase):
                  'set(PULP_GPU_RUNTIME_COMMIT "d361ea5b855707391798b7315183d99b6cbe69b6")'),
                 ('set(PULP_GPU_RUNTIME_VERSION "${PULP_VELLUM_tag}")',
                  'set(PULP_GPU_RUNTIME_VERSION "v0.2.0")'),
-                ('file(READ "${PULP_VELLUM_LOCK_FILE}" _pulp_vellum_lock)',
-                 'file(READ "${CMAKE_CURRENT_LIST_DIR}/../../pulp.lock" _pulp_vellum_lock)'),
+                # Reading a path a caller can preset, the record still naming the
+                # staged lock: only the probe lock's sha shows the wrong lock was read.
+                ('file(READ "${_pulp_vellum_lock_file}" _pulp_vellum_lock)',
+                 'if(DEFINED PULP_VELLUM_LOCK_FILE)\n'
+                 '    file(READ "${PULP_VELLUM_LOCK_FILE}" _pulp_vellum_lock)\nelse()\n'
+                 '    file(READ "${_pulp_vellum_lock_file}" _pulp_vellum_lock)\nendif()'),
+                # Taking the path itself from a caller-settable variable.
+                ('set(_pulp_vellum_lock_file "${CMAKE_CURRENT_LIST_DIR}/../../pulp.lock")',
+                 'set(_pulp_vellum_lock_file "${CMAKE_CURRENT_LIST_DIR}/../../pulp.lock")\n'
+                 'if(DEFINED PULP_VELLUM_LOCK_FILE)\n'
+                 '    set(_pulp_vellum_lock_file "${PULP_VELLUM_LOCK_FILE}")\nendif()'),
                 ('set(PULP_VELLUM_${_field} "${_value}")',
                  'set(PULP_VELLUM_${_field} "${_value}")\n    if(_field STREQUAL "sha")\n'
                  '        set(PULP_VELLUM_sha d361ea5b855707391798b7315183d99b6cbe69b6)\n    endif()')):
@@ -434,9 +443,6 @@ class GpuRuntimePinTests(unittest.TestCase):
                 ('set("FETCHCONTENT_SOURCE_DIR_VELLUM_GPU_RUNTIME" /x CACHE PATH "")',
                  "sets FETCHCONTENT_SOURCE_DIR"),
                 ("set([[FETCHCONTENT_FULLY_DISCONNECTED]] ON)", "sets FETCHCONTENT_FULLY_DISCONNECTED"),
-                ('set(PULP_VELLUM_LOCK_FILE "/tmp/other.lock" CACHE FILEPATH "" FORCE)',
-                 "sets PULP_VELLUM_LOCK_FILE"),
-                ('set([==[PULP_VELLUM_LOCK_FILE]==] "/tmp/other.lock")', "sets PULP_VELLUM_LOCK_FILE"),
                 ("pulp_register_fetchcontent_source(vellum_gpu_runtime DIR x REF y)",
                  "registers a FetchContent source for vellum_gpu_runtime"),
                 ("cmake_language(SET_DEPENDENCY_PROVIDER p SUPPORTED_METHODS "
@@ -448,6 +454,92 @@ class GpuRuntimePinTests(unittest.TestCase):
         other.write_text("pulp_register_fetchcontent_source(Catch2 DIR catch2 REF v3)\n"
                          'set(_doc "set(FETCHCONTENT_SOURCE_DIR_VELLUM_GPU_RUNTIME /x)")\n'
                          "# set(PULP_VELLUM_LOCK_FILE /x)\n", encoding="utf-8")
+        self.assertEqual(self.problems(), [])
+
+    def test_the_manifest_must_name_the_canonical_pin(self) -> None:
+        # A copy of the pin elsewhere would itself pass; naming it must not move
+        # the audit off the file configure includes.
+        (self.root / "tools/cmake/Other.cmake").write_text(self.original, encoding="utf-8")
+        (self.root / "elsewhere/tools/cmake").mkdir(parents=True)
+        for sources in (["tools/cmake/Other.cmake"], [str((self.root / self.GPU).resolve())],
+                        ["../elsewhere/" + self.GPU], ["tools/cmake/../cmake/PulpGpuRuntime.cmake"],
+                        [self.GPU, self.GPU], [], None):
+            with self.subTest(sources=sources):
+                entry = self.entry()
+                entry[0]["source_files"] = sources
+                found = audit.gpu_runtime_pin_agreement(entry, self.root)
+                self.assertTrue(any("source_files must be exactly" in p for p in found), found)
+        self.assertEqual(self.problems(), [])
+
+    def test_a_preset_lock_path_cannot_redirect_the_reader(self) -> None:
+        import json
+        other = json.loads(LOCK_FILE.read_text(encoding="utf-8"))
+        other["vellum"]["sha"] = "f" * 40
+        (self.root / "other.lock").write_text(json.dumps(other), encoding="utf-8")
+        run = audit.run_gpu_runtime_driver(
+            self.root, self.GPU, "0.2.0",
+            defines={"PULP_VELLUM_LOCK_FILE": str(self.root / "other.lock")})
+        (_, declare), = run.named("FetchContent_Declare")
+        self.assertEqual(declare[4], json.loads(LOCK_FILE.read_text(encoding="utf-8"))["vellum"]["sha"])
+        self.assertEqual([args for _, args in run.named("lock")],
+                         [[str((self.root / "pulp.lock").resolve())]])
+
+    CHECKOUT = ('    pulp_check_gpu_runtime_checkout("${vellum_gpu_runtime_SOURCE_DIR}" '
+                '"${PULP_GPU_RUNTIME_COMMIT}")\n')
+
+    def test_the_populated_source_must_be_checked_against_the_lock(self) -> None:
+        self.assertIn(self.CHECKOUT, self.original)
+        make = "    FetchContent_MakeAvailable(vellum_gpu_runtime)\n"
+        for label, text in (
+                ("removed", self.original.replace(self.CHECKOUT, "", 1)),
+                ("constant-false", self.original.replace(
+                    self.CHECKOUT, "    if(FALSE)\n" + self.CHECKOUT + "    endif()\n", 1)),
+                ("literal sha", self.original.replace(self.CHECKOUT, self.CHECKOUT.replace(
+                    "${PULP_GPU_RUNTIME_COMMIT}", "d361ea5b855707391798b7315183d99b6cbe69b6"), 1)),
+                ("another directory", self.original.replace(
+                    '"${vellum_gpu_runtime_SOURCE_DIR}"', '"${CMAKE_CURRENT_LIST_DIR}"', 1)),
+                ("before the fetch", self.original.replace(self.CHECKOUT, "", 1).replace(
+                    make, self.CHECKOUT + make, 1)),
+                ("redefined as a no-op", self.original.replace(
+                    'include("${CMAKE_CURRENT_LIST_DIR}/PulpGpuRuntimeRecord.cmake")\n',
+                    'include("${CMAKE_CURRENT_LIST_DIR}/PulpGpuRuntimeRecord.cmake")\n'
+                    "function(pulp_check_gpu_runtime_checkout)\nendfunction()\n", 1))):
+            with self.subTest(label=label):
+                self.assertNotEqual(text, self.original)
+                (self.root / self.GPU).write_text(text, encoding="utf-8")
+                self.assertFlags("must check the populated vellum_gpu_runtime source")
+
+    def test_cmake_language_code_is_checked_like_source(self) -> None:
+        other = self.root / "tools/cmake/Other.cmake"
+        for code, fragment in (
+                ("cmake_language(CALL message hi)", "through cmake_language(CALL)"),
+                ('cmake_language(EVAL CODE "function(set)\\nendfunction()")', "redefines set()"),
+                ('cmake_language(EVAL CODE "set([[FETCHCONTENT_SOURCE_DIR_VELLUM_GPU_RUNTIME]] /x)")',
+                 "sets FETCHCONTENT_SOURCE_DIR_VELLUM_GPU_RUNTIME"),
+                ('cmake_language(EVAL CODE "cmake_language(DEFER CALL set '
+                 '[[FETCHCONTENT_FULLY_DISCONNECTED]] ON)")', "sets FETCHCONTENT_FULLY_DISCONNECTED"),
+                ('cmake_language(EVAL CODE "${_code}")', "built from variables"),
+                ('cmake_language(EVAL CODE "set(\\${_n} x)")', "built from variables"),
+                ('cmake_language(EVAL CODE "set(x \\"${_v}\\")")', "built from variables"),
+                ('cmake_language(EVAL CODE "# ${_v}\\nset(x 1)")', "built from variables"),
+                ('cmake_language(EVAL CODE "function([[${_cmd}]])\\nendfunction()")',
+                 "not a literal name"),
+                ('cmake_language(EVAL CODE "set(x" "1)")', "EVAL CODE with one argument"),
+                ('cmake_language(EVAL CODE "set(x")', "cannot parse"),
+                ("cmake_language(DEFER CALL ${_fn})", "defers a call to"),
+                ("cmake_language(DEFER DIRECTORY d CALL ${_fn} a)", "defers a call to"),
+                ("function(${_name})\nendfunction()", "not a literal name"),
+                ("macro(execute_process)\nendmacro()", "redefines execute_process()")):
+            with self.subTest(code=code):
+                other.write_text(code + "\n", encoding="utf-8")
+                self.assertFlags(fragment)
+        # The forms the tree really uses: CMake's documented idiom for binding a
+        # value into a deferred call, and a deferred call to a literal command.
+        other.write_text('cmake_language(EVAL CODE\n'
+                         '    "cmake_language(DEFER DIRECTORY [[${CMAKE_SOURCE_DIR}]] CALL _fin '
+                         '[[${target}]])")\n'
+                         'cmake_language(DEFER DIRECTORY "${CMAKE_SOURCE_DIR}" CALL _fin)\n',
+                         encoding="utf-8")
         self.assertEqual(self.problems(), [])
 
     def test_unparseable_cmake_elsewhere_fails_closed(self) -> None:

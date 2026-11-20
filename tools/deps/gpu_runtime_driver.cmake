@@ -6,7 +6,7 @@
 #
 #   cmake -DPULP_DRIVER_ROOT=<repo> [-DPULP_DRIVER_MODULE=<pin file>] -DPULP_DRIVER_RECORD=<file>
 #         -DPULP_DRIVER_FETCHED_VERSION=<x.y.z>
-#         [-DPULP_DRIVER_PREFIX_MODE=ON] [-DPULP_VELLUM_LOCK_FILE=<lock>]
+#         [-DPULP_DRIVER_PREFIX_MODE=ON]
 #         -P gpu_runtime_driver.cmake
 #
 # The module runs with the macOS gpu-runtime conditions it gates on. These
@@ -15,7 +15,9 @@
 #                                under <repo>/tools/cmake are really included;
 #                                every other include is recorded and skipped.
 #                                After the lock reader, a `lock` line records the
-#                                PULP_VELLUM_LOCK_FILE it read.
+#                                lock file it read (always <repo>/pulp.lock; the
+#                                audit stages a copy of the modules beside a probe
+#                                lock to evaluate another one).
 #   FetchContent_Declare()       recorded.
 #   FetchContent_MakeAvailable() recorded, with any FetchContent source override
 #                                in effect; sets <name>_SOURCE_DIR to a fixed
@@ -23,9 +25,10 @@
 #   get_directory_property()     recorded; PROJECT_VERSION of the stand-in
 #                                gpu-runtime directory is PULP_DRIVER_FETCHED_VERSION.
 #   find_package()               recorded; finds nothing.
-#   pulp_check_gpu_runtime_record(), pulp_check_gpu_runtime_archive()
-#                                recorded (the prefix integrity checks have their
-#                                own tests).
+#   pulp_check_gpu_runtime_record(), pulp_check_gpu_runtime_archive(),
+#   pulp_check_gpu_runtime_checkout()
+#                                recorded (these integrity checks have their own
+#                                tests).
 #   message(FATAL_ERROR|SEND_ERROR)
 #                                recorded, then stops as CMake would. (Where it
 #                                was called from comes from CMake's own trace.)
@@ -118,6 +121,10 @@ function(pulp_check_gpu_runtime_archive)
     set(_pulp_driver_argc ${ARGC})
     _pulp_driver_capture(pulp_check_gpu_runtime_archive)
 endfunction()
+function(pulp_check_gpu_runtime_checkout)
+    set(_pulp_driver_argc ${ARGC})
+    _pulp_driver_capture(pulp_check_gpu_runtime_checkout)
+endfunction()
 ]=])
 
 function(_pulp_driver_record_lock)
@@ -146,7 +153,7 @@ function(include)
     endforeach()
     _include("${_pulp_driver_target}")
     if(_pulp_driver_target STREQUAL "${_pulp_driver_cmake_dir}/PulpVellumLock.cmake")
-        _pulp_driver_record_lock("${PULP_VELLUM_LOCK_FILE}")
+        _pulp_driver_record_lock("${_pulp_vellum_lock_file}")
     else()
         cmake_language(EVAL CODE "${_pulp_driver_prefix_stubs}")
     endif()

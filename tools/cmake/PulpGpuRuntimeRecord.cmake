@@ -19,6 +19,49 @@ function(pulp_check_gpu_runtime_record prefix commit)
     endif()
 endfunction()
 
+# pulp_check_gpu_runtime_checkout(<source-dir> <commit>)
+#
+# Source mode builds whatever FetchContent_MakeAvailable() left in <source-dir>.
+# A FetchContent source override, FETCHCONTENT_FULLY_DISCONNECTED reusing an
+# older population, or a dependency provider can each leave something other
+# than the pinned commit there, and any file that ran earlier can set those
+# variables under a name built at configure time. So the result is checked
+# rather than the inputs: <source-dir> must be a git checkout whose HEAD is
+# exactly <commit>, with no modified, staged or untracked file. Anything else,
+# including an empty <source-dir>, stops configure.
+function(pulp_check_gpu_runtime_checkout source_dir commit)
+    if(source_dir STREQUAL "" OR NOT IS_DIRECTORY "${source_dir}")
+        message(FATAL_ERROR
+            "Pulp: gpu-runtime was not populated from a source checkout ('${source_dir}'), "
+            "so it cannot be checked against the pinned ${commit}")
+    endif()
+    if(NOT GIT_EXECUTABLE)
+        find_package(Git QUIET)
+    endif()
+    if(NOT GIT_EXECUTABLE)
+        message(FATAL_ERROR
+            "Pulp: git was not found, so the gpu-runtime checkout at ${source_dir} cannot be "
+            "checked against the pinned ${commit}")
+    endif()
+    execute_process(
+        COMMAND "${GIT_EXECUTABLE}" -C "${source_dir}" rev-parse HEAD
+        RESULT_VARIABLE _rc OUTPUT_VARIABLE _head ERROR_QUIET
+        OUTPUT_STRIP_TRAILING_WHITESPACE)
+    if(NOT _rc EQUAL 0 OR NOT _head STREQUAL commit)
+        message(FATAL_ERROR
+            "Pulp: the gpu-runtime source at ${source_dir} is at '${_head}', not the pinned "
+            "${commit}. Delete it (or the build directory) to fetch the pin again.")
+    endif()
+    execute_process(
+        COMMAND "${GIT_EXECUTABLE}" -C "${source_dir}" status --porcelain --untracked-files=all
+        RESULT_VARIABLE _rc OUTPUT_VARIABLE _status ERROR_QUIET)
+    if(NOT _rc EQUAL 0 OR NOT _status STREQUAL "")
+        message(FATAL_ERROR
+            "Pulp: the gpu-runtime checkout at ${source_dir} has local changes, so it is not "
+            "the pinned ${commit}:\n${_status}")
+    endif()
+endfunction()
+
 # _pulp_gpu_runtime_check_contained(<real-prefix> <prefix> <relative-path>)
 #
 # Refuses a listed path that is not a plain file reached through plain

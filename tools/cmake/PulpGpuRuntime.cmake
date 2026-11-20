@@ -17,6 +17,8 @@
 #                             gpu-runtime/ directory against Pulp's own Skia.
 #                             Source is pinned by commit (pulp.lock vellum.sha),
 #                             not by archive, so the archive digests do not apply.
+#                             Whatever FetchContent populates must be a clean
+#                             checkout of that commit, else configure stops.
 #
 # Either way the package checks Dawn against its renderer lock, which must name
 # the Skia asset Pulp resolved (tools/deps/audit.py --strict asserts the same).
@@ -71,6 +73,7 @@ else()
     set(GPU_RUNTIME_BENCHMARK ${PULP_BENCHMARK} CACHE BOOL "" FORCE)
     set(GPU_RUNTIME_HOST_OWNS_DAWN_PROCS ${PULP_DAWN_PROCS_HOST_OWNED} CACHE BOOL "" FORCE)
     FetchContent_MakeAvailable(vellum_gpu_runtime)
+    pulp_check_gpu_runtime_checkout("${vellum_gpu_runtime_SOURCE_DIR}" "${PULP_GPU_RUNTIME_COMMIT}")
     get_directory_property(_pulp_gpu_runtime_version
         DIRECTORY "${vellum_gpu_runtime_SOURCE_DIR}/gpu-runtime" DEFINITION PROJECT_VERSION)
     if(NOT _pulp_gpu_runtime_version STREQUAL PULP_GPU_RUNTIME_VERSION)

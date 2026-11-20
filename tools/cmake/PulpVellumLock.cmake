@@ -15,12 +15,16 @@
 #                       gpu-runtime/renderer-lock.json at vellum.sha. Configure only
 #                       checks its shape; tools/deps/audit.py --strict reads that file
 #                       at the pinned commit and fails unless the digest matches.
-set(PULP_VELLUM_LOCK_FILE "${CMAKE_CURRENT_LIST_DIR}/../../pulp.lock"
-    CACHE FILEPATH "Pulp Vellum lock file")
-if(NOT EXISTS "${PULP_VELLUM_LOCK_FILE}")
-    message(FATAL_ERROR "Pulp: missing pulp.lock at ${PULP_VELLUM_LOCK_FILE}")
+#
+# The lock is always the pulp.lock beside this checkout. Its path is derived
+# from this file's location alone, never from a variable a caller or an earlier
+# file could set, so nothing that runs before this reader can point it at
+# another lock.
+set(_pulp_vellum_lock_file "${CMAKE_CURRENT_LIST_DIR}/../../pulp.lock")
+if(NOT EXISTS "${_pulp_vellum_lock_file}")
+    message(FATAL_ERROR "Pulp: missing pulp.lock at ${_pulp_vellum_lock_file}")
 endif()
-file(READ "${PULP_VELLUM_LOCK_FILE}" _pulp_vellum_lock)
+file(READ "${_pulp_vellum_lock_file}" _pulp_vellum_lock)
 string(JSON _pulp_lock_schema ERROR_VARIABLE _pulp_lock_error GET "${_pulp_vellum_lock}" schema)
 if(_pulp_lock_error OR NOT _pulp_lock_schema STREQUAL "pulp.lock.v1")
     message(FATAL_ERROR "Pulp: pulp.lock has an invalid schema")
