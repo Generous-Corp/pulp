@@ -553,6 +553,12 @@ straight:
   is polled on a short timer only by scopes the editor makes (the process-wide
   post scope is not opened), so `post_to_main_thread` is refused there. The
   fake host in `test_clap_contract_editor.cpp` counts live timers and fds.
+  On Windows, with no loop lent (a host without `timer-support`, or any VST3
+  host), a scope made on the UI thread opens a message-only window there
+  (`main_thread_win32.cpp`) and posts and timers use `PostMessage` and
+  `SetTimer`; a registered host loop is still preferred. The window lives only
+  while a scope does, and a scope on another thread is refused, so
+  `main_thread_supported()` is true on Windows only while some scope holds it.
 - Sizing comes from `Editor::size_hints()` through the session, not the adapter:
   `can_resize` / `get_resize_hints` / `adjust_size` follow
   `ContractEditorSession::resizable()` and `constrain()`. An editor that declares
