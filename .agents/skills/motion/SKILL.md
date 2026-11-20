@@ -494,7 +494,7 @@ cannot spam events in production.
 
 - `apple/Sources/PulpSwift/PulpBridge.h` — C ABI (publish + provenance
   + register / update / detach geometry).
-- `apple/Sources/PulpSwift/PulpMotionBridge.cpp` — bridge to
+- `apple/Sources/PulpSwift/PulpMotionBridge.cpp`: bridge to
   `pulp::view::motion`. Internal mutex-protected registry keeps the
   `TraceHandle` separate from the lambda-captured atomic rect so
   `Coordinator::reset()` cannot self-deadlock.
@@ -726,7 +726,7 @@ discovery.
 - `tools/motion/visual/requirements.lock` — hash-pinned resolution of `requirements.txt` that CI installs; regenerate it (command in its header) whenever `requirements.txt` changes, or `test_visual_python_deps_step.py` fails
 - `examples/ui-preview/main.cpp` — env-knob wiring for the standalone host
 - `apple/Sources/PulpSwift/PulpBridge.h` — Swift C ABI surface (Path G)
-- `apple/Sources/PulpSwift/PulpMotionBridge.cpp` — Swift motion bridge shims (Path G)
+- `apple/Sources/PulpSwift/PulpMotionBridge.cpp`: Swift motion bridge shims (Path G)
 - `apple/Sources/PulpSwift/PulpMotion.swift` — Swift facade + Trace DSL (Path G)
 - `apple/Sources/PulpSwift/PulpMotionProbe.swift` — SwiftUI / UIKit probe (Path G)
 - `core/platform/include/pulp/platform/android/motion_bridge.h` — Android C ABI (Path H)

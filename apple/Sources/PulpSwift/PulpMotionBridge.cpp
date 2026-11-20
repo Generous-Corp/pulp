@@ -1,4 +1,4 @@
-// PulpMotionBridge.cpp — C bridge for the motion observability shims
+// PulpMotionBridge.cpp: C bridge for the motion observability shims
 // Links against pulp::view to expose motion::Coordinator to Swift.
 // The parameter and state shims live in PulpBridge.cpp and need no view headers.
 
@@ -222,7 +222,7 @@ void pulp_motion_detach_trace(int trace_id) {
         geometry_registry().erase(it);
     }
     // `entry` goes out of scope here. The TraceHandle destructor calls
-    // Coordinator::detach() which takes the coordinator mutex — fine,
+    // Coordinator::detach() which takes the coordinator mutex, fine,
     // because we are no longer holding the geometry mutex.
 }
 
