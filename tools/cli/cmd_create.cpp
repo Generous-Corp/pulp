@@ -389,7 +389,7 @@ int cmd_create(const std::vector<std::string>& args) {
         flush();
     }
 
-    if (!ui.empty() && ui != "none") {
+    if (!ui.empty() && ui != "none" && ui != "vellum") {
         std::cerr << "Error: --ui " << ui
                   << " is not available yet: needs the pulp-vellum editor package\n";
         return 1;
@@ -594,6 +594,34 @@ int cmd_create(const std::vector<std::string>& args) {
         {"VST3_UID", make_vst3_uid()},
         {"SDK_VERSION", sdk_version},
         {"UI_MODE_LINE", ui == "none" ? "NO_EDITOR" : ""},
+        {"VIEW_HEADER", lower_name_underscored + "_view.hpp"},
+        {"VIEW_TYPE", ns + "::" + class_name + "View"},
+        {"VELLUM_SOURCE_LINE", ui == "vellum" ? lower_name_underscored + "_view.cpp" : ""},
+        {"VELLUM_EDITOR_LINE", ui == "vellum"
+                                   ? "pulp_add_vellum_editor_package(" + class_name +
+                                         "_VellumEditor\n"
+                                         "    VIEW_HEADER \"" +
+                                         lower_name_underscored +
+                                         "_view.hpp\"\n"
+                                         "    VIEW_TYPE " +
+                                         ns + "::" + class_name +
+                                         "View\n"
+                                         "    VIEW_INCLUDE_DIRS \"${CMAKE_CURRENT_SOURCE_DIR}\"\n"
+                                         ")"
+                                   : ""},
+        {"VELLUM_FIND_LINE", ui == "vellum" ? "find_package(Vellum CONFIG REQUIRED)" : ""},
+        {"VELLUM_HELPER_LINE",
+         ui == "vellum"
+             ? "if(DEFINED PULP_ROOT_DIR)\n"
+               "    "
+               "include(\"${PULP_ROOT_DIR}/integrations/pulp-vellum/cmake/"
+               "PulpVellumEditorPackage.cmake\")\n"
+               "else()\n"
+               "    include(\"${PULP_SDK_DIR}/lib/cmake/Pulp/PulpVellumEditorPackage.cmake\")\n"
+               "endif()"
+             : ""},
+        {"UI_LINE",
+         ui == "vellum" ? "UI " + class_name + "_VellumEditor" : (ui == "none" ? "NO_EDITOR" : "")},
     };
 
     auto source_template_dir = template_kit ? template_kit->template_dir
@@ -663,6 +691,19 @@ int cmd_create(const std::vector<std::string>& args) {
         }
     }
 
+    if (ui == "vellum") {
+        const auto cmake_template = cmake_template_dir / "CMakeLists.txt.template";
+        const bool has_view_templates = fs::exists(source_template_dir / "view.hpp.template") &&
+                                        fs::exists(source_template_dir / "view.cpp.template");
+        if (!fs::exists(cmake_template) ||
+            read_file_contents(cmake_template).find("{{UI_LINE}}") == std::string::npos ||
+            !has_view_templates) {
+            std::cerr << "Error: --ui vellum is not available for the " << template_key
+                      << " template yet; it uses a script UI\n";
+            return 1;
+        }
+    }
+
     fs::create_directories(out_dir);
     if (standalone_mode) {
         log("Mode: standalone product project (default)\n");
@@ -684,6 +725,8 @@ int cmd_create(const std::vector<std::string>& args) {
     std::vector<FileMapping> file_map = {
         {"processor.hpp.template", header_name},
         {"processor.cpp.template", source_name},
+        {"view.hpp.template", lower_name_underscored + "_view.hpp"},
+        {"view.cpp.template", lower_name_underscored + "_view.cpp"},
         {"agent_operations.cpp.template", "agent_operations.cpp"},
         {"CMakeLists.txt.template", "CMakeLists.txt"},
         {"clap_entry.cpp.template", "clap_entry.cpp"},
@@ -705,6 +748,9 @@ int cmd_create(const std::vector<std::string>& args) {
         if (tmpl_file == "lv2_entry.cpp.template" && formats.find("LV2") == std::string::npos) continue;
         if (tmpl_file == "au_v2_entry.cpp.template" && formats.find("AU") == std::string::npos) continue;
         if (tmpl_file == "aax_entry.cpp.template" && formats.find("AAX") == std::string::npos) continue;
+        if ((tmpl_file == "view.hpp.template" || tmpl_file == "view.cpp.template") &&
+            ui != "vellum")
+            continue;
         auto tmpl_path = (tmpl_file == "CMakeLists.txt.template")
             ? cmake_template_dir / tmpl_file
             : source_template_dir / tmpl_file;

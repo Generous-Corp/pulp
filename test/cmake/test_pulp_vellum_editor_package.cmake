@@ -10,6 +10,7 @@ namespace pulp::vellum { template <typename T> pulp::format::EditorFactory* edit
 ]=])
 file(WRITE "${FIXTURE_DIR}/src/CMakeLists.txt" "cmake_minimum_required(VERSION 3.24)\nproject(VellumPackage CXX)\n"
     "add_library(pulp-vellum INTERFACE)\nadd_library(pulp::vellum ALIAS pulp-vellum)\n"
+    "add_library(Pulp::vellum ALIAS pulp-vellum)\n"
     "add_library(vellum-view INTERFACE)\nadd_library(Vellum::MirrorView_core ALIAS vellum-view)\n"
     "include(\"${PULP_SOURCE_DIR}/integrations/pulp-vellum/cmake/PulpVellumEditorPackage.cmake\")\n"
     "include(\"${PULP_SOURCE_DIR}/tools/cmake/PulpEditorPackage.cmake\")\n"
@@ -45,3 +46,21 @@ if(NOT error_flat MATCHES "needs Vellum::MirrorView_core")
     message(FATAL_ERROR "missing-view error was not the helper's message:\n${output}${error}")
 endif()
 message(STATUS "Vellum editor package refuses an SDK without the view layer")
+
+# An installed SDK that did not build the optional Pulp bridge must fail with
+# the same actionable explanation instead of generating an unresolved target.
+file(MAKE_DIRECTORY "${FIXTURE_DIR}/nopulp")
+file(WRITE "${FIXTURE_DIR}/nopulp/CMakeLists.txt" "cmake_minimum_required(VERSION 3.24)\nproject(VellumNoPulp CXX)\n"
+    "add_library(Vellum::MirrorView_core INTERFACE IMPORTED)\n"
+    "include(\"${PULP_SOURCE_DIR}/integrations/pulp-vellum/cmake/PulpVellumEditorPackage.cmake\")\n"
+    "pulp_add_vellum_editor_package(pulp::vellum-editor VIEW_HEADER root.hpp VIEW_TYPE test::RootView)\n")
+execute_process(COMMAND "${CMAKE_COMMAND}" -S "${FIXTURE_DIR}/nopulp" -B "${FIXTURE_DIR}/nopulp-build"
+    RESULT_VARIABLE result OUTPUT_VARIABLE output ERROR_VARIABLE error)
+if(result EQUAL 0)
+    message(FATAL_ERROR "Vellum editor package configured without pulp-vellum")
+endif()
+string(REGEX REPLACE "[ \t\r\n]+" " " error_flat "${error}")
+if(NOT error_flat MATCHES "optional pulp-vellum integration")
+    message(FATAL_ERROR "missing-pulp error was not the helper's message:\n${output}${error}")
+endif()
+message(STATUS "Vellum editor package refuses an SDK without the Pulp bridge")
