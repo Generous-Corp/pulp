@@ -94,14 +94,14 @@ class RepositoryTests(unittest.TestCase):
     def test_pulp_manifest_generates(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             self.assertEqual(notices.main(["--out", tmp]), 0)
-            manifest = json.loads((Path(tmp) / "notices.json").read_text())
+            manifest = json.loads((Path(tmp) / "notices.json").read_text(encoding="utf-8"))
             names = {e["name"] for e in manifest["entries"]}
             # Controls: dependencies every plug-in or every GPU editor links.
             for name in ("CLAP", "Mbed TLS", "Skia", "Dawn", "Yoga"):
                 self.assertIn(name, names)
             for entry in manifest["entries"]:
                 text = Path(tmp) / entry["license_text"]
-                self.assertTrue(text.read_text().strip(), entry["name"])
+                self.assertTrue(text.read_text(encoding="utf-8").strip(), entry["name"])
 
     def test_unchanged_output_is_not_rewritten(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

@@ -116,10 +116,10 @@ def build_manifest(deps: list[dict], sections: dict[str, str],
 
 
 def write_if_changed(path: Path, content: str) -> bool:
-    if path.exists() and path.read_text() == content:
+    if path.exists() and path.read_text(encoding="utf-8") == content:
         return False
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(content)
+    path.write_text(content, encoding="utf-8")
     return True
 
 
@@ -133,8 +133,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--sdk-version", default="")
     args = parser.parse_args(argv)
 
-    deps = json.loads(args.manifest.read_text())["dependencies"]
-    sections = notice_sections(args.notice.read_text())
+    deps = json.loads(args.manifest.read_text(encoding="utf-8"))["dependencies"]
+    sections = notice_sections(args.notice.read_text(encoding="utf-8"))
     manifest, texts, errors = build_manifest(deps, sections, args.sdk_version)
     if errors:
         for error in errors:
