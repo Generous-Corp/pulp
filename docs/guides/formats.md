@@ -466,14 +466,18 @@ offset (`inStartFrame`) is preserved.
 The AU adapter stores Pulp state alongside the standard AU state dictionary:
 
 - **Save:** Calls `AUEffectBase::SaveState()` (or `MusicDeviceBase::SaveState()`),
-  then appends a `CFData` blob under the key `"pulp-state"`. That blob contains
-  the parameter-only `StateStore` payload plus any non-empty
-  `Processor::serialize_plugin_state()` bytes.
-- **Load:** Calls the base `RestoreState()`, then looks for the `"pulp-state"`
-  key. If found, restores both layers and syncs all parameter values back to
-  the AU parameter system via `Globals()->SetParameter()`. Older blobs with only
-  raw `StateStore` data still load and call `deserialize_plugin_state()` with
-  empty bytes.
+  then adds a `CFData` entry under the key `"pulp-state-v2"`. It lists only the
+  parameters that differ from their declared defaults, followed by any non-empty
+  `Processor::serialize_plugin_state()` bytes, and ends in a CRC-32.
+- **Load:** Calls the base `RestoreState()`, then reads `"pulp-state-v2"`; when
+  that is absent it reads the `"pulp-state"` envelope earlier versions wrote
+  (parameter store plus plugin payload), so older sessions still load. Either
+  way the parameters are applied before `SetProperty` returns and synced back to
+  the AU parameter system via `Globals()->SetParameter()`. A malformed entry
+  fails the restore and leaves the plug-in's state unchanged. A session saved by
+  this version and opened by an older build loses its Pulp state, because the
+  older build only looks for `"pulp-state"`.
+- AUv3 `fullState` and VST3 still carry the `PLST` envelope.
 
 ### Tail and Latency
 

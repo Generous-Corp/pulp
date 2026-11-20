@@ -9,6 +9,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <limits>
+#include <memory>
 #include <mutex>
 #include <optional>
 #include <span>
@@ -478,37 +479,46 @@ std::vector<uint8_t> serialize(const state::StateStore& store,
     return out;
 }
 
-bool deserialize(std::span<const uint8_t> bytes,
-                 state::StateStore& store,
-                 Processor& processor) {
-    ParsedBlob parsed{};
-    std::vector<uint8_t> migrated_storage;
-    if (!parse_blob(bytes, parsed, migrated_storage)) {
-        return false;
+std::shared_ptr<const std::vector<uint8_t>> plugin_state_payload(const Processor& processor) {
+    if (auto published = processor.published_plugin_state_snapshot()) {
+        return published;
     }
+    return std::make_shared<const std::vector<uint8_t>>(safe_serialize_plugin_state(processor));
+}
 
+bool deserialize_parts(std::span<const uint8_t> store_blob, std::span<const uint8_t> plugin_blob,
+                       state::StateStore& store, Processor& processor) {
     state::StateStore probe;
     clone_schema(store, probe);
-    if (!probe.deserialize(parsed.store_blob)) {
+    if (!probe.deserialize(store_blob)) {
         return false;
     }
 
     const auto previous_store_blob = store.serialize();
     const auto previous_plugin_blob = safe_serialize_plugin_state(processor);
 
-    if (!store.deserialize(parsed.store_blob)) {
+    if (!store.deserialize(store_blob)) {
         restore_previous_state(previous_store_blob, previous_plugin_blob,
                                store, processor);
         return false;
     }
 
-    if (safe_deserialize_plugin_state(processor, parsed.plugin_blob)) {
+    if (safe_deserialize_plugin_state(processor, plugin_blob)) {
         return true;
     }
 
     restore_previous_state(previous_store_blob, previous_plugin_blob,
                            store, processor);
     return false;
+}
+
+bool deserialize(std::span<const uint8_t> bytes, state::StateStore& store, Processor& processor) {
+    ParsedBlob parsed{};
+    std::vector<uint8_t> migrated_storage;
+    if (!parse_blob(bytes, parsed, migrated_storage)) {
+        return false;
+    }
+    return deserialize_parts(parsed.store_blob, parsed.plugin_blob, store, processor);
 }
 
 } // namespace pulp::format::plugin_state_io

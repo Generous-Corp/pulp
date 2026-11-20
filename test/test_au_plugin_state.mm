@@ -14,6 +14,7 @@
 #include <pulp/format/audio_workgroup_client.hpp>
 #include <pulp/format/host_quirks.hpp>
 #include <pulp/format/host_type.hpp>
+#include <pulp/format/plugin_state_io.hpp>
 #include <pulp/format/processor.hpp>
 #include <pulp/format/quirk_apply.hpp>
 #include <pulp/format/registry.hpp>
@@ -25,6 +26,7 @@
 
 #include <algorithm>
 #include <array>
+#include <chrono>
 #include <cmath>
 #include <limits>
 #include <cstdint>
@@ -509,6 +511,28 @@ private:
     int tail_samples_ = 0;
 };
 
+// Effect with a configurable number of parameters and an opaque plug-in
+// payload, for state-size and state-time measurements.
+std::size_t g_many_param_count = 24;
+
+class TestAUManyParamProcessor : public TestAUEffectProcessor {
+  public:
+    void define_parameters(pulp::state::StateStore& store) override {
+        for (std::size_t i = 0; i < g_many_param_count; ++i) {
+            store.add_parameter({
+                .id = static_cast<pulp::state::ParamID>(100 + i),
+                .name = "P" + std::to_string(i),
+                .unit = "",
+                .range = {-1.0f, 1.0f, 0.0f, 0.001f},
+            });
+        }
+    }
+};
+
+std::unique_ptr<pulp::format::Processor> create_many_param_processor() {
+    return std::make_unique<TestAUManyParamProcessor>();
+}
+
 std::unique_ptr<pulp::format::Processor> create_effect_processor() {
     return std::make_unique<TestAUEffectProcessor>();
 }
@@ -666,6 +690,14 @@ void require_plst_blob(const uint8_t* bytes, std::size_t size) {
     REQUIRE(bytes[1] == 'L');
     REQUIRE(bytes[2] == 'S');
     REQUIRE(bytes[3] == 'T');
+}
+
+void require_compact_blob(const uint8_t* bytes, std::size_t size) {
+    REQUIRE(size >= 4);
+    REQUIRE(bytes[0] == 'P');
+    REQUIRE(bytes[1] == 'L');
+    REQUIRE(bytes[2] == 'C');
+    REQUIRE(bytes[3] == 'S');
 }
 
 struct ScopedFactoryRegistration {
@@ -912,11 +944,10 @@ TEST_CASE("AU v2 effect SaveState/RestoreState round-trips plugin-owned payload"
     REQUIRE(saved != nullptr);
     REQUIRE(CFGetTypeID(saved) == CFDictionaryGetTypeID());
     auto saved_dict = static_cast<CFDictionaryRef>(saved);
-    auto payload = static_cast<CFDataRef>(
-        CFDictionaryGetValue(saved_dict, CFSTR("pulp-state")));
+    auto payload = static_cast<CFDataRef>(CFDictionaryGetValue(saved_dict, CFSTR("pulp-state-v2")));
     REQUIRE(payload != nullptr);
-    require_plst_blob(CFDataGetBytePtr(payload),
-                      static_cast<std::size_t>(CFDataGetLength(payload)));
+    require_compact_blob(CFDataGetBytePtr(payload),
+                         static_cast<std::size_t>(CFDataGetLength(payload)));
 
     pulp::format::au::PulpAUEffect loader(nullptr);
     auto* loader_processor = g_last_effect_processor;
@@ -946,11 +977,10 @@ TEST_CASE("AU v2 instrument SaveState/RestoreState round-trips plugin-owned payl
     REQUIRE(saved != nullptr);
     REQUIRE(CFGetTypeID(saved) == CFDictionaryGetTypeID());
     auto saved_dict = static_cast<CFDictionaryRef>(saved);
-    auto payload = static_cast<CFDataRef>(
-        CFDictionaryGetValue(saved_dict, CFSTR("pulp-state")));
+    auto payload = static_cast<CFDataRef>(CFDictionaryGetValue(saved_dict, CFSTR("pulp-state-v2")));
     REQUIRE(payload != nullptr);
-    require_plst_blob(CFDataGetBytePtr(payload),
-                      static_cast<std::size_t>(CFDataGetLength(payload)));
+    require_compact_blob(CFDataGetBytePtr(payload),
+                         static_cast<std::size_t>(CFDataGetLength(payload)));
 
     pulp::format::au::PulpAUInstrument loader(nullptr);
     auto* loader_processor = g_last_instrument_processor;
@@ -1008,10 +1038,10 @@ TEST_CASE("AU v2 lifecycle churn preserves byte-equivalent plugin state",
             REQUIRE(resaved != nullptr);
             const auto saved_dict = static_cast<CFDictionaryRef>(saved);
             const auto resaved_dict = static_cast<CFDictionaryRef>(resaved);
-            const auto saved_pulp = static_cast<CFDataRef>(
-                CFDictionaryGetValue(saved_dict, CFSTR("pulp-state")));
-            const auto resaved_pulp = static_cast<CFDataRef>(
-                CFDictionaryGetValue(resaved_dict, CFSTR("pulp-state")));
+            const auto saved_pulp =
+                static_cast<CFDataRef>(CFDictionaryGetValue(saved_dict, CFSTR("pulp-state-v2")));
+            const auto resaved_pulp =
+                static_cast<CFDataRef>(CFDictionaryGetValue(resaved_dict, CFSTR("pulp-state-v2")));
             REQUIRE(saved_pulp != nullptr);
             REQUIRE(resaved_pulp != nullptr);
             // AUBase contributes instance metadata that can legitimately
@@ -3422,11 +3452,11 @@ TEST_CASE("AU v2 SaveState accepts pre-existing property lists",
         REQUIRE(saver.SaveState(&saved) == noErr);
         REQUIRE(saved != nullptr);
         auto saved_dict = static_cast<CFDictionaryRef>(saved);
-        auto payload = static_cast<CFDataRef>(
-            CFDictionaryGetValue(saved_dict, CFSTR("pulp-state")));
+        auto payload =
+            static_cast<CFDataRef>(CFDictionaryGetValue(saved_dict, CFSTR("pulp-state-v2")));
         REQUIRE(payload != nullptr);
-        require_plst_blob(CFDataGetBytePtr(payload),
-                          static_cast<std::size_t>(CFDataGetLength(payload)));
+        require_compact_blob(CFDataGetBytePtr(payload),
+                             static_cast<std::size_t>(CFDataGetLength(payload)));
         CFRelease(saved);
     }
 
@@ -3442,11 +3472,11 @@ TEST_CASE("AU v2 SaveState accepts pre-existing property lists",
         REQUIRE(saver.SaveState(&saved) == noErr);
         REQUIRE(saved != nullptr);
         auto saved_dict = static_cast<CFDictionaryRef>(saved);
-        auto payload = static_cast<CFDataRef>(
-            CFDictionaryGetValue(saved_dict, CFSTR("pulp-state")));
+        auto payload =
+            static_cast<CFDataRef>(CFDictionaryGetValue(saved_dict, CFSTR("pulp-state-v2")));
         REQUIRE(payload != nullptr);
-        require_plst_blob(CFDataGetBytePtr(payload),
-                          static_cast<std::size_t>(CFDataGetLength(payload)));
+        require_compact_blob(CFDataGetBytePtr(payload),
+                             static_cast<std::size_t>(CFDataGetLength(payload)));
         CFRelease(saved);
     }
 }
@@ -4771,5 +4801,364 @@ TEST_CASE("AU v3 pulls a side chain declared without a main input from bus 0",
 
         [unit deallocateRenderResources];
         [unit release];
+    }
+}
+
+namespace {
+
+namespace cs = pulp::format::au::compact_state;
+
+// Written by the save path that existed before the compact format; see the
+// fixture header for its contents.
+constexpr uint8_t kLegacyClassInfoBlob[] = {
+#include "fixtures/au_state/legacy_pulp_state.inc"
+};
+constexpr std::size_t kLegacyFixturePayloadSize = 64;
+
+CFDataRef make_cf_data(const std::vector<uint8_t>& bytes) {
+    return CFDataCreate(kCFAllocatorDefault, bytes.data(), static_cast<CFIndex>(bytes.size()));
+}
+
+// A class info the base class accepts (identity keys from a real SaveState),
+// with Pulp's own entry replaced by `bytes` under `key`. Without the base keys
+// AUBase::RestoreState rejects the dictionary before Pulp's entry is read.
+CFMutableDictionaryRef make_class_info(pulp::format::au::PulpAUEffect& source, const char* key,
+                                       const std::vector<uint8_t>& bytes) {
+    CFPropertyListRef saved = nullptr;
+    REQUIRE(source.SaveState(&saved) == noErr);
+    CFMutableDictionaryRef dict =
+        CFDictionaryCreateMutableCopy(kCFAllocatorDefault, 0, static_cast<CFDictionaryRef>(saved));
+    CFRelease(saved);
+    CFDictionaryRemoveValue(dict, CFSTR("pulp-state-v2"));
+    CFDictionaryRemoveValue(dict, CFSTR("pulp-state"));
+    CFStringRef cf_key = CFStringCreateWithCString(kCFAllocatorDefault, key, kCFStringEncodingUTF8);
+    CFDataRef data = make_cf_data(bytes);
+    CFDictionarySetValue(dict, cf_key, data);
+    CFRelease(data);
+    CFRelease(cf_key);
+    return dict;
+}
+
+std::vector<uint8_t> class_info_blob(CFPropertyListRef saved, const char* key) {
+    CFStringRef cf_key = CFStringCreateWithCString(kCFAllocatorDefault, key, kCFStringEncodingUTF8);
+    auto data =
+        static_cast<CFDataRef>(CFDictionaryGetValue(static_cast<CFDictionaryRef>(saved), cf_key));
+    CFRelease(cf_key);
+    if (!data)
+        return {};
+    const auto* p = CFDataGetBytePtr(data);
+    return std::vector<uint8_t>(p, p + CFDataGetLength(data));
+}
+
+void refresh_crc(std::vector<uint8_t>& blob) {
+    const auto crc = cs::crc32({blob.data(), blob.size() - 4});
+    for (int i = 0; i < 4; ++i)
+        blob[blob.size() - 4 + i] = static_cast<uint8_t>(crc >> (8 * i));
+}
+
+void fill_decode_store(pulp::state::StateStore& store, std::size_t params) {
+    for (std::size_t i = 0; i < params; ++i) {
+        store.add_parameter({
+            .id = static_cast<pulp::state::ParamID>(100 + i),
+            .name = "P" + std::to_string(i),
+            .unit = "",
+            .range = {-1.0f, 1.0f, 0.0f, 0.001f},
+        });
+    }
+}
+
+uint32_t reference_crc32(const uint8_t* data, std::size_t len) {
+    uint32_t crc = 0xFFFFFFFFu;
+    for (std::size_t i = 0; i < len; ++i) {
+        crc ^= data[i];
+        for (int j = 0; j < 8; ++j)
+            crc = (crc >> 1) ^ (0xEDB88320u & ((crc & 1u) ? 0xFFFFFFFFu : 0u));
+    }
+    return ~crc;
+}
+
+void set_many_params(pulp::state::StateStore& store, std::size_t count, std::size_t changed) {
+    for (std::size_t i = 0; i < changed; ++i)
+        store.set_value(static_cast<pulp::state::ParamID>(100 + (i * count) / changed),
+                        0.0625f * static_cast<float>(i + 1));
+}
+
+} // namespace
+
+TEST_CASE("AU compact state CRC matches the bitwise reference", "[au][auv2][state][compact]") {
+    const std::string check = "123456789";
+    REQUIRE(cs::crc32({reinterpret_cast<const uint8_t*>(check.data()), check.size()}) ==
+            0xCBF43926u);
+
+    std::vector<uint8_t> data(300);
+    uint32_t x = 7;
+    for (auto& b : data) {
+        x = x * 1664525u + 1013904223u;
+        b = static_cast<uint8_t>(x >> 24);
+    }
+    for (std::size_t len = 0; len <= data.size(); ++len)
+        REQUIRE(cs::crc32({data.data(), len}) == reference_crc32(data.data(), len));
+}
+
+TEST_CASE("AU compact state round-trips parameters and payload", "[au][auv2][state][compact]") {
+    g_many_param_count = 24;
+    ScopedFactoryRegistration registration(create_many_param_processor);
+
+    pulp::format::au::PulpAUEffect saver(nullptr);
+    auto* saved_proc = g_last_effect_processor;
+    REQUIRE(saved_proc != nullptr);
+    set_many_params(saved_proc->state(), 24, 9);
+    saved_proc->state().set_value(123, -1.0f); // lower bound, still non-default
+    saved_proc->plugin_state = "layout=48";
+
+    CFPropertyListRef saved = nullptr;
+    REQUIRE(saver.SaveState(&saved) == noErr);
+    REQUIRE(CFDictionaryGetValue(static_cast<CFDictionaryRef>(saved), CFSTR("pulp-state-v2")) !=
+            nullptr);
+    REQUIRE(CFDictionaryGetValue(static_cast<CFDictionaryRef>(saved), CFSTR("pulp-state")) ==
+            nullptr);
+
+    pulp::format::au::PulpAUEffect loader(nullptr);
+    auto* loaded_proc = g_last_effect_processor;
+    REQUIRE(loaded_proc != saved_proc);
+    for (std::size_t i = 0; i < 24; ++i) // stale values the restore must replace
+        loaded_proc->state().set_value(static_cast<pulp::state::ParamID>(100 + i), 0.5f);
+    loaded_proc->plugin_state = "stale";
+
+    REQUIRE(loader.RestoreState(saved) == noErr);
+    // Read straight after RestoreState: the restore must already have applied.
+    for (std::size_t i = 0; i < 24; ++i) {
+        const auto id = static_cast<pulp::state::ParamID>(100 + i);
+        REQUIRE(loaded_proc->state().get_value(id) == saved_proc->state().get_value(id));
+    }
+    REQUIRE(loaded_proc->plugin_state == "layout=48");
+    CFRelease(saved);
+}
+
+TEST_CASE("AU compact state restores a class info saved in the legacy format",
+          "[au][auv2][state][compact]") {
+    g_many_param_count = 24;
+    ScopedFactoryRegistration registration(create_many_param_processor);
+    pulp::format::au::PulpAUEffect loader(nullptr);
+    auto* proc = g_last_effect_processor;
+    REQUIRE(proc != nullptr);
+    for (std::size_t i = 0; i < 24; ++i)
+        proc->state().set_value(static_cast<pulp::state::ParamID>(100 + i), 0.5f);
+
+    const std::vector<uint8_t> legacy(std::begin(kLegacyClassInfoBlob),
+                                      std::end(kLegacyClassInfoBlob));
+    auto* class_info = make_class_info(loader, "pulp-state", legacy);
+    REQUIRE(loader.RestoreState(class_info) == noErr);
+
+    for (std::size_t i = 0; i < 24; ++i) {
+        const float expected =
+            (i % 2 == 1 && i / 2 < 9) ? 0.0625f * static_cast<float>(i / 2 + 1) : 0.0f;
+        REQUIRE(proc->state().get_value(static_cast<pulp::state::ParamID>(100 + i)) == expected);
+    }
+    REQUIRE(proc->plugin_state.size() == kLegacyFixturePayloadSize);
+    REQUIRE(static_cast<uint8_t>(proc->plugin_state[0]) ==
+            0x05); // first payload byte of the fixture
+    CFRelease(class_info);
+
+    // Saving after a legacy restore writes the compact format, and that
+    // restores to the same values.
+    CFPropertyListRef resaved = nullptr;
+    REQUIRE(loader.SaveState(&resaved) == noErr);
+    pulp::format::au::PulpAUEffect second(nullptr);
+    auto* second_proc = g_last_effect_processor;
+    REQUIRE(second.RestoreState(resaved) == noErr);
+    for (std::size_t i = 0; i < 24; ++i) {
+        const auto id = static_cast<pulp::state::ParamID>(100 + i);
+        REQUIRE(second_proc->state().get_value(id) == proc->state().get_value(id));
+    }
+    REQUIRE(second_proc->plugin_state == proc->plugin_state);
+    CFRelease(resaved);
+}
+
+TEST_CASE("AU compact state is much smaller than the legacy envelope",
+          "[au][auv2][state][compact]") {
+    g_many_param_count = 500;
+    ScopedFactoryRegistration registration(create_many_param_processor);
+    pulp::format::au::PulpAUEffect saver(nullptr);
+    auto* proc = g_last_effect_processor;
+    REQUIRE(proc != nullptr);
+    set_many_params(proc->state(), 500, 40);
+
+    SECTION("parameter-only state") {
+        proc->plugin_state.clear();
+        CFPropertyListRef saved = nullptr;
+        REQUIRE(saver.SaveState(&saved) == noErr);
+        const auto compact = class_info_blob(saved, "pulp-state-v2");
+        const auto legacy = pulp::format::plugin_state_io::serialize(proc->state(), *proc);
+        CAPTURE(compact.size(), legacy.size());
+        REQUIRE(legacy.size() >= 500 * 8);
+        REQUIRE(compact.size() * 10 < legacy.size());
+        CFRelease(saved);
+    }
+
+    SECTION("with a processor payload the saving is the parameter part") {
+        proc->plugin_state.assign(200 * 1024, 'x');
+        CFPropertyListRef saved = nullptr;
+        REQUIRE(saver.SaveState(&saved) == noErr);
+        const auto compact = class_info_blob(saved, "pulp-state-v2");
+        const auto legacy = pulp::format::plugin_state_io::serialize(proc->state(), *proc);
+        // Compact carries the payload plus a few hundred bytes; the legacy
+        // envelope carries it plus every parameter.
+        REQUIRE(compact.size() < proc->plugin_state.size() + 400);
+        REQUIRE(legacy.size() > proc->plugin_state.size() + 500 * 8);
+        CFRelease(saved);
+    }
+}
+
+TEST_CASE("AU compact state saves faster than the legacy envelope", "[au][auv2][state][compact]") {
+    g_many_param_count = 500;
+    ScopedFactoryRegistration registration(create_many_param_processor);
+    pulp::format::au::PulpAUEffect saver(nullptr);
+    auto* proc = g_last_effect_processor;
+    REQUIRE(proc != nullptr);
+    set_many_params(proc->state(), 500, 40);
+    proc->plugin_state.assign(200 * 1024, 'x');
+    for (std::size_t i = 0; i < proc->plugin_state.size(); ++i)
+        proc->plugin_state[i] = static_cast<char>(i * 31 + (i >> 8));
+
+    auto best_us = [](auto&& fn) {
+        double best = 1e30;
+        for (int r = 0; r < 25; ++r) {
+            const auto t0 = std::chrono::steady_clock::now();
+            fn();
+            best = std::min(best, std::chrono::duration<double, std::micro>(
+                                      std::chrono::steady_clock::now() - t0)
+                                      .count());
+        }
+        return best;
+    };
+    const double compact_us = best_us([&] {
+        CFPropertyListRef p = nullptr;
+        REQUIRE(saver.SaveState(&p) == noErr);
+        CFRelease(p);
+    });
+    // Control: the envelope serialization the legacy key paid for, same payload.
+    const double legacy_us = best_us([&] {
+        auto v = pulp::format::plugin_state_io::serialize(proc->state(), *proc);
+        REQUIRE(!v.empty());
+    });
+    CAPTURE(compact_us, legacy_us);
+    REQUIRE(compact_us < legacy_us * 0.5);
+}
+
+TEST_CASE("AU compact state rejects malformed blobs without changing state",
+          "[au][auv2][state][compact]") {
+    pulp::state::StateStore store;
+    fill_decode_store(store, 8);
+    set_many_params(store, 8, 3);
+    const std::vector<uint8_t> payload = {1, 2, 3, 4, 5};
+    const auto good = cs::encode(store, payload);
+    REQUIRE(!good.empty());
+
+    cs::Decoded decoded;
+    REQUIRE(cs::decode(good, store, decoded) == cs::DecodeStatus::ok);
+    REQUIRE(std::vector<uint8_t>(decoded.plugin_payload.begin(), decoded.plugin_payload.end()) ==
+            payload);
+
+    SECTION("every strict prefix is rejected") {
+        for (std::size_t len = 0; len < good.size(); ++len) {
+            cs::Decoded d;
+            REQUIRE(cs::decode({good.data(), len}, store, d) != cs::DecodeStatus::ok);
+        }
+    }
+
+    SECTION("every single-byte corruption is rejected") {
+        for (std::size_t i = 0; i < good.size(); ++i) {
+            auto bad = good;
+            bad[i] ^= 0x5A;
+            cs::Decoded d;
+            REQUIRE(cs::decode(bad, store, d) != cs::DecodeStatus::ok);
+        }
+    }
+
+    SECTION("structural faults with a valid checksum") {
+        auto check = [&](const char* name, std::vector<uint8_t> bad, cs::DecodeStatus expected) {
+            refresh_crc(bad);
+            cs::Decoded d;
+            INFO(name);
+            REQUIRE(cs::decode(bad, store, d) == expected);
+        };
+        auto with = [&](std::size_t index, uint8_t value) {
+            auto bad = good;
+            bad[index] = value;
+            return bad;
+        };
+        check("format version", with(4, 2), cs::DecodeStatus::unsupported_format_version);
+        check("flags", with(5, 1), cs::DecodeStatus::unsupported_flags);
+        // state_version newer than the store's
+        check("future state version", with(6, 9), cs::DecodeStatus::unsupported_state_version);
+        // entry count of 2^63 cannot fit the bytes that follow
+        {
+            std::vector<uint8_t> bad(good.begin(), good.begin() + 10);
+            for (int i = 0; i < 9; ++i)
+                bad.push_back(0xFF);
+            bad.push_back(0x01);
+            bad.insert(bad.end(), {0, 0, 0, 0, 0}); // payload length + CRC placeholder
+            check("huge count", bad, cs::DecodeStatus::malformed);
+        }
+        // an over-long varint (11 continuation bytes)
+        {
+            std::vector<uint8_t> bad(good.begin(), good.begin() + 10);
+            for (int i = 0; i < 11; ++i)
+                bad.push_back(0x80);
+            bad.insert(bad.end(), {0, 0, 0, 0, 0});
+            check("overlong varint", bad, cs::DecodeStatus::malformed);
+        }
+        // payload length that disagrees with the bytes left
+        {
+            auto bad = good;
+            const std::size_t len_index = bad.size() - 4 - payload.size() - 1;
+            bad[len_index] = static_cast<uint8_t>(payload.size() + 1);
+            check("payload length too long", bad, cs::DecodeStatus::malformed);
+            bad[len_index] = static_cast<uint8_t>(payload.size() - 1);
+            check("payload length too short", bad, cs::DecodeStatus::malformed);
+        }
+        // the same id twice
+        {
+            pulp::state::StateStore dup;
+            fill_decode_store(dup, 8);
+            dup.set_value(101, 0.25f);
+            dup.set_value(102, 0.5f);
+            auto bad = cs::encode(dup, {});
+            // entries are (varint id, f32): rewrite the second id to the first
+            bad[10 + 1 + 5] = bad[10 + 1];
+            check("duplicate id", bad, cs::DecodeStatus::malformed);
+        }
+    }
+
+    SECTION("a rejected class info leaves the store and the payload untouched") {
+        g_many_param_count = 8;
+        ScopedFactoryRegistration registration(create_many_param_processor);
+        pulp::format::au::PulpAUEffect effect(nullptr);
+        auto* proc = g_last_effect_processor;
+        REQUIRE(proc != nullptr);
+        proc->state().set_value(101, 0.75f);
+        proc->plugin_state = "keep";
+
+        for (std::size_t len : {std::size_t{0}, std::size_t{3}, good.size() / 2, good.size() - 1}) {
+            std::vector<uint8_t> bad(good.begin(), good.begin() + len);
+            auto* class_info = make_class_info(effect, "pulp-state-v2", bad);
+            REQUIRE(effect.RestoreState(class_info) == kAudioUnitErr_InvalidPropertyValue);
+            CFRelease(class_info);
+        }
+        auto flipped = good;
+        flipped[flipped.size() / 2] ^= 0xFF;
+        auto* class_info = make_class_info(effect, "pulp-state-v2", flipped);
+        REQUIRE(effect.RestoreState(class_info) == kAudioUnitErr_InvalidPropertyValue);
+        CFRelease(class_info);
+
+        // A value of the wrong CF type under the key is rejected too.
+        CFMutableDictionaryRef wrong = make_class_info(effect, "pulp-state-v2", {});
+        CFDictionarySetValue(wrong, CFSTR("pulp-state-v2"), CFSTR("not data"));
+        REQUIRE(effect.RestoreState(wrong) == kAudioUnitErr_InvalidPropertyValue);
+        CFRelease(wrong);
+
+        REQUIRE_THAT(proc->state().get_value(101), WithinAbs(0.75, 1e-6));
+        REQUIRE(proc->plugin_state == "keep");
     }
 }
