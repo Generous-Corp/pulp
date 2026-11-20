@@ -32,6 +32,7 @@
       },
       "documented_in_dependencies_md": true,
       "documented_in_notice_md": true,
+      "link_targets": ["ausdk"],
       "source_files": [
         "CMakeLists.txt",
         "setup.sh",
@@ -102,6 +103,8 @@
       },
       "documented_in_dependencies_md": true,
       "documented_in_notice_md": true,
+      "link_targets": ["pulp-canvas"],
+      "link_feature": "PULP_HAS_WOFF2_DECODER",
       "source_files": [
         "tools/cmake/PulpDependencies.cmake",
         "core/canvas/CMakeLists.txt"
@@ -139,6 +142,7 @@
       "interim_fork": "Pinned to a danielraffel/choc fork tag adding WebView file drag-and-drop (Tracktion/choc#64 PoC) plus a cherry-pick of upstream Tracktion/choc 9181665: parseString() stops at end of input instead of reading past an unterminated string (a fuzzed pulp.package.json content-pack manifest reached that heap over-read). Fork is upstream f0f5cdf5a938 +5 DnD commits +2 JSON EOF commits, -0. Revert to upstream Tracktion/choc when #64 merges — see pulp #3619.",
       "documented_in_dependencies_md": true,
       "documented_in_notice_md": true,
+      "link_targets": ["pulp-runtime", "pulp-midi"],
       "source_files": [
         "CMakeLists.txt"
       ]
@@ -156,6 +160,7 @@
       },
       "documented_in_dependencies_md": true,
       "documented_in_notice_md": true,
+      "link_targets": ["clap"],
       "source_files": [
         "tools/cmake/PulpDependencies.cmake",
         "tools/cmake/PulpWclap.cmake"
@@ -192,6 +197,7 @@
       },
       "documented_in_dependencies_md": true,
       "documented_in_notice_md": true,
+      "link_targets": ["pulp-cpp-httplib"],
       "source_files": [
         "external/cpp-httplib/httplib.h",
         "core/runtime/include/pulp/runtime/http.hpp",
@@ -234,6 +240,7 @@
       },
       "documented_in_dependencies_md": true,
       "documented_in_notice_md": true,
+      "link_targets": ["gpu-runtime-dawn", "skia::dawn"],
       "notes": "Bundled through the Skia chrome/m158 prebuilt toolchain (danielraffel/skia-builder fork). Exact Dawn revision tracks Skia's DEPS file at be7d7c3e996e567eda7dc9774274f7a0103cdb8c; the bundled build reports Dawn SHA1 1716e88cc9e58398fab5d4473f7f2e858667b677 (include/dawn/dawn_version.h).",
       "source_files": [
         "CMakeLists.txt",
@@ -255,6 +262,8 @@
       },
       "documented_in_dependencies_md": true,
       "documented_in_notice_md": true,
+      "link_targets": ["pulp-audio"],
+      "spdx": "Unlicense",
       "source_files": [
         "external/dr_libs/dr_flac.h",
         "external/dr_libs/dr_mp3.h",
@@ -416,6 +425,7 @@
       },
       "documented_in_dependencies_md": true,
       "documented_in_notice_md": true,
+      "link_targets": ["hwy"],
       "notes": "CMake pins the exact 1.4.0 release SHA (2607d3b5b0113992fe84d3848859eae13b3b52c1) instead of the tag name to avoid intermittent `fatal: invalid reference: 1.2.0` shallow-clone failures hit by tools/scripts/local_diff_cover.sh (Pulp #1930). Upstream drift is still tracked against the 1.4.0 tag.",
       "source_files": [
         "CMakeLists.txt",
@@ -436,6 +446,8 @@
       },
       "documented_in_dependencies_md": true,
       "documented_in_notice_md": true,
+      "link_targets": ["skia::skia"],
+      "spdx": "Unicode-3.0",
       "source_files": [
         "tools/cmake/FindSkia.cmake",
         "tools/cmake/PulpSkiaIcuData.cmake",
@@ -455,6 +467,8 @@
       },
       "documented_in_dependencies_md": true,
       "documented_in_notice_md": true,
+      "link_targets": ["pulp-bundled-fonts"],
+      "spdx": "OFL-1.1",
       "notes": "Vendored deterministic text-shaping font. Inter-Regular.ttf SHA-256: 40d692fce188e4471e2b3cba937be967878f631ad3ebbbdcd587687c7ebe0c82. The web-player also redistributes the identical TTF and inter.woff2 (SHA-256: 338239f6b590b8ced3bf857654d32da3fd3663294cd3003651ed57aa3abd7aa1). The holdout fixture test/fixtures/import-differential/holdout/spectr-standalone.html embeds Inter 4.001;git-66647c0bb variable WOFF2 subsets as part of an unmodified Claude standalone bundle; the OFL text ships at test/fixtures/import-differential/holdout/OFL.txt.",
       "source_files": [
         "external/fonts/Inter-Regular.ttf",
@@ -480,6 +494,8 @@
       },
       "documented_in_dependencies_md": true,
       "documented_in_notice_md": true,
+      "link_targets": ["pulp-bundled-fonts"],
+      "spdx": "OFL-1.1",
       "notes": "Vendored deterministic monospace text-shaping font. SHA-256: a0bf60ef0f83c5ed4d7a75d45838548b1f6873372dfac88f71804491898d138f. Holdout fixtures embed JetBrains Mono 2.211: variable WOFF2 subsets inside test/fixtures/import-differential/holdout/spectr-standalone.html, and the static 400/500/700 TTFs of Forge's tape-machine design pack, base64-inlined, in test/fixtures/import-differential/holdout/lattice-panel.html and kelvin-panel.html. The OFL text ships at test/fixtures/import-differential/holdout/OFL.txt.",
       "source_files": [
         "external/fonts/JetBrainsMono-Regular.ttf",
@@ -504,6 +520,8 @@
       },
       "documented_in_dependencies_md": true,
       "documented_in_notice_md": true,
+      "link_targets": ["pulp-bundled-fonts"],
+      "spdx": "OFL-1.1",
       "notes": "Vendored deterministic UI font, four weights. SHA-256 Regular c3143e923ed1ca7bdf27f96c351fbafaebcbd3cf3f4c2d30d03e6c7f98e73d7a, Medium d6ff7726ec21576cf2fdac55080b2d43832780fa981f03f0b66d2723a7c1ea09, SemiBold a63c8d75600a2d42e0e152e4c4810474a90a0b93206f47530a741dbb78a9e571, Bold 3e49280c154002dcbab4344a77ad291d5587d4157b24b5a02341f68cccd24615. Bundled because imported designs specify it and no host ships it; a family bundled at one weight abandons itself, since the bundled matcher refuses a face whose weight is too far from the request. Holdout fixtures test/fixtures/import-differential/holdout/lattice-panel.html (Medium, SemiBold, ExtraBold) and kelvin-panel.html (ExtraBold) base64-inline Jost 3.710 TTFs from Forge's tape-machine design pack. The OFL text ships at test/fixtures/import-differential/holdout/OFL.txt.",
       "source_files": [
         "external/fonts/Jost-Regular.ttf",
@@ -570,6 +588,7 @@
       "upstream": { "kind": "url-snapshot", "ref": "https://download.drobilla.net/lilv-0.28.0.tar.xz" },
       "documented_in_dependencies_md": true,
       "documented_in_notice_md": true,
+      "link_targets": ["pulp-host"],
       "notes": "LV2 host library: reads plug-in bundles, instantiates plug-ins, and saves and restores their state for the LV2 PluginSlot. Vendored unmodified (include/, src/, COPYING) in external/lilv/lilv from the release tarball, SHA-256 8dcb70adb5cf072335115a6b091f4113710bdc73abaadaa3f9e9c1e55957b149; compiled into pulp-host with hidden symbols. See external/lilv/README.md.",
       "source_files": [
         "external/lilv/lilv/COPYING",
@@ -590,6 +609,7 @@
       },
       "documented_in_dependencies_md": true,
       "documented_in_notice_md": true,
+      "link_targets": ["lv2-headers"],
       "source_files": [
         "CMakeLists.txt"
       ]
@@ -625,6 +645,7 @@
       },
       "documented_in_dependencies_md": true,
       "documented_in_notice_md": true,
+      "link_targets": ["mbedcrypto", "mbedx509", "mbedtls", "everest", "p256m"],
       "source_files": [
         "CMakeLists.txt",
         "core/runtime/CMakeLists.txt"
@@ -644,6 +665,7 @@
       },
       "documented_in_dependencies_md": true,
       "documented_in_notice_md": true,
+      "link_targets": ["pulp-runtime"],
       "notes": "Vendored from the upstream tag byte-for-byte except one local patch: mz_zip_add_mem_to_archive_file_in_place_v2 in external/miniz/miniz_zip.c opens the archive once (r+b, else exclusive w+bx) and keeps that stream, instead of upstream's stat()-then-open sequence that another process can race. Re-apply it on every bump; the in-place archive tests in test/test_preset_manager.cpp cover it. miniz_export.h is Pulp's stand-in for the header upstream's CMake generates.",
       "source_files": [
         "external/miniz/miniz.h",
@@ -834,6 +856,8 @@
       },
       "documented_in_dependencies_md": true,
       "documented_in_notice_md": true,
+      "link_targets": ["pulp-signal"],
+      "link_feature": "mufft_SOURCE_DIR",
       "notes": "Float FFT backend for FftT on every non-Apple target (Apple uses vDSP). Pinned to an exact commit because upstream publishes no release tags. Pulp compiles fft.c, kernel.c, cpu.c and the x86 SSE/SSE3/AVX kernels itself (core/signal/CMakeLists.txt) through a Pulp-owned C shim; muFFT's own CMake, which builds FFTW-linked (GPL) bench and test binaries, never runs, and those binaries are not built or shipped. Apple fetches it only when tests are built.",
       "source_files": [
         "core/signal/CMakeLists.txt",
@@ -854,6 +878,8 @@
       },
       "documented_in_dependencies_md": true,
       "documented_in_notice_md": true,
+      "link_targets": ["pulp-canvas"],
+      "spdx": "Zlib",
       "source_files": [
         "external/nanosvg/nanosvg.h",
         "external/nanosvg/nanosvgrast.h",
@@ -908,6 +934,8 @@
       },
       "documented_in_dependencies_md": true,
       "documented_in_notice_md": true,
+      "link_targets": ["pulp-bundled-noto-color-emoji"],
+      "spdx": "OFL-1.1",
       "notes": "Bundled cross-platform color-emoji typeface (COLRv1 build). SHA-256: 0ae57fe58645638523ba35f388d93739d292539a9acb84df5700c81b1e1a28d2. Gated by PULP_BUNDLE_NOTO_COLOR_EMOJI CMake option (defaults ON for Linux/Android/headless/CI, OFF for macOS/Windows release builds that use the platform color-emoji typeface).",
       "source_files": [
         "external/fonts/NotoColorEmoji.ttf",
@@ -994,6 +1022,8 @@
       },
       "documented_in_dependencies_md": true,
       "documented_in_notice_md": true,
+      "link_targets": ["pulp-tracing"],
+      "link_feature": "PULP_TRACING",
       "notes": "Dev-only tracing SDK, gated behind PULP_TRACING (OFF by default; never linked into a shipping build, never exported by cmake --install). The amalgamated C++ SDK ships as the release artifact perfetto-cpp-sdk-src.zip (no longer in the git tree at sdk/); fetched by pinned URL + SHA-256 c6fa3d89aee30f7da39402c9cd178c9f2e344544fda5c2109fd8457e319c3a2f. The prebuilt trace_processor_shell query tool (same v57.2) backs `pulp trace query --trace` (offline SQL over a .pftrace); `pulp trace fetch` downloads it on demand into $PULP_HOME, SHA-256-verified, from the immutable per-platform artifacts at https://commondatastorage.googleapis.com/perfetto-luci-artifacts/v57.2/<platform>/ (mac-arm64 98a41b80e9f60da0373d64aff6455681f8c26b7c391ae5736324a5b11e3dacc2, mac-amd64 c0f61397901da47cbe1bb9a0843624f7c2038ac92176ce15e3736ce9aa0afef0, linux-amd64 55ba613fc6d4f71df81eee2dbfc293020063655c241b3e314bff75345b802684, linux-arm64 1dcc1d9aaff2eb92e8bc58f1957e4e445600294bd61dbc09345c1018c5ff0868, windows-amd64 trace_processor_shell.exe 100334b6091596fbc97f872556849a5747bf47a7f7190c485ba8cea8d2409c7b). Never linked or shipped.",
       "source_files": [
         "tools/cmake/PulpTracing.cmake",
@@ -1037,6 +1067,7 @@
       },
       "documented_in_dependencies_md": true,
       "documented_in_notice_md": true,
+      "link_targets": ["pulp-runtime"],
       "source_files": [
         "external/pugixml/pugixml.hpp",
         "external/pugixml/pugixml.cpp",
@@ -1113,6 +1144,7 @@
       ],
       "documented_in_dependencies_md": true,
       "documented_in_notice_md": true,
+      "link_targets": ["pulp-view-script"],
       "notes": "Default JS engine, embedded whole inside CHOC's choc/javascript/choc_javascript_QuickJS.h rather than fetched on its own; the version is that header's CONFIG_VERSION (bellard/quickjs publishes release snapshots, not tags, so the upstream reference is the master branch and the audit reports its tip), so a QuickJS bump only arrives through a CHOC pin bump. Listed separately so --check-upstream reports QuickJS drift instead of hiding it behind CHOC.",
       "source_files": [
         "tools/cmake/PulpDependencies.cmake",
@@ -1259,6 +1291,8 @@
       },
       "documented_in_dependencies_md": true,
       "documented_in_notice_md": true,
+      "link_targets": ["SDL3-static", "SDL3-shared", "SDL3_Headers"],
+      "spdx": "Zlib",
       "source_files": [
         "CMakeLists.txt"
       ]
@@ -1273,6 +1307,7 @@
       "upstream": { "kind": "url-snapshot", "ref": "https://download.drobilla.net/serd-0.32.10.tar.xz" },
       "documented_in_dependencies_md": true,
       "documented_in_notice_md": true,
+      "link_targets": ["pulp-host"],
       "notes": "Turtle reader and writer used by lilv. Vendored unmodified (include/, src/, COPYING) in external/lilv/serd from the release tarball, SHA-256 b0e93b49e52f01a049475b7886ef140407115a32d3b1e5dc5f95141c88275d1c; compiled into pulp-host with hidden symbols. See external/lilv/README.md.",
       "source_files": [
         "external/lilv/serd/COPYING",
@@ -1294,6 +1329,7 @@
       },
       "documented_in_dependencies_md": true,
       "documented_in_notice_md": true,
+      "link_targets": ["SheenBidi"],
       "notes": "Unicode Bidirectional Algorithm engine backing core/canvas::BidiAnalyzer. Pulp-owned bidi pass for Arabic / Hebrew / mixed-direction text that does not depend on system ICU; consumed by TextRunPlanner as the canonical fallback for iOS / Android / headless / minimal-toolchain hosts. Item 6.8 of the 2026-05-24 macOS plugin-authoring plan.",
       "source_files": [
         "tools/cmake/PulpDependencies.cmake",
@@ -1336,6 +1372,7 @@
       },
       "documented_in_dependencies_md": true,
       "documented_in_notice_md": true,
+      "link_targets": ["skia::skia"],
       "notes": "Prebuilt via skia-builder (danielraffel fork: https://github.com/danielraffel/skia-builder) for Pulp rendering. The fork tracks olilarkin/skia-builder's tag pattern and adds iOS device/simulator, visionOS, mac-x86_64, Windows ARM64, and Skia.xcframework slices the upstream does not ship. The chrome/m158 release ships all required platform slices including linux-arm64 and the native jsonreader/skresources archives. Its two Linux archives were re-cut from the same Skia revision with skia_use_partition_alloc = false (skia-builder run 41466672481); the release notes' replacement ledger records both digests. Visual harness determinism locks Skia plus its bundled HarfBuzz and ICU DEPS revisions; regenerate raster goldens only when any pinned Skia asset, bundled text dependency, font file, or sampler/render configuration changes.",
       "vellum_renderer_drift_check": {
         "note": "tools/deps/audit.py --strict reads gpu-runtime's renderer lock at this commit, which must equal vellum-gpu-runtime's upstream.commit, and fails unless its macos-arm64 sha256 equals release_assets.mac-universal.sha256, every other mac-* release asset carries that same digest (an x86_64-only or arm64-only macOS build forwards to gpu-runtime too, and its lock pins one macOS asset), and its milestone equals this entry's version. PULP_VELLUM_CHECKOUT=<vellum checkout> reads the same commit from a local clone instead of raw.githubusercontent.com.",
@@ -1429,6 +1466,7 @@
       "upstream": { "kind": "url-snapshot", "ref": "https://download.drobilla.net/sord-0.16.22.tar.xz" },
       "documented_in_dependencies_md": true,
       "documented_in_notice_md": true,
+      "link_targets": ["pulp-host"],
       "notes": "In-memory RDF store used by lilv. Vendored unmodified (include/, src/, COPYING) in external/lilv/sord from the release tarball, SHA-256 bb23b34b216579136795d518cffa73d91cf205594ce9accebfd408afb839173f; compiled into pulp-host with hidden symbols. See external/lilv/README.md.",
       "source_files": [
         "external/lilv/sord/COPYING",
@@ -1465,6 +1503,7 @@
       "upstream": { "kind": "url-snapshot", "ref": "https://download.drobilla.net/sratom-0.6.22.tar.xz" },
       "documented_in_dependencies_md": true,
       "documented_in_notice_md": true,
+      "link_targets": ["pulp-host"],
       "notes": "LV2 atom serialization used by lilv for plug-in state. Vendored unmodified (include/, src/, COPYING) in external/lilv/sratom from the release tarball, SHA-256 0209b7d0f22c96abb416722ed735b0933be47931ecff4aa4b26ded7760b4f252; compiled into pulp-host with hidden symbols. See external/lilv/README.md.",
       "source_files": [
         "external/lilv/sratom/COPYING",
@@ -1484,6 +1523,8 @@
       },
       "documented_in_dependencies_md": true,
       "documented_in_notice_md": true,
+      "link_targets": ["pulp-audio"],
+      "spdx": "MIT OR Unlicense",
       "source_files": [
         "external/dr_libs/stb_vorbis.c",
         "core/audio/src/ogg_reader.cpp"
@@ -1549,6 +1590,8 @@
       },
       "documented_in_dependencies_md": true,
       "documented_in_notice_md": true,
+      "link_targets": ["pulp-runtime"],
+      "spdx": "LicenseRef-PublicDomain",
       "notes": "Ed25519 sign/verify per RFC 8032 — Sparkle appcast signatures and future v2 license-key payloads. `randombytes()` supplied by core/runtime/src/crypto.cpp via mbedTLS CTR-DRBG.",
       "source_files": [
         "external/tweetnacl/tweetnacl.c",
@@ -1595,6 +1638,7 @@
       },
       "documented_in_dependencies_md": true,
       "documented_in_notice_md": true,
+      "link_targets": ["v8::v8"],
       "source_files": [
         "tools/cmake/FindV8.cmake",
         "tools/cmake/PulpV8Windows.cmake",
@@ -1673,6 +1717,7 @@
       },
       "documented_in_dependencies_md": true,
       "documented_in_notice_md": true,
+      "link_targets": ["gpu-runtime-device-api", "gpu-runtime-device", "gpu-runtime-bootstrap", "gpu-runtime-dawn", "gpu-runtime-skia-log-bridge"],
       "notes": "gpu-runtime, the GPU device layer shared by GPU audio and rendering: a self-contained subproject of the Vellum repository (gpu-runtime/) with no Pulp or Vellum dependency. Pulp's macOS device targets forward to it (tools/cmake/PulpGpuRuntime.cmake). It adds no third-party code: its Dawn is the Skia toolchain's, checked against gpu-runtime/renderer-lock.json, which the Skia entry's vellum_renderer_drift_check holds equal to Pulp's pin.",
       "source_files": [
         "tools/cmake/PulpGpuRuntime.cmake"
@@ -1737,6 +1782,7 @@
       },
       "documented_in_dependencies_md": true,
       "documented_in_notice_md": true,
+      "link_targets": ["vst3-sdk"],
       "notes": "Pin must stay at v3.8.0_build_66 or newer: that is the first Steinberg tag released under MIT. Earlier tags (including v3.7.12_build_20) offer only 'Steinberg VST3 License OR GPLv3', neither of which Pulp may redistribute inside its MIT-licensed SDK artifacts. assert_vst3_license_is_mit in setup.sh fails the setup if the pin drifts below that.",
       "source_files": [
         "CMakeLists.txt",
@@ -1761,6 +1807,7 @@
       },
       "documented_in_dependencies_md": true,
       "documented_in_notice_md": true,
+      "link_targets": ["webgpu"],
       "source_files": [
         "CMakeLists.txt"
       ]
@@ -1778,6 +1825,7 @@
       },
       "documented_in_dependencies_md": true,
       "documented_in_notice_md": true,
+      "link_targets": ["webgpu"],
       "notes": "Prebuilt WebGPU runtime (libwgpu_native) behind WebGPU-distribution on desktop GPU builds; staged beside every module that links WebGPU. Each release asset is digest-pinned in `artifacts`: `sha256` is the downloaded zip (setup.sh and configure refuse a mismatch), `tree_sha256` is its extracted tree (configure re-checks the shared source cache against it). tools/deps/wgpu_native_digests.py computes both. Bumping it also bumps PULP_WGPU_NATIVE_VERSION, WGPU_NATIVE_VERSION in setup.sh and tools/deps/shared-source-contract.txt.",
       "artifacts": [
         {
@@ -1850,6 +1898,8 @@
       },
       "documented_in_dependencies_md": true,
       "documented_in_notice_md": true,
+      "link_targets": ["pulp-canvas"],
+      "link_feature": "PULP_HAS_WOFF2_DECODER",
       "source_files": [
         "tools/cmake/PulpDependencies.cmake",
         "core/canvas/CMakeLists.txt"
@@ -1869,6 +1919,7 @@
       },
       "documented_in_dependencies_md": true,
       "documented_in_notice_md": true,
+      "link_targets": ["yaml-cpp"],
       "source_files": [
         "CMakeLists.txt"
       ]
@@ -1887,6 +1938,7 @@
       },
       "documented_in_dependencies_md": true,
       "documented_in_notice_md": true,
+      "link_targets": ["yogacore"],
       "source_files": [
         "CMakeLists.txt"
       ]
@@ -1901,6 +1953,7 @@
       "upstream": { "kind": "url-snapshot", "ref": "https://download.drobilla.net/zix-0.8.2.tar.xz" },
       "documented_in_dependencies_md": true,
       "documented_in_notice_md": true,
+      "link_targets": ["pulp-host"],
       "notes": "Portable data structures and file system helpers used by lilv, serd, and sord. Vendored unmodified (include/, src/, COPYING) in external/lilv/zix from the release tarball, SHA-256 4c73aab0f8cbbfe56b00c8c6d648316021e699c5ae6cbf254391ef309047e67b; compiled into pulp-host with hidden symbols. See external/lilv/README.md.",
       "source_files": [
         "external/lilv/zix/COPYING",

@@ -59,6 +59,14 @@ functions:
       - pulp-install-${target}
     docs: reference/cmake.md#pulp_add_plugin
 
+  - name: pulp_add_notice_manifest
+    status: experimental
+    summary: Register an SDK's pulp.notices.v1 manifest so pulp_add_plugin bundles list its third-party notices.
+    required:
+      - manifest
+    creates: []
+    docs: guides/shipping.md#third-party-notices-in-every-bundle
+
   - name: pulp_add_plugin_bundle
     status: usable
     summary: Package MANY plugins into ONE binary per format (CLAP, VST3) — the multi-plugin counterpart to pulp_add_plugin.

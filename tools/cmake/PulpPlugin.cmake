@@ -598,6 +598,10 @@ function(pulp_add_plugin target)
             "${PLUGIN_MANUFACTURER}")
     endforeach()
 
+    # ── Third-party notices ────────────────────────────────────────────
+    # ThirdPartyNotices.{json,txt} in every bundle, from its link closure.
+    _pulp_attach_third_party_notices(${target} "${PLUGIN_PLUGIN_NAME}")
+
     _pulp_add_plugin_install_target(${target} "${PLUGIN_PLUGIN_NAME}")
 
     set(_built_formats)
