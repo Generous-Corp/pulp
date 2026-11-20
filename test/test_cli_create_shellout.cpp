@@ -1116,11 +1116,15 @@ namespace vellum::view { class View {}; }
     // proving the source include path and SOURCES closure rather than merely
     // checking that configure accepted no-op stubs.
     auto configured_cmake = cmake_lists;
-    const auto formats = "FORMATS         CLAP Standalone";
-    const auto clap_only = "FORMATS         CLAP";
-    const auto formats_pos = configured_cmake.find(formats);
+    // The default format list is host-dependent (macOS adds VST3/AU), so
+    // replace the whole FORMATS value rather than matching one spelling.
+    const std::string formats_key = "FORMATS         ";
+    const auto formats_pos = configured_cmake.find(formats_key);
     REQUIRE(formats_pos != std::string::npos);
-    configured_cmake.replace(formats_pos, std::strlen(formats), clap_only);
+    const auto formats_value_pos = formats_pos + formats_key.size();
+    auto formats_eol = configured_cmake.find('\n', formats_value_pos);
+    if (formats_eol == std::string::npos) formats_eol = configured_cmake.size();
+    configured_cmake.replace(formats_value_pos, formats_eol - formats_value_pos, "CLAP");
     write_file(out_dir / "CMakeLists.txt",
                configured_cmake + "\nfile(WRITE \"${CMAKE_CURRENT_BINARY_DIR}/"
                                   "factory_compile.cpp\" \"#include <pulp-vellum/"
