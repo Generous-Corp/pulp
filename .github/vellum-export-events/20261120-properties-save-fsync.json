@@ -11,6 +11,6 @@
     "core/state/include/pulp/state/xml_properties_file.hpp",
     "core/state/src/xml_properties_file.cpp"
   ],
-  "vellum_inherits": true,
-  "rationale": "XmlPropertiesFile::save no longer flushes the drive cache by default, so a settings save on the UI thread does not wait on the disk; DurableFileReplacement::commit gains an opt-in relaxed durability and keeps full as its default. The next re-export should carry both."
+  "vellum_inherits": false,
+  "rationale": "Pulp-only edit: XmlPropertiesFile::save no longer flushes the drive cache by default, and DurableFileReplacement::commit gains an opt-in relaxed durability. Vellum's framework copy is transferred, so any change Vellum wants is made in its own framework tree."
 }
