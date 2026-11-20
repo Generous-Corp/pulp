@@ -8,7 +8,7 @@ include(${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpMacOsArch.cmake)  # macOS ar
 include(${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpMinOs.cmake)
 
 project(Pulp
-    VERSION 1.174.0
+    VERSION 1.175.0
     DESCRIPTION "Cross-platform audio plugin and application framework"
     HOMEPAGE_URL "https://github.com/Generous-Corp/pulp"
     LANGUAGES CXX C
@@ -995,6 +995,10 @@ endif()
 # included after the module targets exist and before the consumers that assert
 # a bound over them (examples/, tools/).
 include(PulpLinkFloor)
+
+# Pulp's own third-party notices manifest, unioned into each plug-in bundle's
+# ThirdPartyNotices files by pulp_add_plugin().
+pulp_generate_sdk_notices()
 
 # pulp::signal must reach the pulp-simd kernels without pulp-runtime, whose
 # archive carries the HTTP/TLS stack. pulp-test-simd-signal-link links only
