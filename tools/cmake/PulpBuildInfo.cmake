@@ -290,6 +290,15 @@ function(_pulp_attach_build_info target format_target format name bundle_id vers
                 "{\"file\": \"$<TARGET_FILE_NAME:${_runtime_target}>\", \"component\": \"${_runtime_target}\", \"version\": null}")
         endforeach()
     endif()
+    # A UI package's runtime libraries are staged whether or not the target is
+    # editor-less in Pulp's own sense: the package carries the editor.
+    get_target_property(_ui_libraries ${format_target} PULP_UI_PACKAGE_RUNTIME_LIBRARIES)
+    if(_ui_libraries)
+        foreach(_ui_library IN LISTS _ui_libraries)
+            list(APPEND _libs
+                "{\"file\": \"$<TARGET_FILE_NAME:${_ui_library}>\", \"component\": \"${_ui_library}\", \"version\": null}")
+        endforeach()
+    endif()
     set(_j_libs "[")
     set(_first TRUE)
     foreach(_lib IN LISTS _libs)

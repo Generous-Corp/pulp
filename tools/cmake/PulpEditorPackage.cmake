@@ -118,6 +118,17 @@ struct PulpPluginEditorFactoryRegistrar {
 } // namespace
 " @ONLY)
 
+    # An AUv3 extension loads its editor from a framework inside a container
+    # app, and nothing stages UI package libraries there yet. Refuse instead
+    # of shipping an extension whose editor cannot load.
+    get_target_property(_runtime_libraries "${ui}" PULP_EDITOR_RUNTIME_LIBRARIES)
+    if(_runtime_libraries AND (TARGET "${target}_AUv3" OR TARGET "${target}_AUv3Framework"))
+        message(FATAL_ERROR
+            "pulp_add_plugin(${target}): UI package '${ui}' needs runtime libraries "
+            "(${_runtime_libraries}), which the AUv3 format cannot carry yet; drop AUv3 "
+            "from FORMATS for this plug-in")
+    endif()
+
     foreach(_suffix IN LISTS _PULP_UI_PACKAGE_TARGET_SUFFIXES)
         set(_format_target "${target}_${_suffix}")
         if(TARGET "${_format_target}")
@@ -171,4 +182,26 @@ function(_pulp_stage_ui_package_runtime plugin module)
         set_property(TARGET "${module}" APPEND PROPERTY INSTALL_RPATH "${_origin}")
     endif()
     set_property(TARGET "${module}" PROPERTY PULP_UI_PACKAGE_RUNTIME_LIBRARIES "${_libraries}")
+endfunction()
+
+# Copy the UI package runtime libraries staged beside `module` into `dest`, the
+# directory of an assembled bundle that carries a copy of the module (the
+# Windows and Linux VST3 Contents/<arch> folders). The module's $ORIGIN or
+# @loader_path rpath then finds them there too.
+function(_pulp_copy_ui_package_runtime module dest)
+    if(NOT TARGET "${module}")
+        return()
+    endif()
+    get_target_property(_libraries "${module}" PULP_UI_PACKAGE_RUNTIME_LIBRARIES)
+    if(NOT _libraries)
+        return()
+    endif()
+    foreach(_library IN LISTS _libraries)
+        add_custom_command(TARGET "${module}" POST_BUILD
+            COMMAND "${CMAKE_COMMAND}" -E make_directory "${dest}"
+            COMMAND "${CMAKE_COMMAND}" -E copy_if_different
+                "$<TARGET_FILE_DIR:${module}>/$<TARGET_FILE_NAME:${_library}>" "${dest}"
+            COMMENT "Copying $<TARGET_FILE_NAME:${_library}> into the ${module} bundle"
+            VERBATIM)
+    endforeach()
 endfunction()

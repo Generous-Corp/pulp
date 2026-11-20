@@ -110,3 +110,76 @@ if(NOT error_flat MATCHES "optional pulp-vellum integration")
     message(FATAL_ERROR "missing-pulp error was not the helper's message:\n${output}${error}")
 endif()
 message(STATUS "Vellum editor package refuses an SDK without the Pulp bridge")
+
+# A module's staged UI package libraries reach an assembled bundle folder and
+# its build-info record. This fixture builds, so the POST_BUILD copies run.
+file(MAKE_DIRECTORY "${FIXTURE_DIR}/bundle")
+file(WRITE "${FIXTURE_DIR}/bundle/module.cpp" "int vellum_bundle_fixture_module() { return 0; }\n")
+file(WRITE "${FIXTURE_DIR}/libvellum-bundle-fixture.dylib" "fixture\n")
+file(WRITE "${FIXTURE_DIR}/bundle/root.hpp" "#pragma once\nnamespace test { struct RootView {}; }\n")
+file(WRITE "${FIXTURE_DIR}/bundle/CMakeLists.txt" "cmake_minimum_required(VERSION 3.24)\nproject(VellumBundle CXX)\n"
+    "set(PULP_ROOT_DIR \"${PULP_SOURCE_DIR}\")\n"
+    "add_library(pulp-vellum INTERFACE)\nadd_library(pulp::vellum ALIAS pulp-vellum)\n"
+    "add_library(vellum-dylib SHARED IMPORTED)\n"
+    "set_target_properties(vellum-dylib PROPERTIES IMPORTED_LOCATION \"${FIXTURE_DIR}/libvellum-bundle-fixture.dylib\")\n"
+    "add_library(vellum-view INTERFACE)\nadd_library(Vellum::MirrorView_core ALIAS vellum-view)\n"
+    "target_link_libraries(vellum-view INTERFACE vellum-dylib)\n"
+    "include(\"${PULP_SOURCE_DIR}/integrations/pulp-vellum/cmake/PulpVellumEditorPackage.cmake\")\n"
+    "include(\"${PULP_SOURCE_DIR}/tools/cmake/PulpEditorPackage.cmake\")\n"
+    "include(\"${PULP_SOURCE_DIR}/tools/cmake/PulpBuildInfo.cmake\")\n"
+    "pulp_add_vellum_editor_package(pulp::vellum-editor VIEW_HEADER root.hpp VIEW_TYPE test::RootView)\n"
+    "set(PULP_Plugin_UI_PACKAGE pulp::vellum-editor)\n"
+    "add_library(Plugin_CLAP MODULE module.cpp)\n"
+    "set_target_properties(Plugin_CLAP PROPERTIES LINKER_LANGUAGE CXX)\n"
+    "_pulp_stage_ui_package_runtime(Plugin Plugin_CLAP)\n"
+    "_pulp_copy_ui_package_runtime(Plugin_CLAP \"\${CMAKE_BINARY_DIR}/assembled/Contents/arch\")\n"
+    "_pulp_attach_build_info(Plugin Plugin_CLAP CLAP Plugin com.example.plugin 1.0.0 Example)\n")
+execute_process(COMMAND "${CMAKE_COMMAND}" -S "${FIXTURE_DIR}/bundle" -B "${FIXTURE_DIR}/bundle-build"
+    RESULT_VARIABLE result OUTPUT_VARIABLE output ERROR_VARIABLE error)
+if(NOT result EQUAL 0)
+    message(FATAL_ERROR "bundle fixture configure failed:\n${output}${error}")
+endif()
+execute_process(COMMAND "${CMAKE_COMMAND}" --build "${FIXTURE_DIR}/bundle-build" --target Plugin_CLAP
+    RESULT_VARIABLE result OUTPUT_VARIABLE output ERROR_VARIABLE error)
+if(NOT result EQUAL 0)
+    message(FATAL_ERROR "bundle fixture build failed:\n${output}${error}")
+endif()
+if(NOT EXISTS "${FIXTURE_DIR}/bundle-build/assembled/Contents/arch/libvellum-bundle-fixture.dylib")
+    message(FATAL_ERROR "the UI package library was not copied into the assembled bundle")
+endif()
+file(GLOB_RECURSE _build_info "${FIXTURE_DIR}/bundle-build/*pulp-build-info.json")
+if(NOT _build_info)
+    message(FATAL_ERROR "the bundle fixture wrote no pulp-build-info.json")
+endif()
+list(GET _build_info 0 _build_info)
+file(READ "${_build_info}" _build_info_text)
+if(NOT _build_info_text MATCHES "libvellum-bundle-fixture.dylib")
+    message(FATAL_ERROR "build-info does not list the UI package library:\n${_build_info_text}")
+endif()
+message(STATUS "UI package libraries reach an assembled bundle and its build-info")
+
+# AUv3 cannot carry UI package libraries yet, so attaching one is refused.
+file(MAKE_DIRECTORY "${FIXTURE_DIR}/auv3")
+file(WRITE "${FIXTURE_DIR}/auv3/module.cpp" "int vellum_auv3_fixture_module() { return 0; }\n")
+file(WRITE "${FIXTURE_DIR}/auv3/root.hpp" "#pragma once\nnamespace test { struct RootView {}; }\n")
+file(WRITE "${FIXTURE_DIR}/auv3/CMakeLists.txt" "cmake_minimum_required(VERSION 3.24)\nproject(VellumAuv3 CXX)\n"
+    "add_library(pulp-vellum INTERFACE)\nadd_library(pulp::vellum ALIAS pulp-vellum)\n"
+    "add_library(vellum-dylib SHARED IMPORTED)\n"
+    "set_target_properties(vellum-dylib PROPERTIES IMPORTED_LOCATION \"${FIXTURE_DIR}/libvellum-bundle-fixture.dylib\")\n"
+    "add_library(vellum-view INTERFACE)\nadd_library(Vellum::MirrorView_core ALIAS vellum-view)\n"
+    "target_link_libraries(vellum-view INTERFACE vellum-dylib)\n"
+    "include(\"${PULP_SOURCE_DIR}/integrations/pulp-vellum/cmake/PulpVellumEditorPackage.cmake\")\n"
+    "include(\"${PULP_SOURCE_DIR}/tools/cmake/PulpEditorPackage.cmake\")\n"
+    "pulp_add_vellum_editor_package(pulp::vellum-editor VIEW_HEADER root.hpp VIEW_TYPE test::RootView)\n"
+    "add_library(Plugin_AUv3Framework MODULE module.cpp)\n"
+    "_pulp_attach_ui_package(Plugin pulp::vellum-editor)\n")
+execute_process(COMMAND "${CMAKE_COMMAND}" -S "${FIXTURE_DIR}/auv3" -B "${FIXTURE_DIR}/auv3-build"
+    RESULT_VARIABLE result OUTPUT_VARIABLE output ERROR_VARIABLE error)
+if(result EQUAL 0)
+    message(FATAL_ERROR "a UI package with runtime libraries attached to an AUv3 target")
+endif()
+string(REGEX REPLACE "[ \t\r\n]+" " " error_flat "${error}")
+if(NOT error_flat MATCHES "AUv3 format cannot carry")
+    message(FATAL_ERROR "AUv3 refusal was not the helper's message:\n${output}${error}")
+endif()
+message(STATUS "a UI package with runtime libraries is refused for AUv3")
