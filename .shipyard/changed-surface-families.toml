@@ -1681,6 +1681,44 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
+name = "script-readers-b2d9dda119aa"
+paths = ["tools/scripts/swift_bridge_split_guard.py"]
+tests = [
+  "build-parallelism-guard",
+  "changed-surface-policy-inventory",
+  "changed-surface-policy-selftest",
+  "changed-surface-script-families-drift",
+  "changed-surface-script-families-selftest",
+  "changed-surface-shadow-plans-selftest",
+  "clean-worktree-planning-selftest",
+  "configure-only-selftest",
+  "flake-exoneration-selftest",
+  "gate-common-selftest",
+  "gpu-audio-provider-identity-selftest",
+  "gpu-dpr-runner-selftest",
+  "gpu-first-visible-acceptance-selftest",
+  "gpu-first-visible-campaign-selftest",
+  "gpu-first-visible-external-adapter-selftest",
+  "gpu-first-visible-role-producers-selftest",
+  "gpu-handoff-provenance-selftest",
+  "pr-head-affected-tests-selftest",
+  "pr-head-diff-scoped-registrations",
+  "prepush-receipt",
+  "prepush-refresh-push",
+  "reuse-policy-replay-selftest",
+  "sample-region-compat-baseline-selftest",
+  "swift-bridge-split-guard",
+  "vellum-watch-preflight-selftest",
+  "wide-non-native-selftest",
+]
+build_targets = ["pulp-cli"]
+supported_build_types = [
+  "debug",
+  "release",
+]
+risk_class = "low"
+
+[[families]]
 name = "script-readers-8d6d9b9f473a"
 paths = ["tools/scripts/test_advisory_macos_runner_policy.py"]
 tests = [
@@ -9250,6 +9288,7 @@ paths = [
   "tools/scripts/stale_run_reaper.py",
   "tools/scripts/status_tone_signal_lint.py",
   "tools/scripts/summarize_daw_bench_results.py",
+  "tools/scripts/swift_bridge_split_guard.py",
   "tools/scripts/test_a2t_structural_verification_ci.py",
   "tools/scripts/test_action_pin_lint.py",
   "tools/scripts/test_add_component.py",
@@ -9742,6 +9781,7 @@ tests = [
   "status-tone-signal-lint",
   "status-tone-signal-lint-selftest",
   "style-dedup-table-sync",
+  "swift-bridge-split-guard",
   "test-file-paths-lint",
   "test-file-paths-lint-selftest",
   "timeline-mcp-drift",
@@ -9877,6 +9917,7 @@ paths = [
   "tools/scripts/stale_run_reaper.py",
   "tools/scripts/status_tone_signal_lint.py",
   "tools/scripts/summarize_daw_bench_results.py",
+  "tools/scripts/swift_bridge_split_guard.py",
   "tools/scripts/test_a2t_structural_verification_ci.py",
   "tools/scripts/test_action_pin_lint.py",
   "tools/scripts/test_add_component.py",

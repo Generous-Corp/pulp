@@ -203,6 +203,15 @@ if(TARGET pulp-vellum)
     list(APPEND PULP_SDK_TARGETS pulp-vellum)
     set(PULP_SDK_HAS_VELLUM_BRIDGE ON)
 endif()
+# The optional Vellum audio meters/scopes package links Vellum::Value and
+# Vellum::MirrorView_core PUBLIC, so PulpConfig must re-find Vellum for it too.
+if(TARGET pulp-vellum-audio)
+    list(APPEND PULP_SDK_TARGETS pulp-vellum-audio)
+    set(PULP_SDK_HAS_VELLUM_BRIDGE ON)
+    install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/integrations/pulp-vellum-audio/include/pulp/"
+        DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/pulp"
+        FILES_MATCHING PATTERN "*.hpp" PATTERN "*.h")
+endif()
 
 # pulp-canvas links pulp-bundled-fonts privately when Skia is on.
 # CMake exports the canvas target through PulpTargets, and refuses unless

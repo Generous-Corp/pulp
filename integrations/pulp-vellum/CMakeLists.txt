@@ -27,3 +27,6 @@ if(NOT TARGET Vellum::MirrorView_core)
         "pulp-vellum requires a Vellum SDK exporting Vellum::MirrorView_core "
         "and vellum::view::PluginViewHost::create(); the SDK is too old")
 endif()
+# The About view is built on Vellum's view layer.
+target_sources(pulp-vellum PRIVATE src/about_notices.cpp)
+target_link_libraries(pulp-vellum PUBLIC Vellum::MirrorView_core)

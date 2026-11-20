@@ -72,6 +72,7 @@ CMAKE_ERROR = re.compile(r"^CMake Error at (\S+?):(\d+)")
 CMAKE_MISSING = re.compile(
     r"(Cannot find source file:|add_subdirectory given source|"
     r"include could not find|Could not find a package|No SOURCES given)\s*(.*)")
+TOOL_ERROR = re.compile(r"^(?:ccache|ninja|cmake): error:\s*(.*)")
 
 
 def parse_build_log(text: str) -> list[dict]:
@@ -104,6 +105,11 @@ def parse_build_log(text: str) -> list[dict]:
             current["kind"] = "compile-error"
             current["detail"] = error.group(2)
             current["source"] = error.group(1)
+            continue
+        tool_error = TOOL_ERROR.match(line)
+        if tool_error:
+            current["kind"] = "tool-error"
+            current["detail"] = tool_error.group(1)
     for failure in failures:
         if failure["kind"] is None:
             failure["kind"] = "unknown"
@@ -386,6 +392,47 @@ def deleted_data_still_referenced(scratch: Path, paths: list[str]) -> list[dict]
     return found
 
 
+DATA_SUFFIXES = (".css", ".js", ".json", ".py", ".svg", ".wgsl", ".glsl", ".ttf", ".otf")
+
+
+def restore_deleted_inputs(scratch: Path, paths: list[str]) -> list[dict]:
+    """Restore deleted data inputs that surviving source files still require.
+
+    A cutover deletion can remove a checked-in runtime prelude while its CMake
+    producer remains. Restore only non-source data with an exact in-tree
+    reference, and report the dependency so the row still gets a finding.
+    """
+    restored = []
+    for rel in paths:
+        if not rel.endswith(DATA_SUFFIXES):
+            continue
+        target = scratch_path(scratch, rel)
+        if target is None or target.exists():
+            continue
+        needles = [rel]
+        if "/js/" in rel:
+            needles.append("js/" + rel.split("/js/", 1)[1])
+        referenced_by = set()
+        for needle in needles:
+            users = run(["git", "-C", str(scratch), "grep", "-l", "-F", needle, "--", ".",
+                         ":(exclude)docs", ":(exclude).github", ":(exclude).agents",
+                         ":(exclude)tools/scripts/cutover_trial_inputs.json"])
+            referenced_by.update(u for u in users.stdout.split() if not u.startswith("planning/"))
+        referenced_by = sorted(referenced_by)
+        if not referenced_by:
+            continue
+        # Bytes, not text: restored fonts must round-trip exactly.
+        shown = subprocess.run(["git", "-C", str(scratch), "show", f"HEAD:{rel}"],
+                               capture_output=True, check=False)
+        if shown.returncode:
+            continue
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(shown.stdout)
+        restored.append({"restored": rel, "referenced_by": referenced_by[:10],
+                         "count": len(referenced_by)})
+    return restored
+
+
 # ---- grouping -------------------------------------------------------------
 
 def path_matches(row_path: str, candidate: str) -> bool:
@@ -433,11 +480,30 @@ def build_report(inputs: dict, configure_text: str, build_text: str,
                  deleted: int, missing: list[str], configure_ok: bool,
                  build_ran: bool, build_returncode: int | None = None,
                  edits: list[dict] | None = None,
-                 data_refs: list[dict] | None = None) -> dict:
+                 data_refs: list[dict] | None = None,
+                 restored_inputs: list[dict] | None = None) -> dict:
     rows = inputs["stranded_rows"]
     failures = parse_build_log(build_text) if build_ran else []
     configure_errors = [] if configure_ok else parse_configure_log(configure_text)
     grouping = group_failures(failures, rows, configure_errors)
+    first_by_row: dict[str, dict] = {}
+    for failure in failures:
+        for row_id in failure.get("rows", []):
+            first_by_row.setdefault(row_id, failure)
+    row_results = []
+    for row in rows:
+        failure = first_by_row.get(row["id"])
+        if failure:
+            detail = failure["detail"] or "unknown build error"
+            first_error = f"{failure['kind']}: {detail}"
+            target = failure["target"]
+        else:
+            first_error = ("No target-specific failure was emitted for this row. The keep-going "
+                           "build reached other failures and stopped without building this row.")
+            target = None
+        row_results.append({"id": row["id"], "capability": row["capability"],
+                            "result": "fails", "target": target,
+                            "first_error": first_error})
     return {
         "schema": SCHEMA,
         "export_id": inputs.get("export_id"),
@@ -446,7 +512,7 @@ def build_report(inputs: dict, configure_text: str, build_text: str,
         "configure": {"ok": configure_ok, "errors": configure_errors},
         "cutover_required_changes": [e for e in edits or [] if e.get("class") == "a-expected"],
         "stranded_dependencies": [e for e in edits or [] if e.get("class") == "b-stranded-restored"]
-                                 + (data_refs or []),
+                                 + (restored_inputs or []),
         "stranded_consumers": [
             dict(e, consumer_target=LINKS_MISSING.search(e["why"]).group(1),
                  needs=LINKS_MISSING.search(e["why"]).group(2))
@@ -454,6 +520,7 @@ def build_report(inputs: dict, configure_text: str, build_text: str,
         "cascade_edits": sum(1 for e in edits or [] if e.get("class") == "cascade"),
         "unclassified_edits": [e for e in edits or [] if e.get("class") == "unclassified"],
         "deleted_data_still_referenced": data_refs or [],
+        "restored_deleted_inputs": restored_inputs or [],
         "build": {"ran": build_ran,
                   "ok": (build_returncode == 0
                          if build_returncode is not None else None),
@@ -462,6 +529,7 @@ def build_report(inputs: dict, configure_text: str, build_text: str,
         "stranded_rows_total": len(rows),
         "rows_without_paths": [r["id"] for r in rows if not r["paths"]],
         "stranded_rows_hit": len(grouping["by_row"]),
+        "row_results": row_results,
         **grouping,
     }
 
@@ -548,17 +616,23 @@ def main(argv: list[str] | None = None) -> int:
                     args.scratch, configure_once,
                     deleted=set(inputs["delete_paths"]) - set(missing))
             data_refs = deleted_data_still_referenced(args.scratch, inputs["delete_paths"])
+            restored_inputs = restore_deleted_inputs(args.scratch, inputs["delete_paths"])
             (log_dir / "cutover-configure.log").write_text(configure_text, encoding="utf-8")
             build_text, ran, build_returncode = "", False, None
             if configure_ok:
                 wrapper = args.build_wrapper or (args.scratch / "tools/ci/governed-build.sh")
                 build_command = [str(wrapper), "cmake", "--build", str(build_dir), "--", "-k", "0"]
-                built = run(build_command, cwd=args.scratch)
+                ccache_tmp = build_dir / "cutover-ccache-tmp"
+                ccache_tmp.mkdir(parents=True, exist_ok=True)
+                build_env = os.environ.copy()
+                build_env["CCACHE_TEMPDIR"] = str(ccache_tmp)
+                built = run(build_command, cwd=args.scratch, env=build_env)
                 build_text, ran = built.stdout + built.stderr, True
                 build_returncode = built.returncode
                 (log_dir / "cutover-build.log").write_text(build_text, encoding="utf-8")
             report = build_report(inputs, configure_text, build_text, deleted, missing,
-                                  configure_ok, ran, build_returncode, edits, data_refs)
+                                  configure_ok, ran, build_returncode, edits, data_refs,
+                                  restored_inputs)
         args.report.parent.mkdir(parents=True, exist_ok=True)
         args.report.write_text(json.dumps(report, indent=1) + "\n", encoding="utf-8")
     except (InputError, OSError) as error:
