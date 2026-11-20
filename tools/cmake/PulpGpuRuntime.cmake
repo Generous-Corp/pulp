@@ -8,21 +8,27 @@
 # layer and one proc table.
 #
 # Two ways in, the first that applies wins:
-#   PULP_GPU_RUNTIME_PREFIX   an extracted vellum-gpu-runtime archive (or any
-#                             install of the package), found by exact version;
+#   PULP_GPU_RUNTIME_PREFIX   an extracted vellum-gpu-runtime archive, found by
+#                             exact version. PULP_GPU_RUNTIME_ARCHIVE must name
+#                             that archive: its sha256 must equal pulp.lock's
+#                             vellum.gpu_runtime_digest and the prefix must hold
+#                             exactly its files, else configure stops;
 #   source mode (default)     the pinned Vellum commit below, built from its
 #                             gpu-runtime/ directory against Pulp's own Skia.
+#                             Source is pinned by commit (pulp.lock vellum.sha),
+#                             not by archive, so the archive digests do not apply.
 #
 # Either way the package checks Dawn against its renderer lock, which must name
 # the Skia asset Pulp resolved (tools/deps/audit.py --strict asserts the same).
 #
 # Sets PULP_HAS_GPU_RUNTIME when the targets exist.
 
+include("${CMAKE_CURRENT_LIST_DIR}/PulpVellumLock.cmake")
+
 set(PULP_GPU_RUNTIME_PREFIX "" CACHE PATH
-    "An installed vellum-gpu-runtime package; empty builds the pinned source")
-# Pinned in tools/deps/manifest.json ("vellum-gpu-runtime"); keep them equal.
-set(PULP_GPU_RUNTIME_COMMIT "14bd4c5e430bc8da6b4204f1daa8a1bdbc6b7f3a")
-set(PULP_GPU_RUNTIME_VERSION "0.1.10")
+    "An extracted vellum-gpu-runtime archive; empty builds the pinned source")
+set(PULP_GPU_RUNTIME_ARCHIVE "" CACHE FILEPATH
+    "The gpu-runtime archive PULP_GPU_RUNTIME_PREFIX was extracted from")
 
 # OFF builds Pulp's own device sources on macOS too, the layer every other
 # platform still uses; it keeps that mode compilable where it can gate.
@@ -38,6 +44,8 @@ endif()
 
 if(PULP_GPU_RUNTIME_PREFIX)
     pulp_check_gpu_runtime_record("${PULP_GPU_RUNTIME_PREFIX}" "${PULP_GPU_RUNTIME_COMMIT}")
+    pulp_check_gpu_runtime_archive("${PULP_GPU_RUNTIME_PREFIX}"
+        "${PULP_GPU_RUNTIME_ARCHIVE}" "${PULP_VELLUM_gpu_runtime_digest}")
     set(GPU_RUNTIME_SKIA_DIR "${SKIA_DIR}")
     pulp_find_gpu_runtime_package(${PULP_GPU_RUNTIME_VERSION} "${PULP_GPU_RUNTIME_PREFIX}"
         _pulp_gpu_runtime_error)

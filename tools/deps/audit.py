@@ -45,16 +45,22 @@ from __future__ import annotations
 
 import argparse
 import functools
+import hashlib
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
+import tempfile
 import urllib.error
 import urllib.request
 from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
+
+import cmake_commands
+from pulp_lock import load as load_pulp_lock, validate as validate_pulp_lock
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -1070,26 +1076,27 @@ class VellumPinUnavailable(RuntimeError):
     """Vellum's pinned renderer module could not be read at the pinned commit."""
 
 
-def read_vellum_pin_source(repository: str, commit: str, path: str) -> str:
-    """Vellum's renderer module at `commit`, from a local checkout or GitHub.
+def read_vellum_pin_bytes(repository: str, commit: str, path: str) -> bytes:
+    """The exact bytes of Vellum's `path` at `commit`, from a local checkout or GitHub.
 
     A checkout named by PULP_VELLUM_CHECKOUT is read with `git show`, so the
     override still compares the pinned commit rather than whatever that checkout
-    has on disk.
+    has on disk. Bytes, not text, so a digest over them matches the file.
     """
     checkout = os.environ.get(VELLUM_CHECKOUT_ENV)
     if checkout:
         try:
             result = subprocess.run(
                 ["git", "-C", checkout, "show", f"{commit}:{path}"],
-                capture_output=True, text=True, encoding="utf-8", timeout=30, check=False,
+                capture_output=True, timeout=30, check=False,
             )
         except (OSError, subprocess.SubprocessError) as error:
             raise VellumPinUnavailable(f"git show in {checkout} failed: {error}") from error
         if result.returncode != 0:
+            stderr = result.stderr.decode("utf-8", errors="replace").strip()
             raise VellumPinUnavailable(
                 f"{VELLUM_CHECKOUT_ENV}={checkout} cannot show {commit}:{path}: "
-                f"{result.stderr.strip() or 'git exited ' + str(result.returncode)}")
+                f"{stderr or 'git exited ' + str(result.returncode)}")
         return result.stdout
     match = GITHUB_REPO_RE.search(repository)
     if not match:
@@ -1098,9 +1105,18 @@ def read_vellum_pin_source(repository: str, commit: str, path: str) -> str:
     url = f"https://raw.githubusercontent.com/{owner}/{name}/{commit}/{path}"
     try:
         with urllib.request.urlopen(url, timeout=30) as response:
-            return response.read().decode("utf-8")
-    except (urllib.error.URLError, OSError, UnicodeDecodeError) as error:
+            return response.read()
+    except (urllib.error.URLError, OSError) as error:
         raise VellumPinUnavailable(f"cannot read {url}: {error}") from error
+
+
+def read_vellum_pin_source(repository: str, commit: str, path: str) -> str:
+    """Vellum's renderer module or lock at `commit`, as text (see read_vellum_pin_bytes)."""
+    data = read_vellum_pin_bytes(repository, commit, path)
+    try:
+        return data.decode("utf-8")
+    except UnicodeDecodeError as error:
+        raise VellumPinUnavailable(f"{path} at {commit} is not UTF-8: {error}") from error
 
 
 def vellum_renderer_drift(manifest: list[dict], read_source=None) -> tuple[str, list[str]]:
@@ -1188,53 +1204,604 @@ def vellum_renderer_drift(manifest: list[dict], read_source=None) -> tuple[str, 
     return ("mismatch" if problems else "match"), problems
 
 
-# The CMake file configure reads the gpu-runtime pin from.
+# The CMake file configure reads the gpu-runtime pin from, and the reader of
+# pulp.lock it includes.
 GPU_RUNTIME_PIN_FILE = "tools/cmake/PulpGpuRuntime.cmake"
-GPU_RUNTIME_COMMIT_RE = re.compile(r'set\(\s*PULP_GPU_RUNTIME_COMMIT\s+"([0-9a-f]{40})"\s*\)')
-GPU_RUNTIME_VERSION_RE = re.compile(r'set\(\s*PULP_GPU_RUNTIME_VERSION\s+"([0-9]+\.[0-9]+\.[0-9]+)"\s*\)')
+GPU_RUNTIME_LOCK_READER = "tools/cmake/PulpVellumLock.cmake"
+GPU_RUNTIME_RECORD_MODULE = "tools/cmake/PulpGpuRuntimeRecord.cmake"
+# Evaluates the pin file with real CMake and records what it does (see the file).
+GPU_RUNTIME_DRIVER = ROOT / "tools/deps/gpu_runtime_driver.cmake"
+GPU_RUNTIME_FETCHED_DIR = "/pulp-driver/vellum_gpu_runtime/gpu-runtime"
+CMAKE_ENV = "PULP_CMAKE"
+# The one source the declaration may name, and the only options it may carry.
+# Anything else (URL, URL_HASH, SOURCE_DIR, DOWNLOAD_COMMAND, SVN_*, HG_*,
+# CVS_*, PATCH_COMMAND, ...) could take or alter the source outside the pin.
+GPU_RUNTIME_REPOSITORY = "https://github.com/Generous-Corp/vellum.git"
+GPU_RUNTIME_DECLARE_OPTIONS = {"GIT_REPOSITORY", "GIT_TAG", "SOURCE_SUBDIR", "GIT_SHALLOW",
+                               "GIT_PROGRESS"}
+GPU_RUNTIME_DECLARE_FLAGS = {"EXCLUDE_FROM_ALL", "SYSTEM"}
+# What the pin file may include: the lock reader and the prefix helpers, which
+# the driver really evaluates, and FetchContent itself. Any other include is
+# code the driver cannot see, so it fails.
+GPU_RUNTIME_ALLOWED_INCLUDES = ("FetchContent",)
+# A second lock the audit evaluates the pin file against. The pin must follow
+# it, so a pin copied into CMake as a literal cannot pass.
+GPU_RUNTIME_PROBE_LOCK = {
+    "schema": "pulp.lock.v1",
+    "vellum": {"tag": "v9.8.7", "sha": "0123456789abcdef0123456789abcdef01234567",
+               "sdk_digest": "1" * 64, "gpu_runtime_digest": "2" * 64},
+    "render_toolchain": {"lock_digest": "3" * 64},
+}
+# Set anywhere in the tree, these make FetchContent use a source other than the
+# declared one. A developer's own -D or PULP_FETCHCONTENT_SOURCE_DIR_<NAME>
+# override is outside the tree and not audited here.
+GPU_RUNTIME_SOURCE_OVERRIDE_VARS = ("FETCHCONTENT_SOURCE_DIR_VELLUM_GPU_RUNTIME",
+                                    "FETCHCONTENT_FULLY_DISCONNECTED")
+# Set before the pin file runs, this makes the lock reader read another lock.
+GPU_RUNTIME_LOCK_PATH_VAR = "PULP_VELLUM_LOCK_FILE"
+GPU_RUNTIME_SOURCE_HELPERS = ("pulp_register_fetchcontent_source",
+                              "pulp_materialize_mutable_fetchcontent_source")
+# Commands that read a variable name without writing it.
+CMAKE_READ_ONLY_COMMANDS = {"if", "elseif", "while", "message"}
+# Commands the driver records; a function() or macro() of the same name
+# elsewhere in the tree would replace the real one in a configure.
+GPU_RUNTIME_RELIED_COMMANDS = {
+    "include", "set", "string", "file", "foreach", "message", "return", "find_package",
+    "get_directory_property", "fetchcontent_declare", "fetchcontent_makeavailable",
+}
+
+
+class GpuRuntimeRun:
+    """One evaluation of the pin file: its recorded calls and how it ended."""
+
+    def __init__(self, calls: list[tuple[str, list[str]]], output: str,
+                 trace: list[tuple[int, str]] | None = None) -> None:
+        self.calls = calls
+        self.output = output
+        # Every command CMake executed in the pin file, as (line, command),
+        # from CMake's own --trace, up to the message() that stopped it.
+        self.trace = trace or []
+
+    def named(self, name: str) -> list[tuple[int, list[str]]]:
+        return [(i, args) for i, (call, args) in enumerate(self.calls) if call == name]
+
+    @property
+    def stopped(self) -> bool:
+        """It ended at a message(FATAL_ERROR) or ran to the end of the file."""
+        return bool(self.calls) and self.calls[-1][0] in ("message", "end")
+
+
+def find_cmake() -> str | None:
+    return os.environ.get(CMAKE_ENV) or shutil.which("cmake")
+
+
+def run_gpu_runtime_driver(root: Path, source: str, fetched_version: str, *,
+                           prefix: bool = False, lock_file: Path | None = None,
+                           cmake: str | None = None) -> GpuRuntimeRun:
+    """Evaluate `source` under `root` with gpu_runtime_driver.cmake."""
+    with tempfile.TemporaryDirectory() as work:
+        record = Path(work) / "record.txt"
+        trace = Path(work) / "trace.json"
+        command = [cmake or find_cmake() or "cmake", "--trace-format=json-v1",
+                   f"--trace-redirect={trace}", f"--trace-source={(root / source).resolve()}",
+                   f"-DPULP_DRIVER_ROOT={root.resolve()}",
+                   f"-DPULP_DRIVER_MODULE={(root / source).resolve()}",
+                   f"-DPULP_DRIVER_RECORD={record}",
+                   f"-DPULP_DRIVER_FETCHED_VERSION={fetched_version}",
+                   f"-DPULP_DRIVER_PREFIX_MODE={'ON' if prefix else 'OFF'}"]
+        if lock_file is not None:
+            command.append(f"-D{GPU_RUNTIME_LOCK_PATH_VAR}={lock_file}")
+        command += ["-P", str(GPU_RUNTIME_DRIVER)]
+        try:
+            result = subprocess.run(command, capture_output=True, text=True, encoding="utf-8",
+                                    errors="replace", timeout=60, check=False)
+            output = result.stdout + result.stderr
+        except (OSError, subprocess.SubprocessError) as error:
+            return GpuRuntimeRun([], f"cannot run {command[0]}: {error}")
+        calls = []
+        try:
+            lines = record.read_text(encoding="utf-8").splitlines()
+        except OSError:
+            lines = []
+        for line in lines:
+            name, *fields = line.split("\t")
+            calls.append((name, [bytes.fromhex(field).decode("utf-8", "replace")
+                                 for field in fields]))
+        executed = []
+        try:
+            entries = trace.read_text(encoding="utf-8").splitlines()
+        except OSError:
+            entries = []
+        for entry in entries:
+            try:
+                event = json.loads(entry)
+            except ValueError:
+                continue
+            if "cmd" not in event:
+                continue
+            executed.append((int(event.get("line", 0)), str(event["cmd"]).lower()))
+            # CMake keeps tracing block ends while it unwinds from the stop.
+            if (executed[-1][1] == "message"
+                    and (event.get("args") or [""])[0] in ("FATAL_ERROR", "SEND_ERROR")):
+                break
+        return GpuRuntimeRun(calls, output, executed)
+
+
+def _declaration_problems(source: str, args: list[str], sha: str) -> list[str]:
+    problems = []
+    options: dict[str, list[str]] = {}
+    unexpected, index = [], 1
+    while index < len(args):
+        option = args[index]
+        if option in GPU_RUNTIME_DECLARE_FLAGS:
+            index += 1
+        elif option in GPU_RUNTIME_DECLARE_OPTIONS and index + 1 < len(args):
+            options.setdefault(option, []).append(args[index + 1])
+            index += 2
+        else:
+            unexpected.append(option)
+            index += 1
+    if options.get("GIT_REPOSITORY") != [GPU_RUNTIME_REPOSITORY]:
+        problems.append(f"{source}: the vellum_gpu_runtime FetchContent GIT_REPOSITORY must be "
+                        f"exactly {GPU_RUNTIME_REPOSITORY} (found {options.get('GIT_REPOSITORY')})")
+    if options.get("GIT_TAG") != [sha]:
+        problems.append(f"{source}: the vellum_gpu_runtime FetchContent GIT_TAG must be the lock's "
+                        f"vellum.sha {sha} (found {options.get('GIT_TAG')})")
+    if unexpected:
+        problems.append(f"{source}: the vellum_gpu_runtime FetchContent declaration carries "
+                        f"{', '.join(unexpected)}, which could take its source from somewhere "
+                        "other than the pinned commit; only "
+                        f"{', '.join(sorted(GPU_RUNTIME_DECLARE_OPTIONS | GPU_RUNTIME_DECLARE_FLAGS))} "
+                        "are allowed")
+    return problems
+
+
+def _source_mode_problems(root: Path, source: str, run: GpuRuntimeRun, sha: str,
+                          lock_path: Path, label: str) -> list[str]:
+    """One declaration of the pinned commit, made available with no source override."""
+    problems = []
+    declares = [(i, args) for i, args in run.named("FetchContent_Declare")
+                if args and args[0].lower() == "vellum_gpu_runtime"]
+    if len(declares) != 1:
+        return [f"{source} ({label}) must declare FetchContent vellum_gpu_runtime exactly once "
+                f"(found {len(declares)})"]
+    at, args = declares[0]
+    problems += [f"{problem} ({label})" for problem in _declaration_problems(source, args, sha)]
+    made = [i for i, args in run.named("FetchContent_MakeAvailable")
+            if i > at and "vellum_gpu_runtime" in args]
+    if not made:
+        problems.append(f"{source} ({label}) never makes vellum_gpu_runtime available after "
+                        "declaring it")
+    for _, args in run.named("FetchContentOverrides"):
+        if args[0].endswith("_VELLUM_GPU_RUNTIME") and any(args[1:]):
+            problems.append(f"{source} ({label}): FetchContent takes vellum_gpu_runtime from "
+                            f"{args[1] or 'the local tree (FETCHCONTENT_FULLY_DISCONNECTED)'}, "
+                            "not the pinned commit")
+    for _, args in run.named("lock"):
+        if not args or Path(args[0]).resolve() != lock_path.resolve():
+            problems.append(f"{source} ({label}) read the pin from {args[:1]}, not {lock_path}")
+    if not run.named("lock"):
+        problems.append(f"{source} ({label}) never read a lock through PulpVellumLock.cmake")
+    return problems
+
+
+def gpu_runtime_cmake_problems(root: Path, source: str) -> list[str]:
+    """Assert, by running it with real CMake, that `source` builds gpu-runtime from pulp.lock.
+
+    tools/deps/gpu_runtime_driver.cmake evaluates `source` with `cmake -P`,
+    recording the FetchContent, find_package, version-read, include and
+    FATAL_ERROR calls it makes. The audit asserts on those calls, so
+    comments, quoting, escapes, dead branches and return() behave as CMake
+    defines them. Evaluated against the repository's pulp.lock and against a
+    second probe lock, it requires:
+
+    - exactly one vellum_gpu_runtime declaration, with GIT_REPOSITORY the
+      canonical Vellum repository, GIT_TAG the lock's vellum.sha (under both
+      locks), and no option that takes the source from elsewhere;
+    - the lock read through PulpVellumLock.cmake from the repository's
+      pulp.lock, and no include the driver cannot evaluate;
+    - configure stopping with FATAL_ERROR when, and only when, the fetched
+      project's version differs from the lock's tag;
+    - the prefix package found by the lock's version (EXACT), after the
+      record and archive checks ran with the lock's sha and archive digest.
+
+    A file that replaces a recorded command (function(), macro() or
+    cmake_language(EVAL)) leaves the recorder unrun, so the record it must
+    produce is missing and the audit fails. gpu_runtime_tree_problems covers
+    what the rest of the tree could do before this file runs.
+    """
+    problems: list[str] = []
+    cmake = find_cmake()
+    if cmake is None:
+        return [f"cmake was not found (set {CMAKE_ENV}); {source} is checked by evaluating it "
+                "with cmake -P, so the gpu-runtime pin cannot be verified"]
+    try:
+        lock = load_pulp_lock(root / "pulp.lock")
+        sha = lock["vellum"]["sha"]
+        version = str(lock["vellum"]["tag"]).removeprefix("v")
+        digest = lock["vellum"]["gpu_runtime_digest"]
+    except (ValueError, KeyError, TypeError) as error:
+        return [f"cannot read pulp.lock to check {source}: {error}"]
+    if not (root / source).is_file():
+        return [f"{source} is missing"]
+
+    with tempfile.TemporaryDirectory() as work:
+        probe_lock = Path(work) / "probe.lock"
+        probe_lock.write_text(json.dumps(GPU_RUNTIME_PROBE_LOCK), encoding="utf-8")
+        probe_sha = GPU_RUNTIME_PROBE_LOCK["vellum"]["sha"]
+        probe_version = GPU_RUNTIME_PROBE_LOCK["vellum"]["tag"].removeprefix("v")
+        probe_digest = GPU_RUNTIME_PROBE_LOCK["vellum"]["gpu_runtime_digest"]
+        runs = {
+            "source": run_gpu_runtime_driver(root, source, version, cmake=cmake),
+            "fetched version above": run_gpu_runtime_driver(root, source, version + ".99",
+                                                             cmake=cmake),
+            "fetched version below": run_gpu_runtime_driver(root, source, "0.0.0", cmake=cmake),
+            "probe lock": run_gpu_runtime_driver(root, source, probe_version, cmake=cmake,
+                                                 lock_file=probe_lock),
+            "prefix": run_gpu_runtime_driver(root, source, version, prefix=True, cmake=cmake),
+            "prefix, probe lock": run_gpu_runtime_driver(root, source, probe_version, prefix=True,
+                                                         cmake=cmake, lock_file=probe_lock),
+        }
+        for label, run in runs.items():
+            if not run.stopped:
+                tail = "\n".join(run.output.strip().splitlines()[-6:])
+                problems.append(f"evaluating {source} with cmake -P ({label}) failed before a "
+                                f"FATAL_ERROR or the end of the file:\n{tail}")
+            for _, args in run.named("include"):
+                target = args[0] if len(args) == 1 else None
+                passed = target is not None and Path(target).is_absolute() and Path(target).resolve() in (
+                    (root / GPU_RUNTIME_LOCK_READER).resolve(), (root / GPU_RUNTIME_RECORD_MODULE).resolve())
+                if not passed and args not in ([name] for name in GPU_RUNTIME_ALLOWED_INCLUDES):
+                    problems.append(f"{source} ({label}) includes {args}, which the audit cannot "
+                                    "evaluate; it may include only PulpVellumLock.cmake, "
+                                    "PulpGpuRuntimeRecord.cmake and FetchContent")
+        if problems:
+            return problems
+
+        problems += _source_mode_problems(root, source, runs["source"], sha, root / "pulp.lock",
+                                          "source")
+        problems += _source_mode_problems(root, source, runs["probe lock"], probe_sha, probe_lock,
+                                          "probe lock")
+
+        # The version check. These runs differ from the source run only in
+        # the fetched project's version. Each must stop with FATAL_ERROR
+        # straight after reading that version, and the source run must have
+        # executed exactly the same pin-file commands up to that message() and
+        # then done something else: the stop depends on the version and
+        # nothing else.
+        same = runs["source"]
+        for label in ("fetched version above", "fetched version below"):
+            wrong = runs[label]
+            reads = [i for i, args in wrong.named("get_directory_property")
+                     if args[1:] == ["DIRECTORY", GPU_RUNTIME_FETCHED_DIR, "DEFINITION",
+                                     "PROJECT_VERSION"]]
+            checked = False
+            if reads and wrong.trace:
+                at, calls, steps = reads[-1], wrong.calls, wrong.trace
+                checked = (len(calls) == at + 2 and calls[at + 1][0] == "message"
+                           and same.calls[:at + 1] == calls[:at + 1]
+                           and steps[-1][1] == "message"
+                           and same.trace[:len(steps) - 1] == steps[:-1]
+                           and len(same.trace) >= len(steps)
+                           and same.trace[len(steps) - 1] != steps[-1])
+            if not checked:
+                problems.append(f"{source} does not stop configure with FATAL_ERROR when, and "
+                                "only when, the fetched gpu-runtime's PROJECT_VERSION differs "
+                                f"from the lock's tag ({label})")
+
+        for label, run, want_sha, want_version, want_digest in (
+                ("prefix", runs["prefix"], sha, version, digest),
+                ("prefix, probe lock", runs["prefix, probe lock"], probe_sha, probe_version,
+                 probe_digest)):
+            finds = run.named("find_package")
+            if run.named("FetchContent_Declare"):
+                problems.append(f"{source} ({label}) declares a FetchContent source although "
+                                "PULP_GPU_RUNTIME_PREFIX is set")
+            if (len(finds) != 1 or finds[0][1][:2] != ["VellumGpuRuntime", want_version]
+                    or "EXACT" not in finds[0][1]):
+                problems.append(f"{source} ({label}) must find the prefix package as "
+                                f"find_package(VellumGpuRuntime {want_version} EXACT ...) "
+                                f"(found {[args for _, args in finds]})")
+                continue
+            before = finds[0][0]
+            records = [args for i, args in run.named("pulp_check_gpu_runtime_record") if i < before]
+            archives = [args for i, args in run.named("pulp_check_gpu_runtime_archive") if i < before]
+            if [args[1:2] for args in records] != [[want_sha]]:
+                problems.append(f"{source} ({label}) must check the prefix record against the "
+                                f"lock's sha {want_sha} before finding it (found {records})")
+            if [args[2:3] for args in archives] != [[want_digest]]:
+                problems.append(f"{source} ({label}) must check the prefix archive against the "
+                                f"lock's gpu_runtime_digest before finding it (found {archives})")
+    return problems
+
+
+def _named_writes(command: cmake_commands.Command, names: tuple[str, ...]) -> list[str]:
+    """The `names` that `command` writes: arguments naming them, in any quoting.
+
+    set("NAME" v) and set([[NAME]] v) write NAME just as set(NAME v) does.
+    """
+    if command.name in CMAKE_READ_ONLY_COMMANDS:
+        return []
+    upper = {name.upper(): name for name in names}
+    return [upper[argument.value.upper()] for argument in command.arguments
+            if argument.value.upper() in upper]
+
+
+CMAKE_EXPANSION = re.compile(r"\$\{[^}]*\}|\$ENV\{[^}]*\}|@[A-Za-z_][A-Za-z0-9_]*@|\$<[^>]*>")
+CMAKE_VARIABLE_REFERENCE = re.compile(r"\$\{([A-Za-z0-9_]+)\}")
+# Commands whose first argument is the variable they write.
+CMAKE_DESTINATION_COMMANDS = {"set", "unset", "option"}
+CMAKE_SET_KEYWORDS = {"CACHE", "PARENT_SCOPE", "FORCE", "INTERNAL", "BOOL", "FILEPATH", "PATH",
+                      "STRING"}
+
+
+def _expand_known(value: str, known: dict[str, set[str]]) -> set[str]:
+    """Every text `value` can have, substituting the literal variables seen so far."""
+    results = {""}
+    position = 0
+    for match in CMAKE_VARIABLE_REFERENCE.finditer(value):
+        options = known.get(match.group(1).upper()) or {match.group(0)}
+        results = {prefix + value[position:match.start()] + option
+                   for prefix in results for option in sorted(options)[:8]}
+        position = match.end()
+        if len(results) > 64:
+            return {value}
+    return {prefix + value[position:] for prefix in results}
+
+
+def _record_literal(command: cmake_commands.Command, known: dict[str, set[str]]) -> None:
+    """Remember the literal text set(NAME text) and string(CONCAT NAME ...) give a variable."""
+    values = command.values()
+    if command.name == "set" and len(values) >= 2:
+        parts = [value for value in values[1:] if value not in CMAKE_SET_KEYWORDS]
+        if len(parts) == 1 and "PARENT_SCOPE" not in values and "CACHE" not in values:
+            known.setdefault(values[0].upper(), set()).update(_expand_known(parts[0], known))
+    elif command.name == "string" and len(values) >= 3 and values[0].upper() == "CONCAT":
+        text = {""}
+        for part in values[2:]:
+            text = {prefix + option for prefix in text for option in _expand_known(part, known)}
+        known.setdefault(values[1].upper(), set()).update(sorted(text)[:8])
+
+
+def _expanded_destination_writes(command: cmake_commands.Command, names: tuple[str, ...],
+                                 known: dict[str, set[str]]) -> list[str]:
+    """The `names` an expanded destination could be: set(${n} v), set(PULP_${n} v).
+
+    A destination is resolved through the literal set()/string(CONCAT) values seen
+    earlier in the same file; what stays unresolved is treated as every name its
+    literal text allows, so set(PULP_VELLUM_${s} v) fails closed. A destination
+    that is only an unresolved expansion is the out-parameter idiom
+    (set(${out} v)) the tree uses everywhere, and is not flagged: the name it
+    receives must come from a literal argument or a resolved expansion elsewhere,
+    which is flagged. A write with PARENT_SCOPE targets the caller's variable
+    and is skipped for the same reason.
+    """
+    if (command.name not in CMAKE_DESTINATION_COMMANDS or not command.arguments
+            or "PARENT_SCOPE" in command.values()):
+        return []
+    if not CMAKE_EXPANSION.search(command.arguments[0].value):
+        return []
+    found: list[str] = []
+    for destination in _expand_known(command.arguments[0].value, known):
+        if not CMAKE_EXPANSION.search(destination):
+            found += [name for name in names if name.upper() == destination.upper()]
+            continue
+        parts = CMAKE_EXPANSION.split(destination)
+        if not any(parts):
+            continue
+        pattern = ".*".join(re.escape(part) for part in parts)
+        found += [name for name in names if re.fullmatch(pattern, name, re.IGNORECASE)]
+    return sorted(set(found))
+
+
+GPU_RUNTIME_SOURCE_HELPER_FILE = "tools/cmake/PulpFetchContent.cmake"
+CMAKE_EVAL_DEPTH = 4
+
+
+def _unescape_cmake(text: str) -> str:
+    """The text a quoted CMake argument holds: \\n, \\t and \\r become characters."""
+    escapes = {"n": "\n", "t": "\t", "r": "\r"}
+    return re.sub(r"\\(.)", lambda m: escapes.get(m.group(1), m.group(1)), text, flags=re.DOTALL)
+
+
+def _scan_tree_commands(rel: str, commands: list[cmake_commands.Command],
+                        protected: tuple[str, ...], known: dict[str, set[str]],
+                        problems: list[str], depth: int) -> None:
+    """Flag what `commands` could do to the gpu-runtime fetch.
+
+    cmake_language(EVAL CODE ...) is evaluated: its code text is tokenized and
+    scanned as commands too, so the text is not an opaque string. A CALL is
+    scanned as the command it calls. Code that cannot be read fails closed.
+    """
+    for command in commands:
+        if rel != GPU_RUNTIME_SOURCE_HELPER_FILE:
+            # The helper file builds FETCHCONTENT_SOURCE_DIR_<name> for any dependency;
+            # a call registering vellum_gpu_runtime through it is flagged below.
+            expanded_names = _expanded_destination_writes(command, protected, known)
+        else:
+            expanded_names = [name for name in _expanded_destination_writes(command, protected, known)
+                              if name not in GPU_RUNTIME_SOURCE_OVERRIDE_VARS]
+        for name in expanded_names:
+            problems.append(f"{rel}:{command.line} sets a variable named by an expansion that "
+                            f"can be {name}, with {command.name}(), which can make the "
+                            "gpu-runtime fetch use another source or lock")
+        _record_literal(command, known)
+        for name in _named_writes(command, protected):
+            problems.append(f"{rel}:{command.line} sets {name} with {command.name}(), which "
+                            "can make the gpu-runtime fetch use another source or lock")
+        if command.name == "cmake_language" and command.arguments:
+            mode = command.arguments[0].value.upper()
+            values = command.values()
+            if mode == "EVAL":
+                if len(values) < 3 or values[1].upper() != "CODE" or depth >= CMAKE_EVAL_DEPTH:
+                    problems.append(f"{rel}:{command.line} cmake_language(EVAL) is not in the "
+                                    "form EVAL CODE <text> the audit can read")
+                else:
+                    try:
+                        embedded = cmake_commands.tokenize(_unescape_cmake("".join(values[2:])))
+                    except cmake_commands.CMakeSyntaxError as error:
+                        problems.append(f"{rel}:{command.line} cmake_language(EVAL) runs code the "
+                                        f"audit cannot parse as CMake: {error}")
+                    else:
+                        _scan_tree_commands(f"{rel}:{command.line} EVAL", embedded, protected,
+                                            known, problems, depth + 1)
+            elif mode == "CALL":
+                if len(values) < 2:
+                    problems.append(f"{rel}:{command.line} cmake_language(CALL) names no command")
+                else:
+                    called = cmake_commands.Command(values[1].lower(), command.arguments[2:],
+                                                    command.line)
+                    if not CMAKE_EXPANSION.search(values[1]):
+                        _scan_tree_commands(f"{rel} CALL", [called], protected, known,
+                                            problems, depth + 1)
+                    else:
+                        problems.append(f"{rel}:{command.line} cmake_language(CALL) names its "
+                                        f"command by an expansion, {values[1]}, so the audit "
+                                        "cannot tell what it runs")
+            elif "SET_DEPENDENCY_PROVIDER" in values:
+                problems.append(f"{rel}:{command.line} sets a dependency provider, which can "
+                                "replace the pinned gpu-runtime fetch")
+        if (command.name in GPU_RUNTIME_SOURCE_HELPERS and command.arguments
+                and command.arguments[0].value.lower() == "vellum_gpu_runtime"):
+            problems.append(f"{rel}:{command.line} registers a FetchContent source for "
+                            f"vellum_gpu_runtime with {command.name}(), so it may not build "
+                            "from the pinned commit")
+        if command.name in ("function", "macro") and command.arguments:
+            defined = command.arguments[0].value
+            if defined.lower() in GPU_RUNTIME_RELIED_COMMANDS or (
+                    CMAKE_EXPANSION.search(defined) and any(CMAKE_EXPANSION.split(defined))
+                    and any(re.fullmatch(".*".join(re.escape(part) for part in
+                                                   CMAKE_EXPANSION.split(defined)), name, re.IGNORECASE)
+                            for name in GPU_RUNTIME_RELIED_COMMANDS)):
+                problems.append(f"{rel}:{command.line} redefines {defined}() "
+                                "with " + command.name + "(), which the gpu-runtime pin relies on")
+
+
+def gpu_runtime_tree_problems(root: Path) -> list[str]:
+    """What the rest of the tree could do to the gpu-runtime fetch before the pin file runs.
+
+    Scans every command (tools/deps/cmake_commands.py; comments and the text
+    of quoted or bracket arguments are not commands) in tools/cmake/*.cmake
+    and the root CMakeLists.txt for: a FetchContent source override for
+    vellum_gpu_runtime, a write of PULP_VELLUM_LOCK_FILE outside the lock
+    reader, a source registered for vellum_gpu_runtime through Pulp's
+    FetchContent helpers, a dependency provider, and a function() or macro()
+    replacing a command the pin evaluation relies on.
+    """
+    problems: list[str] = []
+    candidates = sorted((root / "tools/cmake").glob("*.cmake"))
+    if (root / "CMakeLists.txt").is_file():
+        candidates.append(root / "CMakeLists.txt")
+    for path in candidates:
+        rel = path.relative_to(root).as_posix()
+        try:
+            commands = cmake_commands.tokenize(path.read_text(encoding="utf-8"))
+        except OSError as error:
+            problems.append(f"cannot read {rel}: {error}")
+            continue
+        except cmake_commands.CMakeSyntaxError as error:
+            problems.append(f"cannot parse {rel} as CMake, so its effect on the gpu-runtime fetch "
+                            f"cannot be checked: {error}")
+            continue
+        protected = GPU_RUNTIME_SOURCE_OVERRIDE_VARS
+        if rel != GPU_RUNTIME_LOCK_READER:
+            protected = (*protected, GPU_RUNTIME_LOCK_PATH_VAR)
+        _scan_tree_commands(rel, commands, protected, {}, problems, depth=0)
+    return problems
 
 
 def gpu_runtime_pin_agreement(manifest: list[dict], root: Path = ROOT) -> list[str]:
-    """The commit and version the build fetches must be the manifest's.
+    """The build must fetch and version-check gpu-runtime from pulp.lock.
 
-    tools/cmake/PulpGpuRuntime.cmake is what configure reads; the manifest is
-    what the audit, DEPENDENCIES.md and the renderer-lock check read. A pin
-    moved in one and not the other is refused.
+    tools/cmake/PulpGpuRuntime.cmake is what configure reads and the manifest
+    is what the audit and DEPENDENCIES.md read; pulp_lock_agreement ties the
+    manifest to pulp.lock. This asserts the CMake side of that chain by
+    evaluating the CMake, so an edit that fetches an unpinned commit or skips
+    the lock-derived version check fails here.
     """
     entry = next((dep for dep in manifest if dep.get("name") == GPU_RUNTIME_ENTRY), None)
     if entry is None:
-        # Nothing to agree with is only fine while nothing is pinned.
+        # Nothing to agree with is only fine while nothing is fetched.
         try:
-            pinning = GPU_RUNTIME_COMMIT_RE.search(
+            commands = cmake_commands.tokenize(
                 (root / GPU_RUNTIME_PIN_FILE).read_text(encoding="utf-8"))
         except OSError:
-            pinning = None
-        if pinning:
-            return [f"{GPU_RUNTIME_PIN_FILE} fetches gpu-runtime at {pinning.group(1)}, but the "
-                    f"manifest has no {GPU_RUNTIME_ENTRY} entry"]
+            return []
+        except cmake_commands.CMakeSyntaxError as error:
+            return [f"cannot parse {GPU_RUNTIME_PIN_FILE} as CMake: {error}"]
+        if any(command.name == "fetchcontent_declare" and command.arguments
+               and command.arguments[0].value.lower() == "vellum_gpu_runtime"
+               for command in commands):
+            return [f"{GPU_RUNTIME_PIN_FILE} fetches gpu-runtime, but the manifest has no "
+                    f"{GPU_RUNTIME_ENTRY} entry"]
         return []
     sources = entry.get("source_files") or []
     if len(sources) != 1:
         return [f"{GPU_RUNTIME_ENTRY} must name exactly one source file, the CMake pin"]
-    path = root / sources[0]
-    try:
-        text = path.read_text(encoding="utf-8")
-    except OSError as error:
-        return [f"{GPU_RUNTIME_ENTRY}: cannot read {sources[0]}: {error}"]
-    commits = GPU_RUNTIME_COMMIT_RE.findall(text)
-    versions = GPU_RUNTIME_VERSION_RE.findall(text)
-    if len(commits) != 1 or len(versions) != 1:
-        return [f"{sources[0]} must set PULP_GPU_RUNTIME_COMMIT and PULP_GPU_RUNTIME_VERSION once "
-                f"each (found {len(commits)} and {len(versions)})"]
+    if sources[0] != GPU_RUNTIME_PIN_FILE:
+        return [f"{GPU_RUNTIME_ENTRY} source_files must be exactly {GPU_RUNTIME_PIN_FILE}, "
+                f"not {sources[0]!r}: the audit evaluates only that file"]
+    return [*gpu_runtime_cmake_problems(root, sources[0]), *gpu_runtime_tree_problems(root)]
+
+
+
+def renderer_lock_digest_problems(lock: dict, manifest: list[dict], read_bytes=None) -> list[str]:
+    """pulp.lock's render_toolchain.lock_digest is sha256 of gpu-runtime's renderer lock.
+
+    The digest is taken over the exact bytes of the file the Skia entry's
+    vellum_renderer_drift_check names (gpu-runtime/renderer-lock.json), read at
+    pulp.lock's vellum.sha from raw.githubusercontent.com or, when
+    PULP_VELLUM_CHECKOUT is set, with `git show` in that checkout. An
+    unreadable lock fails closed, as the drift check does.
+    """
+    digest = (lock.get("render_toolchain") or {}).get("lock_digest")
+    sha = (lock.get("vellum") or {}).get("sha")
+    if not isinstance(digest, str) or not isinstance(sha, str) or not FULL_SHA_RE.fullmatch(sha):
+        return []  # pulp_lock.validate already reports the malformed field
+    skia = next((dep for dep in manifest if dep.get("name") == "Skia"), None)
+    spec = (skia or {}).get(VELLUM_DRIFT_FIELD)
+    if not isinstance(spec, dict):
+        return [f"render_toolchain.lock_digest cannot be checked: the Skia entry has no "
+                f"{VELLUM_DRIFT_FIELD} naming gpu-runtime's renderer lock"]
+    repository, path, commit = spec.get("repository"), spec.get("path"), spec.get("commit")
+    if (not isinstance(repository, str) or not isinstance(path, str)
+            or not path.endswith(".json") or path.startswith("/") or ".." in Path(path).parts):
+        return [f"render_toolchain.lock_digest cannot be checked: Skia {VELLUM_DRIFT_FIELD} "
+                f"does not name a repository-relative renderer lock (path {path!r})"]
     problems = []
+    if not isinstance(commit, str) or commit.lower() != sha:
+        problems.append(f"Skia {VELLUM_DRIFT_FIELD} reads the renderer lock at {commit}, but "
+                        f"pulp.lock pins Vellum {sha}; they must be the same commit")
+    try:
+        data = (read_bytes or read_vellum_pin_bytes)(repository, sha, path)
+    except VellumPinUnavailable as error:
+        return [*problems, f"render_toolchain.lock_digest cannot be checked: {error}"]
+    actual = hashlib.sha256(data).hexdigest()
+    if actual != digest:
+        problems.append(f"render_toolchain.lock_digest is {digest}, but {path} at Vellum {sha} "
+                        f"hashes to {actual}")
+    return problems
+
+
+def pulp_lock_agreement(manifest: list[dict], root: Path = ROOT, read_bytes=None) -> list[str]:
+    """Validate pulp.lock, bind its renderer digest, and derive the legacy gpu-runtime pin from it."""
+    try:
+        lock = load_pulp_lock(root / "pulp.lock")
+    except ValueError as exc:
+        return [str(exc)]
+    problems = validate_pulp_lock(lock)
+    vellum = lock.get("vellum", {})
+    entry = next((dep for dep in manifest if dep.get("name") == GPU_RUNTIME_ENTRY), None)
+    if entry is None:
+        problems.append(f"manifest has no {GPU_RUNTIME_ENTRY} entry required by pulp.lock")
+        return problems
     pinned = ((entry.get("upstream") or {}).get("commit") or "").lower()
-    if commits[0] != pinned:
-        problems.append(f"{sources[0]} fetches gpu-runtime at {commits[0]}, but the manifest "
-                        f"pins {pinned or 'nothing'}")
+    if pinned != vellum.get("sha"):
+        problems.append(f"manifest {GPU_RUNTIME_ENTRY} pins {pinned or 'nothing'}, but pulp.lock pins {vellum.get('sha')}")
     version = str(entry.get("version", "")).split(" ", 1)[0]
-    if versions[0] != version:
-        problems.append(f"{sources[0]} expects gpu-runtime {versions[0]}, but the manifest "
-                        f"names {version or 'nothing'}")
+    if version != str(vellum.get("tag", "")).removeprefix("v"):
+        problems.append(f"manifest {GPU_RUNTIME_ENTRY} version is {version or 'missing'}, but pulp.lock pins {vellum.get('tag')}")
+    problems.extend(renderer_lock_digest_problems(lock, manifest, read_bytes))
     return problems
 
 
@@ -1680,6 +2247,12 @@ def main() -> int:
             for problem in pin_problems:
                 print(f"  - {problem}")
             vellum_problems = [*vellum_problems, *pin_problems]
+        lock_problems = pulp_lock_agreement(manifest)
+        if lock_problems:
+            print("\npulp.lock drift:")
+            for problem in lock_problems:
+                print(f"  - {problem}")
+            vellum_problems = [*vellum_problems, *lock_problems]
 
     if args.require_offline_trees and offline_unverified:
         print("\nOffline-fetch trees required but absent: " + ", ".join(offline_unverified))
