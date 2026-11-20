@@ -199,6 +199,39 @@ class BundleVellumSdkTests(unittest.TestCase):
         self.assertTrue(bundle.bundle(lock_path=self.lock, prefix=prefix, platform="darwin-arm64",
                                       archive=self.archive, archive_dir=None, integrations=self.integration).is_dir())
 
+    def test_interrupted_publication_is_not_marked_staged_and_recovers(self):
+        prefix = self.root / "prefix"
+        original = bundle._publish_step
+
+        def interrupt():
+            raise OSError("synthetic interruption between renames")
+
+        bundle._publish_step = interrupt
+        try:
+            with self.assertRaisesRegex(OSError, "synthetic interruption"):
+                bundle.bundle(lock_path=self.lock, prefix=prefix, platform="darwin-arm64",
+                              archive=self.archive, archive_dir=None, integrations=self.integration)
+        finally:
+            bundle._publish_step = original
+        sdk_root = prefix / "share/pulp/vellum-sdk/0.2.0"
+        # setup.sh skips staging only when this marker exists.
+        self.assertFalse((sdk_root / "pulp-sdk-digest.txt").exists())
+        self.assertTrue((prefix / "share/pulp" / bundle.PUBLISH_PENDING).exists())
+        staged = bundle.bundle(lock_path=self.lock, prefix=prefix, platform="darwin-arm64",
+                               archive=self.archive, archive_dir=None, integrations=self.integration)
+        self.assertTrue((staged / "pulp-sdk-digest.txt").is_file())
+        self.assertTrue((prefix / "share/pulp/integrations/pulp-vellum/bridge.hpp").is_file())
+        self.assertFalse((prefix / "share/pulp" / bundle.PUBLISH_PENDING).exists())
+
+    def test_foreign_integrations_without_pending_marker_are_not_replaced(self):
+        prefix = self.root / "prefix"
+        foreign = prefix / "share/pulp/integrations"
+        foreign.mkdir(parents=True)
+        with self.assertRaisesRegex(FileExistsError, "refusing to overwrite staged integrations"):
+            bundle.bundle(lock_path=self.lock, prefix=prefix, platform="darwin-arm64",
+                          archive=self.archive, archive_dir=None, integrations=self.integration)
+        self.assertTrue(foreign.is_dir())
+
     def test_existing_staged_sdk_is_not_overwritten(self):
         prefix = self.root / "prefix"
         bundle.bundle(lock_path=self.lock, prefix=prefix, platform="darwin-arm64",

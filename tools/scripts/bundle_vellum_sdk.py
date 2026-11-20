@@ -59,6 +59,13 @@ def resolve_archive(lock_path: Path, platform: str, archive: Path | None,
     return candidate, digest
 
 
+PUBLISH_PENDING = ".vellum-sdk-publish-pending"
+
+
+def _publish_step() -> None:
+    """Between the two publication renames; a test hook for interruption."""
+
+
 def _canonical(name: str) -> Path:
     """Archive member name without "." segments or a leading "/"."""
     return Path(*[part for part in PurePosixPath(name).parts if part not in (".", "/")])
@@ -134,14 +141,25 @@ def bundle(*, lock_path: Path, prefix: Path, platform: str, archive: Path | None
         unpacked.mkdir()
         _safe_extract(resolved, unpacked)
         sdk_root = prefix / "share" / "pulp" / "vellum-sdk" / _lock(lock_path)[0].removeprefix("v")
-        if sdk_root.exists():
-            raise FileExistsError(f"refusing to overwrite staged Vellum SDK: {sdk_root}")
         sdk_root.parent.mkdir(parents=True, exist_ok=True)
         integration_dest = prefix / "share" / "pulp" / "integrations"
-        if integration_dest.exists():
-            raise FileExistsError(f"refusing to overwrite staged integrations: {integration_dest}")
+        # Publication renames the integrations, then the SDK, then writes the
+        # SDK digest marker that setup.sh treats as "staged". The pending
+        # marker spans that window, so a run interrupted inside it is redone
+        # here instead of being accepted (or refused) as a staged SDK.
+        pending = prefix / "share" / "pulp" / PUBLISH_PENDING
+        digest_marker = sdk_root / "pulp-sdk-digest.txt"
         with tempfile.TemporaryDirectory(prefix=f".{sdk_root.name}-", dir=sdk_root.parent) as staging:
             staging_root = Path(staging)
+            if pending.exists() and not digest_marker.exists():
+                for leftover, name in ((sdk_root, "stale-sdk"), (integration_dest, "stale-integrations")):
+                    if leftover.exists() or leftover.is_symlink():
+                        leftover.rename(staging_root / name)
+                pending.unlink()
+            if sdk_root.exists():
+                raise FileExistsError(f"refusing to overwrite staged Vellum SDK: {sdk_root}")
+            if integration_dest.exists():
+                raise FileExistsError(f"refusing to overwrite staged integrations: {integration_dest}")
             staged_sdk = staging_root / sdk_root.name
             staged_integrations = staging_root / "integrations"
             shutil.copytree(unpacked, staged_sdk, symlinks=True)
@@ -149,12 +167,17 @@ def bundle(*, lock_path: Path, prefix: Path, platform: str, archive: Path | None
             if (prefix / "NOTICE.md").exists():
                 shutil.copy2(prefix / "NOTICE.md", staging_root / "NOTICE.md")
             _merge_notice(staging_root, staged_sdk)
-            (staged_sdk / "pulp-sdk-digest.txt").write_text(digest + "\n", encoding="utf-8")
             staged_notice = staging_root / "NOTICE.md"
-            staged_sdk.rename(sdk_root)
+            staged_digest = staging_root / "pulp-sdk-digest.txt"
+            staged_digest.write_text(digest + "\n", encoding="utf-8")
+            pending.write_text(sdk_root.name + "\n", encoding="utf-8")
             staged_integrations.rename(integration_dest)
+            _publish_step()
+            staged_sdk.rename(sdk_root)
             if staged_notice.exists():
                 os.replace(staged_notice, prefix / "NOTICE.md")
+            os.replace(staged_digest, digest_marker)
+            pending.unlink()
     return sdk_root
 
 
