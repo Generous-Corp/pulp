@@ -801,6 +801,18 @@ reads, then send only the event that advertisement licenses. The reachability
 tests in `test_clap_midi_events.cpp` and `test_clap_param_flags.cpp` are
 written in that order on purpose.
 
+### Fewer input buffers than declared ports are padded, not refused
+
+A simple host may call `process` with `audio_inputs_count` below the
+declared input port count (an instrument often gets none). `clap_process`
+fills each missing port with a silent buffer of the declared channel
+count, taken from a block `clap_activate` preallocates (no audio-thread
+allocation), and still runs the Processor. A count above the declared one,
+a null array with a non-zero count, a wrong channel count and a null
+channel pointer are still refused by `clap_phase_validate_layout` (outputs
+zeroed, Processor not called). The padding is logged once per instance,
+from `clap_on_main_thread`, never from `process`.
+
 ### Sidechain `data32` can be null — guard before routing
 
 A host may report `audio_inputs_count > 1` but hand the adapter a null
