@@ -1043,6 +1043,90 @@ TEST_CASE("VST3 does not echo host automation back during an open gesture",
     REQUIRE(processor.terminate() == Steinberg::kResultOk);
 }
 
+namespace {
+// Runs one process() block on a non-editor thread, as a host's audio thread
+// would, delivering one automation point for the gain parameter.
+void process_gain_automation_block(pulp::format::vst3::PulpVst3Processor& processor,
+                                   const pulp::state::ParamRange& range, float plain) {
+    constexpr int kFrames = 64;
+    std::array<float, kFrames> in_l{}, in_r{}, out_l{}, out_r{};
+    float* inputs[2] = {in_l.data(), in_r.data()};
+    float* outputs[2] = {out_l.data(), out_r.data()};
+    Steinberg::Vst::AudioBusBuffers input_bus{};
+    input_bus.numChannels = 2;
+    input_bus.channelBuffers32 = inputs;
+    Steinberg::Vst::AudioBusBuffers output_bus{};
+    output_bus.numChannels = 2;
+    output_bus.channelBuffers32 = outputs;
+    Steinberg::Vst::ParameterChanges changes(1);
+    Steinberg::int32 queue_index = 0, point_index = 0;
+    auto* queue = changes.addParameterData(kGainParamId, queue_index);
+    REQUIRE(queue != nullptr);
+    REQUIRE(queue->addPoint(0, range.normalize(plain), point_index) == Steinberg::kResultTrue);
+    Steinberg::Vst::ProcessData data{};
+    data.symbolicSampleSize = Steinberg::Vst::kSample32;
+    data.numSamples = kFrames;
+    data.numInputs = 1;
+    data.numOutputs = 1;
+    data.inputs = &input_bus;
+    data.outputs = &output_bus;
+    data.inputParameterChanges = &changes;
+    Steinberg::tresult processed = Steinberg::kResultFalse;
+    std::thread([&] { processed = processor.process(data); }).join();
+    REQUIRE(processed == Steinberg::kResultOk);
+}
+} // namespace
+
+TEST_CASE("VST3 does not echo host automation that the plug-in mirrors back",
+          "[vst3][automation][echo]") {
+    // A plug-in that writes a host-automated value back into the store on the
+    // main thread (here quantised to a whole dB) must not be reported to the
+    // host as editing that parameter, or hosts treat it as touched and stop
+    // applying the envelope.
+    reset_test_processor();
+    HostApp host_app;
+    pulp::format::vst3::PulpVst3Processor processor(create_test_processor);
+    REQUIRE(processor.initialize(&host_app) == Steinberg::kResultOk);
+    GestureEditRecorder recorder;
+    REQUIRE(processor.setComponentHandler(&recorder) == Steinberg::kResultOk);
+    auto& store = TestVst3Processor::g_last_processor->state();
+    const pulp::state::ParamRange range{-60.0f, 24.0f, 0.0f, 0.1f};
+
+    Steinberg::Vst::ProcessSetup setup{};
+    setup.processMode = Steinberg::Vst::kRealtime;
+    setup.symbolicSampleSize = Steinberg::Vst::kSample32;
+    setup.maxSamplesPerBlock = 64;
+    setup.sampleRate = 48000.0;
+    REQUIRE(processor.setupProcessing(setup) == Steinberg::kResultOk);
+    REQUIRE(processor.setActive(true) == Steinberg::kResultOk);
+
+    for (int block = 0; block < 200; ++block) {
+        process_gain_automation_block(processor, range,
+                                      static_cast<float>(10.0 * std::sin(block * 0.07) + 3.3));
+        store.set_value(kGainParamId, std::round(store.get_value(kGainParamId)));
+    }
+    CHECK(recorder.edits.empty());
+    CHECK(recorder.begins.empty());
+
+    // Control: a user gesture on the automated parameter still reports.
+    process_gain_automation_block(processor, range, 5.0f);
+    store.begin_gesture(kGainParamId);
+    store.set_value(kGainParamId, -20.0f);
+    store.end_gesture(kGainParamId);
+    CHECK_FALSE(recorder.edits.empty());
+    CHECK(recorder.begins.size() == 1);
+
+    // Control: after the echo window a plug-in write reports again.
+    recorder.edits.clear();
+    std::this_thread::sleep_for(
+        std::chrono::milliseconds(pulp::format::HostWriteEchoGuard::kWindowNs / 1'000'000 + 50));
+    store.set_value(kGainParamId, -30.0f);
+    CHECK(recorder.edits.size() == 1);
+
+    REQUIRE(processor.setActive(false) == Steinberg::kResultOk);
+    REQUIRE(processor.terminate() == Steinberg::kResultOk);
+}
+
 TEST_CASE("VST3 reports the editor's value even if automation lands before the report",
           "[vst3][editor][gesture][automation]") {
     // The edit bridge reports an editor write from a listener on that write.

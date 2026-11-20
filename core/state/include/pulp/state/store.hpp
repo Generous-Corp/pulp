@@ -507,6 +507,12 @@ class StateStore {
     /// end). Observability for tests and adapters.
     std::size_t open_gesture_count() const noexcept { return open_gestures_.size(); }
 
+    /// Whether @p id has an open gesture. **Main-thread only**, like the
+    /// gesture entry points that mutate the set.
+    bool gesture_open(ParamID id) const noexcept {
+        return open_gestures_.count(id) != 0;
+    }
+
     /// Run a complete parameter gesture (begin_gesture → value writes →
     /// end_gesture) on the host's main thread, from ANY thread.
     ///

@@ -21,6 +21,7 @@
 #include <pulp/state/store.hpp>
 
 #include <chrono>
+#include <cmath>
 #include <string>
 #include <thread>
 #include <vector>
@@ -348,4 +349,78 @@ TEST_CASE("gestures on different parameters keep their own streams",
     REQUIRE(gain_end == 1);
     REQUIRE(pan_begin == 1);
     REQUIRE(pan_end == 1);
+}
+
+// ── Host automation mirrored back by the plug-in ───────────────────────────
+
+namespace {
+// Host automation as an audio thread applies it: a write on another thread.
+void host_writes_on_audio_thread(StateStore& store, ParamID id, float value) {
+    std::thread([&] { store.set_value_rt(id, value); }).join();
+}
+} // namespace
+
+TEST_CASE("a plug-in write-back of host automation is not reported",
+          "[host-parameter-edit][echo]") {
+    StateStore store;
+    add_unit_param(store, kGain, "Gain");
+    EditLog log;
+    HostParameterEditBridge bridge(store, log.callbacks());
+
+    for (int block = 0; block < 100; ++block) {
+        const float host_value = 0.01f * static_cast<float>(block) + 0.004f;
+        host_writes_on_audio_thread(store, kGain, host_value);
+        // The plug-in quantises and mirrors the value back on the main thread.
+        store.set_value(kGain, std::round(host_value * 10.0f) / 10.0f);
+        // Equal-value write-back too.
+        store.set_value(kGain, store.get_value(kGain));
+    }
+    REQUIRE(log.entries.empty());
+}
+
+TEST_CASE("genuine plug-in edits still report beside host automation",
+          "[host-parameter-edit][echo]") {
+    StateStore store;
+    add_unit_param(store, kGain, "Gain");
+    constexpr ParamID kOther = 2;
+    add_unit_param(store, kOther, "Other");
+    EditLog log;
+    HostParameterEditBridge bridge(store, log.callbacks());
+
+    // A parameter the host has not written reports.
+    host_writes_on_audio_thread(store, kGain, 0.4f);
+    store.set_value(kOther, 0.9f);
+    REQUIRE(log.count(EditLog::Entry::Kind::value) == 1);
+    REQUIRE(log.entries.back().id == kOther);
+
+    // A user gesture on the automated parameter reports.
+    log.entries.clear();
+    store.begin_gesture(kGain);
+    store.set_value(kGain, 0.8f);
+    store.end_gesture(kGain);
+    REQUIRE(log.stream() == "B V V E");
+
+    // A processor-originated write reports through its own path, not here, and
+    // does not arm the guard.
+    log.entries.clear();
+    std::thread([&] {
+        const ScopedProcessorParameterWrite processor_write;
+        store.set_value_rt(kOther, 0.2f);
+    }).join();
+    store.set_value(kOther, 0.25f);
+    REQUIRE(log.count(EditLog::Entry::Kind::value) == 1);
+}
+
+TEST_CASE("the echo window closes", "[host-parameter-edit][echo]") {
+    StateStore store;
+    add_unit_param(store, kGain, "Gain");
+    HostWriteEchoGuard guard;
+    const auto t0 = HostWriteEchoGuard::now_ns();
+    CHECK_FALSE(guard.is_echo_at(store, kGain, t0)); // never host-written
+    guard.note_host_write(kGain);
+    const auto after_write = HostWriteEchoGuard::now_ns();
+    CHECK(guard.is_echo_at(store, kGain, after_write));
+    CHECK_FALSE(
+        guard.is_echo_at(store, kGain, after_write + HostWriteEchoGuard::kWindowNs + 1'000'000));
+    CHECK_FALSE(guard.is_echo_at(store, kGain + 1, after_write)); // other parameter
 }

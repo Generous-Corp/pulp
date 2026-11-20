@@ -5,6 +5,46 @@
 
 namespace pulp::format {
 
+void HostWriteEchoGuard::note_host_write(state::ParamID id) noexcept {
+    const std::uint64_t key = static_cast<std::uint64_t>(id) + 1;
+    const std::int64_t now = now_ns();
+    std::size_t index = (key * 0x9E3779B97F4A7C15ull) >> 32;
+    for (std::size_t i = 0; i < kProbe; ++i) {
+        auto& slot = slots_[(index + i) % kSlots];
+        std::uint64_t current = slot.key.load(std::memory_order_acquire);
+        if (current == 0 &&
+            slot.key.compare_exchange_strong(current, key, std::memory_order_acq_rel))
+            current = key;
+        if (current == key) {
+            slot.stamp_ns.store(now, std::memory_order_release);
+            return;
+        }
+    }
+}
+
+bool HostWriteEchoGuard::is_echo(const state::StateStore& store, state::ParamID id) const noexcept {
+    return is_echo_at(store, id, now_ns());
+}
+
+bool HostWriteEchoGuard::is_echo_at(const state::StateStore& store, state::ParamID id,
+                                    std::int64_t now) const noexcept {
+    const std::uint64_t key = static_cast<std::uint64_t>(id) + 1;
+    std::size_t index = (key * 0x9E3779B97F4A7C15ull) >> 32;
+    for (std::size_t i = 0; i < kProbe; ++i) {
+        const auto& slot = slots_[(index + i) % kSlots];
+        const std::uint64_t current = slot.key.load(std::memory_order_acquire);
+        if (current == 0)
+            return false;
+        if (current != key)
+            continue;
+        const auto stamp = slot.stamp_ns.load(std::memory_order_acquire);
+        if (stamp == 0 || now - stamp > kWindowNs)
+            return false;
+        return !store.gesture_open(id);
+    }
+    return false;
+}
+
 HostParameterEditBridge::HostParameterEditBridge(state::StateStore& store,
                                                  Callbacks callbacks)
     : store_(store),
@@ -47,7 +87,23 @@ void HostParameterEditBridge::on_begin(state::ParamID id) {
 }
 
 void HostParameterEditBridge::on_value(state::ParamID id, float plain) {
+    // Remember the host's writes made off the editor thread: the audio
+    // thread's automation, one write per block, is what a plug-in mirrors back.
+    // A host write on the editor thread (setParamNormalized, a state restore)
+    // is a discrete event, and by thread alone it cannot be told from the
+    // user's edit that follows it, so it arms nothing. A write on another
+    // thread that is not the processor's own output is the host's too: the
+    // audio thread applies only host automation to the store.
+    if (std::this_thread::get_id() != editor_thread_) {
+        if (!ScopedProcessorParameterWrite::active())
+            echo_guard_.note_host_write(id);
+        return;
+    }
     if (!would_report()) return;
+    // The plug-in mirroring a host-written value back (often quantised) is
+    // not an edit of that parameter.
+    if (echo_guard_.is_echo(store_, id))
+        return;
     if (!callbacks_.value) return;
     // The value this write stored, not a re-read: another listener on this
     // write may already have run a host automation write, and the store would

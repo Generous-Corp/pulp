@@ -303,8 +303,19 @@ bool clap_init(const clap_plugin_t* plugin) {
         });
     self->outbound_param_listener = self->store.add_listener(
         [self](state::ParamID id, float value) {
-            if (g_clap_host_writing_param || g_clap_process_running ||
-                std::this_thread::get_id() != self->main_thread_id) return;
+            // A write the host made off the main thread (process() applying
+            // automation, or params.flush on the audio thread) is remembered
+            // so the plug-in mirroring it back on the main thread is not
+            // reported as an edit.
+            const bool on_main = std::this_thread::get_id() == self->main_thread_id;
+            if (g_clap_process_running || (g_clap_host_writing_param && !on_main)) {
+                self->host_write_echo_guard.note_host_write(id);
+                return;
+            }
+            if (g_clap_host_writing_param || !on_main)
+                return;
+            if (self->host_write_echo_guard.is_echo(self->store, id))
+                return;
             queue_outbound_param_event(
                 self, {OutboundParamEventKind::Value, id, value});
         },

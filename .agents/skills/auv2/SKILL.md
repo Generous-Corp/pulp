@@ -1727,3 +1727,13 @@ registering the same ID twice keeps both entries in `all_params()`.
   already applied. Legacy `pulp-state` class infos still restore their payload.
 * **CRC-32** is `StateStore::crc32` (table driven, same value as the bitwise
   definition); the parameter blob, PLST envelope and compact blob share it.
+
+## Host automation mirrored back by the plug-in is not an edit
+
+A plug-in that writes a host-automated value back into the store on the main
+thread (e.g. after quantising it) must not reach the host as an edit: hosts
+treat the parameter as touched and stop applying its envelope. the listener in `wire_host_parameter_bridge`, shares
+`HostWriteEchoGuard` with the VST3 bridge: off-main-thread host writes are
+remembered per parameter and a non-host write inside `kWindowNs` is not
+reported unless a gesture is open on it. Do not report from a new listener
+without consulting the guard.

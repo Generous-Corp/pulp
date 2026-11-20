@@ -9,6 +9,7 @@
 #include <pulp/format/state_restore_gate.hpp>
 #include <pulp/format/adapter_boundary.hpp>
 #include <pulp/format/ara.hpp>
+#include <pulp/format/host_parameter_edit.hpp>
 #include <pulp/format/host_quirks.hpp>
 #include <pulp/format/detail/playhead_diff.hpp>
 #include <pulp/events/plugin_main_thread.hpp>
@@ -267,6 +268,9 @@ struct PulpClapPlugin {
         outbound_param_events;
     std::optional<OutboundParamEvent> pending_outbound_param_event;
     state::ListenerToken outbound_param_listener;
+    /// Parameters the host wrote recently; a plug-in write-back of one is not
+    /// reported to the host as an edit. See HostWriteEchoGuard.
+    HostWriteEchoGuard host_write_echo_guard;
     std::thread::id main_thread_id;
 
     // Reused per-block MIDI buffers. Reserved and capacity-limited during
