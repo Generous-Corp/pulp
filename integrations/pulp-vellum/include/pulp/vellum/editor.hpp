@@ -14,11 +14,7 @@
 #include <pulp/vellum/visual_port_feed.hpp>
 
 #include <vellum/view/plugin_view_host.hpp>
-#if __has_include(<gpu_runtime/dawn_native_bootstrap.hpp>)
-#include <gpu_runtime/dawn_native_bootstrap.hpp>
-#else
 #include <vellum/graphics/dawn_native_bootstrap.hpp>
-#endif
 #include <vellum/view/view.hpp>
 
 #include <memory>
@@ -30,9 +26,11 @@
 
 namespace pulp::vellum {
 
-/// Install Dawn's host proc table once for each plug-in bundle before Vellum
-/// creates its first GPU editor host. New SDKs provide the bundle-scoped
-/// gpu_runtime API; older SDKs use Vellum's process-scoped app-host fallback.
+/// Install Dawn's proc table before Vellum creates the first GPU editor host.
+/// The process owns that table; the installed Vellum SDK registers it through
+/// its app-host bootstrap, which agrees across plug-ins built on the same Dawn
+/// revision. Pulp's own gpu-runtime copy must not be used here: linking it into
+/// a plug-in would carry a second Dawn beside the one in Vellum's provider.
 inline bool register_editor_dawn_bootstrap(std::string_view bundle_id,
                                            std::string* error = nullptr) {
     static std::mutex mutex;
@@ -40,14 +38,8 @@ inline bool register_editor_dawn_bootstrap(std::string_view bundle_id,
     std::lock_guard lock(mutex);
     if (registered.contains(std::string(bundle_id)))
         return true;
-#if __has_include(<gpu_runtime/dawn_native_bootstrap.hpp>)
-    if (!::gpu_runtime::register_native_dawn_bootstrap(bundle_id, error))
-        return false;
-#else
-    (void)bundle_id;
     if (!::vellum::app_host::register_native_dawn_bootstrap(error))
         return false;
-#endif
     registered.emplace(bundle_id);
     return true;
 }

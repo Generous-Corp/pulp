@@ -212,8 +212,9 @@ TEST_CASE("A registered PluginViewHost factory wins over the platform host",
 }
 
 TEST_CASE("A Vellum editor attaches to a native parent view", "[pulp-vellum][editor][host]") {
-    if (!pulp::vellum::detail::platform_plugin_view_host_available())
-        SKIP("no platform plug-in view host on this OS");
+#if !defined(__APPLE__)
+    SKIP("Vellum's SDK ships its GPU plug-in view host on macOS only");
+#endif
     Fixture fixture;
     Context context(*fixture.port);
     Processor processor;
