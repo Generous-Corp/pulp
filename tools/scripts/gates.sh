@@ -185,6 +185,7 @@ SHIPYARD_WATCHDOG_TEST="$ROOT/tools/scripts/test_shipyard_pr_watchdog.py"
 SEQ_EXPOSURE="$ROOT/tools/scripts/sequencer_exposure_check.py"
 NEG_CAPABILITY="$ROOT/tools/scripts/negative_capability_check.py"
 LABEL_EXCLUSION="$ROOT/tools/scripts/ctest_label_exclusion_guard.py"
+CLOCK_IN_TESTS="$ROOT/tools/scripts/clock_in_tests_lint.py"
 VELLUM_HINT="$ROOT/tools/scripts/vellum_watch_preflight.py"
 VELLUM_BOUNDARY="$ROOT/tools/scripts/vellum_boundary_lint.py"
 CLEAN_OUTPUT_LINT="$ROOT/tools/ui-build/lint/clean_output_lint.py"
@@ -1153,6 +1154,18 @@ if [ -f "$LABEL_EXCLUSION" ]; then
         3) echo "[ctest-label-exclusion] NOT CHECKED: slow-test runtime of changed registrations (no local CTest timing data); the static label and TIMEOUT checks passed" >>"$not_checked_log" ;;
         *) fail=1 ;;
     esac
+fi
+
+# Clock-in-tests lint: a Python test under tools/ that reads the real clock
+# beside a pinned date passes until the calendar crosses a window it assumed,
+# then fails every run at once. Diff-scoped: every added or edited line is
+# judged, including lines in the baseline; the baseline is used only by --all.
+if [ -f "$CLOCK_IN_TESTS" ]; then
+    echo "" >&2
+    echo "▸ clock-in-tests lint (a test must not read the real clock unmarked)" >&2
+    if ! "$PYTHON" "$CLOCK_IN_TESTS" --base "$BASE"; then
+        fail=1
+    fi
 fi
 
 

@@ -10,6 +10,9 @@
 #include <pulp/format/clap_adapter.hpp>
 #include "../examples/pulp-gain/pulp_gain.hpp"
 #include <pulp/format/host_quirks.hpp>
+#include <pulp/runtime/log_sink.hpp>
+#include <algorithm>
+#include <memory>
 #include <clap/ext/preset-load.h>
 #include <clap/ext/note-name.h>
 #include <clap/ext/remote-controls.h>
@@ -1863,4 +1866,175 @@ TEST_CASE("CLAP instrument with declared inputs advertises its audio input ports
     REQUIRE(std::string(port.name) == "Side Chain");
     REQUIRE((port.flags & CLAP_AUDIO_PORT_IS_MAIN) == 0);
     REQUIRE(pulp::format::clap_generic::note_ports_count(&plugin, true) == 1);
+}
+
+// A host may call process with fewer input buffers than the plug-in declares
+// ports (simple hosts give an instrument none). The adapter treats each
+// missing port as silence of the declared width and still runs the Processor.
+namespace {
+struct MissingInputProbe : pulp::format::Processor {
+    static inline int process_calls = 0;
+    static inline std::size_t last_input_channels = 0;
+    static inline float last_input_peak = 0.0f;
+
+    pulp::format::PluginDescriptor descriptor() const override {
+        return {
+            .name = "MissingInputProbe",
+            .manufacturer = "PulpTest",
+            .bundle_id = "com.pulp.test.missing-input-probe",
+            .version = "1.0.0",
+            .category = pulp::format::PluginCategory::Instrument,
+            .input_buses = {{"Audio In", 2}},
+            .output_buses = {{"Audio Out", 2}},
+        };
+    }
+    void define_parameters(pulp::state::StateStore& store) override {
+        store.add_parameter(
+            {.id = 1, .name = "Level", .unit = "", .range = {0.0f, 1.0f, 0.0f, 0.01f}});
+    }
+    void prepare(const pulp::format::PrepareContext&) override {}
+    void process(pulp::audio::BufferView<float>& out,
+                 const pulp::audio::BufferView<const float>& in, pulp::midi::MidiBuffer&,
+                 pulp::midi::MidiBuffer&, const pulp::format::ProcessContext&) override {
+        ++process_calls;
+        last_input_channels = in.num_channels();
+        last_input_peak = 0.0f;
+        for (std::size_t ch = 0; ch < in.num_channels(); ++ch)
+            for (std::size_t i = 0; i < in.num_samples(); ++i)
+                last_input_peak = std::max(last_input_peak, std::abs(in.channel(ch)[i]));
+        for (std::size_t ch = 0; ch < out.num_channels(); ++ch)
+            for (std::size_t i = 0; i < out.num_samples(); ++i)
+                out.channel(ch)[i] = 0.25f;
+    }
+};
+
+struct MissingInputFixture {
+    static constexpr uint32_t kFrames = 64;
+    pulp::format::clap_adapter::PulpClapPlugin* plugin = nullptr;
+    std::array<float, kFrames> out_l{}, out_r{}, in_l{}, in_r{};
+    float* outs[2] = {out_l.data(), out_r.data()};
+    float* ins[2] = {in_l.data(), in_r.data()};
+    clap_audio_buffer_t audio_out{};
+    clap_audio_buffer_t audio_in{};
+
+    MissingInputFixture() {
+        MissingInputProbe::process_calls = 0;
+        plugin = new pulp::format::clap_adapter::PulpClapPlugin();
+        plugin->factory = [] {
+            return std::unique_ptr<pulp::format::Processor>(new MissingInputProbe);
+        };
+        plugin->plugin.plugin_data = plugin;
+        REQUIRE(pulp::format::clap_adapter::clap_init(&plugin->plugin));
+        REQUIRE(pulp::format::clap_adapter::clap_activate(&plugin->plugin, 48000.0, 32, kFrames));
+        audio_out.data32 = outs;
+        audio_out.channel_count = 2;
+        audio_in.data32 = ins;
+        audio_in.channel_count = 2;
+    }
+    ~MissingInputFixture() {
+        pulp::format::clap_adapter::clap_deactivate(&plugin->plugin);
+        pulp::format::clap_adapter::clap_destroy(&plugin->plugin);
+    }
+
+    clap_process_status run(clap_audio_buffer_t* inputs, uint32_t input_count,
+                            const clap_input_events_t* events = nullptr) {
+        out_l.fill(-1.0f);
+        out_r.fill(-1.0f);
+        clap_process_t proc{};
+        proc.frames_count = kFrames;
+        proc.audio_inputs = inputs;
+        proc.audio_inputs_count = input_count;
+        proc.audio_outputs = &audio_out;
+        proc.audio_outputs_count = 1;
+        proc.in_events = events;
+        return pulp::format::clap_adapter::clap_process(&plugin->plugin, &proc);
+    }
+    bool output_is_zero() const {
+        return std::all_of(out_l.begin(), out_l.end(), [](float v) { return v == 0.0f; });
+    }
+};
+} // namespace
+
+TEST_CASE("CLAP process with no input buffers still runs the processor", "[clap][entry][layout]") {
+    MissingInputFixture fx;
+
+    struct Events {
+        clap_event_param_value_t ev{};
+        static uint32_t size(const clap_input_events_t*) {
+            return 1;
+        }
+        static const clap_event_header_t* get(const clap_input_events_t* l, uint32_t) {
+            return &static_cast<Events*>(l->ctx)->ev.header;
+        }
+    } events;
+    events.ev.header.size = sizeof(events.ev);
+    events.ev.header.type = CLAP_EVENT_PARAM_VALUE;
+    events.ev.header.space_id = CLAP_CORE_EVENT_SPACE_ID;
+    events.ev.param_id = 1;
+    events.ev.note_id = events.ev.port_index = events.ev.channel = events.ev.key = -1;
+    events.ev.value = 0.75;
+    const clap_input_events_t in_events{&events, &Events::size, &Events::get};
+
+    REQUIRE(fx.plugin->store.get_value(1) == 0.0f);
+    REQUIRE(fx.run(nullptr, 0, &in_events) == CLAP_PROCESS_CONTINUE);
+    REQUIRE(MissingInputProbe::process_calls == 1);
+    REQUIRE(MissingInputProbe::last_input_channels == 2);
+    REQUIRE(MissingInputProbe::last_input_peak == 0.0f);
+    REQUIRE(fx.out_l[0] == 0.25f);
+    REQUIRE(fx.out_r[MissingInputFixture::kFrames - 1] == 0.25f);
+    REQUIRE(fx.plugin->store.get_value(1) == 0.75f);
+
+    // A fully supplied layout is untouched by the padding path.
+    REQUIRE(fx.run(&fx.audio_in, 1) == CLAP_PROCESS_CONTINUE);
+    REQUIRE(MissingInputProbe::process_calls == 2);
+}
+
+TEST_CASE("CLAP process logs the missing input ports once per instance", "[clap][entry][layout]") {
+    pulp::runtime::CaptureLogSink capture;
+    pulp::runtime::ScopedLogSink scoped(capture);
+    MissingInputFixture fx;
+
+    const auto count = [&] {
+        std::size_t n = 0;
+        for (const auto& r : capture.records())
+            if (r.message.find("fewer audio input ports") != std::string::npos)
+                ++n;
+        return n;
+    };
+    for (int i = 0; i < 3; ++i)
+        REQUIRE(fx.run(nullptr, 0) == CLAP_PROCESS_CONTINUE);
+    pulp::format::clap_adapter::clap_on_main_thread(&fx.plugin->plugin);
+    REQUIRE(count() == 1);
+    for (int i = 0; i < 3; ++i)
+        REQUIRE(fx.run(nullptr, 0) == CLAP_PROCESS_CONTINUE);
+    pulp::format::clap_adapter::clap_on_main_thread(&fx.plugin->plugin);
+    REQUIRE(count() == 1);
+}
+
+TEST_CASE("CLAP process still rejects malformed input layouts", "[clap][entry][layout]") {
+    MissingInputFixture fx;
+
+    SECTION("more input ports than declared") {
+        clap_audio_buffer_t two[2] = {fx.audio_in, fx.audio_in};
+        REQUIRE(fx.run(two, 2) == CLAP_PROCESS_CONTINUE);
+        REQUIRE(MissingInputProbe::process_calls == 0);
+        REQUIRE(fx.output_is_zero());
+    }
+    SECTION("null array with a non-zero count") {
+        REQUIRE(fx.run(nullptr, 1) == CLAP_PROCESS_CONTINUE);
+        REQUIRE(MissingInputProbe::process_calls == 0);
+        REQUIRE(fx.output_is_zero());
+    }
+    SECTION("wrong channel count") {
+        fx.audio_in.channel_count = 1;
+        REQUIRE(fx.run(&fx.audio_in, 1) == CLAP_PROCESS_CONTINUE);
+        REQUIRE(MissingInputProbe::process_calls == 0);
+        REQUIRE(fx.output_is_zero());
+    }
+    SECTION("null channel pointer") {
+        fx.ins[1] = nullptr;
+        REQUIRE(fx.run(&fx.audio_in, 1) == CLAP_PROCESS_CONTINUE);
+        REQUIRE(MissingInputProbe::process_calls == 0);
+        REQUIRE(fx.output_is_zero());
+    }
 }
