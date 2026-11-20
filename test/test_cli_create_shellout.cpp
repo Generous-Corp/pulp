@@ -1057,15 +1057,18 @@ TEST_CASE("pulp-cpp create --ui vellum emits a Vellum editor package and configu
         REQUIRE_FALSE(choc_copy_ec);
     }
     // Stubs carry only the surface the effect template's view uses, so the
-    // generated sources compile without a Vellum SDK.
-    write_file(fake_include / "pulp" / "vellum" / "editor_env.hpp", R"(
+    // generated sources compile without a Vellum SDK. They sit in their own
+    // include directory, reachable only through the Vellum targets as in a
+    // real SDK, so a view compiled outside the editor package fails here too.
+    const auto vellum_include = sdk / "vellum-include";
+    write_file(vellum_include / "pulp" / "vellum" / "editor_env.hpp", R"(
 #pragma once
 namespace pulp::vellum {
 struct ParamModel { int resolve(const char*) { return 0; } };
 struct EditorEnv { ParamModel params; };
 }
 )");
-    write_file(fake_include / "pulp" / "vellum" / "editor.hpp", R"(
+    write_file(vellum_include / "pulp" / "vellum" / "editor.hpp", R"(
 #pragma once
 #include <pulp/vellum/editor_env.hpp>
 namespace pulp::format { class EditorFactory {}; }
@@ -1073,7 +1076,7 @@ namespace pulp::vellum {
 template <typename ViewType> format::EditorFactory* editor_factory() { return nullptr; }
 }
 )");
-    write_file(fake_include / "vellum" / "view" / "view.hpp", R"(
+    write_file(vellum_include / "vellum" / "view" / "view.hpp", R"(
 #pragma once
 #include <memory>
 namespace vellum::view {
@@ -1090,12 +1093,12 @@ private:
 };
 }
 )");
-    write_file(fake_include / "vellum" / "view" / "widgets.hpp", R"(
+    write_file(vellum_include / "vellum" / "view" / "widgets.hpp", R"(
 #pragma once
 #include <vellum/view/view.hpp>
 namespace vellum::view { class Knob : public View { public: void set_label(const char*) {} }; }
 )");
-    write_file(fake_include / "vellum" / "view" / "parameter_binding.hpp", R"(
+    write_file(vellum_include / "vellum" / "view" / "parameter_binding.hpp", R"(
 #pragma once
 namespace vellum::view {
 struct ParameterBinding {};
@@ -1121,15 +1124,18 @@ template <typename W, typename M, typename H> ParameterBinding bind_parameter(W&
                    pulp_include_dirs +
                    "\")\n"
                    "set_target_properties(Pulp::format Pulp::format-core Pulp::format-clap-core "
-                   "Pulp::clap Pulp::standalone-contract pulp::vellum PROPERTIES "
+                   "Pulp::clap Pulp::standalone-contract PROPERTIES "
                    "INTERFACE_INCLUDE_DIRECTORIES \"${_pulp_test_includes}\")\n"
+                   "set_target_properties(pulp::vellum PROPERTIES "
+                   "INTERFACE_INCLUDE_DIRECTORIES \"" +
+                   native_path_string(vellum_include) + "\")\n"
                    "include(\"" +
                    source + "/tools/cmake/PulpUtils.cmake\")\n");
     write_file(vellum_cfg / "VellumConfig.cmake",
                "add_library(Vellum::MirrorView_core INTERFACE IMPORTED)\n"
                "set_target_properties(Vellum::MirrorView_core PROPERTIES "
                "INTERFACE_INCLUDE_DIRECTORIES \"" +
-                   include + "\")\n");
+                   native_path_string(vellum_include) + "\")\n");
     write_file(vellum_cfg / "VellumConfigVersion.cmake",
                "set(PACKAGE_VERSION \"0.2.0\")\nset(PACKAGE_VERSION_COMPATIBLE TRUE)\n");
 
@@ -1150,8 +1156,10 @@ template <typename W, typename M, typename H> ParameterBinding bind_parameter(W&
     CHECK(cmake_lists.find("VIEW_TYPE vellumgain::VellumGainView") != std::string::npos);
     CHECK(cmake_lists.find("VIEW_INCLUDE_DIRS \"${CMAKE_CURRENT_SOURCE_DIR}\"") !=
           std::string::npos);
-    CHECK(cmake_lists.find("SOURCES         vellumgain.cpp vellumgain_view.cpp") !=
-          std::string::npos);
+    // The view compiles with the editor package, which carries Vellum's
+    // include paths; the plug-in's audio core never includes Vellum.
+    CHECK(cmake_lists.find("SOURCES         vellumgain.cpp\n") != std::string::npos);
+    CHECK(cmake_lists.find("    SOURCES \"vellumgain_view.cpp\"") != std::string::npos);
     CHECK(cmake_lists.find("UI VellumGain_VellumEditor") != std::string::npos);
     const auto view_header = read_file(out_dir / "vellumgain_view.hpp");
     CHECK(view_header.find("class VellumGainView") != std::string::npos);
@@ -1211,6 +1219,21 @@ template <typename W, typename M, typename H> ParameterBinding bind_parameter(W&
     INFO(built.stderr_output);
     REQUIRE_FALSE(built.timed_out);
     REQUIRE(built.exit_code == 0);
+    // The view source compiled, and only in the target that links the editor
+    // package, never in the audio core.
+    bool view_in_package = false;
+    bool view_in_core = false;
+    for (const auto& entry : fs::recursive_directory_iterator(out_dir / "build")) {
+        const auto path = entry.path().generic_string();
+        if (path.find("vellumgain_view.cpp.o") == std::string::npos)
+            continue;
+        if (path.find("vellum-factory-compile.dir") != std::string::npos)
+            view_in_package = true;
+        if (path.find("VellumGain_Core.dir") != std::string::npos)
+            view_in_core = true;
+    }
+    CHECK(view_in_package);
+    CHECK_FALSE(view_in_core);
 
     const auto missing_dir = tmp.path / "VellumMissing";
     auto missing = run_create({"create", "VellumMissing", "--ui", "vellum", "--type", "effect",

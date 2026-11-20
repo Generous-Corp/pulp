@@ -44,7 +44,7 @@ function(_pulp_vellum_runtime_libraries out_var root)
 endfunction()
 
 function(pulp_add_vellum_editor_package package)
-    cmake_parse_arguments(PARSE_ARGV 1 _vellum_pkg "" "VIEW_HEADER;VIEW_TYPE" "VIEW_INCLUDE_DIRS")
+    cmake_parse_arguments(PARSE_ARGV 1 _vellum_pkg "" "VIEW_HEADER;VIEW_TYPE" "VIEW_INCLUDE_DIRS;SOURCES")
     if(NOT _vellum_pkg_VIEW_HEADER OR NOT _vellum_pkg_VIEW_TYPE)
         message(FATAL_ERROR "${package}: VIEW_HEADER and VIEW_TYPE are required")
     endif()
@@ -86,6 +86,14 @@ function(pulp_add_vellum_editor_package package)
         "${CMAKE_CURRENT_BINARY_DIR}" ${_vellum_pkg_VIEW_INCLUDE_DIRS})
     target_link_libraries("${_package_target}" INTERFACE
         ${_pulp_vellum_target} Vellum::MirrorView_core)
+    # View sources compile in each target that links the package, where
+    # Vellum's include paths are present; the plug-in's audio core never sees
+    # them.
+    foreach(_source IN LISTS _vellum_pkg_SOURCES)
+        cmake_path(ABSOLUTE_PATH _source BASE_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
+            NORMALIZE OUTPUT_VARIABLE _source_path)
+        target_sources("${_package_target}" INTERFACE "${_source_path}")
+    endforeach()
     # The editor loads Vellum's dylibs; each plug-in module carries copies so
     # the bundle does not depend on where the Vellum SDK was installed.
     _pulp_vellum_runtime_libraries(_runtime_libraries "${_package_target}")
