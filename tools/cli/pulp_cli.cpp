@@ -45,6 +45,7 @@ static const Command commands[] = {
     {"design", "Launch the AI design tool", cmd_design},
     {"docs", "Browse local documentation", cmd_docs},
     {"authority", "Find the native source of truth", cmd_authority},
+    {"licenses", "Show a plug-in bundle's third-party notices", cmd_licenses},
     {"dsp", "DSP capability registry (collisions + snapshot freshness)", cmd_dsp},
     {"forge", "Export Forge catalog integration data", cmd_forge},
     {"clean", "Remove build directory", cmd_clean},

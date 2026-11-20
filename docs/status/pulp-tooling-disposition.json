@@ -2960,6 +2960,25 @@
         ]
       },
       {
+        "name": "licenses",
+        "disposition": "pulp-owned",
+        "arguments": [
+          {
+            "name": "bundle-path",
+            "kind": "positional"
+          },
+          {
+            "name": "--json",
+            "kind": "flag"
+          },
+          {
+            "name": "--check",
+            "kind": "flag"
+          }
+        ],
+        "subcommands": []
+      },
+      {
         "name": "list",
         "disposition": "pulp-owned",
         "arguments": [
