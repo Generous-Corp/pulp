@@ -807,7 +807,10 @@ class ReleaseArtifactContentsTests(unittest.TestCase):
                     )
 
     def test_installed_sdk_archives_match_release_matrix(self) -> None:
-        archive_targets = installed_sdk_targets() - interface_library_targets()
+        install_text = INSTALL_RULES.read_text(encoding="utf-8")
+        archive_targets = installed_sdk_targets(install_text) - interface_library_targets()
+        if re.search(r"if\s*\(\s*TARGET\s+pulp-vellum\s*\).*?list\s*\(APPEND\s+PULP_SDK_TARGETS\s+pulp-vellum", install_text, re.DOTALL):
+            archive_targets.discard("pulp-vellum")
         matrix_targets = set(rac.DEFAULT_MATRIX.pulp_library_stems)
         for platform_targets in rac.DEFAULT_MATRIX.platform_library_stems.values():
             matrix_targets.update(platform_targets)
@@ -816,6 +819,11 @@ class ReleaseArtifactContentsTests(unittest.TestCase):
             matrix_targets,
             "PULP_SDK_TARGETS archives and release_product_matrix.json drifted",
         )
+
+    def test_optional_vellum_archive_is_conditional_in_installed_sdk_contract(self) -> None:
+        text = INSTALL_RULES.read_text(encoding="utf-8")
+        self.assertIsNotNone(re.search(r"if\s*\(\s*TARGET\s+pulp-vellum\s*\).*?list\s*\(APPEND\s+PULP_SDK_TARGETS\s+pulp-vellum", text, re.DOTALL))
+        self.assertNotIn("pulp-vellum", rac.DEFAULT_MATRIX.pulp_library_stems)
 
     def test_native_surface_is_expected_on_every_sdk_platform(self) -> None:
         # PulpInstallRules.cmake installs pulp-native wherever the target
