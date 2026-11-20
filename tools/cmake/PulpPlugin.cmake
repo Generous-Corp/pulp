@@ -735,6 +735,9 @@ function(pulp_add_plugin_bundle target)
             "${BUNDLE_BUNDLE_NAME}" "${BUNDLE_BUNDLE_ID}" "${BUNDLE_VERSION}"
             "${BUNDLE_MANUFACTURER}")
     endforeach()
+    # Same ThirdPartyNotices.{json,txt} as pulp_add_plugin(), so a multi-plugin
+    # bundle does not ship third-party code without its notices.
+    _pulp_attach_third_party_notices(${target} "${BUNDLE_BUNDLE_NAME}")
     if(_built_formats)
         list(JOIN _built_formats ";" _built_formats_display)
     else()

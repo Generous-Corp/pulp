@@ -122,6 +122,15 @@ class RepositoryTests(unittest.TestCase):
         self.assertIn("skia::skia", dawn["required_by"])
         self.assertEqual(dawn["feature"], "PULP_SKIA_PROVIDES_DAWN")
 
+    def test_every_plugin_entry_point_attaches_notices(self) -> None:
+        # pulp_add_plugin and pulp_add_plugin_bundle both build shipped
+        # VST3/CLAP bundles; each must attach ThirdPartyNotices.
+        text = (ROOT / "tools" / "cmake" / "PulpPlugin.cmake").read_text(encoding="utf-8")
+        for fn in ("pulp_add_plugin", "pulp_add_plugin_bundle"):
+            start = text.index(f"function({fn} ")
+            end = text.index("\nendfunction()", start)
+            self.assertIn("_pulp_attach_third_party_notices(", text[start:end], fn)
+
 
 if __name__ == "__main__":
     unittest.main()
