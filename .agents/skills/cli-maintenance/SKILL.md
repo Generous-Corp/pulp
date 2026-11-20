@@ -2677,6 +2677,16 @@ Gotchas:
 - `--audio-scope-json` cannot be combined with `--audio-inspector` because
   both consume the live capture FIFO.
 
+## `pulp licenses` — a built bundle's third-party notices
+
+`tools/cli/cmd_licenses.cpp` reads the `ThirdPartyNotices.json` that
+`pulp_add_plugin` writes into each bundle, through the same parser the
+runtime `pulp::format::third_party_notices()` uses, so the CLI and an About
+view can never disagree. `--check` exits non-zero when
+`sdks_without_manifest` or `unattributed_targets` is non-empty: a notice list
+with a gap must fail loudly, never print as complete. It takes a file path,
+so it is CLI-only in the MCP parity baseline.
+
 ## `pulp validate` — plugin-format validators
 
 Runs `clap-validator` / `pluginval` / `auval` / optional AAX validator
