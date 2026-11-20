@@ -1473,10 +1473,21 @@ if [ "$PULP_UI" = "vellum" ]; then
             if [ "$(sha256_of_file "$VELLUM_SDK_ARCHIVE")" != "$VELLUM_SDK_DIGEST" ]; then
                 fail "Vellum SDK archive digest does not match pulp.lock"
             else
-                python3 tools/scripts/bundle_vellum_sdk.py \
-                    --lock pulp.lock --platform "$VELLUM_PLATFORM" \
-                    --archive "$VELLUM_SDK_ARCHIVE" --integrations "$REPO_ROOT/build"
-                info "Vellum SDK staged in $REPO_ROOT/build"
+                VELLUM_TAG="$(vellum_lock_value tag)"
+                VELLUM_PREFIX="${PULP_VELLUM_SDK_PREFIX:-${HOME}/.local/share/pulp/vellum/${VELLUM_TAG}}"
+                VELLUM_STAGED="$VELLUM_PREFIX/share/pulp/vellum-sdk/${VELLUM_TAG#v}"
+                if [ -f "$VELLUM_STAGED/pulp-sdk-digest.txt" ] && \
+                   [ "$(tr -d '[:space:]' < "$VELLUM_STAGED/pulp-sdk-digest.txt")" = "$VELLUM_SDK_DIGEST" ]; then
+                    info "Vellum SDK $VELLUM_TAG already staged in $VELLUM_STAGED"
+                elif python3 tools/scripts/bundle_vellum_sdk.py \
+                        --lock "$REPO_ROOT/pulp.lock" --prefix "$VELLUM_PREFIX" \
+                        --platform "$VELLUM_PLATFORM" --archive "$VELLUM_SDK_ARCHIVE" \
+                        --integrations "$REPO_ROOT/integrations"; then
+                    info "Vellum SDK $VELLUM_TAG staged in $VELLUM_STAGED"
+                else
+                    fail "Vellum SDK staging failed (set PULP_UI=none to continue audio-only)"
+                fi
+                info "Vellum UI projects find it with CMAKE_PREFIX_PATH=$VELLUM_STAGED/sdk"
             fi
         fi
     else
