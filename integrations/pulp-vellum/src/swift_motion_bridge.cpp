@@ -1,19 +1,16 @@
-// PulpMotionBridge.cpp: C bridge for the motion observability shims
-// Links against pulp::view to expose motion::Coordinator to Swift.
-// The parameter and state shims live in PulpBridge.cpp and need no view headers.
-
 #include "PulpBridge.h"
 #include <atomic>
-#include <cstdlib>
-#include <cstring>
 #include <memory>
 #include <mutex>
-#include <pulp/view/motion.hpp>
 #include <string>
 #include <unordered_map>
+#include <utility>
 #include <vector>
+#include <vellum/view/motion.hpp>
 
 namespace {
+
+namespace motion = vellum::view::motion;
 
 /// Per-geometry-trace storage. The atomics carry the most-recently
 /// published rect; the motion Coordinator's `multi(...)` samplers read
@@ -37,7 +34,7 @@ struct PulpMotionGeometryState {
 
 struct PulpMotionGeometryEntry {
     std::shared_ptr<PulpMotionGeometryState> state;
-    pulp::view::motion::TraceHandle handle;
+    motion::TraceHandle handle;
     // The view_name that the SwiftUI/UIKit/AppKit probe registered
     // this trace under. Threaded through so out-of-band publish calls
     // (when `metric_name != "frame"` in pulp_motion_update_geometry)
@@ -70,23 +67,23 @@ std::string safe_string(const char* s) {
 extern "C" {
 
 bool pulp_motion_tracing_enabled(void) {
-    return pulp::view::motion::Coordinator::instance().tracing_enabled();
+    return motion::Coordinator::instance().tracing_enabled();
 }
 
 void pulp_motion_publish_value(const char* view, const char* metric, double value, double epsilon,
                                int precision) {
-    if (!pulp::view::motion::Coordinator::instance().tracing_enabled())
+    if (!motion::Coordinator::instance().tracing_enabled())
         return;
-    pulp::view::motion::PublishOptions opts;
+    motion::PublishOptions opts;
     opts.epsilon = epsilon;
     opts.precision = precision;
-    pulp::view::motion::publish_value(safe_string(view), safe_string(metric), value, opts);
+    motion::publish_value(safe_string(view), safe_string(metric), value, opts);
 }
 
 void pulp_motion_publish_components(const char* view, const char* metric, const char* const* keys,
                                     const double* values, int count, double epsilon,
                                     int precision) {
-    if (!pulp::view::motion::Coordinator::instance().tracing_enabled())
+    if (!motion::Coordinator::instance().tracing_enabled())
         return;
     if (count < 0 || !keys || !values)
         return;
@@ -95,40 +92,39 @@ void pulp_motion_publish_components(const char* view, const char* metric, const 
     for (int i = 0; i < count; ++i) {
         comps.emplace_back(safe_string(keys[i]), values[i]);
     }
-    pulp::view::motion::PublishOptions opts;
+    motion::PublishOptions opts;
     opts.epsilon = epsilon;
     opts.precision = precision;
-    pulp::view::motion::publish_components(safe_string(view), safe_string(metric), std::move(comps),
-                                           opts);
+    motion::publish_components(safe_string(view), safe_string(metric), std::move(comps), opts);
 }
 
 void pulp_motion_set_ambient_provenance(const char* kind, const char* id, const char* file,
                                         int line) {
-    pulp::view::motion::Provenance p;
+    motion::Provenance p;
     p.source_kind = safe_string(kind);
     p.source_id = safe_string(id);
     p.source_file = safe_string(file);
     p.source_line = line;
-    pulp::view::motion::set_ambient_provenance(std::move(p));
+    motion::set_ambient_provenance(std::move(p));
 }
 
 void pulp_motion_clear_ambient_provenance(void) {
-    pulp::view::motion::clear_ambient_provenance();
+    motion::clear_ambient_provenance();
 }
 
 int pulp_motion_register_geometry_trace(const char* view_name, int fps) {
-    auto& coord = pulp::view::motion::Coordinator::instance();
+    auto& coord = motion::Coordinator::instance();
     if (!coord.tracing_enabled())
         return 0;
     auto state = std::make_shared<PulpMotionGeometryState>();
 
-    pulp::view::motion::TraceOptions opts;
+    motion::TraceOptions opts;
     opts.fps = fps > 0 ? fps : 30;
 
     // Build a multi(...) sampler that pulls from the atomic state. We
     // capture `state` by value so the lambdas keep it alive even if the
     // C ABI map entry is removed concurrently.
-    using Component = pulp::view::motion::TraceBuilder::Component;
+    using Component = motion::TraceBuilder::Component;
     std::vector<Component> components;
     components.emplace_back("minX",
                             [state] { return state->minx.load(std::memory_order_relaxed); });
@@ -139,7 +135,7 @@ int pulp_motion_register_geometry_trace(const char* view_name, int fps) {
     components.emplace_back("height",
                             [state] { return state->height.load(std::memory_order_relaxed); });
 
-    pulp::view::motion::Provenance prov;
+    motion::Provenance prov;
     prov.source_kind = "swiftui";
     prov.source_id = safe_string(view_name);
 
@@ -191,7 +187,7 @@ void pulp_motion_update_geometry(int trace_id, const char* metric_name, double m
     // tick, so the primary "frame" metric does not double-emit here.
     const std::string name = safe_string(metric_name);
     if (!name.empty() && name != "frame") {
-        if (!pulp::view::motion::Coordinator::instance().tracing_enabled())
+        if (!motion::Coordinator::instance().tracing_enabled())
             return;
         std::vector<std::pair<std::string, double>> comps;
         comps.reserve(4);
@@ -199,15 +195,15 @@ void pulp_motion_update_geometry(int trace_id, const char* metric_name, double m
         comps.emplace_back("minY", minY);
         comps.emplace_back("width", width);
         comps.emplace_back("height", height);
-        pulp::view::motion::PublishOptions opts;
+        motion::PublishOptions opts;
         opts.epsilon = 0.1;
         opts.precision = 2;
         // Use the trace's registered view_name. Hardcoding "swiftui"
         // loses the trace identity and makes it impossible to correlate
         // out-of-band metrics with their owning SwiftUI/UIKit view.
-        pulp::view::motion::publish_components(trace_view_name.empty() ? std::string("swiftui")
-                                                                       : trace_view_name,
-                                               name, std::move(comps), opts);
+        motion::publish_components(trace_view_name.empty() ? std::string("swiftui")
+                                                           : trace_view_name,
+                                   name, std::move(comps), opts);
     }
 }
 

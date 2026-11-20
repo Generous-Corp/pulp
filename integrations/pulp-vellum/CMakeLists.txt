@@ -16,8 +16,10 @@ target_compile_features(pulp-vellum PUBLIC cxx_std_20)
 target_link_libraries(pulp-vellum PUBLIC pulp::format-core Vellum::Value)
 include("${PULP_ROOT_DIR}/integrations/pulp-vellum/cmake/PulpVellumEditorPackage.cmake")
 
-# The About view needs Vellum's view layer, which older SDKs do not ship.
+# The About view and Swift motion bridge require a Vellum SDK with its view layer.
 if(TARGET Vellum::MirrorView_core)
-    target_sources(pulp-vellum PRIVATE src/about_notices.cpp)
+    target_sources(pulp-vellum PRIVATE src/about_notices.cpp src/swift_motion_bridge.cpp)
+    set_property(TARGET pulp-vellum PROPERTY PULP_VELLUM_HAS_SWIFT_MOTION TRUE)
+    target_include_directories(pulp-vellum PRIVATE ${PULP_ROOT_DIR}/apple/Sources/PulpSwift)
     target_link_libraries(pulp-vellum PUBLIC Vellum::MirrorView_core)
 endif()

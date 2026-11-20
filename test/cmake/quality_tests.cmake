@@ -606,7 +606,7 @@ if(Python3_Interpreter_FOUND)
         "${CMAKE_SOURCE_DIR}/tools/scripts/test_build_parallelism_guard.py")
 
     # The Swift C bridge's parameter/state shims must not include view headers;
-    # the motion shims live in PulpMotionBridge.cpp.
+    # the motion shims live in the pulp-vellum integration.
     add_test(NAME swift-bridge-split-guard COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/scripts/swift_bridge_split_guard.py")
 
@@ -810,6 +810,10 @@ if(Python3_Interpreter_FOUND)
     # zones a day apart from UTC so a dependency shows up before the rollover.
     add_test(NAME clock-in-tests-lint-selftest COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/scripts/test_clock_in_tests_lint.py")
+    add_test(NAME date-sensitive-selftests-tz-matrix-selftest COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/scripts/test_date_sensitive_selftests_tz_matrix.py")
+    add_test(NAME date-sensitive-selftests-tz-matrix COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/scripts/date_sensitive_selftests_tz_matrix.py")
 
     # Capability-contract gate wiring: `agent_capability_manifest.py --check`
     # answers a different question depending on which base it resolves -- left
