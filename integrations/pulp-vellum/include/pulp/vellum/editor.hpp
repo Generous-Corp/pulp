@@ -9,6 +9,7 @@
 /// lifetime while all edits still use Pulp's existing parameter bridge.
 
 #include <pulp/format/editor_host.hpp>
+#include <pulp/format/processor.hpp>
 #include <pulp/vellum/editor_env.hpp>
 #include <pulp/vellum/param_port_model.hpp>
 #include <pulp/vellum/visual_port_feed.hpp>

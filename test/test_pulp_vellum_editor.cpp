@@ -1,9 +1,12 @@
+// First, so this file proves the header compiles on its own, as a generated
+// editor package includes it.
+#include <pulp/vellum/editor.hpp>
+
 #include <catch2/catch_test_macros.hpp>
 
 #include <pulp/format/editor_host.hpp>
 #include <pulp/format/processor.hpp>
 #include <pulp/state/store.hpp>
-#include <pulp/vellum/editor.hpp>
 
 #include <vellum/value/param_model.hpp>
 #include <vellum/view/plugin_view_host.hpp>
