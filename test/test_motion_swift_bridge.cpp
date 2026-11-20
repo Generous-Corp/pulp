@@ -1,6 +1,6 @@
 /// @file test_motion_swift_bridge.cpp
 /// Catch2 unit tests for the Swift bridge C ABI in
-/// `apple/Sources/PulpSwift/PulpBridge.cpp`. Exercises the publish
+/// `apple/Sources/PulpSwift/PulpMotionBridge.cpp`. Exercises the publish
 /// channel shim, the ambient-provenance slot, and the geometry-trace
 /// register/update/detach lifecycle without needing a Swift compiler.
 
