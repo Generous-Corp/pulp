@@ -1056,17 +1056,51 @@ TEST_CASE("pulp-cpp create --ui vellum emits a Vellum editor package and configu
                       fs::copy_options::overwrite_existing, choc_copy_ec);
         REQUIRE_FALSE(choc_copy_ec);
     }
+    // Stubs carry only the surface the effect template's view uses, so the
+    // generated sources compile without a Vellum SDK.
+    write_file(fake_include / "pulp" / "vellum" / "editor_env.hpp", R"(
+#pragma once
+namespace pulp::vellum {
+struct ParamModel { int resolve(const char*) { return 0; } };
+struct EditorEnv { ParamModel params; };
+}
+)");
     write_file(fake_include / "pulp" / "vellum" / "editor.hpp", R"(
 #pragma once
+#include <pulp/vellum/editor_env.hpp>
 namespace pulp::format { class EditorFactory {}; }
 namespace pulp::vellum {
-struct EditorEnv {};
 template <typename ViewType> format::EditorFactory* editor_factory() { return nullptr; }
 }
 )");
     write_file(fake_include / "vellum" / "view" / "view.hpp", R"(
 #pragma once
-namespace vellum::view { class View {}; }
+#include <memory>
+namespace vellum::view {
+enum class FlexAlign { center };
+enum class FlexJustify { center };
+struct Flex { FlexAlign align_items{}; FlexJustify justify_content{}; float preferred_width = 0; float preferred_height = 0; };
+class View {
+public:
+    virtual ~View() = default;
+    Flex& flex() { return flex_; }
+    void add_child(std::unique_ptr<View>) {}
+private:
+    Flex flex_;
+};
+}
+)");
+    write_file(fake_include / "vellum" / "view" / "widgets.hpp", R"(
+#pragma once
+#include <vellum/view/view.hpp>
+namespace vellum::view { class Knob : public View { public: void set_label(const char*) {} }; }
+)");
+    write_file(fake_include / "vellum" / "view" / "parameter_binding.hpp", R"(
+#pragma once
+namespace vellum::view {
+struct ParameterBinding {};
+template <typename W, typename M, typename H> ParameterBinding bind_parameter(W&, M&, H) { return {}; }
+}
 )");
     write_file(cfg / "PulpConfigVersion.cmake",
                "set(PACKAGE_VERSION \"" PULP_EXPECTED_SDK_VERSION "\")\n"
