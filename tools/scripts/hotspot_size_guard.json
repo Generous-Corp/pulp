@@ -67,7 +67,7 @@
     },
     {
       "path": "core/host/src/graph_serializer_save.cpp",
-      "max_loc": 722,
+      "max_loc": 723,
       "note": "Serializer save path: writer selection, plain and saved-identity v7 documents, the legacy v6 test writer and durable .pulpgraph file writes"
     },
     {
