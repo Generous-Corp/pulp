@@ -2,8 +2,8 @@
 // once, never blocks the caller, and leaves enumeration results unchanged.
 #include <catch2/catch_test_macros.hpp>
 
-#include <pulp/midi/device.hpp>
 #include "../core/midi/src/warm_up_test_access.hpp"
+#include <pulp/midi/device.hpp>
 
 #include <atomic>
 #include <chrono>
@@ -34,8 +34,12 @@ struct ColdBackend {
 };
 
 struct ResetGuard {
-    ResetGuard() { pulp::midi::detail::reset_warm_up_for_testing(); }
-    ~ResetGuard() { pulp::midi::detail::reset_warm_up_for_testing(); }
+    ResetGuard() {
+        pulp::midi::detail::reset_warm_up_for_testing();
+    }
+    ~ResetGuard() {
+        pulp::midi::detail::reset_warm_up_for_testing();
+    }
 };
 
 } // namespace
