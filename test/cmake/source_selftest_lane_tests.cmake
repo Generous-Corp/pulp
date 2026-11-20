@@ -113,6 +113,11 @@ add_test(NAME shipyard-merge-gate-evidence-selftest
     COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/scripts/test_shipyard_merge_gate_evidence.py")
 
+# Clock/date guard data schema contract (data only; the guards land separately).
+add_test(NAME clock-guard-data-selftest
+    COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/scripts/fixtures/test_clock_guard_data.py")
+
 add_test(NAME windows-vm-manifest-selftest
     COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/ci/test_windows_vm_manifest.py")

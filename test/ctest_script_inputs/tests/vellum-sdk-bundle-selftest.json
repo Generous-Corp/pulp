@@ -1,0 +1,11 @@
+{
+ "name": "vellum-sdk-bundle-selftest",
+ "record": {
+  "entry": "tools/scripts/test_bundle_vellum_sdk.py",
+  "inputs": [
+   "tools/scripts/bundle_vellum_sdk.py",
+   "tools/scripts/test_bundle_vellum_sdk.py"
+  ],
+  "kind": "python"
+ }
+}

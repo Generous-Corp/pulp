@@ -209,6 +209,12 @@
       "timeout": 600.0
     },
     {
+      "name": "clock-guard-data-selftest",
+      "argv": [
+        "{repo}/tools/scripts/fixtures/test_clock_guard_data.py"
+      ]
+    },
+    {
       "name": "cmake-link-floor-selftest",
       "argv": [
         "{repo}/tools/scripts/link_floor_selftest.py",
