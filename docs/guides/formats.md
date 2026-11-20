@@ -477,6 +477,9 @@ The AU adapter stores Pulp state alongside the standard AU state dictionary:
   fails the restore and leaves the plug-in's state unchanged. A session saved by
   this version and opened by an older build loses its Pulp state, because the
   older build only looks for `"pulp-state"`.
+- A processor whose AU class already stores its own bytes in the class info can
+  override `Processor::class_info_owns_plugin_state()`; the entry then holds
+  parameters only and restoring it does not call `deserialize_plugin_state()`.
 - AUv3 `fullState` and VST3 still carry the `PLST` envelope.
 
 ### Tail and Latency

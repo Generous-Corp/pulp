@@ -1718,3 +1718,12 @@ registering the same ID twice keeps both entries in `all_params()`.
   or `AUBase::RestoreState` rejects the dictionary before Pulp's entry is read;
   start from a real `SaveState()` result (`make_class_info` in
   `test_au_plugin_state.mm`). AUv3 `fullState` and VST3 keep the PLST envelope.
+* **A processor that owns its class-info state** overrides
+  `Processor::class_info_owns_plugin_state()` (default false). Save then writes
+  parameters only (flag bit 0) and skips `serialize_plugin_state()`; restore
+  applies the parameters and does not call `deserialize_plugin_state()`. Order:
+  `AUBase::RestoreState`, then the compact parameters, so an AU subclass that
+  restores its own key after calling the Pulp `RestoreState` sees parameters
+  already applied. Legacy `pulp-state` class infos still restore their payload.
+* **CRC-32** is `StateStore::crc32` (table driven, same value as the bitwise
+  definition); the parameter blob, PLST envelope and compact blob share it.
