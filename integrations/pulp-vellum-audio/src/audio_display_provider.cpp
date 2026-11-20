@@ -103,8 +103,7 @@ std::size_t AudioDisplayProvider::read_meter(std::size_t index, std::span<float>
 }
 
 std::size_t AudioDisplayProvider::read_meter(std::size_t index, std::span<float> rms,
-                                             std::span<float> peak,
-                                             AudioFrameInfo& info) noexcept {
+                                             std::span<float> peak, AudioFrameInfo& info) noexcept {
     auto* c = at(index);
     if (c == nullptr || c->shape != ::vellum::value::ChannelShape::meter)
         return 0;
