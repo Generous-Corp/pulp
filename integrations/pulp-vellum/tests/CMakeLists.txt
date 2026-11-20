@@ -26,3 +26,15 @@ if(PULP_BUILD_TESTS AND TARGET Catch2::Catch2WithMain)
             "skipping pulp-test-pulp-vellum-editor")
     endif()
 endif()
+
+if(APPLE AND PULP_BUILD_TESTS AND TARGET Catch2::Catch2WithMain)
+    find_package(VellumRmlUi CONFIG REQUIRED COMPONENTS Core SoftRenderer NativeHost)
+    add_executable(pulp-test-pulp-vellum-rmlui-editor
+        ${PULP_ROOT_DIR}/test/test_pulp_vellum_rmlui_editor.mm)
+    target_compile_options(pulp-test-pulp-vellum-rmlui-editor PRIVATE -fobjc-arc)
+    target_link_libraries(pulp-test-pulp-vellum-rmlui-editor PRIVATE
+        pulp::vellum VellumRmlUi::NativeHost VellumRmlUi::Core
+        VellumRmlUi::SoftRenderer Catch2::Catch2WithMain "-framework Cocoa")
+    include(Catch)
+    catch_discover_tests(pulp-test-pulp-vellum-rmlui-editor PROPERTIES LABELS pulp-vellum-rmlui)
+endif()

@@ -4,11 +4,11 @@
 functions:
   - name: pulp_add_rmlui_editor_package
     status: partial
-    summary: Wrap a supplied native-parent RmlUi editor host and record its RML/RCSS assets.
+    summary: Generate a native-parent RmlUi EditorFactory and record its RML, RCSS and asset roots.
     required:
       - DOCUMENT
       - STYLESHEET
-      - EDITOR_TARGET
+      - ASSET_DIRS
     creates:
       - "<package>"
 

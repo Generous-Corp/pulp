@@ -187,14 +187,16 @@ include(integrations/pulp-vellum/cmake/PulpRmlUiEditorPackage.cmake)
 pulp_add_rmlui_editor_package(my_rmlui
     DOCUMENT ${CMAKE_CURRENT_SOURCE_DIR}/ui/editor.rml
     STYLESHEET ${CMAKE_CURRENT_SOURCE_DIR}/ui/editor.rcss
-    EDITOR_TARGET my_native_rmlui_editor)
+    ASSET_DIRS ${CMAKE_CURRENT_SOURCE_DIR}/ui/assets)
 ```
 
-`EDITOR_TARGET` must already provide the ordinary editor factory properties.
-The wrapper records the reviewed document and stylesheet and links only that
-target. The current VellumRmlUi SDK does not export a native-parent Editor, so
-the helper refuses an incomplete target instead of silently selecting
-`VellumRmlUi::VellumRenderer` (which brings Vellum's Skia/Dawn renderer).
+The helper generates the ordinary `PULP_EDITOR_FACTORY_FUNCTION` and
+`PULP_EDITOR_FACTORY_HEADER` properties and records the regular document,
+stylesheet and optional asset roots. It links `pulp::vellum` plus exactly
+`VellumRmlUi::NativeHost`, `::Core` and `::SoftRenderer`; it refuses missing
+assets and any renderer closure containing `VellumRenderer`, Skia or Dawn.
+The generated editor attaches to Cocoa parents, binds all parameter ids in a
+`params` model, and pumps `NativeParentHost::idle()` from `Editor::idle()`.
 
 A plug-in that declares a package gets `NO_EDITOR`'s view-free link without
 saying so: its VST3, CLAP, AU v2 and LV2 modules link `Pulp::format-core`

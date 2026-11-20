@@ -81,23 +81,20 @@ device in the same editor. The `rmlui` agent skill
 
 ### RmlUi package status
 
-`pulp_add_rmlui_editor_package` records an RML document and RCSS stylesheet
-around a supplied native-parent editor target. The target must provide the
-normal `PULP_EDITOR_FACTORY_FUNCTION` and `PULP_EDITOR_FACTORY_HEADER`
-properties, so the package still enters `pulp_add_plugin(... UI <package>)`
-through the ordinary editor-host contract.
+`pulp_add_rmlui_editor_package` generates a concrete `format::Editor` and
+`EditorFactory` around Vellum's `vellum::rmlui::NativeParentHost`. It records the
+RML document, RCSS stylesheet and optional allowlisted asset roots. The editor
+attaches to a `cocoa_view` parent, drives `idle()` from the host tick, and binds
+the decimal id of every `ParamPort` parameter in the `params` model. Reads and
+writes go through `ParamPortModel`; writes bracket a begin/set/end gesture and
+port listeners call `dirty_model` after store changes. The package links only
+`VellumRmlUi::NativeHost`, `::Core` and `::SoftRenderer`; `VellumRenderer`, Skia
+and Dawn are rejected by the configure and link-closure checks.
 
-The installed VellumRmlUi SDK inspected for this contract exports
-`VellumRmlUi::Core`, `::SoftRenderer` and `::DevAssets`. Its renderer-neutral
-`vellum::rmlui::Backend` has `ModelHost` and `bind_model`, which is the right
-parameter seam for `pulp::vellum::ParamPortModel`, and `SoftRenderer` needs no
-Skia or Dawn. It does not export a native-parent Editor or a surface that can
-attach a Backend to `NativeParent`. Pulp's `integrations/rmlui-native` supplies
-the Metal surface and `VellumRmlUi::Metal` adapter for a newer SDK's
-`VellumRmlUi::Native` component, but it does not provide the Editor or the
-Backend-to-surface binding. The helper therefore fails closed until Vellum
-exports that missing host layer; a package cannot claim editor support from a
-document and stylesheet alone.
+The generated editor reads only the recorded regular files and asset roots.
+Missing files, directories passed as files, traversal and absolute asset paths
+fail closed. A parent view used for tests need not belong to a window, so the
+native host proof never orders a window on screen.
 
 ## How a plug-in gets its default editor
 
