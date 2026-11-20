@@ -178,6 +178,20 @@ struct PulpClapPlugin {
     std::array<int, kMaxInputBuses> declared_input_channels{};
     std::array<int, kMaxOutputBuses> declared_output_channels{};
 
+    // A host may hand fewer input buffers than the plug-in declares ports (a
+    // simple host gives an instrument none). clap_process() then fills each
+    // missing port from this silent block, sized to the activated maximum, so
+    // the Processor still runs. `padded_*` is the per-block copy that carries
+    // the host's own ports followed by the silent ones.
+    std::vector<float> silent_input;
+    std::array<float*, kMaxChannels> silent_input_ptrs{};
+    std::array<clap_audio_buffer_t, kMaxInputBuses> padded_inputs{};
+    clap_process_t padded_process{};
+    // Set once on the audio thread when a block needed padding; the log line
+    // is written from clap_on_main_thread() so process() never formats text.
+    std::atomic<bool> missing_inputs_seen{false};
+    std::atomic<bool> missing_inputs_log_pending{false};
+
     // Pre-allocated buffers — no heap allocation on audio thread
     float* output_ptrs[kMaxChannels] = {};
     const float* input_ptrs[kMaxChannels] = {};

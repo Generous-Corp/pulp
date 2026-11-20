@@ -539,6 +539,10 @@ bool clap_activate(const clap_plugin_t* plugin, double sr, uint32_t, uint32_t ma
     self->native_f64_enabled = desc.effective_capabilities().supports_f64_audio;
 
     const auto scratch_frames = static_cast<std::size_t>(max_frames);
+    self->silent_input.assign(scratch_frames, 0.0f);
+    self->silent_input_ptrs.fill(self->silent_input.data());
+    self->missing_inputs_seen.store(false, std::memory_order_relaxed);
+    self->missing_inputs_log_pending.store(false, std::memory_order_relaxed);
     resize_f64_boundary_scratch(self->f64_input_scratch, scratch_frames);
     resize_f64_boundary_scratch(self->f64_output_scratch, scratch_frames);
     resize_f64_boundary_scratch(self->f64_sidechain_scratch, scratch_frames);
@@ -1779,6 +1783,46 @@ clap_process_status clap_process(const clap_plugin_t* plugin, const clap_process
     num_samples = static_cast<uint32_t>(clamp_block_to_prepared_max(
         static_cast<int>(num_samples), self->max_buffer_size));
 
+    // A host that supplies fewer input ports than declared gets the missing
+    // ones as silence of the declared width, so the Processor still runs. A
+    // count above the declared one, a null array, or a bad channel count in a
+    // supplied port is still malformed and is rejected below.
+    if (process->audio_inputs_count < self->declared_input_bus_count &&
+        self->declared_input_bus_count <= self->padded_inputs.size() &&
+        (process->audio_inputs_count == 0 || process->audio_inputs) &&
+        self->silent_input.size() >= num_samples) {
+        bool paddable = true;
+        for (uint32_t b = process->audio_inputs_count; b < self->declared_input_bus_count; ++b) {
+            const int width = self->declared_input_channels[b];
+            if (width < 0 || width > kMaxChannels) {
+                paddable = false;
+                break;
+            }
+        }
+        if (paddable) {
+            for (uint32_t b = 0; b < process->audio_inputs_count; ++b)
+                self->padded_inputs[b] = process->audio_inputs[b];
+            for (uint32_t b = process->audio_inputs_count; b < self->declared_input_bus_count;
+                 ++b) {
+                clap_audio_buffer_t silent{};
+                silent.channel_count = static_cast<uint32_t>(self->declared_input_channels[b]);
+                silent.data32 = silent.channel_count > 0 ? self->silent_input_ptrs.data() : nullptr;
+                silent.constant_mask = ~uint64_t{0};
+                self->padded_inputs[b] = silent;
+            }
+            self->padded_process = *process;
+            self->padded_process.audio_inputs = self->padded_inputs.data();
+            self->padded_process.audio_inputs_count = self->declared_input_bus_count;
+            process = &self->padded_process;
+            if (!self->warming_render_path &&
+                !self->missing_inputs_seen.exchange(true, std::memory_order_relaxed)) {
+                self->missing_inputs_log_pending.store(true, std::memory_order_release);
+                if (self->host && self->host->request_callback)
+                    self->host->request_callback(self->host);
+            }
+        }
+    }
+
     // Reject a host block that differs from the topology selected during
     // activation before publishing any host storage to the Processor.
     if (!clap_phase_validate_layout(self, process, original_num_samples)) {
@@ -2365,7 +2409,16 @@ void clap_on_main_thread(const clap_plugin_t* plugin) {
     // request_callback() in response to the process_status flag we set when a
     // flag becomes pending, and this entrypoint runs on the main thread.
     auto* self = get_self(plugin);
-    if (!self || !self->processor || !self->host) return;
+    if (!self || !self->processor)
+        return;
+
+    if (self->missing_inputs_log_pending.exchange(false, std::memory_order_acq_rel)) {
+        runtime::log_warn("CLAP: host supplied fewer audio input ports than the {} declared; "
+                          "missing ports are processed as silence",
+                          self->declared_input_bus_count);
+    }
+    if (!self->host)
+        return;
 
     // A Program Change latched on the audio thread: resolve and load it here.
 #if PULP_CLAP_PRESET_LIBRARY
