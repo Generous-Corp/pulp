@@ -39,7 +39,7 @@ int main() {
                               {.enable_hot_reload = false,
                                .enable_theme_reload = false,
                                .script_source = "createLabel('bytecode-probe', 'ok', '');\n/*" +
-                                               std::string(2100, 'x') + "*/\n",
+                                                std::string(2100, 'x') + "*/\n",
                                .script_name = "bytecode-probe.js"});
     std::string error;
     if (!session.load(&error)) {
