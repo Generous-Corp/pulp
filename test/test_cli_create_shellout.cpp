@@ -1070,7 +1070,7 @@ struct EditorEnv { ParamModel params; };
 )");
     write_file(vellum_include / "pulp" / "vellum" / "editor.hpp", R"(
 #pragma once
-#include <pulp/vellum/editor_env.hpp>
+#include "editor_env.hpp"
 namespace pulp::format { class EditorFactory {}; }
 namespace pulp::vellum {
 template <typename ViewType> format::EditorFactory* editor_factory() { return nullptr; }
@@ -1128,7 +1128,8 @@ template <typename W, typename M, typename H> ParameterBinding bind_parameter(W&
                    "INTERFACE_INCLUDE_DIRECTORIES \"${_pulp_test_includes}\")\n"
                    "set_target_properties(pulp::vellum PROPERTIES "
                    "INTERFACE_INCLUDE_DIRECTORIES \"" +
-                   native_path_string(vellum_include) + "\")\n"
+                   native_path_string(vellum_include) +
+                   "\")\n"
                    "include(\"" +
                    source + "/tools/cmake/PulpUtils.cmake\")\n");
     write_file(vellum_cfg / "VellumConfig.cmake",
