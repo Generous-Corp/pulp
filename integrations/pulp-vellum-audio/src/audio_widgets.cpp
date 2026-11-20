@@ -61,11 +61,15 @@ void LevelMeter::sample() noexcept {
         rms_ = std::clamp(rms[0], 0.0f, 1.0f);
         peak_ = std::clamp(peak[0], 0.0f, 1.0f);
         stale_ = false;
+        info_ = next_info;
+        last_publish_ = published;
+        quiet_ticks_ = 0;
+        request_repaint();
+        return;
     }
-    info_ = next_info;
-    last_publish_ = published;
-    quiet_ticks_ = 0;
-    request_repaint();
+    // A frame with zero channels is not consumed: stay stale and retry next tick.
+    stale_ = true;
+    rms_ = peak_ = 0.0f;
 }
 
 void LevelMeter::paint(::vellum::canvas::Canvas& canvas) {
@@ -97,26 +101,34 @@ void AnalyzerScope::set_feed(AudioDisplayProvider* feed, std::size_t channel) no
     last_publish_ = 0;
     quiet_ticks_ = 0;
     stale_ = true;
-    column_count_ = 0;
+    column_count_ = 0;  // nothing drawn until a frame arrives; mapped_columns_ is kept
 }
 
 void AnalyzerScope::configure_mapping(const pulp::signal::SpectrumBinMappingConfig& config) {
     mapping_.configure(config);
-    column_count_ = std::min(config.columns, columns_.size());
+    mapped_columns_ = std::min(config.columns, columns_.size());
+    column_count_ = 0;
 }
 
-void AnalyzerScope::map_bins_(const float* values, std::size_t count) noexcept {
-    if (mapping_.valid() && count == mapping_.bin_count()) {
-        mapping_.map({values, count}, {columns_.data(), column_count_},
+bool AnalyzerScope::map_bins_(const float* values, std::size_t count) noexcept {
+    if (mapping_.valid()) {
+        // A configured mapping owns the column count; a frame of any other
+        // size is dropped rather than silently bypassing the mapping.
+        if (count != mapping_.bin_count())
+            return false;
+        mapping_.map({values, count}, {columns_.data(), mapped_columns_},
                      pulp::signal::SpectrumAggregation::peak);
-    } else {
-        column_count_ = std::min(count, columns_.size());
-        std::copy_n(values, column_count_, columns_.begin());
+        column_count_ = mapped_columns_;
+        return true;
     }
+    column_count_ = std::min(count, columns_.size());
+    std::copy_n(values, column_count_, columns_.begin());
+    return true;
 }
 
 void AnalyzerScope::set_bins(const float* values, std::size_t count) {
-    map_bins_(values, count);
+    if (!map_bins_(values, count))
+        return;
     stale_ = false;
     request_repaint();
 }
@@ -128,19 +140,19 @@ void AnalyzerScope::sample() noexcept {
     AudioFrameInfo next_info;
     if (!feed_->read_info(channel_, next_info)) {
         stale_ = true;
-        column_count_ = 0;
         return;
     }
     if (published == last_publish_) {
         ++quiet_ticks_;
-        if (quiet_ticks_ >= 8) {
+        if (quiet_ticks_ >= 8)
             stale_ = true;
-            column_count_ = 0;
-        }
         return;
     }
     const auto count = feed_->read_vector(channel_, bins_);
-    map_bins_(bins_.data(), count);
+    if (!map_bins_(bins_.data(), count)) {
+        stale_ = true;
+        return;
+    }
     info_ = next_info;
     stale_ = false;
     last_publish_ = published;

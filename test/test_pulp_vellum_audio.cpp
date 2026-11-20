@@ -184,6 +184,45 @@ TEST_CASE("Vellum audio widgets snapshot feed values", "[pulp-vellum-audio]") {
     CHECK(scope.column_count() == 3);
 }
 
+TEST_CASE("Vellum AnalyzerScope keeps its mapping across stale periods and set_feed",
+          "[pulp-vellum-audio]") {
+    pulp::vellum_audio::AudioDisplayProvider provider({
+        {.name = "spectrum", .shape = ::vellum::value::ChannelShape::vector},
+    });
+    const auto spectrum = provider.find("spectrum", ::vellum::value::ChannelShape::vector);
+    REQUIRE(spectrum);
+    pulp::vellum_audio::AnalyzerScope scope(&provider);
+    scope.set_channel(*spectrum);
+    pulp::signal::SpectrumBinMappingConfig mapping;
+    mapping.fft_size = 4;
+    mapping.columns = 3;
+    mapping.min_hz = 20.0;
+    mapping.max_hz = 18000.0;
+    mapping.floor_db = -96.0f;
+    scope.configure_mapping(mapping);
+    provider.publish_scope(*spectrum, std::array{-90.0f, -60.0f, -30.0f},
+                           {.floor_db = -96.0f, .sequence = 1});
+    scope.sample();
+    REQUIRE(scope.column_count() == 3);
+
+    for (int i = 0; i < 8; ++i)
+        scope.sample(); // quiet feed goes stale
+    CHECK(scope.stale());
+
+    provider.publish_scope(*spectrum, std::array{-80.0f, -50.0f, -20.0f},
+                           {.floor_db = -96.0f, .sequence = 2});
+    scope.sample();
+    CHECK_FALSE(scope.stale());
+    CHECK(scope.column_count() == 3);
+
+    scope.set_feed(&provider, *spectrum);
+    provider.publish_scope(*spectrum, std::array{-70.0f, -40.0f, -10.0f},
+                           {.floor_db = -96.0f, .sequence = 3});
+    scope.sample();
+    CHECK_FALSE(scope.stale());
+    CHECK(scope.column_count() == 3);
+}
+
 TEST_CASE("Vellum LevelMeter feed changes are rendered inside its bounds",
           "[pulp-vellum-audio][render]") {
     if (!::vellum::view::raw_rgba_render_available())

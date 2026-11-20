@@ -91,13 +91,14 @@ class AnalyzerScope final : public ::vellum::view::View, public ::vellum::view::
     }
 
   private:
-    void map_bins_(const float* values, std::size_t count) noexcept;
+    bool map_bins_(const float* values, std::size_t count) noexcept;
     AudioDisplayProvider* feed_ = nullptr;
     std::size_t channel_ = 0;
     pulp::signal::SpectrumBinMapping mapping_;
     std::array<float, AudioDisplayProvider::kMaxScopeSamples> bins_{};
     std::array<float, AudioDisplayProvider::kMaxScopeSamples> columns_{};
-    std::size_t column_count_ = 0;
+    std::size_t column_count_ = 0;   // columns drawn from the latest frame
+    std::size_t mapped_columns_ = 0; // configured by configure_mapping; survives staleness
     AudioFrameInfo info_;
     std::uint32_t last_publish_ = 0;
     std::uint32_t quiet_ticks_ = 0;
