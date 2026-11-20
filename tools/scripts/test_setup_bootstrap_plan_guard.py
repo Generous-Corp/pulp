@@ -70,7 +70,7 @@ class SetupBootstrapPlanGuardTest(unittest.TestCase):
             env["PULP_SHARED_FETCHCONTENT_SOURCE_DIR"] = cache
             result = subprocess.run(
                 ["bash", str(SETUP), "--deps-only", "--dry-run", "--non-interactive"],
-                cwd=REPO_ROOT, env=env, capture_output=True, text=True, timeout=30,
+                cwd=REPO_ROOT, env=env, capture_output=True, text=True, encoding="utf-8", timeout=30,
             )
         # The isolated dry run intentionally has no VST3 cache, so dependency
         # bootstrap may report that unrelated cache as incomplete; the UI
@@ -87,7 +87,7 @@ class SetupBootstrapPlanGuardTest(unittest.TestCase):
         env["PULP_UI"] = "mystery"
         result = subprocess.run(
             ["bash", str(SETUP), "--print-plan"],
-            cwd=REPO_ROOT, env=env, capture_output=True, text=True, timeout=30,
+            cwd=REPO_ROOT, env=env, capture_output=True, text=True, encoding="utf-8", timeout=30,
         )
         self.assertEqual(result.returncode, 2)
         self.assertIn("unknown PULP_UI=mystery", result.stderr)
