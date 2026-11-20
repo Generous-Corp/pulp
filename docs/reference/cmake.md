@@ -136,12 +136,14 @@ and does not run package code.
 
 ### UI Packages
 
-A UI package is any CMake target that declares two target properties:
+A UI package is any CMake target that declares two target properties, and
+optionally a third:
 
 | Property | Value |
 |---|---|
 | `PULP_EDITOR_FACTORY_FUNCTION` | Fully qualified name of a function `::pulp::format::EditorFactory* name()` that returns the package's editor factory. The factory must outlive every editor it creates; a function-local static is the usual shape. It is called on the host's main thread, the first time a host asks for the editor, never at load. |
 | `PULP_EDITOR_FACTORY_HEADER` | The header, on the package's include path, that declares that function. |
+| `PULP_EDITOR_RUNTIME_LIBRARIES` | Optional. Shared-library targets the editor loads at run time. Each format and Standalone module copies them beside its binary and finds them through an `@loader_path` (`$ORIGIN`) rpath only, so the bundle does not depend on where the package's SDK is installed. |
 
 ```cmake
 add_library(my-ui STATIC my_ui_editor.cpp)
@@ -171,7 +173,12 @@ pulp_add_plugin(MyPlugin FORMATS CLAP UI pulp::vellum-editor ...)
 ```
 
 The helper generates the ordinary factory function and links the Vellum view
-target only into this package; the parameter bridge remains view-free.
+target only into this package; the parameter bridge remains view-free. The
+package links Vellum's `Vellum::MirrorView_core`, which exports the
+GPU-backed `PluginViewHost::create()` and factory registry. Pulp registers the
+Dawn bootstrap once per plug-in bundle before creating the editor and lists the
+Vellum dylibs in its link closure as `PULP_EDITOR_RUNTIME_LIBRARIES`, so each
+plug-in bundle carries them. Configure fails closed when the SDK is too old.
 
 `pulp_add_rmlui_editor_package` is the corresponding RML/RCSS asset wrapper:
 

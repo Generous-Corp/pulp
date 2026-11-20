@@ -838,6 +838,21 @@ TEST_CASE("pulp create --ci pins the CLI's SDK version and the project configure
     CHECK(read_file(out_dir / "pulp.toml").find("sdk_version = \"" + expected + "\"") !=
           std::string::npos);
 
+    const auto rust_vellum_dir = tmp.path / "CiVellum";
+    auto rust_vellum =
+        run_rust_cli(PULP_RUST_CLI_BINARY,
+                     {"create", "CiVellum", "--ui", "vellum", "--type", "effect", "--output",
+                      native_path_string(rust_vellum_dir), "--no-build", "--ci"},
+                     source_root(), nullptr);
+    INFO(rust_vellum.stdout_output);
+    INFO(rust_vellum.stderr_output);
+    REQUIRE(rust_vellum.exit_code == 0);
+    CHECK(fs::exists(rust_vellum_dir / "civellum_view.hpp"));
+    const auto rust_vellum_cmake = read_file(rust_vellum_dir / "CMakeLists.txt");
+    CHECK(rust_vellum_cmake.find("pulp_add_vellum_editor_package(CiVellum_VellumEditor") !=
+          std::string::npos);
+    CHECK(rust_vellum_cmake.find("UI CiVellum_VellumEditor") != std::string::npos);
+
     pulp::platform::ProcessOptions options;
     options.working_directory = native_path_string(tmp.path);
     options.timeout_ms = pulp_test_cli::shellout_timeout_ms();
@@ -960,7 +975,7 @@ TEST_CASE("pulp-cpp create rejects unavailable and unknown --ui values",
     }
     TempDir tmp("pulp-create-ui-reject");
 
-    for (const char* mode : {"vellum", "rmlui"}) {
+    for (const char* mode : {"rmlui"}) {
         const auto out_dir = tmp.path / (std::string("Ui_") + mode);
         auto r = run_create({"create", "UiReject", "--ui", mode, "--type", "effect", "--output",
                              native_path_string(out_dir), "--no-build", "--ci"},
@@ -982,4 +997,125 @@ TEST_CASE("pulp-cpp create rejects unavailable and unknown --ui values",
     REQUIRE_FALSE(bogus.timed_out);
     REQUIRE(bogus.exit_code != 0);
     CHECK_FALSE(fs::exists(bogus_dir));
+}
+
+TEST_CASE("pulp-cpp create --ui vellum refuses templates that use a script UI",
+          "[cli][create][shellout][ui-mode]") {
+    if (!pulp_binary_exists()) {
+        SKIP("pulp binary not built");
+    }
+    TempDir tmp("pulp-create-ui-vellum-refuse");
+    struct Case {
+        const char* label;
+        std::vector<std::string> extra;
+        const char* template_name;
+    };
+    const Case cases[] = {
+        {"gain", {"--template", "gain"}, "gain"},
+        {"instrument", {"--type", "instrument"}, "instrument"},
+    };
+    for (const auto& c : cases) {
+        const auto out_dir = tmp.path / (std::string("Refuse_") + c.label);
+        std::vector<std::string> args = {"create", "VellumRefuse", "--ui", "vellum"};
+        args.insert(args.end(), c.extra.begin(), c.extra.end());
+        args.insert(args.end(), {"--output", native_path_string(out_dir), "--no-build", "--ci"});
+        auto r = run_create(args, source_root());
+        INFO(c.label);
+        INFO(r.stderr_output);
+        REQUIRE_FALSE(r.timed_out);
+        REQUIRE(r.exit_code != 0);
+        CHECK(r.stderr_output.find(std::string("--ui vellum is not available for the ") +
+                                   c.template_name + " template yet; it uses a script UI") !=
+              std::string::npos);
+        CHECK_FALSE(fs::exists(out_dir));
+    }
+}
+
+TEST_CASE("pulp-cpp create --ui vellum emits a Vellum editor package and configures",
+          "[cli][create][shellout][ui-mode][configure]") {
+#if !defined(PULP_CATCH2_SOURCE_DIR)
+    SKIP("no Catch2 source copy in this build to serve the generated project offline");
+#else
+    if (!pulp_binary_exists())
+        SKIP("pulp binary not built");
+    TempDir tmp("pulp-create-ui-vellum");
+    const auto sdk = tmp.path / "sdk";
+    const auto cfg = sdk / "lib" / "cmake" / "Pulp";
+    const auto vellum_cfg = sdk / "lib" / "cmake" / "Vellum";
+    write_file(cfg / "PulpConfigVersion.cmake",
+               "set(PACKAGE_VERSION \"" PULP_EXPECTED_SDK_VERSION "\")\n"
+               "set(PACKAGE_VERSION_COMPATIBLE TRUE)\n");
+    write_file(cfg / "PulpConfig.cmake", "set(PULP_SDK_DIR \"" + native_path_string(sdk) +
+                                             "\")\n"
+                                             "add_library(Pulp::format INTERFACE IMPORTED)\n"
+                                             "add_library(pulp::vellum INTERFACE IMPORTED)\n"
+                                             "function(pulp_add_plugin target)\nendfunction()\n");
+    write_file(cfg / "PulpVellumEditorPackage.cmake",
+               "function(pulp_add_vellum_editor_package package)\n"
+               "  add_library(${package} INTERFACE)\n"
+               "endfunction()\n");
+    write_file(vellum_cfg / "VellumConfig.cmake",
+               "add_library(Vellum::MirrorView_core INTERFACE IMPORTED)\n");
+    write_file(vellum_cfg / "VellumConfigVersion.cmake",
+               "set(PACKAGE_VERSION \"0.2.0\")\nset(PACKAGE_VERSION_COMPATIBLE TRUE)\n");
+
+    const auto out_dir = tmp.path / "VellumGain";
+    auto created = run_create({"create", "VellumGain", "--ui", "vellum", "--type", "effect",
+                               "--output", native_path_string(out_dir), "--no-build", "--ci"},
+                              source_root());
+    INFO(created.stdout_output);
+    INFO(created.stderr_output);
+    REQUIRE_FALSE(created.timed_out);
+    REQUIRE(created.exit_code == 0);
+    CHECK(fs::exists(out_dir / "vellumgain_view.hpp"));
+    CHECK(fs::exists(out_dir / "vellumgain_view.cpp"));
+    const auto cmake_lists = read_file(out_dir / "CMakeLists.txt");
+    CHECK(cmake_lists.find("pulp_add_vellum_editor_package(VellumGain_VellumEditor") !=
+          std::string::npos);
+    CHECK(cmake_lists.find("VIEW_HEADER \"vellumgain_view.hpp\"") != std::string::npos);
+    CHECK(cmake_lists.find("VIEW_TYPE vellumgain::VellumGainView") != std::string::npos);
+    CHECK(cmake_lists.find("UI VellumGain_VellumEditor") != std::string::npos);
+    const auto view_header = read_file(out_dir / "vellumgain_view.hpp");
+    CHECK(view_header.find("class VellumGainView") != std::string::npos);
+    // The root view ships one real control bound to the template's parameter.
+    CHECK(view_header.find("::vellum::view::Knob") != std::string::npos);
+    CHECK(view_header.find("bind_parameter(*mix_knob_, env.params") != std::string::npos);
+    CHECK(view_header.find("env.params.resolve(\"Mix\")") != std::string::npos);
+
+    pulp::platform::ProcessOptions options;
+    options.working_directory = native_path_string(tmp.path);
+    options.timeout_ms = pulp_test_cli::shellout_timeout_ms();
+    auto configure = pulp::platform::ChildProcess::run(
+        PULP_CMAKE_COMMAND,
+        {"-S", native_path_string(out_dir), "-B", native_path_string(out_dir / "build"),
+         "-DCMAKE_PREFIX_PATH=" + native_path_string(sdk),
+         "-DFETCHCONTENT_TRY_FIND_PACKAGE_MODE=NEVER",
+         "-DFETCHCONTENT_SOURCE_DIR_CATCH2=" PULP_CATCH2_SOURCE_DIR,
+         "-DFETCHCONTENT_FULLY_DISCONNECTED=ON"},
+        options);
+    INFO(configure.stdout_output);
+    INFO(configure.stderr_output);
+    REQUIRE_FALSE(configure.timed_out);
+    REQUIRE(configure.exit_code == 0);
+
+    const auto missing_dir = tmp.path / "VellumMissing";
+    auto missing = run_create({"create", "VellumMissing", "--ui", "vellum", "--type", "effect",
+                               "--output", native_path_string(missing_dir), "--no-build", "--ci"},
+                              source_root());
+    REQUIRE(missing.exit_code == 0);
+    std::error_code remove_ec;
+    fs::remove(vellum_cfg / "VellumConfig.cmake", remove_ec);
+    fs::remove(vellum_cfg / "VellumConfigVersion.cmake", remove_ec);
+    auto missing_configure = pulp::platform::ChildProcess::run(
+        PULP_CMAKE_COMMAND,
+        {"-S", native_path_string(missing_dir), "-B", native_path_string(missing_dir / "build"),
+         "-DCMAKE_PREFIX_PATH=" + native_path_string(sdk),
+         "-DFETCHCONTENT_TRY_FIND_PACKAGE_MODE=NEVER",
+         "-DFETCHCONTENT_SOURCE_DIR_CATCH2=" PULP_CATCH2_SOURCE_DIR,
+         "-DFETCHCONTENT_FULLY_DISCONNECTED=ON"},
+        options);
+    REQUIRE(missing_configure.exit_code != 0);
+    CHECK((missing_configure.stderr_output + missing_configure.stdout_output).find("Vellum") !=
+          std::string::npos);
+#endif
 }

@@ -431,7 +431,7 @@ pub fn scaffold(
     };
     let plugin_uri = format!("http://pulp.audio/plugins/{lower_name}");
     let vst3_uid = make_vst3_uid();
-    if !args.ui.is_empty() && args.ui != "none" {
+    if !args.ui.is_empty() && args.ui != "none" && args.ui != "vellum" {
         return Err(CliError::BadUsage(format!(
             "--ui {} is not available yet: needs the pulp-vellum editor package",
             args.ui
@@ -439,6 +439,18 @@ pub fn scaffold(
     }
 
     let ui_mode_line = if args.ui == "none" { "NO_EDITOR".to_owned() } else { String::new() };
+    let view_header = format!("{lower_underscored}_view.hpp");
+    let view_source = format!("{lower_underscored}_view.cpp");
+    let view_type = format!("{ns}::{class_name}View");
+    let vellum_editor_line = if args.ui == "vellum" {
+        format!("pulp_add_vellum_editor_package({class_name}_VellumEditor\n    VIEW_HEADER \"{view_header}\"\n    VIEW_TYPE {view_type}\n)")
+    } else { String::new() };
+    let ui_line = if args.ui == "vellum" {
+        format!("UI {class_name}_VellumEditor")
+    } else { ui_mode_line.clone() };
+    let vellum_find_line = if args.ui == "vellum" {
+        "find_package(Vellum CONFIG REQUIRED)\ninclude(\"${PULP_SDK_DIR}/lib/cmake/Pulp/PulpVellumEditorPackage.cmake\")".to_owned()
+    } else { String::new() };
     let vars: Vec<(&str, &str)> = vec![
         ("PLUGIN_NAME", &args.name),
         ("CLASS_NAME", &class_name),
@@ -461,6 +473,11 @@ pub fn scaffold(
         ("VST3_UID", &vst3_uid),
         ("SDK_VERSION", sdk_version),
         ("UI_MODE_LINE", &ui_mode_line),
+        ("VIEW_HEADER", &view_header),
+        ("VIEW_TYPE", &view_type),
+        ("VELLUM_EDITOR_LINE", &vellum_editor_line),
+        ("UI_LINE", &ui_line),
+        ("VELLUM_FIND_LINE", &vellum_find_line),
     ];
 
     // Pick template_key (prefer --template if supplied).
@@ -483,6 +500,17 @@ pub fn scaffold(
         )));
     }
 
+    if args.ui == "vellum" {
+        let supports_ui = fs::read_to_string(cmake_template_dir.join("CMakeLists.txt.template"))
+            .map(|t| t.contains("{{UI_LINE}}"))
+            .unwrap_or(false);
+        if !supports_ui {
+            return Err(CliError::BadUsage(format!(
+                "--ui vellum is not available for the {template_key} template yet; it uses a script UI"
+            )));
+        }
+    }
+
     fs::create_dir_all(out_dir).map_err(|e| CliError::io(out_dir.to_path_buf(), e))?;
     if standalone_mode {
         writeln!(log, "Mode: standalone product project (default)").map_err(io)?;
@@ -500,9 +528,11 @@ pub fn scaffold(
 
     // File map — same source-to-output list as C++.
     let test_name = format!("test_{lower_underscored}.cpp");
-    let file_map: [(&str, &str); 10] = [
+    let file_map: [(&str, &str); 12] = [
         ("processor.hpp.template", "processor.hpp"), // overwritten below
         ("processor.cpp.template", "processor.cpp"), // overwritten below
+        ("view.hpp.template", "view.hpp"),
+        ("view.cpp.template", "view.cpp"),
         ("agent_operations.cpp.template", "agent_operations.cpp"),
         ("CMakeLists.txt.template", "CMakeLists.txt"),
         ("clap_entry.cpp.template", "clap_entry.cpp"),
@@ -531,6 +561,9 @@ pub fn scaffold(
     }
 
     for (tmpl_file, default_out) in file_map {
+        if (matches!(tmpl_file, "view.hpp.template" | "view.cpp.template") && args.ui != "vellum") {
+            continue;
+        }
         if tmpl_file == "clap_entry.cpp.template" && !formats.contains("CLAP") {
             continue;
         }
@@ -569,10 +602,11 @@ pub fn scaffold(
                 expanded.insert_str(insert_at, "\n#include <pulp/midi/mpe_buffer.hpp>");
             }
         }
-        let final_name = rename
-            .iter()
-            .find(|(k, _)| *k == default_out)
-            .map_or(default_out, |(_, v)| *v);
+        let final_name = match default_out {
+            "view.hpp" => view_header.as_str(),
+            "view.cpp" => view_source.as_str(),
+            _ => rename.iter().find(|(k, _)| *k == default_out).map_or(default_out, |(_, v)| *v),
+        };
         let dest = out_dir.join(final_name);
         fs::write(&dest, expanded).map_err(|e| CliError::io(dest.clone(), e))?;
         writeln!(
@@ -844,6 +878,17 @@ mod tests {
     }
 
     #[test]
+    fn vellum_ui_is_refused_for_script_ui_templates() {
+        let td = tempfile::tempdir().unwrap();
+        let args = CreateArgs { name: "Gain".into(), ui: "vellum".into(), ..Default::default() };
+        write_minimal_effect_templates(td.path(), "processor {{LOWER_NAME}}\n");
+        let out = td.path().join("out");
+        let err = scaffold(&args, &out, &td.path().join("tools").join("templates"), None, "1.0.0", &mut Vec::new()).unwrap_err();
+        assert!(err.to_string().contains("--ui vellum is not available for the effect template yet; it uses a script UI"));
+        assert!(!out.exists());
+    }
+
+    #[test]
     fn class_name_camel_cases() {
         assert_eq!(to_class_name("my gain"), "MyGain");
         assert_eq!(to_class_name("my-gain-plus"), "MyGainPlus");
@@ -880,11 +925,17 @@ mod tests {
     }
 
     #[test]
-    fn unavailable_ui_packages_are_rejected() {
+    fn vellum_ui_is_accepted() {
         let td = tempfile::tempdir().unwrap();
         let args = CreateArgs { name: "Gain".into(), ui: "vellum".into(), ..Default::default() };
-        let err = scaffold(&args, &td.path().join("out"), td.path(), None, "1.0.0", &mut Vec::new()).unwrap_err();
-        assert!(err.to_string().contains("not available yet"));
+        write_minimal_effect_templates(td.path(), "processor {{LOWER_NAME}}\n");
+        fs::write(
+            td.path().join("tools").join("templates").join("effect").join("CMakeLists.txt.template"),
+            "project({{CLASS_NAME}})\n{{UI_LINE}}\n",
+        )
+        .unwrap();
+        let result = scaffold(&args, &td.path().join("out"), &td.path().join("tools").join("templates"), None, "1.0.0", &mut Vec::new());
+        assert!(result.is_ok());
     }
 
     #[test]

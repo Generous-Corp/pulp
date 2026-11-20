@@ -1,4 +1,53 @@
 # Generate a concrete pulp_add_plugin UI package for a plug-in root View type.
+#
+# In-tree, integrations/pulp-vellum defines pulp::vellum. An installed SDK
+# ships it as PulpVellumTargets.cmake next to this file; it names Vellum's
+# imported targets, so include this file after find_package(Vellum).
+if(NOT TARGET pulp::vellum AND EXISTS "${CMAKE_CURRENT_LIST_DIR}/PulpVellumTargets.cmake")
+    if(NOT TARGET Vellum::Value)
+        message(FATAL_ERROR "PulpVellumEditorPackage.cmake: call find_package(Vellum) "
+            "before including it; the installed pulp::vellum links Vellum::Value")
+    endif()
+    include("${CMAKE_CURRENT_LIST_DIR}/PulpVellumTargets.cmake")
+    if(TARGET Pulp::vellum AND NOT TARGET pulp::vellum)
+        add_library(pulp::vellum ALIAS Pulp::vellum)
+    endif()
+endif()
+
+# The shared libraries in `root`'s link closure: the Vellum dylibs an editor
+# loads at run time. Static and interface targets are walked, not listed.
+function(_pulp_vellum_runtime_libraries out_var root)
+    set(_libraries "")
+    set(_seen "")
+    set(_pending "${root}")
+    while(_pending)
+        list(POP_FRONT _pending _item)
+        if(_item MATCHES "^\\$<LINK_ONLY:(.+)>$")
+            set(_item "${CMAKE_MATCH_1}")
+        endif()
+        if(NOT TARGET "${_item}")
+            continue()
+        endif()
+        get_target_property(_aliased "${_item}" ALIASED_TARGET)
+        if(_aliased)
+            set(_item "${_aliased}")
+        endif()
+        if(_item IN_LIST _seen)
+            continue()
+        endif()
+        list(APPEND _seen "${_item}")
+        get_target_property(_type "${_item}" TYPE)
+        if(_type STREQUAL "SHARED_LIBRARY")
+            list(APPEND _libraries "${_item}")
+        endif()
+        get_target_property(_links "${_item}" INTERFACE_LINK_LIBRARIES)
+        if(_links)
+            list(APPEND _pending ${_links})
+        endif()
+    endwhile()
+    set(${out_var} "${_libraries}" PARENT_SCOPE)
+endfunction()
+
 function(pulp_add_vellum_editor_package package)
     cmake_parse_arguments(PARSE_ARGV 1 _vellum_pkg "" "VIEW_HEADER;VIEW_TYPE" "VIEW_INCLUDE_DIRS")
     if(NOT _vellum_pkg_VIEW_HEADER OR NOT _vellum_pkg_VIEW_TYPE)
@@ -8,6 +57,12 @@ function(pulp_add_vellum_editor_package package)
         message(FATAL_ERROR "${package}: pulp_add_vellum_editor_package needs "
             "Vellum::MirrorView_core, which this Vellum SDK does not provide "
             "(the v0.2.0 release lacks it; use a Vellum SDK that ships the view layer)")
+    endif()
+    # PluginViewHost::create(), its factory registry, and the GPU host are
+    # Vellum-owned. Refuse an SDK without the exported view implementation.
+    if(NOT TARGET Vellum::MirrorView_core)
+        message(FATAL_ERROR "${package}: requires a Vellum SDK exporting "
+            "Vellum::MirrorView_core and PluginViewHost::create(); the SDK is too old")
     endif()
     if(package MATCHES "::")
         string(REPLACE "::" "-" _package_target "${package}")
@@ -30,8 +85,13 @@ function(pulp_add_vellum_editor_package package)
 "#pragma once\n#include <pulp/vellum/editor.hpp>\n#include <${_vellum_pkg_VIEW_HEADER}>\n\nnamespace pulp::vellum::generated {\ninline ::pulp::format::EditorFactory* ${_package_id}() {\n    return ::pulp::vellum::editor_factory<${_vellum_pkg_VIEW_TYPE}>();\n}\n} // namespace pulp::vellum::generated\n")
     target_include_directories("${_package_target}" INTERFACE
         "${CMAKE_CURRENT_BINARY_DIR}" ${_vellum_pkg_VIEW_INCLUDE_DIRS})
-    target_link_libraries("${_package_target}" INTERFACE pulp::vellum Vellum::MirrorView_core)
+    target_link_libraries("${_package_target}" INTERFACE
+        pulp::vellum Vellum::MirrorView_core)
+    # The editor loads Vellum's dylibs; each plug-in module carries copies so
+    # the bundle does not depend on where the Vellum SDK was installed.
+    _pulp_vellum_runtime_libraries(_runtime_libraries "${_package_target}")
     set_target_properties("${_package_target}" PROPERTIES
         PULP_EDITOR_FACTORY_FUNCTION "pulp::vellum::generated::${_package_id}"
-        PULP_EDITOR_FACTORY_HEADER "pulp-vellum/editor-packages/${_package_id}.hpp")
+        PULP_EDITOR_FACTORY_HEADER "pulp-vellum/editor-packages/${_package_id}.hpp"
+        PULP_EDITOR_RUNTIME_LIBRARIES "${_runtime_libraries}")
 endfunction()
