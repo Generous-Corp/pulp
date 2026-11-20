@@ -1282,6 +1282,20 @@ public:
     /// vtable ordering (node_abi_gate).
     virtual void on_panic(PanicMode /*mode*/) {}
 
+    /// True when the AU class info already carries this processor's own bytes
+    /// under a key the AU class itself writes and restores, so the adapter's
+    /// copy of the state should hold the parameters only.
+    ///
+    /// Default false: the adapter's blob carries serialize_plugin_state() too.
+    /// When true, save omits that payload, and restoring such a blob applies
+    /// the parameters and does NOT call deserialize_plugin_state(); the owning
+    /// AU class restores its own bytes. Blobs saved without the opt-in (or in
+    /// the earlier `pulp-state` format) still restore their payload.
+    virtual bool class_info_owns_plugin_state() const {
+        return false;
+    }
+    /// Appended to preserve additive-only vtable ordering (node_abi_gate).
+
     /// Ask the plug-in to silence itself and, where the host has MIDI output,
     /// end the notes it has sent. Safe from any non-real-time thread (a UI
     /// button, a script, a menu): it records the request and returns at once;
