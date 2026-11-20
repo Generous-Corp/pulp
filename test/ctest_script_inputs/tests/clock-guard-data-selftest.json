@@ -1,0 +1,12 @@
+{
+ "name": "clock-guard-data-selftest",
+ "record": {
+  "entry": "tools/scripts/fixtures/test_clock_guard_data.py",
+  "inputs": [
+   "tools/scripts/clock_in_tests_baseline.json",
+   "tools/scripts/date_sensitive_selftests.json",
+   "tools/scripts/fixtures/test_clock_guard_data.py"
+  ],
+  "kind": "python"
+ }
+}

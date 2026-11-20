@@ -113,6 +113,11 @@ add_test(NAME shipyard-merge-gate-evidence-selftest
     COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/scripts/test_shipyard_merge_gate_evidence.py")
 
+# Clock/date guard data schema contract (data only; the guards land separately).
+add_test(NAME clock-guard-data-selftest
+    COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/scripts/fixtures/test_clock_guard_data.py")
+
 add_test(NAME windows-vm-manifest-selftest
     COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/ci/test_windows_vm_manifest.py")
@@ -129,6 +134,10 @@ add_test(NAME deps-patches-selftest
     COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/deps/test_check_patches.py")
 set_tests_properties(deps-patches-selftest PROPERTIES TIMEOUT 120)
+add_test(NAME deps-notices-selftest
+    COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/deps/test_notices.py")
+set_tests_properties(deps-notices-selftest PROPERTIES TIMEOUT 120)
 add_test(NAME dead-test-guard
     COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/scripts/dead_test_guard.py")

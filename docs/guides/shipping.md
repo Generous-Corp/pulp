@@ -128,6 +128,32 @@ plutil -p ~/Library/Audio/Plug-Ins/Components/MyPlugin.component/Contents/Info.p
 python3 -m json.tool ~/Library/Audio/Plug-Ins/Components/MyPlugin.component/Contents/Resources/pulp-build-info.json
 ```
 
+### Third-party notices in every bundle
+
+Each bundle `pulp_add_plugin()` builds also carries `ThirdPartyNotices.json`
+(`pulp.third-party-notices.v1`) and a readable `ThirdPartyNotices.txt`, next to
+`pulp-build-info.json`. They list only what that bundle links: an audio-only
+(`--ui none` / `NO_EDITOR`) plug-in names its format SDK, CHOC, Mbed TLS and the
+other runtime libraries, and no Skia, Dawn or view stack; a GPU editor adds
+those. Each entry has the name, version, SPDX license id, copyright, source URL,
+the CMake targets that brought it in, and the full notice text.
+
+The list is computed at configure time from the format target's link closure
+and from a notices manifest (`pulp.notices.v1`) per SDK. Pulp's is generated
+from `tools/deps/manifest.json` (each entry's `link_targets` and optional
+`link_feature`) and the `NOTICE.md` sections by `tools/deps/notices.py`, and
+installs as `share/pulp/notices/notices.json`. A third-party SDK or package
+ships its own `notices.json` and either calls
+`pulp_add_notice_manifest(<path>)` or installs it at
+`share/<lowercase namespace>/notices/notices.json` beside its
+`<Namespace>Config.cmake`. A linked `Namespace::` target with no manifest is
+listed under `sdks_without_manifest` rather than silently left out.
+
+When adding a dependency that plug-ins link, give its manifest entry
+`link_targets` and a `NOTICE.md` section; the generator fails without the
+section. Show the `.txt` (or the entries of the `.json`) in an About box, or
+ship it beside the installer.
+
 ## Step 2: Validate
 
 ```bash
