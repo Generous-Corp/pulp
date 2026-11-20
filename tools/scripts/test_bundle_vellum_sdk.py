@@ -102,6 +102,41 @@ class BundleVellumSdkTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "follows symlink"):
             bundle._safe_extract(archive, self.root / "destination")
 
+    def test_special_member_is_refused_on_every_python(self):
+        archive = self.root / "fifo.tar.gz"
+        with tarfile.open(archive, "w:gz") as tar:
+            info = tarfile.TarInfo("sdk/pipe")
+            info.type = tarfile.FIFOTYPE
+            tar.addfile(info)
+        with self.assertRaisesRegex(ValueError, "not a regular file"):
+            bundle._safe_extract(archive, self.root / "destination")
+
+    def test_hardlink_to_symlink_member_is_refused(self):
+        archive = self.root / "hardlink-symlink.tar.gz"
+        with tarfile.open(archive, "w:gz") as tar:
+            link = tarfile.TarInfo("sdk/link")
+            link.type = tarfile.SYMTYPE
+            link.linkname = "real"
+            tar.addfile(link)
+            hard = tarfile.TarInfo("sdk/hard")
+            hard.type = tarfile.LNKTYPE
+            hard.linkname = "sdk/link"
+            tar.addfile(hard)
+        with self.assertRaisesRegex(ValueError, "hardlink targets a symlink"):
+            bundle._safe_extract(archive, self.root / "destination")
+
+    def test_setuid_and_world_write_bits_are_stripped(self):
+        archive = self.root / "setuid.tar.gz"
+        with tarfile.open(archive, "w:gz") as tar:
+            info = tarfile.TarInfo("sdk/tool")
+            info.size = 1
+            info.mode = 0o6777
+            tar.addfile(info, io.BytesIO(b"x"))
+        destination = self.root / "destination"
+        bundle._safe_extract(archive, destination)
+        mode = (destination / "sdk" / "tool").stat().st_mode & 0o7777
+        self.assertEqual(mode & 0o7022, 0, oct(mode))
+
     def test_failed_staging_leaves_no_partial_sdk(self):
         prefix = self.root / "prefix"
         original = bundle._merge_notice

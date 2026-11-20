@@ -71,7 +71,13 @@ def _safe_extract(archive: Path, destination: Path) -> None:
             parts = Path(member.name).parts
             if any(Path(*parts[:index]) in symlinks for index in range(1, len(parts))):
                 raise ValueError(f"archive member follows symlink: {member.name}")
+            if not (member.isreg() or member.isdir() or member.issym() or member.islnk()):
+                # Python < 3.12 has no extraction filter, so refuse device
+                # files and FIFOs here on every interpreter.
+                raise ValueError(f"archive member is not a regular file, directory or link: {member.name}")
             if member.islnk():
+                if Path(member.linkname) in symlinks:
+                    raise ValueError(f"archive hardlink targets a symlink: {member.name}")
                 # Tar hardlink names are rooted at the archive extraction root.
                 link = (destination / member.linkname).resolve()
                 if link != root and root not in link.parents:
@@ -81,10 +87,14 @@ def _safe_extract(archive: Path, destination: Path) -> None:
                 if root not in link.parents and link != root:
                     raise ValueError(f"archive link escapes destination: {member.name}")
                 symlinks.add(Path(member.name))
+            if not member.issym():
+                # Match the "data" filter on every interpreter: no setuid,
+                # setgid or sticky bits, and no group/other write.
+                member.mode &= 0o755
         if sys.version_info >= (3, 12):
-            bundle.extractall(destination, filter="data")
+            bundle.extractall(destination, members=members, filter="data")
         else:
-            bundle.extractall(destination)
+            bundle.extractall(destination, members=members)
 
 
 def _merge_notice(prefix: Path, vellum_root: Path) -> None:

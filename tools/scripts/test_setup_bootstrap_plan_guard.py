@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import shutil
 import os
+import platform
 import subprocess
 import sys
 import tempfile
@@ -63,11 +64,12 @@ class SetupBootstrapPlanGuardTest(unittest.TestCase):
         result = run_guard(SETUP)
         self.assertEqual(result.returncode, 0, f"{result.stdout}{result.stderr}")
 
-    def test_ui_none_skips_rendering_downloads(self) -> None:
+    def _deps_only_dry_run(self, ui: str) -> str:
         env = os.environ.copy()
-        env["PULP_UI"] = "none"
-        with tempfile.TemporaryDirectory(prefix="pulp-setup-ui-none-") as cache:
+        env["PULP_UI"] = ui
+        with tempfile.TemporaryDirectory(prefix=f"pulp-setup-ui-{ui}-") as cache:
             env["PULP_SHARED_FETCHCONTENT_SOURCE_DIR"] = cache
+            env["PULP_VELLUM_SDK_CACHE"] = str(Path(cache) / "vellum-sdk")
             result = subprocess.run(
                 ["bash", str(SETUP), "--deps-only", "--dry-run", "--non-interactive"],
                 cwd=REPO_ROOT, env=env, capture_output=True, text=True, encoding="utf-8", timeout=30,
@@ -76,11 +78,36 @@ class SetupBootstrapPlanGuardTest(unittest.TestCase):
         # bootstrap may report that unrelated cache as incomplete; the UI
         # selection is still fully exercised before that point.
         self.assertIn(result.returncode, (0, 1), f"{result.stdout}{result.stderr}")
-        output = result.stdout + result.stderr
-        self.assertNotIn("Vellum SDK", output)
-        self.assertNotIn("WebGPU-distribution", output)
-        self.assertNotIn("wgpu-native", output)
-        self.assertNotIn("Skia", output)
+        return result.stdout + result.stderr
+
+    # Exact strings the rendering provisioning paths print. Matching these
+    # (not a bare "Skia") keeps the test independent of the wording of the
+    # PULP_UI=none skip notice.
+    RENDERING_MARKERS = (
+        "Staging the pinned Vellum SDK",
+        "vellum-sdk-",
+        "WebGPU-distribution",
+        "wgpu-native",
+        "Provisioning prebuilt Skia",
+        "Skia build directory",
+    )
+
+    def test_ui_none_skips_rendering_downloads(self) -> None:
+        output = self._deps_only_dry_run("none")
+        for marker in self.RENDERING_MARKERS:
+            self.assertNotIn(marker, output)
+
+    @unittest.skipUnless(
+        sys.platform == "darwin" and platform.machine() == "arm64",
+        "the Vellum SDK is staged on darwin-arm64 only",
+    )
+    def test_ui_vellum_reaches_sdk_staging(self) -> None:
+        """Control for the PULP_UI=none test: the same dry run with the
+        default UI does print the markers it asserts are absent."""
+        output = self._deps_only_dry_run("vellum")
+        self.assertIn("Staging the pinned Vellum SDK", output)
+        self.assertIn("vellum-sdk-", output)
+        self.assertIn("WebGPU-distribution", output)
 
     def test_unknown_ui_fails(self) -> None:
         env = os.environ.copy()
