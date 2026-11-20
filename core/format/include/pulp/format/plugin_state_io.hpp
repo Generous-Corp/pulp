@@ -21,6 +21,11 @@ using EnvelopeMigrationFn =
 
 uint32_t current_envelope_version();
 
+/// CRC-32 (IEEE 802.3, reflected, init and final xor 0xFFFFFFFF) used by the
+/// host state envelope and the AU compact state. Table driven, eight bytes per
+/// step; the value is identical to the bitwise definition.
+[[nodiscard]] uint32_t crc32(std::span<const uint8_t> bytes) noexcept;
+
 enum class RestoreBlobFormat : uint8_t {
     unknown,
     legacy_state_store,

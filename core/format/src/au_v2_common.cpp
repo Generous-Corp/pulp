@@ -798,7 +798,7 @@ const char* decode_status_name(DecodeStatus status) noexcept {
 }
 
 std::uint32_t crc32(std::span<const std::uint8_t> bytes) noexcept {
-    return state::StateStore::crc32(bytes);
+    return plugin_state_io::crc32(bytes);
 }
 
 std::vector<std::uint8_t> encode(const state::StateStore& store,

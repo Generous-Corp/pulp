@@ -5204,7 +5204,7 @@ TEST_CASE("AU compact state CRC matches published vectors and the envelope bytes
             stored |= uint32_t(blob[blob.size() - 4 + i]) << (8 * i);
         return stored == reference_crc32(blob.data(), blob.size() - 4);
     };
-    REQUIRE(trailer_ok(proc->state().serialize()));
+    REQUIRE(trailer_ok(proc->state().serialize())); // untouched, bitwise
     REQUIRE(trailer_ok(pulp::format::plugin_state_io::serialize(proc->state(), *proc)));
 }
 
