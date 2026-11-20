@@ -101,7 +101,7 @@ void AnalyzerScope::set_feed(AudioDisplayProvider* feed, std::size_t channel) no
     last_publish_ = 0;
     quiet_ticks_ = 0;
     stale_ = true;
-    column_count_ = 0;  // nothing drawn until a frame arrives; mapped_columns_ is kept
+    column_count_ = 0; // nothing drawn until a frame arrives; mapped_columns_ is kept
 }
 
 void AnalyzerScope::configure_mapping(const pulp::signal::SpectrumBinMappingConfig& config) {
