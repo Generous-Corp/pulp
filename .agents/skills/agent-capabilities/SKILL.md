@@ -2188,3 +2188,9 @@ after any byte change, including a doc comment. `--accept-fingerprint` refuses i
 ("no capability binding names ..."). Replace the literal in the registry with the
 digest `--check` reports, then run `--write` and `--check`; the only generated
 change is that header's surface fragment.
+
+A small non-capability addition (a lifecycle helper such as `midi::warm_up()`)
+belongs in the existing reviewed header it extends, not in a new public header:
+a new `core/midi/include/pulp/midi/*.hpp` fails `--check` as an unclassified
+public header until it is registered. Keep test-only seams in a `core/*/src/`
+header that the test includes by relative path.
