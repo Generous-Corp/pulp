@@ -42,6 +42,13 @@ class ParseTests(unittest.TestCase):
         self.assertEqual([f["kind"] for f in failures], ["undefined-symbol", "unknown"])
         self.assertEqual(failures[0]["detail"], "_pulp_motion_new")
 
+    def test_tool_error_is_first_error_of_its_target(self):
+        failures = ct.parse_build_log(
+            "FAILED: core/CMakeFiles/view.dir/view.cpp.o\n"
+            "ccache: error: failed to create temporary file\n")
+        self.assertEqual(failures[0]["kind"], "tool-error")
+        self.assertEqual(failures[0]["detail"], "failed to create temporary file")
+
     def test_clean_log_has_no_failures(self):
         self.assertEqual(ct.parse_build_log("[1/1] Linking CXX executable a\n"), [])
 
@@ -70,6 +77,8 @@ class GroupingTests(unittest.TestCase):
         self.assertEqual(list(report["by_row"]), ["A2"])
         self.assertEqual(report["stranded_rows_hit"], 1)
         self.assertEqual(report["build"]["failed_targets"][0]["rows"], ["A2"])
+        self.assertEqual(len(report["row_results"]), 3)
+        self.assertEqual(report["row_results"][0]["result"], "fails")
 
     def test_control_without_the_planted_header_hits_no_row(self):
         report = self.report(HEADER_LOG.replace("pulp/view/motion.hpp", "pulp/other/clean.hpp")
@@ -129,6 +138,25 @@ class EditClassTests(unittest.TestCase):
 
 
 class RepairRegressionTests(unittest.TestCase):
+    def test_restore_deleted_referenced_js_input(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "core/view/js").mkdir(parents=True)
+            (root / "core/view/cmake").mkdir(parents=True)
+            source = root / "core/view/js/css-colors.js"
+            source.write_text("var __cssColors__ = {};\n", encoding="utf-8")
+            (root / "core/view/cmake/PulpViewJsPreludes.cmake").write_text(
+                "js/css-colors.js\n", encoding="utf-8")
+            for args in (["init", "-q"], ["add", "."],
+                         ["-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid",
+                          "commit", "-qm", "fixture"]):
+                done = ct.run(["git", "-C", str(root), *args])
+                self.assertEqual(done.returncode, 0, done.stderr)
+            source.unlink()
+            restored = ct.restore_deleted_inputs(root, ["core/view/js/css-colors.js"])
+            self.assertEqual(restored[0]["restored"], "core/view/js/css-colors.js")
+            self.assertEqual(source.read_text(encoding="utf-8"), "var __cssColors__ = {};\n")
+
     def test_external_and_symlink_diagnostics_cannot_write_outside_scratch(self):
         with tempfile.TemporaryDirectory() as tmp:
             parent = Path(tmp)
@@ -366,6 +394,7 @@ class RepairRegressionTests(unittest.TestCase):
                     built = subprocess.CompletedProcess([], 0, 'build output', '')
                     with mock.patch.object(ct, "make_scratch"), mock.patch.object(ct, "delete_paths", return_value=(0, [])), \
                          mock.patch.object(ct, "deleted_data_still_referenced", return_value=[]), \
+                 mock.patch.object(ct, "restore_deleted_inputs", return_value=[]), \
                          mock.patch.object(ct, "run", side_effect=[done, built] if ok else [done]), \
                          mock.patch.object(ct, "repair_configure", side_effect=AssertionError("repair must not run")):
                         self.assertEqual(ct.main(["--scratch", str(root / "source"), "--report", str(report), "--no-repair"]), 0)
@@ -382,12 +411,14 @@ class RepairRegressionTests(unittest.TestCase):
             built = subprocess.CompletedProcess([], 0, 'build output', '')
             with mock.patch.object(ct, "make_scratch"), mock.patch.object(ct, "delete_paths", return_value=(0, [])), \
                  mock.patch.object(ct, "deleted_data_still_referenced", return_value=[]), \
+                 mock.patch.object(ct, "restore_deleted_inputs", return_value=[]), \
                  mock.patch.object(ct, "run", side_effect=[configure, built]) as run_mock:
                 self.assertEqual(ct.main(["--scratch", str(root / "source"), "--report", str(report),
                                           "--no-repair", "--build-wrapper", "/usr/local/bin/leased-build"]), 0)
             build_call = run_mock.call_args_list[1]
             self.assertEqual(build_call.args[0][0], "/usr/local/bin/leased-build")
             self.assertEqual(build_call.args[0][1:3], ["cmake", "--build"])
+            self.assertTrue(build_call.kwargs["env"]["CCACHE_TEMPDIR"].endswith("build/cutover-ccache-tmp"))
 
 
 class InputTests(unittest.TestCase):
