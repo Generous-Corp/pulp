@@ -606,7 +606,7 @@ if(Python3_Interpreter_FOUND)
         "${CMAKE_SOURCE_DIR}/tools/scripts/test_build_parallelism_guard.py")
 
     # The Swift C bridge's parameter/state shims must not include view headers;
-    # the motion shims live in PulpMotionBridge.cpp.
+    # the motion shims live in the pulp-vellum integration.
     add_test(NAME swift-bridge-split-guard COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/scripts/swift_bridge_split_guard.py")
 

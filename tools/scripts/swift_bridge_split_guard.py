@@ -3,7 +3,7 @@
 
 apple/Sources/PulpSwift/PulpBridge.cpp holds the pulp_param_*, pulp_state_* and
 plug-in info shims. They need only the format and state headers; the motion
-shims live in PulpMotionBridge.cpp. This check fails when PulpBridge.cpp
+shims live in the pulp-vellum integration. This check fails when PulpBridge.cpp
 includes any pulp/view/ header, which would drag the view layer back into
 every consumer of the parameter bridge.
 """
