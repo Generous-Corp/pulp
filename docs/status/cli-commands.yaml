@@ -723,7 +723,7 @@ commands:
         description: Configure the generated project with `CMAKE_BUILD_TYPE=Debug` instead of the default Release build.
       - name: --ui
         kind: option
-        description: "UI stack: none selects audio-only NO_EDITOR; vellum and rmlui are reserved until the pulp-vellum editor package is available."
+        description: "UI stack: none selects audio-only NO_EDITOR; vellum emits a root Vellum view and pulp-vellum editor package; rmlui remains reserved. Vellum requires an SDK that includes Vellum::MirrorView_core."
     docs: reference/cli.md#create
 
   - name: cache
@@ -1034,6 +1034,21 @@ commands:
             kind: flag
             description: Emit stable routing and provenance JSON.
     docs: reference/cli.md#authority
+
+  - name: licenses
+    status: usable
+    summary: Show the third-party notices shipped by a plug-in bundle.
+    args:
+      - name: bundle-path
+        kind: positional
+        description: Path to a plug-in bundle or directory containing ThirdPartyNotices.json.
+      - name: --json
+        kind: flag
+        description: Print the generated ThirdPartyNotices.json document.
+      - name: --check
+        kind: flag
+        description: Exit non-zero when the document reports an SDK without a manifest or an unattributed target.
+    docs: reference/cli.md#licenses
 
   - name: forge
     status: experimental

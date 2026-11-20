@@ -161,4 +161,32 @@ public:
 
 std::unique_ptr<MidiSystem> create_midi_system();
 
+// Background warm-up of the platform MIDI backend.
+//
+// On macOS the first CoreMIDI call in a process (the first port count) connects
+// to the system MIDI server and can block for hundreds of milliseconds when the
+// server is cold. An editor that lists MIDI ports while it opens would stall its
+// UI thread for that long. warm_up() moves the connection and the first
+// enumeration onto a worker so a later enumerate_inputs()/enumerate_outputs()
+// finds the connection ready.
+//
+// - warm_up() never blocks and is safe to call from any thread, any number of
+//   times; only the first call starts work.
+// - The warm-up only reads the port lists and discards them. It creates no
+//   client, opens no port, and delivers nothing, so results from the normal
+//   enumeration calls are unchanged.
+// - Platforms whose backend has no costly first call do nothing.
+// - create_midi_system() on Apple platforms calls warm_up() itself.
+
+/// Starts the one-time backend warm-up on a worker thread. Returns at once.
+void warm_up();
+
+/// True once the warm-up has finished (also true after one that did nothing).
+/// False before warm_up() was ever called.
+[[nodiscard]] bool warm_up_done() noexcept;
+
+/// Blocks until a started warm-up has finished. Returns at once when none was
+/// started. For tests and for callers that must have the connection ready.
+void wait_for_warm_up() noexcept;
+
 } // namespace pulp::midi

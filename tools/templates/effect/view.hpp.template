@@ -1,0 +1,13 @@
+#pragma once
+
+#include <pulp/vellum/editor.hpp>
+#include <vellum/view/view.hpp>
+
+namespace {{NAMESPACE}} {
+
+class {{CLASS_NAME}}View final : public ::vellum::view::View {
+public:
+    explicit {{CLASS_NAME}}View(::pulp::vellum::EditorEnv&) {}
+};
+
+} // namespace {{NAMESPACE}}

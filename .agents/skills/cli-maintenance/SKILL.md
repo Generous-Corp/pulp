@@ -474,7 +474,7 @@ provide the required headless/CDP capture capabilities".
 `pulp create` parses its flags twice: in `tools/cli/cmd_create.cpp` and in the
 Rust `experimental/pulp-rs/src/cmd/create.rs`. A flag added to one only works
 from that binary. A flag that writes into the generated project through a
-template placeholder (for example `{{UI_MODE_LINE}}` for `--ui`) also needs the
+template placeholder (for example `{{UI_LINE}}` for `--ui`, which becomes `NO_EDITOR` or `UI <Name>_VellumEditor`) also needs the
 placeholder in `tools/scripts/verify_create_templates.py` and in
 `test/cmake/create_template_tests.cmake`'s expansion list. Otherwise the
 template check fails on an unknown placeholder, or a generated project carries
@@ -2676,6 +2676,16 @@ Gotchas:
   flags.
 - `--audio-scope-json` cannot be combined with `--audio-inspector` because
   both consume the live capture FIFO.
+
+## `pulp licenses`: a built bundle's third-party notices
+
+`tools/cli/cmd_licenses.cpp` reads the `ThirdPartyNotices.json` that
+`pulp_add_plugin` writes into each bundle, through the same parser the
+runtime `pulp::format::third_party_notices()` uses, so the CLI and an About
+view can never disagree. `--check` exits non-zero when
+`sdks_without_manifest` or `unattributed_targets` is non-empty: a notice list
+with a gap must fail loudly, never print as complete. It takes a file path,
+so it is CLI-only in the MCP parity baseline.
 
 ## `pulp validate` — plugin-format validators
 

@@ -99,16 +99,6 @@ if(TARGET pulp-signal-mufft AND NOT APPLE)
     list(APPEND PULP_SDK_TARGETS pulp-signal-mufft)
 endif()
 
-# Optional Vellum integration packages. They remain absent from the SDK unless
-# the corresponding UI option was selected, while an enabled package is
-# exported alongside the other Pulp targets for installed Vellum consumers.
-if(TARGET pulp-vellum)
-    list(APPEND PULP_SDK_TARGETS pulp-vellum)
-endif()
-if(TARGET pulp-vellum-audio)
-    list(APPEND PULP_SDK_TARGETS pulp-vellum-audio)
-endif()
-
 # Modal-spec JSON parsing has a source-bearing library separate from the
 # header-only signal umbrella. Export it or installed consumers can include
 # modal_spec.hpp but cannot link parse_modal_spec()/to_json().
@@ -205,12 +195,19 @@ if(TARGET pulp-native)
     list(APPEND PULP_SDK_TARGETS pulp-native)
 endif()
 
+# The optional Vellum editor bridge is part of the installed SDK when it was
+# enabled for this build. Generated `pulp create --ui vellum` projects link
+# against this exported target and its public headers.
+set(PULP_SDK_HAS_VELLUM_BRIDGE OFF)
 if(TARGET pulp-vellum)
-    install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/integrations/pulp-vellum/include/pulp/"
-        DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/pulp"
-        FILES_MATCHING PATTERN "*.hpp" PATTERN "*.h")
+    list(APPEND PULP_SDK_TARGETS pulp-vellum)
+    set(PULP_SDK_HAS_VELLUM_BRIDGE ON)
 endif()
+# The optional Vellum audio meters/scopes package links Vellum::Value and
+# Vellum::MirrorView_core PUBLIC, so PulpConfig must re-find Vellum for it too.
 if(TARGET pulp-vellum-audio)
+    list(APPEND PULP_SDK_TARGETS pulp-vellum-audio)
+    set(PULP_SDK_HAS_VELLUM_BRIDGE ON)
     install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/integrations/pulp-vellum-audio/include/pulp/"
         DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/pulp"
         FILES_MATCHING PATTERN "*.hpp" PATTERN "*.h")
@@ -398,6 +395,12 @@ foreach(subsystem IN LISTS _pulp_sdk_header_subsystems)
     endif()
 endforeach()
 unset(_pulp_sdk_header_subsystems)
+
+if(TARGET pulp-vellum)
+    install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/integrations/pulp-vellum/include/pulp/"
+        DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/pulp"
+        FILES_MATCHING PATTERN "*.hpp" PATTERN "*.h")
+endif()
 
 if(TARGET pulp-native)
     install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/integrations/pulp-native/include/pulp/"
@@ -936,6 +939,8 @@ install(FILES
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpUiAssets.cmake"
     # Included by PulpUtils.cmake: pulp_add_plugin(... UI <package>).
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpEditorPackage.cmake"
+    # Included by generated --ui vellum projects.
+    "${CMAKE_CURRENT_SOURCE_DIR}/integrations/pulp-vellum/cmake/PulpVellumEditorPackage.cmake"
     # Included by PulpUtils.cmake: pulp_add_js_bytecode().
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpJsBytecode.cmake"
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpInstall.cmake"

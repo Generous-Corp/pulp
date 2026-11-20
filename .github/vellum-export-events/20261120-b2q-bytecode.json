@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "event_id": "20261120-b2q-bytecode",
+  "kind": "exported-path-change",
+  "created_at": "2026-11-20T14:00:26Z",
+  "receipt_export_id": "20261107-f0ac0a4ff392",
+  "paths": [
+    "core/view/src/script_bytecode_blob.cpp"
+  ],
+  "vellum_inherits": false,
+  "rationale": "Adds malformed embedded QuickJS bytecode logging in Pulp-owned view runtime code. Vellum should not inherit this Pulp-specific runtime diagnostic change."
+}

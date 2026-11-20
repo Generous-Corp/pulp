@@ -92,6 +92,7 @@ target_sources(pulp-format-core PRIVATE
     src/transport_quantizer.cpp
     src/editor_prewarm.cpp
     src/app_updates.cpp
+    src/third_party_notices.cpp
 )
 
 target_sources(pulp-format-view PRIVATE
@@ -139,6 +140,8 @@ target_link_libraries(pulp-format-core
         pulp::native-components
         # Processor::value_channels() and the default editor ports.
         pulp::dataplane
+    PRIVATE
+        ${CMAKE_DL_LIBS}
 )
 
 # PUBLIC, and required rather than merely tidy. Three things depend on it:

@@ -228,6 +228,10 @@ pulp_add_test_suite(pulp-test-midi GROUP pulp-test-group-cap-midi
 pulp_add_test_suite(pulp-test-midi-file GROUP pulp-test-group-cap-midi
     LIBRARIES pulp::midi)
 
+# Background warm-up of the platform MIDI backend's slow first call.
+pulp_add_test_suite(pulp-test-midi-warm-up GROUP pulp-test-group-cap-midi
+    LIBRARIES pulp::midi)
+
 # MIDI panic message generation, held-note offs and classification
 pulp_add_test_suite(pulp-test-midi-panic GROUP pulp-test-group-cap-midi
     LIBRARIES pulp::midi)
@@ -490,6 +494,10 @@ pulp_add_test_suite(pulp-test-pulpset-replay GROUP pulp-test-group-cap-format
 # Diagnostic reporter tests
 pulp_add_test_suite(pulp-test-diagnostic GROUP pulp-test-group-cap-format
     SOURCES test_diagnostic_reporter.cpp
+    LIBRARIES pulp::format)
+
+pulp_add_test_suite(pulp-test-third-party-notices GROUP pulp-test-group-cap-format
+    SOURCES test_third_party_notices.cpp
     LIBRARIES pulp::format)
 
 # CLAP entry point macro test

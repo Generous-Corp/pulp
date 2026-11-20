@@ -34,6 +34,7 @@
     "import-design": "Heavy multi-step import; agents call the binary directly today (see #1997 follow-up)",
     "inspect": "Top-level static-profile and offline-audit command; MCP exposes only the in-process profiles sub-tool",
     "loop": "Watch loop; same reasoning as dev",
+    "licenses": "Bundle notice inspection is a file-oriented release check; agents shell out with an explicit bundle path and no RPC state is needed",
     "macos": "Per-PR macOS-runner retargeting; agents call via Bash",
     "overflow": "macOS overflow routing; agents call via Bash",
     "pr": "Routes to `shipyard pr`; agents call shipyard directly",
