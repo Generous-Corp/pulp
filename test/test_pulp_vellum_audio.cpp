@@ -266,7 +266,9 @@ TEST_CASE("Vellum AnalyzerScope feed changes are rendered inside its bounds",
     scope.set_channel(*spectrum);
     scope.set_bounds({0, 0, 128, 96});
     pulp::signal::SpectrumBinMappingConfig mapping;
-    mapping.fft_size = 4;
+    // bin_count() is fft_size / 2 + 1, so fft_size 6 matches the 4-bin frames
+    // below; a mismatched frame is dropped and the scope would stay stale.
+    mapping.fft_size = 6;
     mapping.columns = 4;
     mapping.min_hz = 20.0;
     mapping.max_hz = 18000.0;
@@ -276,10 +278,12 @@ TEST_CASE("Vellum AnalyzerScope feed changes are rendered inside its bounds",
     provider.publish_scope(*spectrum, std::array{-90.0f, -70.0f, -50.0f, -30.0f},
                            {.floor_db = -96.0f, .sequence = 1});
     scope.sample();
+    REQUIRE_FALSE(scope.stale());
     const auto first = render(scope);
     provider.publish_scope(*spectrum, std::array{-80.0f, -45.0f, -20.0f, -5.0f},
                            {.floor_db = -96.0f, .sequence = 2});
     scope.sample();
+    REQUIRE_FALSE(scope.stale());
     const auto second = render(scope);
     const auto repeat = render(scope);
 
