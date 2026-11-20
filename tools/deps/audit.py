@@ -44,6 +44,7 @@ It verifies two classes of invariant:
 from __future__ import annotations
 
 import argparse
+import datetime
 import functools
 import hashlib
 import json
@@ -1066,10 +1067,57 @@ def find_uncovered_declarations(
 VELLUM_DRIFT_FIELD = "vellum_renderer_drift_check"
 GPU_RUNTIME_ENTRY = "vellum-gpu-runtime"
 VELLUM_CHECKOUT_ENV = "PULP_VELLUM_CHECKOUT"
+PIN_TRANSITION_FILE = "tools/deps/pin_transition.json"
 VELLUM_ARCHIVE_SHA_RE = re.compile(
     r'set\(\s*_vellum_expected_archive_sha256\s+"([0-9A-Fa-f]{64})"\s*\)')
 VELLUM_TUPLE_RE = re.compile(r"(chrome/m\d+)\s+macOS universal tuple")
 FULL_SHA_RE = re.compile(r"[0-9a-f]{40}")
+
+
+
+
+def validate_pin_transition(transition: dict, artifact_id: str, old_digest: str,
+                           new_digest: str, *, now: datetime.datetime | None = None) -> list[str]:
+    """Validate one generic old/new digest transition, failing closed."""
+    errors: list[str] = []
+    if not isinstance(transition, dict) or transition.get("schema") != "pulp.pin-transition.v1":
+        return ["pin transition has an invalid schema"]
+    expires = transition.get("expires_at")
+    try:
+        deadline = datetime.datetime.fromisoformat(str(expires).replace("Z", "+00:00"))
+    except (TypeError, ValueError):
+        return ["pin transition has an invalid expires_at"]
+    current = now or datetime.datetime.now(datetime.timezone.utc)
+    if deadline <= current:
+        errors.append("pin transition is expired")
+    entries = transition.get("entries")
+    if not isinstance(entries, list):
+        return errors + ["pin transition entries must be a list"]
+    matches = [e for e in entries if isinstance(e, dict) and e.get("artifact_id") == artifact_id]
+    if len(matches) != 1:
+        return errors + [f"pin transition must have exactly one entry for {artifact_id}"]
+    entry = matches[0]
+    old = entry.get("old_sha256"); new = entry.get("new_sha256")
+    if not all(isinstance(value, str) and re.fullmatch(r"[0-9a-f]{64}", value) for value in (old, new)):
+        errors.append(f"pin transition {artifact_id} has malformed digests")
+    elif old == new or {old, new} != {old_digest, new_digest}:
+        errors.append(f"pin transition {artifact_id} does not name the observed old/new digests")
+    if not isinstance(entry.get("reason"), str) or not entry["reason"].strip():
+        errors.append(f"pin transition {artifact_id} has no reason")
+    if not isinstance(entry.get("owner"), str) or not entry["owner"].strip():
+        errors.append(f"pin transition {artifact_id} has no owner")
+    return errors
+
+
+def renderer_transition(artifact_id: str, old_digest: str, new_digest: str) -> list[str]:
+    path = Path(PIN_TRANSITION_FILE)
+    if not path.is_file():
+        return [f"{path} is required for a renderer pin transition"]
+    try:
+        transition = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as error:
+        return [f"{path} is unreadable: {error}"]
+    return validate_pin_transition(transition, artifact_id, old_digest, new_digest)
 
 
 class VellumPinUnavailable(RuntimeError):
@@ -1182,9 +1230,23 @@ def vellum_renderer_drift(manifest: list[dict], read_source=None) -> tuple[str, 
                 f"the renderer lock is read at {commit}, but Pulp pins {GPU_RUNTIME_ENTRY} "
                 f"at {pinned or 'nothing'}; they must be the same commit")
     if vellum_sha != pulp_sha.lower():
-        problems.append(
-            f"archive digest differs: Vellum {vellum_sha} ({where}) vs Pulp {pulp_sha} "
-            f"(manifest Skia release_assets.{asset_key})")
+        transition_errors = renderer_transition(
+            f"renderer/{asset_key}", vellum_sha, pulp_sha.lower())
+        if transition_errors:
+            problems.append(
+                f"archive digest differs: Vellum {vellum_sha} ({where}) vs Pulp {pulp_sha} "
+                f"(manifest Skia release_assets.{asset_key}); " + "; ".join(transition_errors))
+    elif Path(PIN_TRANSITION_FILE).is_file():
+        try:
+            transition = json.loads(Path(PIN_TRANSITION_FILE).read_text(encoding="utf-8"))
+            entries = transition.get("entries", []) if isinstance(transition, dict) else []
+            active = [e for e in entries if isinstance(e, dict)
+                      and e.get("artifact_id") == f"renderer/{asset_key}"
+                      and pulp_sha.lower() in {e.get("old_sha256"), e.get("new_sha256")}]
+            if active:
+                problems.append(f"{PIN_TRANSITION_FILE} is present without a renderer pin transition")
+        except (OSError, json.JSONDecodeError):
+            pass
     # Every macOS build forwards its device layer to gpu-runtime, whose lock
     # pins one macOS asset, so each mac-* selector must resolve that asset: an
     # x86_64-only build that fetched a thin archive fails the lock's Dawn check.

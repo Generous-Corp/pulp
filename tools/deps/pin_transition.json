@@ -1,0 +1,22 @@
+{
+  "schema": "pulp.pin-transition.v1",
+  "expires_at": "2026-12-04T00:00:00Z",
+  "owner": "danielraffel",
+  "reason": "Expand/contract transition from the original Skia/Dawn release to chrome/m158-attested.1 while Vellum publishes the matching renderer lock and mirror receipt.",
+  "entries": [
+    {
+      "artifact_id": "renderer/mac-universal",
+      "old_sha256": "dca73c0eee5b0f6d129fe357d0754f7165c6b436051e0de947aeedd3e1bde250",
+      "new_sha256": "1779c7d1ba5c73a0d6a1f33b77fbf30774bbd9f7542c1c42cc5129f57e99fbd4",
+      "owner": "danielraffel",
+      "reason": "attested.1 Metal renderer transition"
+    },
+    {
+      "artifact_id": "renderer/libdawn_combined.a",
+      "old_sha256": "6c6c5535e3b004ca260f388536c1baa737c11479d0a95865d174888d7d3077f3",
+      "new_sha256": "337d3beff192f51c0905ac0cc25fc268f9be94cfce58f868a2ede0ad4683c168",
+      "owner": "danielraffel",
+      "reason": "attested.1 Metal Dawn transition"
+    }
+  ]
+}
