@@ -28,7 +28,7 @@ class BundleVellumSdkTests(unittest.TestCase):
             tar.add(source / "sdk", arcname="sdk")
         digest = hashlib.sha256(self.archive.read_bytes()).hexdigest()
         self.lock = self.root / "pulp.lock"
-        self.lock.write_text(json.dumps({"vellum": {"tag": "v0.2.0", "sdk_digest": digest}}), encoding="utf-8")
+        self.lock.write_text(json.dumps({"vellum": {"tag": "v0.2.0", "sdk_digest": digest, "sdk_url": "https://example.invalid/vellum-sdk.tar.gz"}}), encoding="utf-8")
 
     def tearDown(self):
         self.tmp.cleanup()

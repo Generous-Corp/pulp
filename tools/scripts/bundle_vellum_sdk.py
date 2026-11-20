@@ -18,10 +18,10 @@ from pathlib import Path
 SUPPORTED_PLATFORMS = {"darwin-arm64"}
 
 
-def _lock(path: Path) -> tuple[str, str]:
+def _lock(path: Path) -> tuple[str, str, str]:
     data = json.loads(path.read_text(encoding="utf-8"))
     vellum = data["vellum"]
-    return vellum["tag"], vellum["sdk_digest"]
+    return vellum["tag"], vellum["sdk_digest"], vellum["sdk_url"]
 
 
 def archive_name(tag: str, platform: str) -> str:
@@ -30,7 +30,7 @@ def archive_name(tag: str, platform: str) -> str:
 
 def resolve_archive(lock_path: Path, platform: str, archive: Path | None,
                     archive_dir: Path | None, fetch: bool = False) -> tuple[Path | None, str]:
-    tag, digest = _lock(lock_path)
+    tag, digest, url = _lock(lock_path)
     if platform not in SUPPORTED_PLATFORMS:
         raise ValueError(
             f"Vellum publishes no SDK for {platform} yet; only darwin-arm64 is lock-pinned"
@@ -43,7 +43,6 @@ def resolve_archive(lock_path: Path, platform: str, archive: Path | None,
             return None, f"missing Vellum SDK archive for {tag}; expected sha256 vellum.sdk_digest {digest}"
         archive_dir.mkdir(parents=True, exist_ok=True)
         candidate = archive_dir / archive_name(tag, platform)
-        url = f"https://github.com/Generous-Corp/vellum/releases/download/{tag}/{candidate.name}"
         try:
             urllib.request.urlretrieve(url, candidate)
         except OSError as exc:

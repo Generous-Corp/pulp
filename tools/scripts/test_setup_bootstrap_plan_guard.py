@@ -63,6 +63,35 @@ class SetupBootstrapPlanGuardTest(unittest.TestCase):
         result = run_guard(SETUP)
         self.assertEqual(result.returncode, 0, f"{result.stdout}{result.stderr}")
 
+    def test_ui_none_skips_rendering_downloads(self) -> None:
+        env = os.environ.copy()
+        env["PULP_UI"] = "none"
+        with tempfile.TemporaryDirectory(prefix="pulp-setup-ui-none-") as cache:
+            env["PULP_SHARED_FETCHCONTENT_SOURCE_DIR"] = cache
+            result = subprocess.run(
+                ["bash", str(SETUP), "--deps-only", "--dry-run", "--non-interactive"],
+                cwd=REPO_ROOT, env=env, capture_output=True, text=True, timeout=30,
+            )
+        # The isolated dry run intentionally has no VST3 cache, so dependency
+        # bootstrap may report that unrelated cache as incomplete; the UI
+        # selection is still fully exercised before that point.
+        self.assertIn(result.returncode, (0, 1), f"{result.stdout}{result.stderr}")
+        output = result.stdout + result.stderr
+        self.assertNotIn("Vellum SDK", output)
+        self.assertNotIn("WebGPU-distribution", output)
+        self.assertNotIn("wgpu-native", output)
+        self.assertNotIn("Skia", output)
+
+    def test_unknown_ui_fails(self) -> None:
+        env = os.environ.copy()
+        env["PULP_UI"] = "mystery"
+        result = subprocess.run(
+            ["bash", str(SETUP), "--print-plan"],
+            cwd=REPO_ROOT, env=env, capture_output=True, text=True, timeout=30,
+        )
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("unknown PULP_UI=mystery", result.stderr)
+
     def test_debug_default_is_rejected(self) -> None:
         self._assert_rejects("BUILD_TYPE=Release\n", "BUILD_TYPE=Debug\n", "default build type")
 
