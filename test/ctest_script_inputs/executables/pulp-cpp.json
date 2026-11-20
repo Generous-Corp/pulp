@@ -58,6 +58,7 @@
    "tools/cli/cmd_host.cpp",
    "tools/cli/cmd_import.cpp",
    "tools/cli/cmd_inspect.cpp",
+   "tools/cli/cmd_licenses.cpp",
    "tools/cli/cmd_loop.cpp",
    "tools/cli/cmd_macos.cpp",
    "tools/cli/cmd_minos.cpp",
