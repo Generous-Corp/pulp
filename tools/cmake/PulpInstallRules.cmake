@@ -198,8 +198,10 @@ endif()
 # The optional Vellum editor bridge is part of the installed SDK when it was
 # enabled for this build. Generated `pulp create --ui vellum` projects link
 # against this exported target and its public headers.
+set(PULP_SDK_HAS_VELLUM_BRIDGE OFF)
 if(TARGET pulp-vellum)
     list(APPEND PULP_SDK_TARGETS pulp-vellum)
+    set(PULP_SDK_HAS_VELLUM_BRIDGE ON)
 endif()
 
 # pulp-canvas links pulp-bundled-fonts privately when Skia is on.
