@@ -9,7 +9,9 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
 import shutil
+import sys
 import tarfile
 import tempfile
 import urllib.request
@@ -60,15 +62,29 @@ def resolve_archive(lock_path: Path, platform: str, archive: Path | None,
 def _safe_extract(archive: Path, destination: Path) -> None:
     with tarfile.open(archive, "r:gz") as bundle:
         root = destination.resolve()
-        for member in bundle.getmembers():
+        members = bundle.getmembers()
+        symlinks: set[Path] = set()
+        for member in members:
             target = (destination / member.name).resolve()
             if target != root and root not in target.parents:
                 raise ValueError(f"archive member escapes destination: {member.name}")
-            if member.issym() or member.islnk():
+            parts = Path(member.name).parts
+            if any(Path(*parts[:index]) in symlinks for index in range(1, len(parts))):
+                raise ValueError(f"archive member follows symlink: {member.name}")
+            if member.islnk():
+                # Tar hardlink names are rooted at the archive extraction root.
+                link = (destination / member.linkname).resolve()
+                if link != root and root not in link.parents:
+                    raise ValueError(f"archive link escapes destination: {member.name}")
+            elif member.issym():
                 link = (target.parent / member.linkname).resolve()
                 if root not in link.parents and link != root:
                     raise ValueError(f"archive link escapes destination: {member.name}")
-        bundle.extractall(destination)
+                symlinks.add(Path(member.name))
+        if sys.version_info >= (3, 12):
+            bundle.extractall(destination, filter="data")
+        else:
+            bundle.extractall(destination)
 
 
 def _merge_notice(prefix: Path, vellum_root: Path) -> None:
@@ -100,13 +116,24 @@ def bundle(*, lock_path: Path, prefix: Path, platform: str, archive: Path | None
         if sdk_root.exists():
             raise FileExistsError(f"refusing to overwrite staged Vellum SDK: {sdk_root}")
         sdk_root.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copytree(unpacked, sdk_root, symlinks=True)
         integration_dest = prefix / "share" / "pulp" / "integrations"
         if integration_dest.exists():
             raise FileExistsError(f"refusing to overwrite staged integrations: {integration_dest}")
-        shutil.copytree(integrations, integration_dest, symlinks=True)
-        _merge_notice(prefix, sdk_root)
-        (sdk_root / "pulp-sdk-digest.txt").write_text(digest + "\n", encoding="utf-8")
+        with tempfile.TemporaryDirectory(prefix=f".{sdk_root.name}-", dir=sdk_root.parent) as staging:
+            staging_root = Path(staging)
+            staged_sdk = staging_root / sdk_root.name
+            staged_integrations = staging_root / "integrations"
+            shutil.copytree(unpacked, staged_sdk, symlinks=True)
+            shutil.copytree(integrations, staged_integrations, symlinks=True)
+            if (prefix / "NOTICE.md").exists():
+                shutil.copy2(prefix / "NOTICE.md", staging_root / "NOTICE.md")
+            _merge_notice(staging_root, staged_sdk)
+            (staged_sdk / "pulp-sdk-digest.txt").write_text(digest + "\n", encoding="utf-8")
+            staged_notice = staging_root / "NOTICE.md"
+            staged_sdk.rename(sdk_root)
+            staged_integrations.rename(integration_dest)
+            if staged_notice.exists():
+                os.replace(staged_notice, prefix / "NOTICE.md")
     return sdk_root
 
 
