@@ -9,35 +9,58 @@
 /// lifetime while all edits still use Pulp's existing parameter bridge.
 
 #include <pulp/format/editor_host.hpp>
+#include <pulp/format/processor.hpp>
+#include <pulp/vellum/editor_env.hpp>
 #include <pulp/vellum/param_port_model.hpp>
 #include <pulp/vellum/visual_port_feed.hpp>
 
 #include <vellum/view/plugin_view_host.hpp>
+#include <vellum/graphics/dawn_native_bootstrap.hpp>
 #include <vellum/view/view.hpp>
 
 #include <memory>
 #include <type_traits>
+#include <mutex>
+#include <string>
+#include <string_view>
+#include <unordered_set>
 
 namespace pulp::vellum {
 
-struct EditorEnv {
-    format::EditorContext& context;
-    ParamPortModel& params;
-    ::vellum::value::ValueFeed* visuals = nullptr;
-};
+/// Install Dawn's proc table before Vellum creates the first GPU editor host.
+/// The process owns that table; the installed Vellum SDK registers it through
+/// its app-host bootstrap, which agrees across plug-ins built on the same Dawn
+/// revision. Pulp's own gpu-runtime copy must not be used here: linking it into
+/// a plug-in would carry a second Dawn beside the one in Vellum's provider.
+inline bool register_editor_dawn_bootstrap(std::string_view bundle_id,
+                                           std::string* error = nullptr) {
+    static std::mutex mutex;
+    static std::unordered_set<std::string> registered;
+    std::lock_guard lock(mutex);
+    if (registered.contains(std::string(bundle_id)))
+        return true;
+    if (!::vellum::app_host::register_native_dawn_bootstrap(error))
+        return false;
+    registered.emplace(bundle_id);
+    return true;
+}
 
 template <typename ViewType> class Editor final : public format::Editor {
     static_assert(std::is_base_of_v<::vellum::view::View, ViewType>,
                   "a Pulp Vellum editor must derive from vellum::view::View");
 
   public:
-    explicit Editor(format::EditorContext& context)
+    Editor(format::EditorContext& context, std::string bundle_id)
         : model_(context.params()), env_{context, model_, nullptr} {
         if (auto* visuals = context.visuals()) {
             visual_feed_ = std::make_unique<VisualPortFeed>(*visuals);
             env_.visuals = visual_feed_.get();
         }
         root_ = std::make_unique<ViewType>(env_);
+        layout_root();
+        std::string bootstrap_error;
+        if (!register_editor_dawn_bootstrap(bundle_id, &bootstrap_error))
+            return;
         root_->set_requires_gpu_host(true);
         ::vellum::view::PluginViewHost::Options options;
         options.size = {size_.width, size_.height};
@@ -45,8 +68,13 @@ template <typename ViewType> class Editor final : public format::Editor {
         host_ = ::vellum::view::PluginViewHost::create(*root_, options);
     }
 
+    // The root is destroyed after the host (member order), and its teardown
+    // can still repaint: a ScriptedUiSession quarantines its realm and
+    // requests a frame. A host is not required to clear the root's pointer to
+    // it, so clear it here before the host goes away.
     ~Editor() override {
         detach();
+        invalidate();
     }
 
     // X11 is not offered: an X11 parent carries its window in window_id with a
@@ -86,6 +114,7 @@ template <typename ViewType> class Editor final : public format::Editor {
         if (size.width == 0 || size.height == 0)
             return false;
         size_ = size;
+        layout_root();
         if (host_ != nullptr)
             host_->set_size(size.width, size.height);
         return true;
@@ -102,13 +131,29 @@ template <typename ViewType> class Editor final : public format::Editor {
 
     void idle() override {
         // ContractEditorSession pumps ParamPort listeners before this call.
-        // Repaint once per host tick so meter/scope snapshots are visible even
-        // when the Vellum tree has no parameter-driven damage of its own.
+        // A view that owns per-frame work (a scripted session pushing bound
+        // parameter values into widgets) gets its tick here, then the host
+        // repaints once so meter/scope snapshots are visible even when the
+        // Vellum tree has no parameter-driven damage of its own.
+        if constexpr (requires(ViewType& view) { view.editor_idle(); }) {
+            if (root_ != nullptr)
+                root_->editor_idle();
+        }
         if (host_ != nullptr)
             host_->repaint();
     }
 
   private:
+    // The GPU plug-in host draws the root at its current bounds and leaves
+    // layout to its owner, so the editor sizes the root to the editor.
+    void layout_root() {
+        if (root_ == nullptr)
+            return;
+        root_->set_bounds(
+            {0, 0, static_cast<float>(size_.width), static_cast<float>(size_.height)});
+        root_->layout_children();
+    }
+
     ParamPortModel model_;
     std::unique_ptr<VisualPortFeed> visual_feed_;
     EditorEnv env_;
@@ -123,9 +168,12 @@ template <typename ViewType> class EditorFactory final : public format::EditorFa
         return role == format::EditorRole::editor || role == format::EditorRole::inspector;
     }
 
-    std::unique_ptr<format::Editor> create(format::Processor&, format::EditorContext& context,
+    std::unique_ptr<format::Editor> create(format::Processor& processor,
+                                           format::EditorContext& context,
                                            format::EditorRole role) override {
-        return supports(role) ? std::make_unique<Editor<ViewType>>(context) : nullptr;
+        return supports(role)
+                   ? std::make_unique<Editor<ViewType>>(context, processor.descriptor().bundle_id)
+                   : nullptr;
     }
 };
 

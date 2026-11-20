@@ -12,7 +12,7 @@ catch_discover_tests({{TARGET_NAME}}-test)
 pulp_add_plugin({{TARGET_NAME}}
     # The processor body is compiled once and shared by every format, so an
     # edit to process() rebuilds one file before the relinks.
-    SOURCES         {{SOURCE_NAME}} {{VELLUM_SOURCE_LINE}}
+    SOURCES         {{SOURCE_NAME}}
     FORMATS         {{FORMATS}}
     PLUGIN_NAME     "{{PLUGIN_NAME}}"
     BUNDLE_ID       "{{BUNDLE_ID}}"

@@ -12,6 +12,7 @@
     {"name": "design-ir", "carried_by": "view-core"},
     {"name": "view-core", "targets": ["pulp-view-core"], "pulp_kept": {
       "targets": ["pulp-view-tooling"],
+      "ownership_note": "Vellum owns the plug-in editor host implementation (gpu_plugin_editor_host_mac.mm and plugin_view_host.cpp in the Vellum framework). Pulp's legacy core/view plugin_view_host_* remains pulp_kept until deletion.",
       "files": [
         "core/view/src/inspector.cpp",
         "core/view/include/pulp/view/inspector.hpp",
