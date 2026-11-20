@@ -19,6 +19,7 @@
    "core/view/include/pulp/view/widgets.hpp",
    "core/view/src/reload_exports.cpp",
    "tools/cmake",
+   "tools/cmake/PulpConfig.cmake.in",
    "tools/cmake/PulpGpuRuntime.cmake",
    "tools/cmake/PulpGpuRuntimeRecord.cmake",
    "tools/scripts/core_vellum_direction.py",
