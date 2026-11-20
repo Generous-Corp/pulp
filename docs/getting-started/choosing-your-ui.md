@@ -9,13 +9,19 @@ From a fresh checkout on Apple Silicon macOS, run:
 
 ```sh
 ./setup.sh
-pulp create "My Effect" --ui vellum
+pulp create "My Effect"
 pulp build
 ```
 
 `setup.sh` reads the Vellum SDK asset URL and digest from `pulp.lock` and
-stages the verified SDK. Other platforms continue with an audio-only setup
+stages the verified SDK, then prints the `CMAKE_PREFIX_PATH` a Vellum UI
+project uses to find it. Other platforms continue with an audio-only setup
 until a Vellum SDK asset is published for that platform.
+
+`pulp create --ui vellum` is not accepted yet: the CLI refuses every `--ui`
+value except `none` until the pulp-vellum editor package ships. Until then,
+create the project without `--ui` and point its CMake configure at the staged
+SDK.
 
 ## DSP only
 
