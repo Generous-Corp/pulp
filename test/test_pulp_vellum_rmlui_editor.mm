@@ -35,7 +35,6 @@ class Context final : public pulp::format::EditorContext {
     pulp::format::ParamPort& params_;
 };
 
-
 struct Fixture {
     pulp::state::StateStore store;
     // The port lists the parameters that exist when it is made, so it is
