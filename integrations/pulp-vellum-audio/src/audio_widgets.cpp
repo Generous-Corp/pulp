@@ -40,9 +40,7 @@ void LevelMeter::sample() noexcept {
     if (feed_ == nullptr)
         return;
     const auto published = feed_->publish_count(channel_);
-    AudioFrameInfo next_info;
-    const bool has_frame = feed_->read_info(channel_, next_info);
-    if (!has_frame) {
+    if (published == 0) { // never published
         stale_ = true;
         rms_ = peak_ = 0.0f;
         return;
@@ -57,7 +55,8 @@ void LevelMeter::sample() noexcept {
     }
     std::array<float, AudioDisplayProvider::kMaxMeterChannels> rms{};
     std::array<float, AudioDisplayProvider::kMaxMeterChannels> peak{};
-    if (feed_->read_meter(channel_, rms, peak) != 0) {
+    AudioFrameInfo next_info;
+    if (feed_->read_meter(channel_, rms, peak, next_info) != 0) {
         rms_ = std::clamp(rms[0], 0.0f, 1.0f);
         peak_ = std::clamp(peak[0], 0.0f, 1.0f);
         stale_ = false;
@@ -137,8 +136,7 @@ void AnalyzerScope::sample() noexcept {
     if (feed_ == nullptr)
         return;
     const auto published = feed_->publish_count(channel_);
-    AudioFrameInfo next_info;
-    if (!feed_->read_info(channel_, next_info)) {
+    if (published == 0) { // never published
         stale_ = true;
         return;
     }
@@ -148,7 +146,8 @@ void AnalyzerScope::sample() noexcept {
             stale_ = true;
         return;
     }
-    const auto count = feed_->read_vector(channel_, bins_);
+    AudioFrameInfo next_info;
+    const auto count = feed_->read_vector(channel_, bins_, next_info);
     if (!map_bins_(bins_.data(), count)) {
         stale_ = true;
         return;

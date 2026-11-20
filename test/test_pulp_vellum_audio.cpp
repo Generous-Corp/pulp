@@ -389,3 +389,56 @@ TEST_CASE("Vellum audio provider never exposes a torn frame", "[pulp-vellum-audi
     CHECK(peak[0] == static_cast<float>(kIterations) + 0.25f);
     CHECK(samples[0] == static_cast<float>(kIterations) + 0.5f);
 }
+
+TEST_CASE("Vellum audio provider reads values and frame info from one frame",
+          "[pulp-vellum-audio][threading]") {
+    using Provider = pulp::vellum_audio::AudioDisplayProvider;
+    Provider provider({
+        {.name = "meter", .shape = ::vellum::value::ChannelShape::meter},
+        {.name = "scope", .shape = ::vellum::value::ChannelShape::vector},
+    });
+    const auto meter = provider.find("meter", ::vellum::value::ChannelShape::meter);
+    const auto scope = provider.find("scope", ::vellum::value::ChannelShape::vector);
+    REQUIRE(meter);
+    REQUIRE(scope);
+    constexpr std::uint32_t kIterations = 100'000;
+    std::atomic<bool> done = false;
+    std::atomic<bool> mismatched = false;
+
+    // Each frame's values equal its sequence, so a value paired with another
+    // frame's metadata shows up as values != info.sequence.
+    std::thread audio([&] {
+        for (std::uint32_t sequence = 1; sequence <= kIterations; ++sequence) {
+            const float marker = static_cast<float>(sequence);
+            const std::array values{marker, marker};
+            provider.publish_meter(*meter, values, values, {.sequence = sequence});
+            provider.publish_scope(*scope, values, {.sequence = sequence});
+        }
+        done.store(true, std::memory_order_release);
+    });
+    std::thread editor([&] {
+        std::array<float, 2> rms{}, peak{}, samples{};
+        const auto deadline = std::chrono::steady_clock::now() + pulp::test::kProgressDeadline;
+        while (!done.load(std::memory_order_acquire) &&
+               std::chrono::steady_clock::now() < deadline) {
+            pulp::vellum_audio::AudioFrameInfo meter_info;
+            if (provider.read_meter(*meter, rms, peak, meter_info) != 0 &&
+                rms[0] != static_cast<float>(meter_info.sequence))
+                mismatched.store(true, std::memory_order_relaxed);
+            pulp::vellum_audio::AudioFrameInfo scope_info;
+            if (provider.read_vector(*scope, samples, scope_info) != 0 &&
+                samples[0] != static_cast<float>(scope_info.sequence))
+                mismatched.store(true, std::memory_order_relaxed);
+        }
+    });
+    audio.join();
+    editor.join();
+    REQUIRE(done.load(std::memory_order_acquire));
+    CHECK_FALSE(mismatched.load(std::memory_order_relaxed));
+
+    std::array<float, 2> rms{}, peak{};
+    pulp::vellum_audio::AudioFrameInfo info;
+    REQUIRE(provider.read_meter(*meter, rms, peak, info) == 2);
+    CHECK(info.sequence == kIterations);
+    CHECK(rms[0] == static_cast<float>(kIterations));
+}

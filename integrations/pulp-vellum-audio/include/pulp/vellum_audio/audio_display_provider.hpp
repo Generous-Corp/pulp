@@ -70,6 +70,13 @@ class AudioDisplayProvider final : public ::vellum::value::ValueFeed {
     std::size_t read_meter(std::size_t index, std::span<float> rms,
                            std::span<float> peak) noexcept override;
     std::size_t read_vector(std::size_t index, std::span<float> samples) noexcept override;
+    /// Like read_meter / read_vector, but also copies the frame's metadata from
+    /// the same TripleBuffer read, so values and info always describe one frame.
+    /// `info` is left untouched only for an unknown index or a wrong shape.
+    std::size_t read_meter(std::size_t index, std::span<float> rms, std::span<float> peak,
+                           AudioFrameInfo& info) noexcept;
+    std::size_t read_vector(std::size_t index, std::span<float> samples,
+                            AudioFrameInfo& info) noexcept;
     std::size_t read_events(std::size_t index,
                             std::span<::vellum::value::ChannelEvent> events) noexcept override;
     [[nodiscard]] std::uint32_t publish_count(std::size_t index) const noexcept override;

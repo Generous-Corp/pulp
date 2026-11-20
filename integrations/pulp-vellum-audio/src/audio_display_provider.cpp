@@ -98,25 +98,40 @@ bool AudioDisplayProvider::read_scalar(std::size_t, float&) noexcept {
 
 std::size_t AudioDisplayProvider::read_meter(std::size_t index, std::span<float> rms,
                                              std::span<float> peak) noexcept {
+    AudioFrameInfo ignored;
+    return read_meter(index, rms, peak, ignored);
+}
+
+std::size_t AudioDisplayProvider::read_meter(std::size_t index, std::span<float> rms,
+                                             std::span<float> peak,
+                                             AudioFrameInfo& info) noexcept {
     auto* c = at(index);
     if (c == nullptr || c->shape != ::vellum::value::ChannelShape::meter)
         return 0;
-    const auto& frame = c->meter.read();
+    const auto& frame = c->meter.read(); // one read: values and info share a frame
     const auto n = std::min<std::size_t>(frame.count, kMaxMeterChannels);
     const auto copied = std::min({n, rms.size(), peak.size()});
     std::copy_n(frame.rms.begin(), copied, rms.begin());
     std::copy_n(frame.peak.begin(), copied, peak.begin());
+    info = frame.info;
     return copied;
 }
 
 std::size_t AudioDisplayProvider::read_vector(std::size_t index,
                                               std::span<float> samples) noexcept {
+    AudioFrameInfo ignored;
+    return read_vector(index, samples, ignored);
+}
+
+std::size_t AudioDisplayProvider::read_vector(std::size_t index, std::span<float> samples,
+                                              AudioFrameInfo& info) noexcept {
     auto* c = at(index);
     if (c == nullptr || c->shape != ::vellum::value::ChannelShape::vector)
         return 0;
-    const auto& frame = c->scope.read();
+    const auto& frame = c->scope.read(); // one read: samples and info share a frame
     const auto n = std::min<std::size_t>(frame.count, std::min(samples.size(), kMaxScopeSamples));
     std::copy_n(frame.samples.begin(), n, samples.begin());
+    info = frame.info;
     return n;
 }
 
