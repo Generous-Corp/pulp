@@ -415,24 +415,38 @@ PulpMotion.setAmbientProvenance(kind: "swiftui", id: "CardView")
 defer { PulpMotion.clearAmbientProvenance() }
 ```
 
-Bridging model: `PulpSwift` is a pure-Swift package; the C bridge lives
-in `apple/Sources/PulpSwift/PulpBridge.{h,cpp}` and is linked by the
-AUv3 / standalone host. At launch the host installs a
-`PulpMotionBackend` whose closures forward into the C ABI
-(`pulp_motion_publish_value`, `pulp_motion_register_geometry_trace`,
-…). Unit tests install a recording backend instead so
-`swift test --package-path apple` runs without a C++ host.
+`PulpSwift` is a pure-Swift package. At launch the native host installs a
+`PulpMotionBackend` whose closures call the C ABI in
+`apple/Sources/PulpSwift/PulpBridge.h`. To link the motion ABI into an AUv3
+or standalone host that builds Pulp from source, configure Pulp with
+`PULP_ENABLE_PULP_VELLUM=ON` and point `Vellum_DIR` to a Vellum SDK for the
+host's target platform that exports `Vellum::MirrorView_core`. Link the
+host target with:
 
-Files: `apple/Sources/PulpSwift/PulpMotion.swift` (facade + `Trace.*`
-factories + `@MotionTraceBuilder`), `PulpMotionProbe.swift` (SwiftUI
-modifier + UIKit / AppKit `PulpMotionGeometryProbe`), `PulpBridge.{h,cpp}`
-(C ABI), `apple/Tests/PulpSwiftTests/PulpMotionTests.swift` (XCTest
-coverage), `test/test_motion_swift_bridge.cpp` (Catch2 round-trip).
+```cmake
+target_link_libraries(my_swift_host PRIVATE pulp::vellum)
+```
+
+For an installed Pulp SDK built with that integration, use
+`find_package(Pulp CONFIG REQUIRED)` and link `Pulp::vellum`. Keep importing
+`PulpBridge.h` in the host's Swift bridging header. For an explicit Swift
+compiler invocation, add the Pulp format include root with `-Xcc -I<dir>`
+(`core/format/include` in a source checkout or `include` in the Pulp SDK).
+Hosts that compiled `PulpMotionBridge.cpp` directly now get its symbols
+from the linked target.
+Parameter and state calls still use `apple/Sources/PulpSwift/PulpBridge.cpp`
+and its Pulp format and state dependencies.
+
+The host enables tracing and binds its frame clock through
+`vellum::view::motion::Coordinator`. Swift's publish and provenance calls use
+that coordinator, and geometry traces sample on its bound
+`vellum::view::FrameClock`. Swift unit tests install a recording backend so
+`swift test --package-path apple` runs without a native host.
 
 ## Kotlin / Android (Compose + View)
 
-The Android facade mirrors the Swift one — same publish channel, same
-`Trace.*` DSL names, same off-by-default contract. Samples flow into the same
+The Android facade shares Swift's publish channel conventions, `Trace.*`
+DSL names, and off-by-default contract. Android samples flow into Pulp's
 `pulp::view::motion::Coordinator`, so fixtures, scrubber, cost attribution,
 reduced-motion gating, and provenance envelopes all work identically.
 Compose uses a `Modifier.pulpMotionGeometry(...)`; classic Views use a

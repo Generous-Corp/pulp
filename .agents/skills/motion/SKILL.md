@@ -460,7 +460,7 @@ final class CardUIView: UIView {
 ### Host wiring (once at app launch)
 
 `PulpSwift` is a pure-Swift package; the C bridge lives in
-`apple/Sources/PulpSwift/PulpMotionBridge.cpp` (excluded from SwiftPM and
+`integrations/pulp-vellum/src/swift_motion_bridge.cpp` (excluded from SwiftPM and
 linked by the AUv3 / standalone host). At launch the host installs a
 `PulpMotionBackend` that forwards into the C ABI:
 
@@ -479,9 +479,12 @@ PulpMotionRuntime.installBackend(backend)
 
 In unit tests, install a recording backend instead — `swift test
 --package-path apple` runs the facade with no C++ host linked.
-For the C bridge itself, `pulp-test-motion-swift-bridge` covers the
-`pulp_motion_*` ABI plus invalid state-buffer guards; run it whenever
-`apple/Sources/PulpSwift/PulpMotionBridge.cpp` changes.
+Enable `PULP_ENABLE_PULP_VELLUM` with a Vellum SDK that exports
+`Vellum::MirrorView_core` and link the native host to `pulp::vellum`
+(`Pulp::vellum` for an installed Pulp SDK). Use the Vellum Coordinator
+and its bound FrameClock for Swift tracing. The
+`pulp-test-motion-swift-bridge` target covers the native motion ABI
+and invalid state-buffer guards.
 
 ### Off-by-default contract
 
@@ -494,8 +497,8 @@ cannot spam events in production.
 
 - `apple/Sources/PulpSwift/PulpBridge.h` — C ABI (publish + provenance
   + register / update / detach geometry).
-- `apple/Sources/PulpSwift/PulpMotionBridge.cpp`: bridge to
-  `pulp::view::motion`. Internal mutex-protected registry keeps the
+- `integrations/pulp-vellum/src/swift_motion_bridge.cpp`: bridge to
+  `vellum::view::motion`. A mutex-protected registry keeps the
   `TraceHandle` separate from the lambda-captured atomic rect so
   `Coordinator::reset()` cannot self-deadlock.
 - `apple/Sources/PulpSwift/PulpMotion.swift` — `PulpMotion` facade,
@@ -726,7 +729,7 @@ discovery.
 - `tools/motion/visual/requirements.lock` — hash-pinned resolution of `requirements.txt` that CI installs; regenerate it (command in its header) whenever `requirements.txt` changes, or `test_visual_python_deps_step.py` fails
 - `examples/ui-preview/main.cpp` — env-knob wiring for the standalone host
 - `apple/Sources/PulpSwift/PulpBridge.h` — Swift C ABI surface (Path G)
-- `apple/Sources/PulpSwift/PulpMotionBridge.cpp`: Swift motion bridge shims (Path G)
+- `integrations/pulp-vellum/src/swift_motion_bridge.cpp`: Swift motion bridge shims (Path G)
 - `apple/Sources/PulpSwift/PulpMotion.swift` — Swift facade + Trace DSL (Path G)
 - `apple/Sources/PulpSwift/PulpMotionProbe.swift` — SwiftUI / UIKit probe (Path G)
 - `core/platform/include/pulp/platform/android/motion_bridge.h` — Android C ABI (Path H)
