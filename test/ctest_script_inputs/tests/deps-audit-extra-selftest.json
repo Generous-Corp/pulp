@@ -12,7 +12,6 @@
    "tools/deps/audit.py",
    "tools/deps/cmake_commands.py",
    "tools/deps/gpu_runtime_driver.cmake",
-   "tools/deps/pin_transition.json",
    "tools/deps/pulp_lock.py",
    "tools/deps/test_audit_extra.py",
    "tools/packages/test-stubs"
