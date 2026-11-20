@@ -707,7 +707,6 @@ supported_build_types = [
 ]
 risk_class = "low"
 
-
 [[families]]
 name = "script-readers-4fd462022d88"
 paths = ["tools/scripts/test_date_sensitive_selftests_tz_matrix.py"]
@@ -745,7 +744,6 @@ supported_build_types = [
   "release",
 ]
 risk_class = "low"
-
 
 [[families]]
 name = "script-readers-65600d651f2f"
