@@ -1158,8 +1158,8 @@ fi
 
 # Clock-in-tests lint: a Python test under tools/ that reads the real clock
 # beside a pinned date passes until the calendar crosses a window it assumed,
-# then fails every run at once. Diff-scoped: only added or edited lines are
-# judged, and existing uses are frozen in clock_in_tests_baseline.json.
+# then fails every run at once. Diff-scoped: every added or edited line is
+# judged, including lines in the baseline; the baseline is used only by --all.
 if [ -f "$CLOCK_IN_TESTS" ]; then
     echo "" >&2
     echo "▸ clock-in-tests lint (a test must not read the real clock unmarked)" >&2

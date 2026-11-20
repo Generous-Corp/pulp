@@ -482,8 +482,8 @@ Two guards cover the class:
   `tools/**/*_test.py` that calls `datetime.now`, `datetime.today`,
   `datetime.utcnow`, `date.today`, `time.time`, `time.time_ns` or
   `time.localtime`. A read that is safe says why on the line:
-  `# clock-ok: <reason>`. Existing uses are frozen in
-  `tools/scripts/clock_in_tests_baseline.json`, so only the diff is judged.
+  `# clock-ok: <reason>`. Diff scans judge every added or edited line, including
+  lines listed in the baseline; the baseline is used only by `--all` validation.
   Pin the date instead whenever the code under test accepts one.
 - The timezone matrix is delivered separately in the follow-up B2 PR after this clock-lint rule lands.
 

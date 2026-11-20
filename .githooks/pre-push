@@ -1152,8 +1152,9 @@ fi
 # Clock-in-tests lint — a Python test under tools/ that reads the real clock
 # (datetime.now, date.today, time.time, ...) beside a pinned date passes until
 # the calendar crosses a window it assumed, then fails every run at once.
-# Diff-scoped over the pushed range; existing uses are frozen in
-# clock_in_tests_baseline.json. Mark a safe read with `# clock-ok: <reason>`.
+# Diff-scoped over the pushed range; every added or edited line is judged,
+# including lines in the baseline. The baseline is used only by --all. Mark a
+# safe read with `# clock-ok: <reason>`.
 if [ -f "$CLOCK_IN_TESTS" ]; then
     run_gate_captured "$PYTHON" "$CLOCK_IN_TESTS" --base "$BASE" \
         --head "${_prepush_pushed_head_sha:-HEAD}"
