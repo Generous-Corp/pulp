@@ -148,8 +148,8 @@ template <typename ViewType> class EditorFactory final : public format::EditorFa
                                            format::EditorContext& context,
                                            format::EditorRole role) override {
         return supports(role)
-            ? std::make_unique<Editor<ViewType>>(context, processor.descriptor().bundle_id)
-            : nullptr;
+                   ? std::make_unique<Editor<ViewType>>(context, processor.descriptor().bundle_id)
+                   : nullptr;
     }
 };
 
