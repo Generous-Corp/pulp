@@ -38,9 +38,21 @@
 /// sources to. A host that exposes its own loop (VST3 `Linux::IRunLoop`, CLAP
 /// timer-support and posix-fd-support) is given to this layer as a
 /// HostRunLoop, and posts and timers then run on the host's UI thread through
-/// it, with no thread and no connection of their own. Without a registered
-/// HostRunLoop main_thread_supported() is false, post() returns false (the
-/// refusal is visible to the caller) and timers never fire.
+/// it, with no thread and no connection of their own. A registered HostRunLoop
+/// is always preferred.
+///
+/// Windows hosts often have none to lend (VST3 has no IRunLoop there, and many
+/// CLAP hosts offer no timer-support). Without one, the first scope made on a
+/// thread opens a message-only window on that thread and posts and timers run
+/// from it (PostMessage and SetTimer), for as long as a scope uses it. Its
+/// work runs only while that thread pumps messages, which a host's UI thread
+/// does, and keeps running inside menu and move/size modal loops. A scope made
+/// on another thread while the window lives is refused. Timers there have
+/// SetTimer's granularity (about 10 ms or more).
+///
+/// On Linux, without a registered HostRunLoop main_thread_supported() is false,
+/// post() returns false (the refusal is visible to the caller) and timers
+/// never fire.
 
 #include <chrono>
 #include <cstddef>
@@ -105,7 +117,7 @@ bool unregister_host_run_loop(HostRunLoopToken token);
 
 /// Whether this platform has a main-thread backend for MainThreadScope and
 /// MainThreadTimer: always on Apple platforms, elsewhere while a HostRunLoop
-/// is registered.
+/// is registered (on Windows also while a scope holds the fallback window).
 bool main_thread_supported() noexcept;
 
 /// Whether the calling thread is the process main thread, or the registered
@@ -125,6 +137,15 @@ std::uint64_t main_thread_callouts() noexcept;
 /// are (they share one source, so an idle scope adds nothing to each wake).
 std::size_t main_thread_source_count() noexcept;
 #endif
+#if defined(_WIN32)
+/// Whether the message-window fallback currently exists: true while a scope
+/// made with no registered host loop is alive. Lets a test prove the fallback
+/// is used only when no host loop is registered, and is gone afterwards.
+bool win32_fallback_live() noexcept;
+/// The window class name of the fallback window (unique to this binary). The
+/// class is registered only while the window exists.
+const wchar_t* win32_fallback_class_name() noexcept;
+#endif
 } // namespace detail
 
 /// Owner of the work one client (typically one editor) schedules on the main
@@ -132,7 +153,8 @@ std::size_t main_thread_source_count() noexcept;
 ///
 /// Construct and destroy it on the main thread (the UI thread of the
 /// HostRunLoop in use, which must be registered when it is constructed; a scope
-/// made without one refuses every post). When the destructor returns,
+/// made without one refuses every post, except on Windows, where it uses the
+/// fallback window of its own thread). When the destructor returns,
 /// no task posted through it and no timer bound to it will run again, and no
 /// run-loop callback into this binary remains. Destroying the scope from
 /// inside one of its own tasks or timers is allowed; the remaining queued
