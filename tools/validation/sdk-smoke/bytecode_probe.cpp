@@ -3,7 +3,7 @@
 #include <pulp/view/scripted_ui.hpp>
 #include <pulp/view/view.hpp>
 
-#include "bytecode_probe_data.hpp"
+#include "PulpSDKSmokeBytecodeData_data.hpp"
 
 #include <cstdint>
 #include <iostream>
@@ -34,11 +34,12 @@ int main() {
 
     View root;
     root.set_bounds({0, 0, 320, 240});
-    state::StateStore store;
+    pulp::state::StateStore store;
     ScriptedUiSession session(root, store,
                               {.enable_hot_reload = false,
                                .enable_theme_reload = false,
-                               .script_source = "createLabel('bytecode-probe', 'ok', '');",
+                               .script_source = "createLabel('bytecode-probe', 'ok', '');\n/*" +
+                                               std::string(2100, 'x') + "*/\n",
                                .script_name = "bytecode-probe.js"});
     std::string error;
     if (!session.load(&error)) {
