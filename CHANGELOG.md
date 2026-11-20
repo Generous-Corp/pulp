@@ -9,6 +9,14 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
      release's bullet block. See docs/guides/versioning.md § Release pipeline
      for the full end-to-end flow. -->
 
+<a id="v11800"></a>
+## [1.180.0] - 2026-11-20
+
+- release/version bump ([#12674](https://github.com/Generous-Corp/pulp/pull/12674))
+- feature/split swift bridge motion ([#12675](https://github.com/Generous-Corp/pulp/pull/12675))
+- lane/d3 vellum audio ([#12654](https://github.com/Generous-Corp/pulp/pull/12654))
+- lane/b7b cutover keepgoing ([#12652](https://github.com/Generous-Corp/pulp/pull/12652))
+
 <a id="v11790"></a>
 ## [1.179.0] - 2026-11-20
 
@@ -13446,6 +13454,7 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/Generous-Corp/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/Generous-Corp/pulp/pull/2))
 
+[1.180.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.180.0
 [1.179.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.179.0
 [1.178.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.178.0
 [1.177.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.177.0
