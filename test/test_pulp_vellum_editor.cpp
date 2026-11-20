@@ -4,8 +4,10 @@
 #include <pulp/format/processor.hpp>
 #include <pulp/state/store.hpp>
 #include <pulp/vellum/editor.hpp>
+#include <pulp/vellum/plugin_view_host.hpp>
 
 #include <vellum/value/param_model.hpp>
+#include <vellum/view/plugin_view_host.hpp>
 #include <vellum/view/view.hpp>
 
 #include <memory>
@@ -81,6 +83,32 @@ class Fixture {
     }
 };
 
+class StubHost final : public ::vellum::view::PluginViewHost {
+  public:
+    ::vellum::view::NativeViewHandle native_handle() override {
+        return this;
+    }
+    void attach_to_parent(::vellum::view::NativeViewHandle) override {}
+    void detach() override {}
+    void repaint() override {}
+    void set_size(uint32_t width, uint32_t height) override {
+        size_ = {width, height};
+    }
+    Size get_size() const override {
+        return size_;
+    }
+
+  private:
+    Size size_;
+};
+
+// Clears any factory a test registers, even when an assertion stops it early.
+struct FactoryReset {
+    ~FactoryReset() {
+        ::vellum::view::PluginViewHost::clear_factory();
+    }
+};
+
 } // namespace
 
 TEST_CASE("Vellum editor factory supports editor and inspector roles", "[pulp-vellum][editor]") {
@@ -124,4 +152,88 @@ TEST_CASE("Vellum view observes a bridged parameter after the UI pump", "[pulp-v
     fixture.store.pump_listeners();
     fixture.store.reconcile_restore_listeners();
     REQUIRE(view.observed == 0.75);
+}
+
+TEST_CASE("PluginViewHost::create() gives a Vellum view a native editor host",
+          "[pulp-vellum][editor][host]") {
+    using ::vellum::view::PluginViewHost;
+    ::vellum::view::View root;
+    PluginViewHost::Options options;
+    options.size = {320, 200};
+    options.use_gpu = true;
+    auto host = PluginViewHost::create(root, options);
+
+    if (!pulp::vellum::detail::platform_plugin_view_host_available()) {
+        // No platform host on this OS: create() says so instead of faking one.
+        CHECK(host == nullptr);
+        return;
+    }
+    REQUIRE(host != nullptr);
+    CHECK(root.plugin_view_host() == host.get());
+    CHECK(host->native_handle() != nullptr);
+    // The installed SDK exposes no GPU surface, so a GPU request opens the
+    // raster host rather than failing.
+    CHECK_FALSE(host->is_gpu_backed());
+    CHECK(host->get_size().width == 320);
+    CHECK(host->get_size().height == 200);
+    host->set_size(640, 480);
+    CHECK(host->get_size().width == 640);
+    CHECK(host->get_size().height == 480);
+    // The host paints the tree into its layer before it is ever shown.
+    CHECK(host->present_first_frame());
+    CHECK_FALSE(host->capture_back_buffer_png().empty());
+
+    // A second host is a native parent the first can attach to.
+    ::vellum::view::View parent_root;
+    auto parent = PluginViewHost::create(parent_root, PluginViewHost::Size{800, 600});
+    REQUIRE(parent != nullptr);
+    CHECK_FALSE(host->is_attached());
+    CHECK(host->try_attach_to_parent(parent->native_handle()));
+    host->detach();
+    CHECK_FALSE(host->is_attached());
+
+    host.reset();
+    CHECK(root.plugin_view_host() == nullptr);
+}
+
+TEST_CASE("A registered PluginViewHost factory wins over the platform host",
+          "[pulp-vellum][editor][host]") {
+    using ::vellum::view::PluginViewHost;
+    FactoryReset reset;
+    StubHost* made = nullptr;
+    PluginViewHost::set_factory([&made](::vellum::view::View&, const PluginViewHost::Options&) {
+        auto stub = std::make_unique<StubHost>();
+        made = stub.get();
+        return std::unique_ptr<PluginViewHost>(std::move(stub));
+    });
+    REQUIRE(PluginViewHost::has_factory());
+
+    ::vellum::view::View root;
+    auto host = PluginViewHost::create(root, PluginViewHost::Size{100, 100});
+    REQUIRE(host != nullptr);
+    CHECK(host.get() == made);
+    CHECK(root.plugin_view_host() == made);
+
+    PluginViewHost::clear_factory();
+    CHECK_FALSE(PluginViewHost::has_factory());
+}
+
+TEST_CASE("A Vellum editor attaches to a native parent view", "[pulp-vellum][editor][host]") {
+    if (!pulp::vellum::detail::platform_plugin_view_host_available())
+        SKIP("no platform plug-in view host on this OS");
+    Fixture fixture;
+    Context context(*fixture.port);
+    Processor processor;
+    pulp::vellum::EditorFactory<TestView> factory;
+    auto editor = factory.create(processor, context, pulp::format::EditorRole::editor);
+    REQUIRE(editor);
+
+    ::vellum::view::View parent_root;
+    auto parent = ::vellum::view::PluginViewHost::create(
+        parent_root, ::vellum::view::PluginViewHost::Size{800, 600});
+    REQUIRE(parent != nullptr);
+    CHECK(editor->attach(
+        {.kind = pulp::format::NativeParentKind::cocoa_view, .handle = parent->native_handle()}));
+    editor->detach();
+    editor->invalidate();
 }

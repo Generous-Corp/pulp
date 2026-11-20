@@ -298,6 +298,19 @@ error. Things that are easy to get wrong:
 - A test that installs a hook with `install_plugin_editor_factory_hook()` must
   clear it (`nullptr`) before it ends, or every later test in the grouped
   binary sees a factory on a headless processor.
+- A package that loads shared libraries lists them as
+  `PULP_EDITOR_RUNTIME_LIBRARIES`. Without it a UI-package module, which skips
+  `pulp_stage_runtime_dependencies()` because it is `NO_EDITOR`, keeps CMake's
+  build rpaths into the SDK: it loads on the build machine and nowhere else,
+  and only the AU's post-build relocatable check notices.
+  `_pulp_stage_ui_package_runtime()` copies them and sets an `@loader_path`-only
+  rpath, and it must run before the module's own post-build checks.
+- Vellum declares `vellum::view::PluginViewHost::create()` and its factory
+  registry but no Vellum library defines them (plug-in embedding glue is
+  Pulp's). `pulp::vellum-host` defines them per plug-in image; without it a
+  `--ui vellum` plug-in compiles and fails to link. Its macOS host registers
+  its NSView subclass at run time under a per-image name, because a DAW loads
+  many plug-ins into one Objective-C runtime.
 
 ### The editor-host acceptance test is one command
 

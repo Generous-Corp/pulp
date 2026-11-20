@@ -269,6 +269,7 @@ function(_pulp_add_standalone target name bundle_id version processor_factory)
     # installed-SDK builds, and the old `if(COMMAND ...)` guard is what let
     # a missing definition silently skip staging entirely.
     pulp_stage_runtime_dependencies(${target}_Standalone)
+    _pulp_stage_ui_package_runtime(${target} ${target}_Standalone)
     pulp_assert_runtime_dependencies_staged(${target}_Standalone)
     # Portability guard (runs AFTER the WebGPU dylib is bundled, so a correctly
     # set-up standalone is clean): fail/warn if the binary bakes a build-tree

@@ -8,9 +8,17 @@ namespace pulp::format { class EditorFactory; }
 namespace test { struct RootView {}; }
 namespace pulp::vellum { template <typename T> pulp::format::EditorFactory* editor_factory(); }
 ]=])
+file(WRITE "${FIXTURE_DIR}/src/module.cpp" "int vellum_package_fixture_module() { return 0; }\n")
 file(WRITE "${FIXTURE_DIR}/src/CMakeLists.txt" "cmake_minimum_required(VERSION 3.24)\nproject(VellumPackage CXX)\n"
     "add_library(pulp-vellum INTERFACE)\nadd_library(pulp::vellum ALIAS pulp-vellum)\n"
+    "add_library(pulp-vellum-host INTERFACE)\nadd_library(pulp::vellum-host ALIAS pulp-vellum-host)\n"
+    "add_library(vellum-dylib SHARED IMPORTED)\n"
+    "set_target_properties(vellum-dylib PROPERTIES IMPORTED_LOCATION \"${FIXTURE_DIR}/libvellum-fixture.dylib\")\n"
+    "add_library(vellum-static STATIC IMPORTED)\n"
+    "set_target_properties(vellum-static PROPERTIES IMPORTED_LOCATION \"${FIXTURE_DIR}/libvellum-fixture.a\" "
+    "INTERFACE_LINK_LIBRARIES \"\$<LINK_ONLY:vellum-dylib>\")\n"
     "add_library(vellum-view INTERFACE)\nadd_library(Vellum::MirrorView_core ALIAS vellum-view)\n"
+    "target_link_libraries(vellum-view INTERFACE vellum-static)\n"
     "include(\"${PULP_SOURCE_DIR}/integrations/pulp-vellum/cmake/PulpVellumEditorPackage.cmake\")\n"
     "include(\"${PULP_SOURCE_DIR}/tools/cmake/PulpEditorPackage.cmake\")\n"
     "pulp_add_vellum_editor_package(pulp::vellum-editor VIEW_HEADER root.hpp VIEW_TYPE test::RootView)\n"
@@ -20,13 +28,31 @@ file(WRITE "${FIXTURE_DIR}/src/CMakeLists.txt" "cmake_minimum_required(VERSION 3
     "if(NOT H)\n message(FATAL_ERROR \"missing generated header\")\nendif()\n"
     "add_library(plugin INTERFACE)\ntarget_link_libraries(plugin INTERFACE pulp::vellum-editor)\n"
     "_pulp_resolve_ui_package(Plugin pulp::vellum-editor PF PH)\n"
-    "if(NOT PF OR NOT PH)\n message(FATAL_ERROR \"UI package did not resolve\")\nendif()\n")
+    "if(NOT PF OR NOT PH)\n message(FATAL_ERROR \"UI package did not resolve\")\nendif()\n"
+    # The package names the shared libraries in its link closure, reached
+    # through a static library's LINK_ONLY edge, and nothing static.
+    "get_target_property(R pulp::vellum-editor PULP_EDITOR_RUNTIME_LIBRARIES)\n"
+    "if(NOT R STREQUAL \"vellum-dylib\")\n message(FATAL_ERROR \"runtime libraries: \${R}\")\nendif()\n"
+    # A plug-in module stages them and finds them through @loader_path only.
+    "add_library(Plugin_CLAP MODULE module.cpp)\n"
+    "set(PULP_Plugin_UI_PACKAGE pulp::vellum-editor)\n"
+    "_pulp_stage_ui_package_runtime(Plugin Plugin_CLAP)\n"
+    "get_target_property(B Plugin_CLAP BUILD_WITH_INSTALL_RPATH)\n"
+    "get_target_property(P Plugin_CLAP INSTALL_RPATH)\n"
+    "get_target_property(S Plugin_CLAP PULP_UI_PACKAGE_RUNTIME_LIBRARIES)\n"
+    "if(APPLE)\n set(O @loader_path)\nelse()\n set(O \"\$ORIGIN\")\nendif()\n"
+    "if(NOT B OR NOT P STREQUAL O OR NOT S STREQUAL \"vellum-dylib\")\n"
+    " message(FATAL_ERROR \"module staging: rpath-from-install=\${B} rpath=\${P} staged=\${S}\")\nendif()\n"
+    "add_library(Plain_CLAP MODULE module.cpp)\n"
+    "_pulp_stage_ui_package_runtime(Plain Plain_CLAP)\n"
+    "get_target_property(B Plain_CLAP BUILD_WITH_INSTALL_RPATH)\n"
+    "if(B)\n message(FATAL_ERROR \"a plug-in without a UI package was restaged\")\nendif()\n")
 execute_process(COMMAND "${CMAKE_COMMAND}" -S "${FIXTURE_DIR}/src" -B "${FIXTURE_DIR}/build"
     RESULT_VARIABLE result OUTPUT_VARIABLE output ERROR_VARIABLE error)
 if(NOT result EQUAL 0)
     message(FATAL_ERROR "Vellum editor package configure failed:\n${output}${error}")
 endif()
-message(STATUS "Vellum editor package configure passed")
+message(STATUS "Vellum editor package configure passed, and its runtime libraries stage beside a module")
 
 # Without Vellum's view layer, the helper must stop
 # with a clear message instead of a generate-time missing-target error.
@@ -54,7 +80,11 @@ file(COPY "${PULP_SOURCE_DIR}/integrations/pulp-vellum/cmake/PulpVellumEditorPac
     DESTINATION "${_installed}")
 file(WRITE "${_installed}/PulpVellumTargets.cmake"
     "add_library(Pulp::vellum INTERFACE IMPORTED)\n"
-    "set_target_properties(Pulp::vellum PROPERTIES INTERFACE_LINK_LIBRARIES Vellum::Value)\n")
+    "set_target_properties(Pulp::vellum PROPERTIES INTERFACE_LINK_LIBRARIES Vellum::Value)\n"
+    "if(NOT PULP_FIXTURE_NO_HOST)\n"
+    " add_library(Pulp::vellum_host INTERFACE IMPORTED)\n"
+    " set_target_properties(Pulp::vellum_host PROPERTIES INTERFACE_LINK_LIBRARIES Vellum::MirrorView_core)\n"
+    "endif()\n")
 file(MAKE_DIRECTORY "${FIXTURE_DIR}/installed-consumer")
 file(WRITE "${FIXTURE_DIR}/installed-consumer/CMakeLists.txt" "cmake_minimum_required(VERSION 3.24)\nproject(VellumInstalled CXX)\n"
     "add_library(vellum-value INTERFACE)\nadd_library(Vellum::Value ALIAS vellum-value)\n"
@@ -63,7 +93,13 @@ file(WRITE "${FIXTURE_DIR}/installed-consumer/CMakeLists.txt" "cmake_minimum_req
     "if(NOT TARGET pulp::vellum)\n message(FATAL_ERROR \"installed pulp::vellum was not loaded\")\nendif()\n"
     "get_target_property(A pulp::vellum ALIASED_TARGET)\n"
     "if(NOT A STREQUAL \"Pulp::vellum\")\n message(FATAL_ERROR \"pulp::vellum aliases \${A}\")\nendif()\n"
-    "pulp_add_vellum_editor_package(InstalledEditor VIEW_HEADER root.hpp VIEW_TYPE test::RootView)\n")
+    "if(NOT PULP_FIXTURE_NO_HOST)\n"
+    " get_target_property(H pulp::vellum-host ALIASED_TARGET)\n"
+    " if(NOT H STREQUAL \"Pulp::vellum_host\")\n  message(FATAL_ERROR \"pulp::vellum-host aliases \${H}\")\n endif()\n"
+    "endif()\n"
+    "pulp_add_vellum_editor_package(InstalledEditor VIEW_HEADER root.hpp VIEW_TYPE test::RootView)\n"
+    "get_target_property(L InstalledEditor INTERFACE_LINK_LIBRARIES)\n"
+    "if(NOT \"pulp::vellum-host\" IN_LIST L)\n message(FATAL_ERROR \"the editor package does not link pulp::vellum-host: \${L}\")\nendif()\n")
 execute_process(COMMAND "${CMAKE_COMMAND}" -S "${FIXTURE_DIR}/installed-consumer"
     -B "${FIXTURE_DIR}/installed-consumer-build"
     RESULT_VARIABLE result OUTPUT_VARIABLE output ERROR_VARIABLE error)
@@ -86,3 +122,17 @@ if(NOT error_flat MATCHES "call find_package\\(Vellum\\) before including it")
     message(FATAL_ERROR "missing-Vellum error was not the helper's message:\n${output}${error}")
 endif()
 message(STATUS "Vellum editor package refuses to load before find_package(Vellum)")
+
+# An installed SDK built without pulp-vellum-host has no PluginViewHost::create()
+# definition; the helper must refuse at configure rather than leave a link error.
+execute_process(COMMAND "${CMAKE_COMMAND}" -S "${FIXTURE_DIR}/installed-consumer"
+    -B "${FIXTURE_DIR}/installed-nohost-build" -DPULP_FIXTURE_NO_HOST=ON
+    RESULT_VARIABLE result OUTPUT_VARIABLE output ERROR_VARIABLE error)
+if(result EQUAL 0)
+    message(FATAL_ERROR "Vellum editor package configured without pulp::vellum-host")
+endif()
+string(REGEX REPLACE "[ \t\r\n]+" " " error_flat "${error}")
+if(NOT error_flat MATCHES "needs pulp::vellum-host, which defines PluginViewHost::create")
+    message(FATAL_ERROR "missing-host error was not the helper's message:\n${output}${error}")
+endif()
+message(STATUS "Vellum editor package refuses an SDK without pulp::vellum-host")

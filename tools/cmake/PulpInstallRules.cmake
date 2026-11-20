@@ -880,7 +880,14 @@ install(SCRIPT "${CMAKE_CURRENT_BINARY_DIR}/PulpStampSourceInstall.cmake")
 # PulpVellumTargets.cmake after the consumer's find_package(Vellum).
 if(TARGET pulp-vellum)
     set_target_properties(pulp-vellum PROPERTIES EXPORT_NAME vellum)
-    install(TARGETS pulp-vellum
+    set(_pulp_vellum_install_targets pulp-vellum)
+    # pulp-vellum-host defines PluginViewHost::create() for Vellum editors; it
+    # exists only when the Vellum SDK carries the view layer.
+    if(TARGET pulp-vellum-host)
+        set_target_properties(pulp-vellum-host PROPERTIES EXPORT_NAME vellum_host)
+        list(APPEND _pulp_vellum_install_targets pulp-vellum-host)
+    endif()
+    install(TARGETS ${_pulp_vellum_install_targets}
         EXPORT PulpVellumTargets
         ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
         INCLUDES DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
