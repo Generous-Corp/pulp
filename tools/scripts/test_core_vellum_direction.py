@@ -165,7 +165,7 @@ class CoreVellumDirectionTests(unittest.TestCase):
         self.assertEqual(self.repo_include_allowed, {})
         self.assertTrue(self.repo_cmake_allowed)
         self.assertEqual({reason for _count, reason in self.repo_cmake_allowed.values()},
-                         {direction._GPU_RUNTIME})
+                         {direction._GPU_RUNTIME, direction._VELLUM_BRIDGE})
         include_boundary.ALLOWED["core-vellum"].update(self.repo_include_allowed)
         direction.ALLOWED_CMAKE.update(self.repo_cmake_allowed)
         self.assertEqual(self._run(REPO), 0)

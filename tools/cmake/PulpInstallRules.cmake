@@ -195,6 +195,15 @@ if(TARGET pulp-native)
     list(APPEND PULP_SDK_TARGETS pulp-native)
 endif()
 
+# The optional Vellum editor bridge is part of the installed SDK when it was
+# enabled for this build. Generated `pulp create --ui vellum` projects link
+# against this exported target and its public headers.
+set(PULP_SDK_HAS_VELLUM_BRIDGE OFF)
+if(TARGET pulp-vellum)
+    list(APPEND PULP_SDK_TARGETS pulp-vellum)
+    set(PULP_SDK_HAS_VELLUM_BRIDGE ON)
+endif()
+
 # pulp-canvas links pulp-bundled-fonts privately when Skia is on.
 # CMake exports the canvas target through PulpTargets, and refuses unless
 # every PRIVATE-linked dependency is also in the export set.
@@ -377,6 +386,12 @@ foreach(subsystem IN LISTS _pulp_sdk_header_subsystems)
     endif()
 endforeach()
 unset(_pulp_sdk_header_subsystems)
+
+if(TARGET pulp-vellum)
+    install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/integrations/pulp-vellum/include/pulp/"
+        DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/pulp"
+        FILES_MATCHING PATTERN "*.hpp" PATTERN "*.h")
+endif()
 
 if(TARGET pulp-native)
     install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/integrations/pulp-native/include/pulp/"
@@ -915,6 +930,8 @@ install(FILES
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpUiAssets.cmake"
     # Included by PulpUtils.cmake: pulp_add_plugin(... UI <package>).
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpEditorPackage.cmake"
+    # Included by generated --ui vellum projects.
+    "${CMAKE_CURRENT_SOURCE_DIR}/integrations/pulp-vellum/cmake/PulpVellumEditorPackage.cmake"
     # Included by PulpUtils.cmake: pulp_add_js_bytecode().
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpJsBytecode.cmake"
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpInstall.cmake"

@@ -60,7 +60,10 @@ _FIRST_ARGUMENT_RE = re.compile(r'''\s*(?:"((?:\\.|[^"\\])*)"|([^\s()]+))''', re
 # targets forward to it. Every reference to it is counted here, so any other
 # Vellum edge, or one more of these, fails.
 _GPU_RUNTIME = "gpu-runtime: the neutral GPU device layer (tools/cmake/PulpGpuRuntime.cmake)"
+_VELLUM_BRIDGE = ("pulp-vellum bridge: the installed SDK loads the Vellum package for the exported "
+                  "pulp-vellum target (tools/cmake/PulpConfig.cmake.in)")
 ALLOWED_CMAKE: dict[tuple[str, str], tuple[int, str]] = {
+    ("tools/cmake/PulpConfig.cmake.in", "find_dependency(Vellum"): (1, _VELLUM_BRIDGE),
     ("core/gpu_audio/CMakeLists.txt", "VellumGpuRuntime::Device"): (1, _GPU_RUNTIME),
     ("core/render/CMakeLists.txt", "VellumGpuRuntime::Device"): (1, _GPU_RUNTIME),
     ("core/render/CMakeLists.txt", "VellumGpuRuntime::DeviceApi"): (1, _GPU_RUNTIME),

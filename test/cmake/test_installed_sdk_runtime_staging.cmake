@@ -291,6 +291,27 @@ if(NOT _timeline_agent_view_probe_result EQUAL 0)
         "${_timeline_agent_view_probe_output}\n${_timeline_agent_view_probe_error}")
 endif()
 
+set(_bytecode_probe
+    "${_consumer_build}/PulpSDKSmokeBytecodeProbe${CMAKE_EXECUTABLE_SUFFIX}")
+if(NOT EXISTS "${_bytecode_probe}")
+    set(_bytecode_probe
+        "${_consumer_build}/${_config}/PulpSDKSmokeBytecodeProbe${CMAKE_EXECUTABLE_SUFFIX}")
+endif()
+if(NOT EXISTS "${_bytecode_probe}")
+    message(FATAL_ERROR
+        "Installed SDK consumer did not produce PulpSDKSmokeBytecodeProbe")
+endif()
+execute_process(
+    COMMAND "${_bytecode_probe}"
+    RESULT_VARIABLE _bytecode_probe_result
+    OUTPUT_VARIABLE _bytecode_probe_output
+    ERROR_VARIABLE _bytecode_probe_error)
+if(NOT _bytecode_probe_result EQUAL 0)
+    message(FATAL_ERROR
+        "Installed-SDK QuickJS bytecode probe failed (${_bytecode_probe_result})\n"
+        "${_bytecode_probe_output}\n${_bytecode_probe_error}")
+endif()
+
 # The POST_BUILD check is a no-op when nothing is required, so assert
 # independently that it actually RAN for at least one target. Otherwise a
 # regression that silently stopped wiring the verification would look identical
