@@ -132,6 +132,8 @@
         "pulp-timeline-agent-view",
         "pulp-timeline-editor",
         "pulp-tool-gpu-health-model",
+        "pulp-vellum",
+        "pulp-vellum-audio",
         "pulp-view",
         "pulp-view-audio",
         "pulp-view-graph-editor",
