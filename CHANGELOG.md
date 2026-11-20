@@ -9,6 +9,14 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
      release's bullet block. See docs/guides/versioning.md § Release pipeline
      for the full end-to-end flow. -->
 
+<a id="v11750"></a>
+## [1.175.0] - 2026-11-20
+
+- release/version bump ([#12642](https://github.com/Generous-Corp/pulp/pull/12642))
+- feature/plugin license display ([#12632](https://github.com/Generous-Corp/pulp/pull/12632))
+- data/clock guard 20261120 ([#12629](https://github.com/Generous-Corp/pulp/pull/12629))
+- feature/vellum sdk bundling ([#12639](https://github.com/Generous-Corp/pulp/pull/12639))
+
 <a id="v11740"></a>
 ## [1.174.0] - 2026-11-20
 
@@ -13406,6 +13414,7 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/Generous-Corp/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/Generous-Corp/pulp/pull/2))
 
+[1.175.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.175.0
 [1.174.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.174.0
 [1.173.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.173.0
 [1.172.1]: https://github.com/Generous-Corp/pulp/releases/tag/v1.172.1
