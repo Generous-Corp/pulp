@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import hashlib
+import io
 import json
 import tarfile
 import tempfile
@@ -77,6 +78,48 @@ class BundleVellumSdkTests(unittest.TestCase):
             tar.addfile(info)
         with self.assertRaisesRegex(ValueError, "link escapes destination"):
             bundle._safe_extract(archive, self.root / "destination")
+
+    def test_hardlink_name_is_resolved_from_extraction_root(self):
+        archive = self.root / "hardlink.tar.gz"
+        with tarfile.open(archive, "w:gz") as tar:
+            info = tarfile.TarInfo("sdk/link")
+            info.type = tarfile.LNKTYPE
+            info.linkname = "../outside"
+            tar.addfile(info)
+        with self.assertRaisesRegex(ValueError, "link escapes destination"):
+            bundle._safe_extract(archive, self.root / "destination")
+
+    def test_member_written_through_symlink_is_refused(self):
+        archive = self.root / "symlink-follow.tar.gz"
+        with tarfile.open(archive, "w:gz") as tar:
+            link = tarfile.TarInfo("sdk/link")
+            link.type = tarfile.SYMTYPE
+            link.linkname = "real"
+            tar.addfile(link)
+            data = tarfile.TarInfo("sdk/link/file")
+            data.size = 1
+            tar.addfile(data, io.BytesIO(b"x"))
+        with self.assertRaisesRegex(ValueError, "follows symlink"):
+            bundle._safe_extract(archive, self.root / "destination")
+
+    def test_failed_staging_leaves_no_partial_sdk(self):
+        prefix = self.root / "prefix"
+        original = bundle._merge_notice
+
+        def fail(*args, **kwargs):
+            raise ValueError("synthetic notice failure")
+
+        bundle._merge_notice = fail
+        try:
+            with self.assertRaisesRegex(ValueError, "synthetic notice failure"):
+                bundle.bundle(lock_path=self.lock, prefix=prefix, platform="darwin-arm64",
+                              archive=self.archive, archive_dir=None, integrations=self.integration)
+        finally:
+            bundle._merge_notice = original
+        self.assertFalse((prefix / "share/pulp/vellum-sdk/0.2.0").exists())
+        # A rerun must be able to stage the SDK after the failed attempt.
+        self.assertTrue(bundle.bundle(lock_path=self.lock, prefix=prefix, platform="darwin-arm64",
+                                      archive=self.archive, archive_dir=None, integrations=self.integration).is_dir())
 
     def test_existing_staged_sdk_is_not_overwritten(self):
         prefix = self.root / "prefix"
