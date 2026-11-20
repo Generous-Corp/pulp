@@ -12,6 +12,20 @@ if(PULP_BUILD_TESTS AND TARGET Catch2::Catch2WithMain)
     include(Catch)
     catch_discover_tests(pulp-test-pulp-vellum PROPERTIES LABELS pulp-vellum)
 
+    # The SDK's imported targets can be scoped to the integration directory.
+    get_property(_has_swift_motion TARGET pulp-vellum PROPERTY PULP_VELLUM_HAS_SWIFT_MOTION)
+    if(_has_swift_motion)
+        add_executable(pulp-test-motion-swift-bridge
+            test_motion_swift_bridge.cpp
+            ${PULP_ROOT_DIR}/apple/Sources/PulpSwift/PulpBridge.cpp)
+        target_include_directories(pulp-test-motion-swift-bridge PRIVATE
+            ${PULP_ROOT_DIR}/apple/Sources/PulpSwift)
+        target_link_libraries(pulp-test-motion-swift-bridge PRIVATE
+            pulp::vellum Catch2::Catch2WithMain Threads::Threads)
+        catch_discover_tests(pulp-test-motion-swift-bridge PROPERTIES
+            LABELS pulp-vellum TIMEOUT 30)
+    endif()
+
     # The editor tests need Vellum's mirrored view layer; skip them for an SDK
     # without it so the parameter-bridge tests still build.
     if(TARGET Vellum::MirrorView_core)
