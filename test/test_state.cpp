@@ -3521,3 +3521,105 @@ TEST_CASE("StateStore::set_values_rt lets the last write to a parameter win",
     REQUIRE_THAT(store.get_value(2), WithinAbs(0.9, 1e-6));
     listener.reset();
 }
+
+
+// ── StateScanGate: per-block scans of a large store ─────────────────────────
+
+namespace {
+
+constexpr std::uint32_t kScanBase = (1u << 14) + 17; // above the dense table limit
+constexpr std::size_t kScanParams = 8000;
+
+struct ScanFixture {
+    StateStore store;
+    std::vector<ParamReader> readers;
+    std::vector<float> seen;
+    std::size_t reads = 0;
+    ScanFixture() {
+        for (std::size_t i = 0; i < kScanParams; ++i)
+            store.add_parameter(make_param_info(kScanBase + static_cast<std::uint32_t>(i), "P",
+                                                "", {0.0f, 1.0f, 0.0f}));
+        for (std::size_t i = 0; i < kScanParams; ++i)
+            readers.push_back(store.param_reader(kScanBase + static_cast<std::uint32_t>(i)));
+        seen.assign(kScanParams, 0.0f);
+    }
+    void scan() {
+        for (std::size_t i = 0; i < readers.size(); ++i) {
+            seen[i] = readers[i].get();
+            ++reads;
+        }
+    }
+};
+
+} // namespace
+
+TEST_CASE("StateScanGate: idle blocks do no value reads", "[state][scan-gate]") {
+    ScanFixture f;
+    StateScanGate gate;
+    REQUIRE(gate.scan_if_changed(f.store, [&] { f.scan(); }));
+    REQUIRE(f.reads == kScanParams);
+    f.reads = 0;
+    for (int block = 0; block < 10000; ++block)
+        gate.scan_if_changed(f.store, [&] { f.scan(); });
+    CHECK(f.reads == 0);
+}
+
+TEST_CASE("StateScanGate: every writer kind is seen by the next block", "[state][scan-gate]") {
+    ScanFixture f;
+    StateScanGate gate;
+    gate.scan_if_changed(f.store, [&] { f.scan(); });
+    const ParamID id = kScanBase + 5;
+
+    auto block = [&] {
+        f.reads = 0;
+        const bool ran = gate.scan_if_changed(f.store, [&] { f.scan(); });
+        CHECK(ran);
+        CHECK(f.reads == kScanParams);
+        // An idle block right after reads nothing.
+        f.reads = 0;
+        CHECK_FALSE(gate.scan_if_changed(f.store, [&] { f.scan(); }));
+        CHECK(f.reads == 0);
+    };
+
+    SECTION("UI write") {
+        f.store.set_value(id, 0.25f);
+        block();
+        CHECK(f.seen[5] == 0.25f);
+    }
+    SECTION("audio-thread write") {
+        f.store.set_value_rt(id, 0.5f);
+        block();
+        CHECK(f.seen[5] == 0.5f);
+    }
+    SECTION("modulation") {
+        const auto before = f.store.state_generation();
+        f.store.set_mod_offset(id, 0.125f);
+        CHECK(f.store.state_generation() != before);
+        block();
+    }
+    SECTION("restore") {
+        f.store.set_value(id, 0.75f);
+        block();
+        const auto bytes = f.store.serialize();
+        f.store.set_value(id, 0.1f);
+        block();
+        REQUIRE(f.store.deserialize(bytes));
+        block();
+        CHECK(f.seen[5] == 0.75f);
+    }
+}
+
+TEST_CASE("StateScanGate: a scan that overlapped a writer is repeated", "[state][scan-gate]") {
+    ScanFixture f;
+    StateScanGate gate;
+    const ParamID id = kScanBase + 9;
+    // A write lands during the scan: the gate must not accept that scan.
+    gate.scan_if_changed(f.store, [&] {
+        f.scan();
+        f.store.set_value(id, 0.9f);
+    });
+    f.reads = 0;
+    CHECK(gate.scan_if_changed(f.store, [&] { f.scan(); }));
+    CHECK(f.seen[9] == 0.9f);
+    CHECK_FALSE(gate.scan_if_changed(f.store, [&] { f.scan(); }));
+}
