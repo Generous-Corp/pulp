@@ -591,6 +591,43 @@ if(PULP_HAS_CLAP)
     target_compile_definitions(pulp-test-clap-single-scan-without-processor PRIVATE PULP_CLAP_GUI=1)
     catch_discover_tests(pulp-test-clap-single-scan-without-processor)
 
+    # CLAP host-conformance checker, proven against one well-behaved Pulp-built
+    # module and one fixture per check that deliberately breaks it.
+    if(TARGET pulp-clap-conformance AND TARGET pulp::format-clap-core AND NOT WIN32)
+        set(_conf_dir ${CMAKE_SOURCE_DIR}/tools/audio/clap-conformance)
+        add_library(pulp-test-clap-conf-pulp MODULE ${_conf_dir}/pulp_conformance_fixture_clap.cpp)
+        target_link_libraries(pulp-test-clap-conf-pulp PRIVATE pulp::format-clap-core clap)
+        set_target_properties(pulp-test-clap-conf-pulp PROPERTIES
+            OUTPUT_NAME "ConfPulp" PREFIX "" SUFFIX ".clap")
+        set(_conf_modules pulp-test-clap-conf-pulp)
+        foreach(_v good HEAVY_MEMORY HEAVY_CPU ECHO NULL_INPUT STATE)
+            string(TOLOWER ${_v} _lv)
+            add_library(pulp-test-clap-conf-${_lv} MODULE ${_conf_dir}/conformance_fixture_clap.cpp)
+            target_link_libraries(pulp-test-clap-conf-${_lv} PRIVATE clap)
+            if(NOT _v STREQUAL "good")
+                target_compile_definitions(pulp-test-clap-conf-${_lv} PRIVATE BREAK_${_v}=1)
+            endif()
+            set_target_properties(pulp-test-clap-conf-${_lv} PROPERTIES
+                OUTPUT_NAME "Conf_${_lv}" PREFIX "" SUFFIX ".clap")
+            list(APPEND _conf_modules pulp-test-clap-conf-${_lv})
+        endforeach()
+        find_package(Python3 COMPONENTS Interpreter QUIET)
+        if(Python3_Interpreter_FOUND)
+            add_test(NAME clap-conformance-checker
+                COMMAND ${Python3_EXECUTABLE} -I ${_conf_dir}/test_clap_conformance.py
+                    $<TARGET_FILE:pulp-clap-conformance>
+                    pulp=$<TARGET_FILE:pulp-test-clap-conf-pulp>
+                    good=$<TARGET_FILE:pulp-test-clap-conf-good>
+                    heavy_memory=$<TARGET_FILE:pulp-test-clap-conf-heavy_memory>
+                    heavy_cpu=$<TARGET_FILE:pulp-test-clap-conf-heavy_cpu>
+                    echo=$<TARGET_FILE:pulp-test-clap-conf-echo>
+                    null_input=$<TARGET_FILE:pulp-test-clap-conf-null_input>
+                    state=$<TARGET_FILE:pulp-test-clap-conf-state>)
+            set_tests_properties(clap-conformance-checker PROPERTIES
+                LABELS "format;clap;tools" TIMEOUT 120)
+        endif()
+    endif()
+
     # CLAP inbound/outbound MIDI event coverage + steady-state RT process guard.
     #
     # Unlike `pulp-test-clap-entry` above, this test DOES NOT re-compile
