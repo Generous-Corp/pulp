@@ -470,7 +470,9 @@ TEST_CASE("staggered repeating timers share main-thread wake-ups",
             CFRunLoopAddTimer(CFRunLoopGetMain(), t, kCFRunLoopCommonModes);
             raw.push_back(t);
         }
-        pump_for(kSpan);
+        // One blocking call: a pump loop's own slices would count as wakes.
+        CFRunLoopRunInMode(kCFRunLoopDefaultMode, std::chrono::duration<double>(kSpan).count(),
+                           false);
         control_wakes = counter.wakes;
         for (auto t : raw) {
             CFRunLoopTimerInvalidate(t);
@@ -487,13 +489,14 @@ TEST_CASE("staggered repeating timers share main-thread wake-ups",
         timers.push_back(std::make_unique<MainThreadTimer>(scope, [&] { ++fires; }));
     int wakes = 0;
     {
-        WakeCounter counter;
         for (auto& t : timers) {
             t->fire_every(kPeriod);
             pump_for(kStagger);
         }
         fires = 0;
-        pump_for(kSpan);
+        WakeCounter counter;
+        CFRunLoopRunInMode(kCFRunLoopDefaultMode, std::chrono::duration<double>(kSpan).count(),
+                           false);
         wakes = counter.wakes;
     }
     for (auto& t : timers)
