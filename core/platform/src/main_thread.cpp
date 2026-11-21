@@ -263,12 +263,12 @@ struct MainThreadTimerState : std::enable_shared_from_this<MainThreadTimerState>
         if (self->period <= 0) {
             self->park();
         } else if (self->align_pending) {
-            // After the first fire, put the next one on the period's next grid
-            // tick: every same-period timer lands on the same tick, and the
-            // second interval is between 0 and one period, never longer.
+            // After the first fire, put the next one on the first grid tick at
+            // least one full period away: no interval is ever shorter than the
+            // period, and every same-period timer lands on the same tick.
             self->align_pending = false;
             const CFAbsoluteTime now = CFAbsoluteTimeGetCurrent();
-            const CFAbsoluteTime next = (std::floor(now / self->period) + 1) * self->period;
+            const CFAbsoluteTime next = std::ceil((now + self->period) / self->period) * self->period;
             set_next_fire(self->timer, next);
         }
         // Hold the callback itself: the timer may be destroyed while it runs.

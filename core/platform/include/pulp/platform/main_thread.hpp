@@ -262,8 +262,9 @@ class MainThreadScope {
 /// the period) so timers started at different moments can share wake-ups.
 /// Repeating timers of 50 ms or more fire their first callback one period
 /// after fire_every(), then move onto a grid of their period on the absolute
-/// clock, so same-period timers started at different moments fire in one
-/// run-loop pass from the second fire on.
+/// clock (the second fire comes between one and two periods after the first,
+/// later ones every period), so same-period timers started at different
+/// moments fire in one run-loop pass from the second fire on.
 ///
 /// It is one-shot and reschedulable: fire_after() replaces any pending fire.
 /// fire_every() repeats until cancel() or another fire_after(). All members
