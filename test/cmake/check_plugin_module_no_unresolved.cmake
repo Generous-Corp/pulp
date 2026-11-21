@@ -79,5 +79,11 @@ else()
     if(n EQUAL 0)
         message(FATAL_ERROR "${MODULE}: expected unresolved symbols but found none; the probe cannot see the defect")
     endif()
+    # ldd -r exits nonzero when it cannot bind a symbol. Text alone (from a
+    # malformed or failed invocation) must not satisfy the negative control.
+    if("${rc}" STREQUAL "0")
+        message(FATAL_ERROR "${MODULE}: ldd -r reported undefined symbols but exited 0; "
+            "the unresolved verdict needs a nonzero ldd exit status:\n${all}")
+    endif()
 endif()
 message(STATUS "${MODULE}: ${n} unresolved symbols; libfontconfig needed: ${names_fontconfig}")
