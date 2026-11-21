@@ -87,6 +87,12 @@ struct RecordingSession {
     void attach_gpu_surface(::vellum::render::GpuSurface* surface) {
         attachments.push_back(surface);
     }
+    bool document_load_pending() const noexcept {
+        return false;
+    }
+    ::vellum::view::WidgetBridge* bridge() const {
+        return nullptr;
+    }
 };
 
 class RecordingHost final : public ::vellum::view::PluginViewHost {
