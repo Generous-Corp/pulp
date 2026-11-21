@@ -1673,3 +1673,22 @@ endif()
 # scanner tests above because it is the same family of `cmake -P` artifact
 # scans and the control scanner reads the same list.
 include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/release_artifact_tests.cmake")
+
+# The installed package config puts libfontconfig after Skia on Pulp::canvas.
+add_test(NAME cmake-canvas-fontconfig-link
+    COMMAND ${CMAKE_COMMAND}
+        -DPULP_SOURCE_DIR=${CMAKE_SOURCE_DIR}
+        -DFIXTURE_DIR=${CMAKE_CURRENT_BINARY_DIR}/canvas-fontconfig-link
+        -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/test_canvas_fontconfig_link.cmake)
+set_tests_properties(cmake-canvas-fontconfig-link PROPERTIES
+    LABELS "cmake;format" TIMEOUT 60)
+
+if(UNIX)
+    add_test(NAME cmake-plugin-module-probe-exit-status
+        COMMAND ${CMAKE_COMMAND}
+            -DPULP_SOURCE_DIR=${CMAKE_SOURCE_DIR}
+            -DWORK_DIR=${CMAKE_CURRENT_BINARY_DIR}/plugin-module-probe-exit-status
+            -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/test_plugin_module_probe.cmake)
+    set_tests_properties(cmake-plugin-module-probe-exit-status PROPERTIES
+        LABELS "cmake;format" TIMEOUT 60)
+endif()
