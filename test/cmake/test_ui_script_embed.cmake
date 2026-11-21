@@ -12,18 +12,21 @@ paths are recorded only by a dev build.
 
 Two halves:
 
-  1. A real configure + build + run of a throwaway project that attaches a
-     script through the same helper every format target uses
-     (_pulp_apply_ui_script_definition), twice:
+  1. Configure, build and run a throwaway project that selects its editor
+     through pulp_add_plugin(UI_SCRIPT), then embeds the selected script
+     through the same helper every format target uses:
        - release (PULP_DEV_BUILD unset): the binary carries the script bytes,
          the theme beside it and the image beside it, registers them at load
          (the run prints what the registry holds), and contains neither the
          script's absolute source path nor the declared asset-root path;
+       - vellum (UI_ENGINE vellum): the public selector creates the package,
+         whose generated hook registers the Vellum factory. The same embedded
+         assets remain registered and the legacy builder stays absent;
        - dev (PULP_DEV_BUILD=ON): the positive control -- the same binary now
          carries both paths, which proves the scan can see them, and still
          carries the embedded bytes.
-     The byte scan is its own control: it must find the script marker in both
-     builds, so an absent path is an absent path and not a scanner that read
+     The byte scan is its own control: it must find the script marker in every
+     build, so an absent path is an absent path and not a scanner that read
      nothing.
 
   2. A source lint that every format target pulp_add_plugin() gives an editor
@@ -102,6 +105,8 @@ file(MAKE_DIRECTORY "${_assets_abs}")
 # only the declarations in editor_assets.hpp, and the run prints the record.
 file(WRITE "${_pdir}/main.cpp" [[
 #include <pulp/format/editor_assets.hpp>
+#include <pulp/format/editor_package.hpp>
+#include <pulp/vellum/scripted_editor.hpp>
 #include <cstdio>
 #include <cstring>
 
@@ -112,7 +117,19 @@ EditorAssets registered_editor_assets() noexcept { return g_assets; }
 void install_scripted_editor_builder() noexcept { g_builder = true; }
 } // namespace pulp::format
 
+namespace pulp::vellum {
+// The external renderer is a recording boundary. The generated registration
+// unit and format-core factory slot remain the production implementation.
+format::EditorFactory* scripted_editor_factory() {
+    static int identity;
+    return reinterpret_cast<format::EditorFactory*>(&identity);
+}
+}
+
 int main() {
+    const auto factory = pulp::format::plugin_editor_factory();
+    std::printf("factory=%s\n", factory == pulp::vellum::scripted_editor_factory()
+                                  ? "vellum" : factory ? "unexpected" : "none");
     const auto assets = pulp::format::registered_editor_assets();
     if (assets.script == nullptr || assets.script_size == 0) {
         std::puts("embedded=none");
@@ -136,18 +153,31 @@ cmake_minimum_required(VERSION 3.24)
 project(PulpUiScriptEmbedFixture CXX)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
-include("${PULP_UI_ASSETS_MODULE}")
-
-add_executable(fixture main.cpp)
-target_include_directories(fixture PRIVATE "${PULP_FORMAT_INCLUDE}")
-set_target_properties(fixture PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
-# The same helpers every format target calls from pulp_add_plugin() /
-# pulp_use_kit_ui().
-_pulp_apply_ui_script_definition(fixture "${CMAKE_CURRENT_SOURCE_DIR}/ui/main.js")
-_pulp_apply_ui_asset_roots_definition(fixture "${CMAKE_CURRENT_SOURCE_DIR}/assets")
+# Stand in for the external libraries, leaving the public selector, package
+# creation, generated registrar and format-core registry real. Pre-create a
+# format-shaped executable so the generated registration can be observed
+# without loading a DAW or an external format SDK.
+add_library(pulp::format INTERFACE IMPORTED)
+add_library(pulp::format-core INTERFACE IMPORTED)
+add_library(Pulp::vellum-scripted INTERFACE IMPORTED)
+include("${PULP_SOURCE_DIR}/tools/cmake/PulpUtils.cmake")
+include("${PULP_SOURCE_DIR}/integrations/pulp-vellum/cmake/PulpVellumEditorPackage.cmake")
+add_executable(fixture_CLAP main.cpp
+    "${PULP_SOURCE_DIR}/core/format/src/editor_package.cpp")
+target_include_directories(fixture_CLAP PRIVATE "${PULP_FORMAT_INCLUDE}"
+    "${PULP_SOURCE_DIR}/integrations/pulp-vellum/include")
+set_target_properties(fixture_CLAP PROPERTIES
+    OUTPUT_NAME fixture RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
+# Installation is outside this embedding fixture; provide its scan dependency.
+add_custom_target(fixture_shipping_scan)
+set(PULP_fixture_CLAP_CONTROL_SHIPPING_SCAN_TARGET fixture_shipping_scan)
 if(FIXTURE_VELLUM_SCRIPTED)
-    set_property(TARGET fixture PROPERTY PULP_VELLUM_SCRIPTED_EDITOR TRUE)
+    set(_engine UI_ENGINE vellum)
 endif()
+pulp_add_plugin(fixture BUNDLE_ID test.scripted.fixture
+    UI_SCRIPT "${CMAKE_CURRENT_SOURCE_DIR}/ui/main.js" ${_engine})
+_pulp_apply_ui_script_definition(fixture_CLAP "${PULP_fixture_UI_SCRIPT}")
+_pulp_apply_ui_asset_roots_definition(fixture_CLAP "${CMAKE_CURRENT_SOURCE_DIR}/assets")
 ]])
 
 # Returns the fixture binary's stdout and path, and the configure output, in
@@ -158,6 +188,7 @@ function(_build_and_run variant extra_args out_stdout out_binary out_configure)
         COMMAND "${CMAKE_COMMAND}" -S "${_pdir}" -B "${_bdir}"
                 -DCMAKE_BUILD_TYPE=Release
                 "-DPULP_UI_ASSETS_MODULE=${_ui_assets_module}"
+                "-DPULP_SOURCE_DIR=${_repo_root}"
                 "-DPULP_FORMAT_INCLUDE=${_format_include}"
                 ${extra_args}
         RESULT_VARIABLE _rv OUTPUT_VARIABLE _out ERROR_VARIABLE _err)
@@ -166,7 +197,8 @@ function(_build_and_run variant extra_args out_stdout out_binary out_configure)
     endif()
     set(${out_configure} "${_out}\n${_err}" PARENT_SCOPE)
     execute_process(
-        COMMAND "${CMAKE_COMMAND}" --build "${_bdir}" --config Release --parallel 2
+        COMMAND "${_repo_root}/tools/ci/governed-build.sh"
+                "${CMAKE_COMMAND}" --build "${_bdir}" --config Release --target fixture_CLAP
         RESULT_VARIABLE _rv OUTPUT_VARIABLE _out ERROR_VARIABLE _err)
     if(NOT _rv EQUAL 0)
         message(FATAL_ERROR "[${variant}] fixture build failed (rc=${_rv}):\n${_out}\n${_err}")
@@ -222,7 +254,7 @@ if(_release_out MATCHES "main\\.js\\.map" OR _release_out MATCHES "stale\\.json"
 endif()
 # An embedded script with no on-disk path still has to install the scripted
 # editor builder, or the editor would open AutoUi.
-if(NOT _release_out MATCHES "builder=installed")
+if(NOT _release_out MATCHES "builder=installed" OR NOT _release_out MATCHES "factory=none")
     list(APPEND _failures "release: the embedded editor did not install the scripted editor builder; stdout was: ${_release_out}")
 endif()
 if(NOT _release_out MATCHES "dev_path=none")
@@ -256,7 +288,8 @@ endif()
 # registrar. Only the legacy builder hookup is omitted.
 _build_and_run(vellum "-DFIXTURE_VELLUM_SCRIPTED=ON" _vellum_out _vellum_bin _vellum_configure)
 if(NOT _vellum_out MATCHES "embedded=main\\.js script_size=${_script_size} theme_size=${_theme_size} files=1"
-   OR NOT _vellum_out MATCHES "builder=none")
+   OR NOT _vellum_out MATCHES "builder=none"
+   OR NOT _vellum_out MATCHES "factory=vellum")
     list(APPEND _failures "vellum: expected the same embedded assets without the legacy builder: ${_vellum_out}")
 endif()
 
