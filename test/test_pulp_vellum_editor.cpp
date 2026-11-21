@@ -2,6 +2,7 @@
 // editor package includes it.
 #include <pulp/vellum/editor.hpp>
 
+#include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 
 #include <pulp/format/editor_host.hpp>
@@ -14,6 +15,13 @@
 #if defined(PULP_TEST_VELLUM_SCRIPTED_UI)
 #include <vellum/view/scripted_ui.hpp>
 #include <vellum/view/widgets.hpp>
+#endif
+
+#if defined(PULP_TEST_VELLUM_SCRIPTED_EDITOR)
+#include <pulp/format/contract_editor_session.hpp>
+#include <pulp/format/editor_assets.hpp>
+#include <pulp/format/plugin_state_io.hpp>
+#include <pulp/vellum/scripted_editor.hpp>
 #endif
 
 #include <memory>
@@ -55,6 +63,15 @@ class Processor final : public pulp::format::Processor {
         return {};
     }
     void define_parameters(pulp::state::StateStore&) override {}
+    bool supports_editor_reload() const override {
+        return reloadable;
+    }
+    std::uint64_t editor_reload_generation() const override {
+        return generation;
+    }
+
+    bool reloadable = false;
+    std::uint64_t generation = 0;
     void prepare(const pulp::format::PrepareContext&) override {}
     void process(pulp::audio::BufferView<float>&, const pulp::audio::BufferView<const float>&,
                  pulp::midi::MidiBuffer&, pulp::midi::MidiBuffer&,
@@ -544,5 +561,93 @@ TEST_CASE("Vellum native messages are scoped to the editor attachment that regis
     CHECK_FALSE(retained_env.request_resize({600, 400, 1.0}));
     CHECK(f.context.resize_requests == 0);
     session.detach_native_message_handler("editorMessage");
+}
+#endif
+
+#if defined(PULP_TEST_VELLUM_SCRIPTED_EDITOR)
+namespace {
+
+template <typename Widget> Widget* find_widget(::vellum::view::View& view) {
+    if (auto* widget = dynamic_cast<Widget*>(&view))
+        return widget;
+    for (std::size_t i = 0; i < view.child_count(); ++i) {
+        if (auto* widget = find_widget<Widget>(*view.child_at(i)))
+            return widget;
+    }
+    return nullptr;
+}
+
+} // namespace
+
+TEST_CASE("Vellum scripted editor mounts and exchanges parameters through the host session",
+          "[pulp-vellum][editor][scripted-editor]") {
+    using pulp::format::ContractEditorSession;
+    using ::vellum::view::PluginViewHost;
+    FactoryReset reset;
+    Fixture fixture;
+    Processor processor;
+    processor.set_state_store(&fixture.store);
+    processor.reloadable = true;
+    int gesture_begins = 0;
+    int gesture_ends = 0;
+    fixture.store.set_gesture_callbacks(
+        [&](pulp::state::ParamID id) {
+            if (id == 1)
+                ++gesture_begins;
+        },
+        [&](pulp::state::ParamID id) {
+            if (id == 1)
+                ++gesture_ends;
+        });
+
+    ::vellum::view::View* root = nullptr;
+    StubHost* host = nullptr;
+    PluginViewHost::set_factory(
+        [&](::vellum::view::View& view, const PluginViewHost::Options& options) {
+            root = &view;
+            auto stub = std::make_unique<StubHost>(options.size);
+            host = stub.get();
+            return stub;
+        });
+    REQUIRE(pulp::format::embeds_editor_script(pulp::format::registered_editor_assets()));
+    auto session = ContractEditorSession::create(processor, fixture.store,
+                                                 *pulp::vellum::scripted_editor_factory(), {},
+                                                 ContractEditorSession::IdleSource::host_driven);
+    REQUIRE(session);
+    REQUIRE(root);
+    REQUIRE(host);
+    REQUIRE(session->attach({.kind = pulp::format::NativeParentKind::cocoa_view, .handle = host}));
+    auto* knob = find_widget<::vellum::view::Knob>(*root);
+    REQUIRE(knob);
+    REQUIRE(knob->value() == Catch::Approx(0.5f));
+
+    fixture.store.set_value_rt(1, 0.25f);
+    CHECK(knob->value() == Catch::Approx(0.5f));
+    session->tick();
+    REQUIRE(knob->value() == Catch::Approx(0.25f));
+    const auto saved = pulp::format::plugin_state_io::serialize(fixture.store, processor);
+
+    knob->on_mouse_down({24, 32});
+    knob->on_mouse_drag({24, 8});
+    knob->on_mouse_up({24, 8});
+    REQUIRE(fixture.store.get_normalized(1) > 0.25f);
+    CHECK(fixture.store.get_normalized(1) == Catch::Approx(knob->value()));
+    CHECK(gesture_begins == 1);
+    CHECK(gesture_ends == 1);
+
+    REQUIRE(pulp::format::plugin_state_io::deserialize(saved, fixture.store, processor));
+    CHECK(knob->value() > 0.25f);
+    session->tick();
+    CHECK(knob->value() == Catch::Approx(0.25f));
+
+    auto initial_value = [&] {
+        const auto* label = find_widget<::vellum::view::Label>(*root);
+        REQUIRE(label);
+        return std::string(label->text());
+    };
+    CHECK(initial_value() == "0.5");
+    ++processor.generation;
+    session->tick();
+    CHECK(initial_value() == "0.25");
 }
 #endif

@@ -103,3 +103,27 @@ function(pulp_add_vellum_editor_package package)
         PULP_EDITOR_RUNTIME_LIBRARIES "${_runtime_libraries}")
     unset(_pulp_vellum_target)
 endfunction()
+
+# Built-in package for UI_SCRIPT. Keep its script library out of other Vellum editors.
+function(_pulp_vellum_scripted_package context out_var)
+    if(TARGET Pulp::vellum-scripted)
+        set(_scripted Pulp::vellum-scripted)
+    elseif(TARGET pulp::vellum-scripted)
+        set(_scripted pulp::vellum-scripted)
+    else()
+        message(FATAL_ERROR
+            "${context}: UI_ENGINE vellum requires PULP_ENABLE_PULP_VELLUM=ON "
+            "and a Vellum SDK with Vellum::MirrorView_script")
+    endif()
+    if(NOT TARGET pulp-vellum-scripted-package)
+        add_library(pulp-vellum-scripted-package INTERFACE)
+        target_link_libraries(pulp-vellum-scripted-package INTERFACE "${_scripted}")
+        _pulp_vellum_runtime_libraries(_runtime_libraries Vellum::MirrorView_script)
+        set_target_properties(pulp-vellum-scripted-package PROPERTIES
+            PULP_EDITOR_FACTORY_FUNCTION "pulp::vellum::scripted_editor_factory"
+            PULP_EDITOR_FACTORY_HEADER "pulp/vellum/scripted_editor.hpp"
+            PULP_EDITOR_RUNTIME_LIBRARIES "${_runtime_libraries}"
+            PULP_VELLUM_SCRIPTED_EDITOR TRUE)
+    endif()
+    set(${out_var} pulp-vellum-scripted-package PARENT_SCOPE)
+endfunction()

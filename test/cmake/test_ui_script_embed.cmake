@@ -145,6 +145,9 @@ set_target_properties(fixture PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINAR
 # pulp_use_kit_ui().
 _pulp_apply_ui_script_definition(fixture "${CMAKE_CURRENT_SOURCE_DIR}/ui/main.js")
 _pulp_apply_ui_asset_roots_definition(fixture "${CMAKE_CURRENT_SOURCE_DIR}/assets")
+if(FIXTURE_VELLUM_SCRIPTED)
+    set_property(TARGET fixture PROPERTY PULP_VELLUM_SCRIPTED_EDITOR TRUE)
+endif()
 ]])
 
 # Returns the fixture binary's stdout and path, and the configure output, in
@@ -247,6 +250,14 @@ if(_has_path)
 endif()
 if(_has_roots)
     list(APPEND _failures "release: the asset-root source path '${_assets_abs}' is baked into the binary")
+endif()
+
+# The Vellum factory still receives the embedded bytes through the common
+# registrar. Only the legacy builder hookup is omitted.
+_build_and_run(vellum "-DFIXTURE_VELLUM_SCRIPTED=ON" _vellum_out _vellum_bin _vellum_configure)
+if(NOT _vellum_out MATCHES "embedded=main\\.js script_size=${_script_size} theme_size=${_theme_size} files=1"
+   OR NOT _vellum_out MATCHES "builder=none")
+    list(APPEND _failures "vellum: expected the same embedded assets without the legacy builder: ${_vellum_out}")
 endif()
 
 # Dev: the positive control for the path scan.
