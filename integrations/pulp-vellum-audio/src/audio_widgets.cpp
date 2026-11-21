@@ -1,4 +1,5 @@
 #include <pulp/vellum_audio/audio_widgets.hpp>
+#include <pulp/vellum_audio/audio_display_provider.hpp>
 
 #include <algorithm>
 #include <cmath>

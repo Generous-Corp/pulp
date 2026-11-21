@@ -1,7 +1,7 @@
 #pragma once
 
 #include <pulp/signal/spectrum_bin_mapping.hpp>
-#include <pulp/vellum_audio/audio_display_provider.hpp>
+#include <pulp/vellum_audio/audio_display_types.hpp>
 #include <vellum/view/data_display.hpp>
 #include <vellum/view/view.hpp>
 #include <vellum/value/value_feed.hpp>
@@ -102,8 +102,8 @@ class AnalyzerScope final : public ::vellum::view::View, public ::vellum::view::
     ::vellum::value::ValueFeed* feed_ = nullptr;
     std::size_t channel_ = 0;
     pulp::signal::SpectrumBinMapping mapping_;
-    std::array<float, AudioDisplayProvider::kMaxScopeSamples> bins_{};
-    std::array<float, AudioDisplayProvider::kMaxScopeSamples> columns_{};
+    std::array<float, kMaxScopeSamples> bins_{};
+    std::array<float, kMaxScopeSamples> columns_{};
     std::size_t column_count_ = 0;   // columns drawn from the latest frame
     std::size_t mapped_columns_ = 0; // configured by configure_mapping; survives staleness
     AudioFrameInfo info_;

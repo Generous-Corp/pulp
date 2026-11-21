@@ -19,14 +19,14 @@ std::unique_ptr<::vellum::view::View> make_scope() {
 
 void register_audio_widgets() {
     static const bool registered = [] {
-        ::vellum::view::register_data_display({
-            "pulp.level", &make_level,
-            {{"pulp.level", "pulp::vellum_audio::LevelMeter",
-              "pulp/vellum_audio/audio_widgets.hpp"}}});
-        ::vellum::view::register_data_display({
-            "pulp.bins", &make_scope,
-            {{"pulp.bins", "pulp::vellum_audio::AnalyzerScope",
-              "pulp/vellum_audio/audio_widgets.hpp"}}});
+        ::vellum::view::register_data_display({"pulp.level",
+                                               &make_level,
+                                               {{"pulp.level", "pulp::vellum_audio::LevelMeter",
+                                                 "pulp/vellum_audio/audio_widgets.hpp"}}});
+        ::vellum::view::register_data_display({"pulp.bins",
+                                               &make_scope,
+                                               {{"pulp.bins", "pulp::vellum_audio::AnalyzerScope",
+                                                 "pulp/vellum_audio/audio_widgets.hpp"}}});
         return true;
     }();
     (void)registered;

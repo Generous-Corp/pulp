@@ -38,8 +38,7 @@ namespace {
 
 class Context final : public pulp::format::EditorContext {
   public:
-    explicit Context(pulp::format::ParamPort& params,
-                     pulp::format::VisualPort* visuals = nullptr)
+    explicit Context(pulp::format::ParamPort& params, pulp::format::VisualPort* visuals = nullptr)
         : params_(params), visuals_(visuals) {}
     pulp::format::ParamPort& params() override {
         return params_;
@@ -817,7 +816,9 @@ namespace {
 
 class ScriptVisualPort final : public pulp::format::VisualPort {
   public:
-    std::size_t channel_count() const noexcept override { return 3; }
+    std::size_t channel_count() const noexcept override {
+        return 3;
+    }
 
     pulp::format::VisualChannelInfo channel(std::size_t index) const noexcept override {
         using Shape = pulp::format::VisualChannelShape;
@@ -829,7 +830,9 @@ class ScriptVisualPort final : public pulp::format::VisualPort {
         return channels[index];
     }
 
-    bool read_scalar(std::size_t, float&) noexcept override { return false; }
+    bool read_scalar(std::size_t, float&) noexcept override {
+        return false;
+    }
 
     std::size_t read_meter(std::size_t index, std::span<float> rms,
                            std::span<float> peak) noexcept override {
@@ -864,9 +867,9 @@ class ScriptVisualPort final : public pulp::format::VisualPort {
 
 TEST_CASE("Vellum scripted editor samples its own visual feed on idle",
           "[pulp-vellum][editor][scripted-editor]") {
-    using ::vellum::view::PluginViewHost;
     using pulp::vellum_audio::AnalyzerScope;
     using pulp::vellum_audio::LevelMeter;
+    using ::vellum::view::PluginViewHost;
     FactoryReset reset;
     ::vellum::view::View* root = nullptr;
     PluginViewHost::set_factory(
