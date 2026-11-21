@@ -30,6 +30,10 @@
 #include <pulp/state/listener_token.hpp>
 #include <pulp/state/store.hpp>
 
+#include <array>
+#include <atomic>
+#include <chrono>
+#include <cstdint>
 #include <functional>
 #include <thread>
 
@@ -89,6 +93,66 @@ inline bool in_non_editor_parameter_write() noexcept {
            ScopedProcessorParameterWrite::active();
 }
 
+/// Remembers which parameters the host wrote recently, so a plug-in that
+/// mirrors a host-written value back into the store is not reported as editing
+/// that parameter.
+///
+/// The write-scope marks above cover the host's own write only. A plug-in that
+/// later re-writes the value on the main thread (typically after quantising it
+/// to a device step) is, by thread alone, indistinguishable from an editor
+/// edit, so each block's automation came back at the host as a plug-in edit.
+/// Hosts such as REAPER then treat the parameter as touched and stop applying
+/// its envelope. The guard makes that impossible: a non-host write to a
+/// parameter the host wrote within `kWindowNs` is not reported, unless the
+/// editor holds a gesture on it (a real user edit).
+///
+/// Only host writes made off the main thread are remembered (automation applied
+/// on the audio thread). A host write on the main thread (a controller call, a
+/// state restore) is a discrete event that, by thread alone, cannot be told
+/// from the user's edit right after it, so it arms nothing.
+///
+/// What is NOT hidden: a write after the window, a write to a parameter the
+/// host has not touched, and anything inside an open gesture. A write inside
+/// the window is hidden even when it is a genuine plug-in change; during live
+/// automation the host's envelope owns the parameter in that window anyway.
+///
+/// `note_host_write` is real-time safe (a bounded probe over a fixed table, no
+/// allocation, no locks). A full table fails open: the write is simply not
+/// remembered, so the worst case is the old behaviour for that parameter.
+class HostWriteEchoGuard {
+  public:
+    /// How long a host write keeps a parameter's non-host writes quiet. Long
+    /// enough to cover a main-thread listener pump, short enough that a user
+    /// edit after the automation stops is reported at once.
+    static constexpr std::int64_t kWindowNs = 150'000'000;
+
+    /// Record that the host wrote @p id now. Any thread, real-time safe.
+    void note_host_write(state::ParamID id) noexcept;
+
+    /// True when @p id was host-written within the window and the editor has no
+    /// gesture open on it. Call on the main thread, for a non-host write.
+    bool is_echo(const state::StateStore& store, state::ParamID id) const noexcept;
+
+    /// Test seam: same as `is_echo` with an explicit clock reading.
+    bool is_echo_at(const state::StateStore& store, state::ParamID id,
+                    std::int64_t now_ns) const noexcept;
+
+    static std::int64_t now_ns() noexcept {
+        return std::chrono::duration_cast<std::chrono::nanoseconds>(
+                   std::chrono::steady_clock::now().time_since_epoch())
+            .count();
+    }
+
+  private:
+    static constexpr std::size_t kSlots = 1024;
+    static constexpr std::size_t kProbe = 16;
+    struct Slot {
+        std::atomic<std::uint64_t> key{0}; // id + 1; 0 means empty
+        std::atomic<std::int64_t> stamp_ns{0};
+    };
+    std::array<Slot, kSlots> slots_{};
+};
+
 /// Reports EDITOR parameter edits to the host, in protocol order, exactly once.
 ///
 /// Owns three guarantees the ad-hoc VST3 wiring did not have:
@@ -141,6 +205,12 @@ public:
     /// without sharing the transport.
     bool would_report() const noexcept;
 
+    /// The echo guard this bridge feeds and consults. A format that keeps its
+    /// own delivery queue (CLAP) or listener (AU) shares it the same way.
+    HostWriteEchoGuard& echo_guard() noexcept {
+        return echo_guard_;
+    }
+
 private:
     void on_begin(state::ParamID id);
     void on_end(state::ParamID id);
@@ -150,6 +220,7 @@ private:
     state::StateStore& store_;
     Callbacks callbacks_;
     std::thread::id editor_thread_;
+    HostWriteEchoGuard echo_guard_;
     state::ListenerToken listener_;
 };
 

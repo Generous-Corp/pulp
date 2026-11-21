@@ -4,6 +4,9 @@
 #include <AudioToolbox/AudioUnitUtilities.h>
 
 #include <pulp/format/au_v2_common.hpp>
+#include <pulp/format/host_parameter_edit.hpp>
+#include <memory>
+#include <pthread.h>
 #include <pulp/format/audio_workgroup_client.hpp>
 #include <pulp/format/parameter_text.hpp>
 #include <pulp/format/plugin_state_io.hpp>
@@ -429,14 +432,19 @@ void wire_host_parameter_bridge(state::StateStore& store,
                                 AudioUnit unit,
                                 state::ListenerToken& out_listener)
 {
+    wire_host_parameter_bridge(store, unit, out_listener, {});
+}
+
+void wire_host_parameter_bridge(state::StateStore& store, AudioUnit unit,
+                                state::ListenerToken& out_listener, HostParameterNotify notify) {
+    if (!notify)
+        notify = notify_host_parameter_event;
     store.set_gesture_callbacks(
-        [unit](state::ParamID id) {
-            notify_host_parameter_event(
-                unit, kAudioUnitEvent_BeginParameterChangeGesture, id);
+        [unit, notify](state::ParamID id) {
+            notify(unit, kAudioUnitEvent_BeginParameterChangeGesture, id);
         },
-        [unit](state::ParamID id) {
-            notify_host_parameter_event(
-                unit, kAudioUnitEvent_EndParameterChangeGesture, id);
+        [unit, notify](state::ParamID id) {
+            notify(unit, kAudioUnitEvent_EndParameterChangeGesture, id);
         });
 
     // Registered as an Audio listener so it runs INLINE, synchronously, on
@@ -444,11 +452,24 @@ void wire_host_parameter_bridge(state::StateStore& store,
     // thread (correct); a host write fires it inside ScopedHostParamWrite, so
     // the echo is suppressed. The render thread never writes the store, so
     // this never notifies from the render thread.
+    //
+    // The guard remembers what the host wrote, so a plug-in that mirrors a
+    // host-written value back on the main thread (e.g. after quantising it) is
+    // not reported as editing that parameter.
+    auto guard = std::make_shared<HostWriteEchoGuard>();
     out_listener = store.add_listener(
-        [unit](state::ParamID id, float /*value*/) {
-            if (host_is_writing_param()) return;
-            notify_host_parameter_event(
-                unit, kAudioUnitEvent_ParameterValueChange, id);
+        [unit, guard, &store, notify](state::ParamID id, float /*value*/) {
+            const bool on_main = pthread_main_np() != 0;
+            if (host_is_writing_param()) {
+                // Only a host write off the main thread (automation) is
+                // remembered; the open-gesture set below is main-thread state.
+                if (!on_main)
+                    guard->note_host_write(id);
+                return;
+            }
+            if (on_main && guard->is_echo(store, id))
+                return;
+            notify(unit, kAudioUnitEvent_ParameterValueChange, id);
         },
         state::ListenerThread::Audio);
 }

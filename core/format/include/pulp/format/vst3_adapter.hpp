@@ -444,6 +444,10 @@ class PulpVst3Processor : public Steinberg::Vst::SingleComponentEffect,
 
     // Parameter output: snapshot values before process to detect plugin-side changes
     std::vector<float> param_snapshot_;
+    // Audio-thread-only values captured from processor-originated writes.
+    // A concurrent UI mirror must never supply the snapshot fallback's value.
+    std::vector<float> processor_param_values_;
+    state::ListenerToken processor_param_listener_;
     state::ParameterEventQueue param_events_;
     // Processor::wants_sample_accurate_parameters(), asked in initialize().
     bool sample_accurate_params_ = false;
