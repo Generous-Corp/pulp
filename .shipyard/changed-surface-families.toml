@@ -669,6 +669,45 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
+name = "script-readers-6ff1726a4748"
+paths = ["tools/scripts/date_sensitive_selftests_tz_matrix.py"]
+tests = [
+  "build-parallelism-guard",
+  "changed-surface-policy-inventory",
+  "changed-surface-policy-selftest",
+  "changed-surface-script-families-drift",
+  "changed-surface-script-families-selftest",
+  "changed-surface-shadow-plans-selftest",
+  "clean-worktree-planning-selftest",
+  "configure-only-selftest",
+  "date-sensitive-selftests-tz-matrix",
+  "date-sensitive-selftests-tz-matrix-selftest",
+  "flake-exoneration-selftest",
+  "gate-common-selftest",
+  "gpu-audio-provider-identity-selftest",
+  "gpu-dpr-runner-selftest",
+  "gpu-first-visible-acceptance-selftest",
+  "gpu-first-visible-campaign-selftest",
+  "gpu-first-visible-external-adapter-selftest",
+  "gpu-first-visible-role-producers-selftest",
+  "gpu-handoff-provenance-selftest",
+  "pr-head-affected-tests-selftest",
+  "pr-head-diff-scoped-registrations",
+  "prepush-receipt",
+  "prepush-refresh-push",
+  "reuse-policy-replay-selftest",
+  "sample-region-compat-baseline-selftest",
+  "vellum-watch-preflight-selftest",
+  "wide-non-native-selftest",
+]
+build_targets = ["pulp-cli"]
+supported_build_types = [
+  "debug",
+  "release",
+]
+risk_class = "low"
+
+[[families]]
 name = "script-readers-65600d651f2f"
 paths = ["tools/scripts/design_unit_boundary_check.py"]
 tests = [
@@ -3403,6 +3442,44 @@ tests = [
   "clean-worktree-planning-selftest",
   "configure-only-selftest",
   "ctest-unique-names-selftest",
+  "flake-exoneration-selftest",
+  "gate-common-selftest",
+  "gpu-audio-provider-identity-selftest",
+  "gpu-dpr-runner-selftest",
+  "gpu-first-visible-acceptance-selftest",
+  "gpu-first-visible-campaign-selftest",
+  "gpu-first-visible-external-adapter-selftest",
+  "gpu-first-visible-role-producers-selftest",
+  "gpu-handoff-provenance-selftest",
+  "pr-head-affected-tests-selftest",
+  "pr-head-diff-scoped-registrations",
+  "prepush-receipt",
+  "prepush-refresh-push",
+  "reuse-policy-replay-selftest",
+  "sample-region-compat-baseline-selftest",
+  "vellum-watch-preflight-selftest",
+  "wide-non-native-selftest",
+]
+build_targets = ["pulp-cli"]
+supported_build_types = [
+  "debug",
+  "release",
+]
+risk_class = "low"
+
+[[families]]
+name = "script-readers-4fd462022d88"
+paths = ["tools/scripts/test_date_sensitive_selftests_tz_matrix.py"]
+tests = [
+  "build-parallelism-guard",
+  "changed-surface-policy-inventory",
+  "changed-surface-policy-selftest",
+  "changed-surface-script-families-drift",
+  "changed-surface-script-families-selftest",
+  "changed-surface-shadow-plans-selftest",
+  "clean-worktree-planning-selftest",
+  "configure-only-selftest",
+  "date-sensitive-selftests-tz-matrix-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
   "gpu-audio-provider-identity-selftest",
@@ -9211,6 +9288,7 @@ paths = [
   "tools/scripts/ctest_nonruns.py",
   "tools/scripts/ctest_unique_names_check.py",
   "tools/scripts/cutover_trial.py",
+  "tools/scripts/date_sensitive_selftests_tz_matrix.py",
   "tools/scripts/design_unit_boundary_check.py",
   "tools/scripts/dsp_provenance_audit.py",
   "tools/scripts/format_header_view_boundary.py",
@@ -9382,6 +9460,7 @@ paths = [
   "tools/scripts/test_ctest_nonruns.py",
   "tools/scripts/test_ctest_unique_names_check.py",
   "tools/scripts/test_cutover_trial.py",
+  "tools/scripts/test_date_sensitive_selftests_tz_matrix.py",
   "tools/scripts/test_dawn_binding_census.py",
   "tools/scripts/test_dead_test_guard.py",
   "tools/scripts/test_design_unit_boundary_check.py",
@@ -9840,6 +9919,7 @@ paths = [
   "tools/scripts/ctest_nonruns.py",
   "tools/scripts/ctest_unique_names_check.py",
   "tools/scripts/cutover_trial.py",
+  "tools/scripts/date_sensitive_selftests_tz_matrix.py",
   "tools/scripts/design_unit_boundary_check.py",
   "tools/scripts/dsp_provenance_audit.py",
   "tools/scripts/format_header_view_boundary.py",
@@ -10011,6 +10091,7 @@ paths = [
   "tools/scripts/test_ctest_nonruns.py",
   "tools/scripts/test_ctest_unique_names_check.py",
   "tools/scripts/test_cutover_trial.py",
+  "tools/scripts/test_date_sensitive_selftests_tz_matrix.py",
   "tools/scripts/test_dawn_binding_census.py",
   "tools/scripts/test_dead_test_guard.py",
   "tools/scripts/test_design_unit_boundary_check.py",
