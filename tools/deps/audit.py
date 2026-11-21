@@ -1117,8 +1117,8 @@ def validate_pin_transition(transition: object, artifact_id: str, old_digest: st
     if not all(isinstance(value, str) and re.fullmatch(r"[0-9a-fA-F]{64}", value)
                for value in (old, new)):
         errors.append(f"pin transition {artifact_id} has malformed digests")
-    elif old.lower() == new.lower() or {old.lower(), new.lower()} != {
-            old_digest.lower(), new_digest.lower()}:
+    elif old.lower() == new.lower() or old.lower() != old_digest.lower() or (
+            new.lower() != new_digest.lower()):
         errors.append(f"pin transition {artifact_id} does not name the observed old/new digests")
     if not isinstance(entry.get("reason"), str) or not entry["reason"].strip():
         errors.append(f"pin transition {artifact_id} has no reason")
@@ -1267,8 +1267,10 @@ def vellum_renderer_drift(manifest: list[dict], read_source=None, *,
                 f"at {pinned or 'nothing'}; they must be the same commit")
     transition_accepted = False
     if vellum_sha != pulp_sha.lower():
+        # Direction matters: the record moves from Pulp's pinned digest (old) to
+        # the digest Vellum's pin now names (new), never the reverse.
         transition_errors = renderer_transition(
-            f"renderer/{asset_key}", vellum_sha, pulp_sha.lower(),
+            f"renderer/{asset_key}", pulp_sha.lower(), vellum_sha,
             now=now if now is not None else datetime.datetime.now(datetime.timezone.utc))
         transition_accepted = not transition_errors
         if transition_errors:

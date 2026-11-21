@@ -199,6 +199,18 @@ class RendererLockTests(unittest.TestCase):
         self.assertEqual(status, "mismatch")
         self.assertIn("future", problems[0])
 
+    def test_a_reversed_transition_fails_closed(self) -> None:
+        # The digests name the same pair of values in reverse: the record would
+        # authorize the opposite renderer change, so direction must be checked.
+        now = datetime.datetime.now(datetime.timezone.utc)
+        reversed_entry = {"artifact_id": "renderer/mac-universal", "old_sha256": OTHER_SHA,
+                          "new_sha256": PULP_SHA, "owner": "danielraffel", "reason": "cycle"}
+        with self.transition_repo(self.transition(now, entries=[reversed_entry]),
+                                  commit_record=True):
+            status, problems = self.drift(now)
+        self.assertEqual(status, "mismatch")
+        self.assertIn("does not name the observed old/new digests", problems[0])
+
     def test_malformed_transition_fails_closed(self) -> None:
         now = datetime.datetime.now(datetime.timezone.utc)
         with self.transition_repo({"schema": "wrong"}, commit_record=True):
