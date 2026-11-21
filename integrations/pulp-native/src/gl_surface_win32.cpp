@@ -149,7 +149,13 @@ struct WglWindow final : GlSurface::Impl, MessageSink {
     HWND previous_focus = nullptr;
     bool holding_focus = false;
     bool pointer_inside = false;
-    std::unordered_map<unsigned, bool> keys_down; // virtual key -> client went first
+    struct KeyPress {
+        bool client_first = false;
+        bool forwarded_down = false; // the host saw the key-down, so it gets the key-up
+    };
+    // Keyed by virtual key and scan identity: Windows reports both Shift, Ctrl
+    // or Alt keys as the same generic virtual key, so the side needs the scan.
+    std::unordered_map<std::uint64_t, KeyPress> keys_down;
     Win32TakenKeys taken_keys; // taken key-downs whose characters are dropped
     DWORD last_press_time = 0;
     unsigned last_press_button = 0;
@@ -406,19 +412,22 @@ struct WglWindow final : GlSurface::Impl, MessageSink {
         key.native_code = static_cast<std::uint16_t>(vk);
         key.modifiers = current_modifiers();
         key.timestamp = GetMessageTime() / 1000.0;
-        const auto known = keys_down.find(vk);
+        const std::uint64_t press_id =
+            (static_cast<std::uint64_t>(Win32TakenKeys::id_from_lparam(
+                 static_cast<std::uint64_t>(lparam)))
+             << 32) |
+            vk;
+        const auto known = keys_down.find(press_id);
         key.repeat = down && known != keys_down.end();
         // Whether the client goes first is decided at the first press and kept
         // for its repeats and its release.
         bool client_first;
+        bool was_forwarded = false;
         if (known != keys_down.end()) {
-            client_first = known->second;
-            if (!down)
-                keys_down.erase(known);
+            client_first = known->second.client_first;
+            was_forwarded = known->second.forwarded_down;
         } else {
             client_first = down && route_key(key, keyboard_focus) == KeyRoute::client_first;
-            if (down)
-                keys_down[vk] = client_first;
         }
         bool taken = false;
         if (client_first) {
@@ -431,7 +440,26 @@ struct WglWindow final : GlSurface::Impl, MessageSink {
         }
         if (!down)
             taken_keys.released(Win32TakenKeys::id_from_lparam(static_cast<std::uint64_t>(lparam)));
-        if (!taken && !(client_first && down && keyboard_focus == KeyboardFocus::text)) {
+        // A client-first key in a text field is typed, not sent to the host. A
+        // key-up follows its key-down: a client-first key goes to the host on
+        // release only if its press did, so the host never sees an unmatched up.
+        bool forward;
+        if (down)
+            forward = !taken && !(client_first && keyboard_focus == KeyboardFocus::text);
+        else
+            forward = !taken && (!client_first || was_forwarded);
+        if (down) {
+            KeyPress& press = keys_down[press_id];
+            if (known == keys_down.end()) {
+                press.client_first = client_first;
+                press.forwarded_down = forward;
+            } else if (forward) {
+                press.forwarded_down = true;
+            }
+        } else if (known != keys_down.end()) {
+            keys_down.erase(press_id);
+        }
+        if (forward) {
             HWND parent = GetParent(hwnd);
             if (parent != nullptr)
                 PostMessageW(parent, message, wparam, lparam);
