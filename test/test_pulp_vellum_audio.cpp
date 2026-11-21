@@ -1,8 +1,17 @@
 #include <pulp/vellum_audio/audio_display_provider.hpp>
 #include <pulp/vellum_audio/audio_widgets.hpp>
+#if defined(PULP_TEST_VELLUM_AUDIO_SCRIPTED)
+#include <pulp/format/editor_host.hpp>
+#include <pulp/vellum/visual_port_feed.hpp>
+#include <vellum/state/store.hpp>
+#include <vellum/view/scripted_ui.hpp>
+#include <vellum/view/view.hpp>
+#endif
+#include <vellum/view/data_display.hpp>
 
 #include <vellum/view/screenshot.hpp>
 
+#include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 
 #include "support/thread_progress.hpp"
@@ -13,10 +22,50 @@
 #include <chrono>
 #include <cstdint>
 #include <memory>
+#include <string>
 #include <thread>
 #include <vector>
 
 namespace {
+
+#if defined(PULP_TEST_VELLUM_AUDIO_SCRIPTED)
+class ScriptVisualPort final : public pulp::format::VisualPort {
+  public:
+    std::size_t channel_count() const noexcept override { return 2; }
+    pulp::format::VisualChannelInfo channel(std::size_t index) const noexcept override {
+        return index == 0
+                   ? pulp::format::VisualChannelInfo{"meter", {},
+                                                     pulp::format::VisualChannelShape::meter,
+                                                     0.0f}
+                   : pulp::format::VisualChannelInfo{"scope", {},
+                                                     pulp::format::VisualChannelShape::vector,
+                                                     0.0f};
+    }
+    bool read_scalar(std::size_t, float&) noexcept override { return false; }
+    std::size_t read_meter(std::size_t index, std::span<float> rms,
+                           std::span<float> peak) noexcept override {
+        if (index != 0)
+            return 0;
+        if (!rms.empty()) rms[0] = 0.55f;
+        if (!peak.empty()) peak[0] = 0.75f;
+        return 1;
+    }
+    std::size_t read_vector(std::size_t index, std::span<float> values) noexcept override {
+        if (index != 1 || values.size() < 3)
+            return 0;
+        values[0] = -60.0f;
+        values[1] = -24.0f;
+        values[2] = -6.0f;
+        return 3;
+    }
+    std::size_t read_events(std::size_t, std::span<pulp::format::VisualEvent>) noexcept override {
+        return 0;
+    }
+    std::uint32_t publish_count(std::size_t index) const noexcept override {
+        return index < 2 ? 1 : 0;
+    }
+};
+#endif
 
 struct RenderedFrame {
     std::vector<std::uint8_t> pixels;
@@ -183,6 +232,73 @@ TEST_CASE("Vellum audio widgets snapshot feed values", "[pulp-vellum-audio]") {
     CHECK_FALSE(scope.stale());
     CHECK(scope.column_count() == 3);
 }
+
+TEST_CASE("Vellum audio widgets register scripted display factories",
+          "[pulp-vellum-audio][scripted-editor]") {
+    using Provider = pulp::vellum_audio::AudioDisplayProvider;
+    Provider provider({{"meter", "", vellum::value::ChannelShape::meter},
+                       {"scope", "", vellum::value::ChannelShape::vector}});
+    pulp::vellum_audio::register_audio_widgets(&provider);
+
+    auto meter = vellum::view::make_data_display("pulp.level");
+    auto scope = vellum::view::make_data_display("pulp.bins");
+    REQUIRE(meter);
+    REQUIRE(scope);
+    auto* level = dynamic_cast<pulp::vellum_audio::LevelMeter*>(meter.get());
+    auto* analyzer = dynamic_cast<pulp::vellum_audio::AnalyzerScope*>(scope.get());
+    REQUIRE(level);
+    REQUIRE(analyzer);
+
+    const std::array<float, 1> rms{0.6f};
+    const std::array<float, 1> peak{0.8f};
+    provider.publish_meter(0, rms, peak);
+    const std::array<float, 3> bins{-60.0f, -30.0f, -6.0f};
+    provider.publish_scope(1, bins);
+    level->set_feed(&provider, 0);
+    analyzer->set_feed(&provider, 1);
+    level->sample();
+    analyzer->sample();
+    CHECK(level->rms() == Catch::Approx(0.6f));
+    CHECK(level->peak() == Catch::Approx(0.8f));
+    CHECK(analyzer->column_count() == bins.size());
+    CHECK_FALSE(level->stale());
+    CHECK_FALSE(analyzer->stale());
+}
+
+#if defined(PULP_TEST_VELLUM_AUDIO_SCRIPTED)
+TEST_CASE("Vellum scripted editor mounts audio widgets from its visual feed",
+          "[pulp-vellum-audio][scripted-editor]") {
+    ScriptVisualPort port;
+    pulp::vellum::VisualPortFeed feed(port);
+    pulp::vellum_audio::register_audio_widgets(&feed);
+    ::vellum::view::View root;
+    ::vellum::state::StateStore store;
+    ::vellum::view::ScriptedUiSession session(
+        root, store,
+        {.script_source = "createMeter('meter'); createSpectrum('scope');", .script_name = "audio.js"});
+    std::string error;
+    REQUIRE(session.load(&error));
+    INFO(error);
+    REQUIRE(session.bridge() != nullptr);
+
+    auto* meter = dynamic_cast<pulp::vellum_audio::LevelMeter*>(
+        session.bridge()->widget("meter"));
+    auto* scope = dynamic_cast<pulp::vellum_audio::AnalyzerScope*>(
+        session.bridge()->widget("scope"));
+    REQUIRE(meter);
+    REQUIRE(scope);
+    auto editor_idle = [&] {
+        session.poll();
+        pulp::vellum_audio::sample_audio_widgets(root);
+    };
+    editor_idle();
+    CHECK(meter->rms() == Catch::Approx(0.55f));
+    CHECK(meter->peak() == Catch::Approx(0.75f));
+    CHECK(scope->column_count() == 3);
+    CHECK_FALSE(meter->stale());
+    CHECK_FALSE(scope->stale());
+}
+#endif
 
 TEST_CASE("Vellum AnalyzerScope keeps its mapping across stale periods and set_feed",
           "[pulp-vellum-audio]") {

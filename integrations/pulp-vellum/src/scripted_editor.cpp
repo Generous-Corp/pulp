@@ -4,6 +4,9 @@
 #include <pulp/format/editor_ui_source.hpp>
 #include <pulp/runtime/log.hpp>
 #include <pulp/vellum/editor.hpp>
+#if defined(PULP_VELLUM_AUDIO)
+#include <pulp/vellum_audio/audio_display_provider.hpp>
+#endif
 
 #include <vellum/view/scripted_ui.hpp>
 #include <vellum/view/scripted_ui_prewarm.hpp>
@@ -42,6 +45,9 @@ class ScriptedEditorRoot final : public ::vellum::view::View {
           session_(*this, env.params, script_options(processor, env.context.host_kind())) {
         set_theme(::vellum::view::Theme::dark());
         flex().direction = ::vellum::view::FlexDirection::column;
+#if defined(PULP_VELLUM_AUDIO)
+        ::pulp::vellum_audio::register_audio_widgets(env.visuals);
+#endif
         session_.set_host_kind(env.context.host_kind() == format::EditorHostKind::standalone
                                    ? "standalone"
                                    : "plugin");
@@ -77,6 +83,9 @@ class ScriptedEditorRoot final : public ::vellum::view::View {
                 reload_generation_ = generation;
         }
         session_.poll();
+#if defined(PULP_VELLUM_AUDIO)
+        ::pulp::vellum_audio::sample_audio_widgets(*this);
+#endif
     }
 
   private:

@@ -21,6 +21,10 @@
 #include <string>
 #include <vector>
 
+namespace vellum::view {
+class View;
+}
+
 namespace pulp::vellum_audio {
 
 struct AudioFrameInfo {
@@ -109,5 +113,18 @@ class AudioDisplayProvider final : public ::vellum::value::ValueFeed {
     [[nodiscard]] const Channel* at(std::size_t index) const noexcept;
     std::deque<Channel> channels_;
 };
+
+} // namespace pulp::vellum_audio
+
+namespace pulp::vellum_audio {
+
+/// Register the Vellum data displays used by scripted `createMeter` and
+/// `createSpectrum` calls. The feed is borrowed by the factories and must
+/// outlive the scripted editor session that uses them.
+void register_audio_widgets(::vellum::value::ValueFeed* feed);
+
+/// Sample every registered audio display below a scripted editor root once per
+/// editor idle tick.
+void sample_audio_widgets(::vellum::view::View& root);
 
 } // namespace pulp::vellum_audio
