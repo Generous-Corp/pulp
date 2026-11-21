@@ -582,13 +582,15 @@ if(APPLE)
     list(APPEND _pulp_standalone_core_sources
         core/format/src/standalone_key_driver_mac.mm
         core/format/src/standalone_settings_window_mac.mm
-        core/format/src/standalone_contract_editor_mac.mm)
+        core/format/src/standalone_contract_editor_mac.mm
+        core/format/src/standalone_persistence_mac.mm)
     list(APPEND _pulp_standalone_view_sources core/format/src/standalone_updater_mac.mm)
 else()
     list(APPEND _pulp_standalone_core_sources
         core/format/src/standalone_key_driver_stub.cpp
         core/format/src/standalone_settings_window_stub.cpp
-        core/format/src/standalone_contract_editor_stub.cpp)
+        core/format/src/standalone_contract_editor_stub.cpp
+        core/format/src/standalone_persistence_stub.cpp)
     list(APPEND _pulp_standalone_view_sources core/format/src/standalone_updater_stub.cpp)
 endif()
 set(_pulp_standalone_sources ${_pulp_standalone_core_sources} ${_pulp_standalone_view_sources})
