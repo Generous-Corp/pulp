@@ -26,13 +26,13 @@ sudo apt-get install build-essential cmake git libasound2-dev
 A plug-in with an editor is linked against Skia, which calls fontconfig for
 font lookup. Install fontconfig's development package on the build machine
 (`sudo apt-get install libfontconfig-dev`; `fontconfig-devel` on Fedora,
-`fontconfig` on Arch) and the VST3, CLAP, LV2 and AAX modules record
-`libfontconfig` as a needed library. The plug-in then loads in a host that has
-not loaded fontconfig itself; end users need the runtime package
-(`libfontconfig1`), which every desktop install already carries. A plug-in
-built without an editor (`NO_EDITOR`, or a UI package) links no Skia and has no
-such dependency. If configure cannot find the library it warns and leaves the
-module unchanged. To check a built module, run `ldd -r` on it: the output must
+`fontconfig` on Arch). A plug-in built with `pulp_add_plugin()`, or by linking
+the installed SDK's `Pulp::view` / `Pulp::canvas`, then records `libfontconfig`
+as a needed library, so it loads in a host that has not loaded fontconfig
+itself. End users need the runtime package (`libfontconfig1`), which every
+desktop install already carries. A plug-in without an editor links no Skia and
+has no such dependency. If configure cannot find the library it warns and leaves
+the link unchanged. To check a built module, run `ldd -r` on it: the output must
 list `libfontconfig` and no `undefined symbol` lines.
 
 ### Fedora / RHEL
