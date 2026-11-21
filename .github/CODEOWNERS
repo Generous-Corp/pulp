@@ -31,3 +31,6 @@
 /core/view/src/
 /packages/pulp-import-ir/
 /tools/figma-plugin/schema/
+
+# Renderer pin transitions require a separate owner-approved record PR.
+/tools/deps/pin_transition.json @danielraffel
