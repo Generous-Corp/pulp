@@ -33,8 +33,8 @@ template <typename Session> class ScriptedEditorRoot final : public ::vellum::vi
             reload_generation_ = processor_.editor_reload_generation();
     }
 
-    format::EditorSize preferred_editor_size() const {
-        return {preferred_.preferred_width, preferred_.preferred_height, 1.0};
+    format::ViewSize editor_view_size() const {
+        return preferred_;
     }
 
     void editor_opened() {

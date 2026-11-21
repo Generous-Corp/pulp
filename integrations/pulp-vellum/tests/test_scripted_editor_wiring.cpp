@@ -37,6 +37,10 @@ class Processor final : public pulp::format::Processor {
     void process(pulp::audio::BufferView<float>&, const pulp::audio::BufferView<const float>&,
                  pulp::midi::MidiBuffer&, pulp::midi::MidiBuffer&,
                  const pulp::format::ProcessContext&) override {}
+    pulp::format::ViewSize view_size() const override {
+        return sizing;
+    }
+    pulp::format::ViewSize sizing;
     EditorPrewarm editor_prewarm() const override {
         return {{"first script", "second script"}, {"first document", "second document"}};
     }
@@ -107,6 +111,16 @@ class RecordingHost final : public ::vellum::view::PluginViewHost {
     Size get_size() const override {
         return {};
     }
+    void set_design_viewport(float width, float height) override {
+        design_width = width;
+        design_height = height;
+    }
+    void set_fixed_aspect_ratio(float ratio) override {
+        aspect_ratio = ratio;
+    }
+    float design_width = 0;
+    float design_height = 0;
+    float aspect_ratio = 0;
     bool attached = false;
 };
 
@@ -180,4 +194,51 @@ TEST_CASE("Format-core prewarm reaches the Vellum scheduler with both payload li
           std::vector<std::string>{"first document", "second document"});
     CHECK_FALSE(pulp::format::request_editor_prewarm(processor));
     CHECK(prewarm_requests.size() == 1);
+}
+
+TEST_CASE("Scripted root preserves processor resize bounds and design viewport",
+          "[pulp-vellum][scripted-wiring][sizing]") {
+    FactoryReset reset;
+    pulp::state::StateStore store;
+    pulp::format::StateStoreParamPort port(store);
+    Context context(port);
+    Processor processor;
+    processor.sizing = {.preferred_width = 600,
+                        .preferred_height = 400,
+                        .min_width = 300,
+                        .min_height = 200,
+                        .max_width = 1200,
+                        .max_height = 800,
+                        .aspect_ratio = 1.5,
+                        .design_width = 900,
+                        .design_height = 600};
+    RecordingHost* host = nullptr;
+    ::vellum::view::PluginViewHost::set_factory(
+        [&](::vellum::view::View&, const ::vellum::view::PluginViewHost::Options&) {
+            auto result = std::make_unique<RecordingHost>();
+            host = result.get();
+            return result;
+        });
+    using Root = pulp::vellum::detail::ScriptedEditorRoot<RecordingSession>;
+    pulp::vellum::Editor<Root> editor(context, processor);
+    REQUIRE(host);
+    CHECK(editor.size().width == 600);
+    CHECK(editor.size().height == 400);
+    const auto hints = editor.size_hints();
+    CHECK(hints.min_width == 300);
+    CHECK(hints.min_height == 200);
+    CHECK(hints.max_width == 1200);
+    CHECK(hints.max_height == 800);
+    CHECK(hints.aspect_ratio == 1.5);
+    CHECK(hints.design_width == 900);
+    CHECK(hints.design_height == 600);
+    CHECK(host->design_width == 900);
+    CHECK(host->design_height == 600);
+    CHECK(host->aspect_ratio == 1.5);
+    REQUIRE(editor.set_size({150, 100, 1.0}));
+    CHECK(editor.size().width == 300);
+    CHECK(editor.size().height == 200);
+    REQUIRE(editor.set_size({1800, 1200, 1.0}));
+    CHECK(editor.size().width == 1200);
+    CHECK(editor.size().height == 800);
 }
