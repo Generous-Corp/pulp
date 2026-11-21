@@ -614,7 +614,8 @@ if(PULP_HAS_CLAP)
         find_package(Python3 COMPONENTS Interpreter QUIET)
         if(Python3_Interpreter_FOUND)
             add_test(NAME clap-conformance-checker
-                COMMAND ${Python3_EXECUTABLE} -I ${_conf_dir}/test_clap_conformance.py
+                COMMAND ${Python3_EXECUTABLE}
+                    "${CMAKE_SOURCE_DIR}/tools/audio/clap-conformance/test_clap_conformance.py"
                     $<TARGET_FILE:pulp-clap-conformance>
                     pulp=$<TARGET_FILE:pulp-test-clap-conf-pulp>
                     good=$<TARGET_FILE:pulp-test-clap-conf-good>
