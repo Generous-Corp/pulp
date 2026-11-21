@@ -114,17 +114,10 @@ class AudioDisplayProvider final : public ::vellum::value::ValueFeed {
     std::deque<Channel> channels_;
 };
 
-} // namespace pulp::vellum_audio
+/// Register the Vellum script factories for createMeter and createSpectrum.
+void register_audio_widgets();
 
-namespace pulp::vellum_audio {
-
-/// Register the Vellum data displays used by scripted `createMeter` and
-/// `createSpectrum` calls. The feed is borrowed by the factories and must
-/// outlive the scripted editor session that uses them.
-void register_audio_widgets(::vellum::value::ValueFeed* feed);
-
-/// Sample every registered audio display below a scripted editor root once per
-/// editor idle tick.
-void sample_audio_widgets(::vellum::view::View& root);
+/// Bind and sample the audio displays in an editor's mounted view tree.
+void sample_audio_widgets(::vellum::view::View& root, ::vellum::value::ValueFeed* feed);
 
 } // namespace pulp::vellum_audio

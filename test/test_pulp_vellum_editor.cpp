@@ -24,18 +24,26 @@
 #include <pulp/vellum/scripted_editor.hpp>
 #endif
 
+#if defined(PULP_TEST_VELLUM_SCRIPTED_AUDIO)
+#include <pulp/vellum_audio/audio_widgets.hpp>
+#include <algorithm>
+#include <array>
+#endif
+
 #include <memory>
 
 namespace {
 
 class Context final : public pulp::format::EditorContext {
   public:
-    explicit Context(pulp::format::ParamPort& params) : params_(params) {}
+    explicit Context(pulp::format::ParamPort& params,
+                     pulp::format::VisualPort* visuals = nullptr)
+        : params_(params), visuals_(visuals) {}
     pulp::format::ParamPort& params() override {
         return params_;
     }
     pulp::format::VisualPort* visuals() override {
-        return nullptr;
+        return visuals_;
     }
     bool request_resize(const pulp::format::EditorSize& size) override {
         ++resize_requests;
@@ -55,6 +63,7 @@ class Context final : public pulp::format::EditorContext {
 
   private:
     pulp::format::ParamPort& params_;
+    pulp::format::VisualPort* visuals_;
 };
 
 class Processor final : public pulp::format::Processor {
@@ -649,5 +658,117 @@ TEST_CASE("Vellum scripted editor mounts and exchanges parameters through the ho
     ++processor.generation;
     session->tick();
     CHECK(initial_value() == "0.25");
+}
+#endif
+
+#if defined(PULP_TEST_VELLUM_SCRIPTED_AUDIO)
+namespace {
+
+class ScriptVisualPort final : public pulp::format::VisualPort {
+  public:
+    std::size_t channel_count() const noexcept override { return 3; }
+
+    pulp::format::VisualChannelInfo channel(std::size_t index) const noexcept override {
+        using Shape = pulp::format::VisualChannelShape;
+        constexpr std::array channels{
+            pulp::format::VisualChannelInfo{"scope", {}, Shape::vector, 0.0f},
+            pulp::format::VisualChannelInfo{"aux", {}, Shape::scalar, 0.0f},
+            pulp::format::VisualChannelInfo{"meter", {}, Shape::meter, 0.0f},
+        };
+        return channels[index];
+    }
+
+    bool read_scalar(std::size_t, float&) noexcept override { return false; }
+
+    std::size_t read_meter(std::size_t index, std::span<float> rms,
+                           std::span<float> peak) noexcept override {
+        if (index != 2 || rms.empty() || peak.empty())
+            return 0;
+        rms.front() = level;
+        peak.front() = level + 0.2f;
+        return 1;
+    }
+
+    std::size_t read_vector(std::size_t index, std::span<float> values) noexcept override {
+        if (index != 0 || values.size() < bins.size())
+            return 0;
+        std::copy(bins.begin(), bins.end(), values.begin());
+        return bins.size();
+    }
+
+    std::size_t read_events(std::size_t, std::span<pulp::format::VisualEvent>) noexcept override {
+        return 0;
+    }
+
+    std::uint32_t publish_count(std::size_t index) const noexcept override {
+        return index == 0 || index == 2 ? frame : 0;
+    }
+
+    float level = 0.0f;
+    std::uint32_t frame = 0;
+    std::array<float, 3> bins{-60.0f, -24.0f, -6.0f};
+};
+
+} // namespace
+
+TEST_CASE("Vellum scripted editor samples its own visual feed on idle",
+          "[pulp-vellum][editor][scripted-editor]") {
+    using ::vellum::view::PluginViewHost;
+    using pulp::vellum_audio::AnalyzerScope;
+    using pulp::vellum_audio::LevelMeter;
+    FactoryReset reset;
+    ::vellum::view::View* root = nullptr;
+    PluginViewHost::set_factory(
+        [&](::vellum::view::View& view, const PluginViewHost::Options& options) {
+            root = &view;
+            return std::make_unique<StubHost>(options.size);
+        });
+
+    Fixture first, second;
+    ScriptVisualPort first_port, second_port;
+    Context first_context{*first.port, &first_port};
+    Context second_context{*second.port, &second_port};
+    Processor first_processor, second_processor;
+    first_processor.reloadable = true;
+    auto& factory = *pulp::vellum::scripted_editor_factory();
+    auto first_editor =
+        factory.create(first_processor, first_context, pulp::format::EditorRole::editor);
+    REQUIRE(first_editor);
+    REQUIRE(root);
+    auto& first_root = *root;
+    auto second_editor =
+        factory.create(second_processor, second_context, pulp::format::EditorRole::editor);
+    REQUIRE(second_editor);
+    REQUIRE(root != &first_root);
+    REQUIRE(first_editor->attach({.kind = pulp::format::NativeParentKind::none}));
+    REQUIRE(second_editor->attach({.kind = pulp::format::NativeParentKind::none}));
+
+    first_port.level = 0.55f;
+    ++first_port.frame;
+    second_port.level = 0.25f;
+    ++second_port.frame;
+    first_editor->idle();
+    second_editor->idle();
+
+    const auto require_widgets = [](::vellum::view::View& view, float level) {
+        const auto* meter = find_widget<LevelMeter>(view);
+        const auto* scope = find_widget<AnalyzerScope>(view);
+        REQUIRE(meter);
+        REQUIRE(scope);
+        CHECK(meter->rms() == Catch::Approx(level));
+        CHECK(meter->peak() == Catch::Approx(level + 0.2f));
+        CHECK(scope->column_count() == 3);
+        CHECK_FALSE(meter->stale());
+        CHECK_FALSE(scope->stale());
+    };
+    require_widgets(first_root, first_port.level);
+    require_widgets(*root, second_port.level);
+
+    first_port.level = 0.65f;
+    ++first_port.frame;
+    ++first_processor.generation;
+    second_editor.reset();
+    first_editor->idle();
+    require_widgets(first_root, first_port.level);
 }
 #endif

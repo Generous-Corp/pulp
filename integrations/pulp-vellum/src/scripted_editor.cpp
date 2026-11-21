@@ -42,11 +42,14 @@ class ScriptedEditorRoot final : public ::vellum::view::View {
     ScriptedEditorRoot(EditorEnv& env, format::Processor& processor)
         : processor_(processor), preferred_(processor.view_size()),
           supports_reload_(processor.supports_editor_reload()),
+#if defined(PULP_VELLUM_AUDIO)
+          visuals_(env.visuals),
+#endif
           session_(*this, env.params, script_options(processor, env.context.host_kind())) {
         set_theme(::vellum::view::Theme::dark());
         flex().direction = ::vellum::view::FlexDirection::column;
 #if defined(PULP_VELLUM_AUDIO)
-        ::pulp::vellum_audio::register_audio_widgets(env.visuals);
+        ::pulp::vellum_audio::register_audio_widgets();
 #endif
         session_.set_host_kind(env.context.host_kind() == format::EditorHostKind::standalone
                                    ? "standalone"
@@ -84,7 +87,7 @@ class ScriptedEditorRoot final : public ::vellum::view::View {
         }
         session_.poll();
 #if defined(PULP_VELLUM_AUDIO)
-        ::pulp::vellum_audio::sample_audio_widgets(*this);
+        ::pulp::vellum_audio::sample_audio_widgets(*this, visuals_);
 #endif
     }
 
@@ -93,6 +96,9 @@ class ScriptedEditorRoot final : public ::vellum::view::View {
     format::ViewSize preferred_;
     bool supports_reload_;
     std::uint64_t reload_generation_ = 0;
+#if defined(PULP_VELLUM_AUDIO)
+    ::vellum::value::ValueFeed* visuals_;
+#endif
     ::vellum::view::ScriptedUiSession session_;
     ::vellum::view::PluginViewHost::GpuSurfaceSubscription gpu_subscription_;
 };

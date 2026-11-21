@@ -53,6 +53,7 @@ class LevelMeter final : public ::vellum::view::View, public ::vellum::view::Lev
     }
 
   private:
+    friend void sample_audio_widgets(::vellum::view::View&, ::vellum::value::ValueFeed*);
     ::vellum::value::ValueFeed* feed_ = nullptr;
     std::size_t channel_ = 0;
     float rms_ = 0.0f;
@@ -96,6 +97,7 @@ class AnalyzerScope final : public ::vellum::view::View, public ::vellum::view::
     }
 
   private:
+    friend void sample_audio_widgets(::vellum::view::View&, ::vellum::value::ValueFeed*);
     bool map_bins_(const float* values, std::size_t count) noexcept;
     ::vellum::value::ValueFeed* feed_ = nullptr;
     std::size_t channel_ = 0;

@@ -42,6 +42,10 @@ if(PULP_BUILD_TESTS AND TARGET Catch2::Catch2WithMain)
         if(TARGET pulp-vellum-scripted)
             target_compile_definitions(pulp-test-pulp-vellum-editor PRIVATE
                 PULP_TEST_VELLUM_SCRIPTED_EDITOR=1)
+            if(TARGET pulp-vellum-audio)
+                target_compile_definitions(pulp-test-pulp-vellum-editor PRIVATE
+                    PULP_TEST_VELLUM_SCRIPTED_AUDIO=1)
+            endif()
             _pulp_vellum_scripted_package("scripted editor fixture" _scripted_package)
             target_link_libraries(pulp-test-pulp-vellum-editor PRIVATE "${_scripted_package}")
             _pulp_apply_ui_script_definition(pulp-test-pulp-vellum-editor
