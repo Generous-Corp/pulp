@@ -27,8 +27,8 @@ pulp_add_plugin(PulpEffect
 # Linux: a plug-in with the full editor stack must resolve every symbol through
 # its own dependencies. Skia's fontconfig calls stay unresolved unless the
 # module names libfontconfig, and a host without fontconfig then fails at load.
-# The control is a module with a deliberate undefined symbol, which the same
-# probe must report.
+# The core test tree runs the same probe on a fixture plug-in and on a control
+# (test/fixtures/linux_reload_host), because examples are off on the required lane.
 if(PULP_BUILD_TESTS AND UNIX AND NOT APPLE AND NOT ANDROID)
     find_program(PULP_LDD ldd)
     find_program(PULP_READELF readelf)
@@ -44,14 +44,6 @@ if(PULP_BUILD_TESTS AND UNIX AND NOT APPLE AND NOT ANDROID)
                     PROPERTIES LABELS "plugin-footprint" TIMEOUT 60)
             endif()
         endforeach()
-        add_library(pulp-unresolved-symbol-control MODULE
-            ${CMAKE_SOURCE_DIR}/test/fixtures/unresolved_symbol_module/module.cpp)
-        add_test(NAME no-unresolved-symbols-control
-            COMMAND ${CMAKE_COMMAND} -DLDD=${PULP_LDD} -DREADELF=${PULP_READELF}
-                -DMODULE=$<TARGET_FILE:pulp-unresolved-symbol-control> -DEXPECT=unresolved
-                -P ${_pulp_unresolved_check})
-        set_tests_properties(no-unresolved-symbols-control
-            PROPERTIES LABELS "plugin-footprint" TIMEOUT 60)
     endif()
 endif()
 

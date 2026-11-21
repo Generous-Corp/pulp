@@ -57,3 +57,27 @@ add_test(NAME linux-reload-host-cycle
 set_tests_properties(linux-reload-host-cycle PROPERTIES
     LABELS "format;linux;reload"
     TIMEOUT 120)
+
+# A plug-in module must resolve every symbol through its own dependencies. Skia's
+# fontconfig calls stay unresolved unless the module names libfontconfig, and a
+# host without it loaded then fails at dlopen or the first font lookup. The
+# control is a module with a deliberate undefined symbol that the same probe
+# must report, so a probe that cannot see the defect fails here.
+find_program(PULP_LDD ldd)
+find_program(PULP_READELF readelf)
+if(PULP_LDD AND PULP_READELF)
+    set(_unresolved_check ${CMAKE_SOURCE_DIR}/test/cmake/check_plugin_module_no_unresolved.cmake)
+    add_test(NAME no-unresolved-symbols-PulpReloadHostFixture_CLAP
+        COMMAND ${CMAKE_COMMAND} -DLDD=${PULP_LDD} -DREADELF=${PULP_READELF}
+            -DMODULE=$<TARGET_FILE:PulpReloadHostFixture_CLAP>
+            -P ${_unresolved_check})
+    add_library(pulp-unresolved-symbol-control MODULE
+        ${CMAKE_SOURCE_DIR}/test/fixtures/unresolved_symbol_module/module.cpp)
+    add_test(NAME no-unresolved-symbols-control
+        COMMAND ${CMAKE_COMMAND} -DLDD=${PULP_LDD} -DREADELF=${PULP_READELF}
+            -DMODULE=$<TARGET_FILE:pulp-unresolved-symbol-control> -DEXPECT=unresolved
+            -P ${_unresolved_check})
+    set_tests_properties(no-unresolved-symbols-PulpReloadHostFixture_CLAP
+        no-unresolved-symbols-control PROPERTIES LABELS "format;linux" TIMEOUT 60)
+    add_dependencies(pulp-test-reload-cycle-host pulp-unresolved-symbol-control)
+endif()
