@@ -600,7 +600,7 @@ if(PULP_HAS_CLAP)
         set_target_properties(pulp-test-clap-conf-pulp PROPERTIES
             OUTPUT_NAME "ConfPulp" PREFIX "" SUFFIX ".clap")
         set(_conf_modules pulp-test-clap-conf-pulp)
-        set(_conf_variants good HEAVY_MEMORY HEAVY_CPU ECHO NULL_INPUT STATE CRASH_TEARDOWN)
+        set(_conf_variants good HEAVY_MEMORY HEAVY_CPU ECHO NULL_INPUT STATE CRASH_TEARDOWN HANG_INIT HANG_PROCESS CONTROL_CHARS)
         if(APPLE)
             list(APPEND _conf_variants ECHO_MAIN)
         endif()
@@ -639,6 +639,9 @@ if(PULP_HAS_CLAP)
                     null_input=$<TARGET_FILE:pulp-test-clap-conf-null_input>
                     crash_teardown=$<TARGET_FILE:pulp-test-clap-conf-crash_teardown>
                     $<$<BOOL:${APPLE}>:bundle=${CMAKE_CURRENT_BINARY_DIR}/ConfBundle.clap>
+                    hang_init=$<TARGET_FILE:pulp-test-clap-conf-hang_init>
+                    hang_process=$<TARGET_FILE:pulp-test-clap-conf-hang_process>
+                    control_chars=$<TARGET_FILE:pulp-test-clap-conf-control_chars>
                     state=$<TARGET_FILE:pulp-test-clap-conf-state>)
             set_tests_properties(clap-conformance-checker PROPERTIES
                 LABELS "format;clap;tools" TIMEOUT 120)

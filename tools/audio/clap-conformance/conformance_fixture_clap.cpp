@@ -14,8 +14,13 @@
 //   BREAK_NULL_INPUT    process reads the first input channel without checking
 //                       that the host supplied one
 //   BREAK_STATE         state.save embeds a per-save counter
+//   BREAK_HANG_INIT     entry init never returns
+//   BREAK_HANG_PROCESS  process never returns
+//   BREAK_CONTROL_CHARS the plug-in id contains a tab and a newline
 
 #include <clap/clap.h>
+
+#include <unistd.h>
 
 #if defined(BREAK_ECHO_MAIN) && defined(__APPLE__)
 #include <dispatch/dispatch.h>
@@ -39,7 +44,11 @@ struct Plug {
 
 const char* const kFeatures[] = {CLAP_PLUGIN_FEATURE_AUDIO_EFFECT, nullptr};
 const clap_plugin_descriptor_t kDesc = {CLAP_VERSION_INIT,
+#ifdef BREAK_CONTROL_CHARS
+                                        "dev.pulp.test.conformance\tfixture\nctrl",
+#else
                                         "dev.pulp.test.conformance-fixture",
+#endif
                                         "Conformance Fixture",
                                         "Pulp",
                                         "",
@@ -201,6 +210,10 @@ void p_reset(const clap_plugin_t*) {}
 clap_process_status p_process(const clap_plugin_t* p, const clap_process_t* pr) {
     auto* self = static_cast<Plug*>(p->plugin_data);
     ++self->blocks;
+#ifdef BREAK_HANG_PROCESS
+    for (;;)
+        pause();
+#endif
     handle_in(self, pr->in_events, pr->out_events);
 #ifdef BREAK_NULL_INPUT
     volatile float probe = pr->audio_inputs[0].data32[0][0];
@@ -250,6 +263,10 @@ const clap_plugin_factory_t kFactory = {f_count, f_desc, f_create};
 bool e_init(const char*) {
     // Plug-ins commonly log to stdout; the checker's report must survive it.
     std::printf("conformance fixture loaded\n");
+#if defined(BREAK_HANG_INIT)
+    for (;;)
+        pause();
+#endif
 #if defined(BREAK_HEAVY_MEMORY)
     const size_t n = 128u << 20;
     auto* m = static_cast<volatile char*>(std::malloc(n));

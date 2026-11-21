@@ -23,6 +23,8 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <cerrno>
+#include <chrono>
 #include <string>
 #include <vector>
 
@@ -34,6 +36,8 @@ int main() {
 #else
 #include <dirent.h>
 #include <dlfcn.h>
+#include <poll.h>
+#include <signal.h>
 #include <sys/resource.h>
 #include <sys/stat.h>
 #include <sys/wait.h>
@@ -416,7 +420,12 @@ std::string fmt(const char* f, ...) {
 
 // ---- checks ---------------------------------------------------------------
 
-// Runs `fn` in a forked child; returns its exit code, or 128+signal on a crash.
+// Longest a forked check may run before it is killed and failed.
+unsigned g_child_timeout_s = 60;
+constexpr int kChildTimedOut = -2;
+
+// Runs `fn` in a forked child; returns its exit code, 128+signal on a crash, or
+// kChildTimedOut when the child outlives g_child_timeout_s and is killed.
 template <class Fn> int run_in_child(Fn&& fn, std::string* captured = nullptr) {
     int fds[2];
     if (pipe(fds) != 0)
@@ -438,17 +447,45 @@ template <class Fn> int run_in_child(Fn&& fn, std::string* captured = nullptr) {
     close(fds[1]);
     std::string out;
     char buf[256];
-    ssize_t n;
-    while ((n = read(fds[0], buf, sizeof(buf))) > 0)
-        out.append(buf, static_cast<size_t>(n));
+    bool timed_out = false;
+    const auto deadline =
+        std::chrono::steady_clock::now() + std::chrono::seconds(g_child_timeout_s);
+    for (;;) {
+        const auto left = std::chrono::duration_cast<std::chrono::milliseconds>(
+                              deadline - std::chrono::steady_clock::now())
+                              .count();
+        if (left <= 0) {
+            timed_out = true;
+            break;
+        }
+        pollfd pfd{fds[0], POLLIN, 0};
+        int pr = poll(&pfd, 1, static_cast<int>(std::min<long long>(left, 1000)));
+        if (pr < 0 && errno != EINTR)
+            break;
+        if (pr > 0) {
+            ssize_t n = read(fds[0], buf, sizeof(buf));
+            if (n > 0)
+                out.append(buf, static_cast<size_t>(n));
+            else if (n == 0)
+                break;
+        }
+    }
     close(fds[0]);
+    if (timed_out)
+        kill(pid, SIGKILL);
     int status = 0;
     waitpid(pid, &status, 0);
     if (captured)
         *captured = out;
+    if (timed_out)
+        return kChildTimedOut;
     if (WIFSIGNALED(status))
         return 128 + WTERMSIG(status);
     return WEXITSTATUS(status);
+}
+
+std::string timeout_detail() {
+    return fmt("timed out after %u s inside the plug-in; the check was killed", g_child_timeout_s);
 }
 
 // Runs a check in a forked child that opens the module itself, so a crash is
@@ -458,13 +495,16 @@ template <class Fn> Result run_check_forked(const char* name, Fn&& fn) {
     std::string msg;
     int rc = run_in_child(
         [&](std::string& out) {
-            alarm(120);
             Result cr{name, "FAIL", ""};
             fn(cr);
             out = cr.status + '\x1f' + cr.detail;
             return 0;
         },
         &msg);
+    if (rc == kChildTimedOut) {
+        r.detail = timeout_detail();
+        return r;
+    }
     if (rc >= 128) {
         r.detail = fmt("crashed (signal %d) inside the plug-in during this check", rc - 128);
         return r;
@@ -508,6 +548,10 @@ Result check_scan_cost(const Options& o) {
             return 0;
         },
         &msg);
+    if (rc == kChildTimedOut) {
+        r.detail = "scan " + timeout_detail();
+        return r;
+    }
     if (rc != 0) {
         r.detail = rc >= 128 ? fmt("scan crashed (signal %d)", rc - 128) : "scan failed: " + msg;
         return r;
@@ -661,6 +705,8 @@ Result check_input_ports(const Options& o, const std::string& id) {
     } else if (rc == 0) {
         r.status = "PASS";
         r.detail = msg + "; processed with zero ports and with zero-channel ports, finite output";
+    } else if (rc == kChildTimedOut) {
+        r.detail = timeout_detail();
     } else if (rc >= 128) {
         r.detail = fmt("crashed with signal %d when input ports were missing", rc - 128);
     } else {
@@ -767,10 +813,21 @@ void check_state_round_trip(const Options& o, const std::string& id, Result& r) 
 
 std::string json_escape(const std::string& s) {
     std::string o;
-    for (char c : s) {
-        if (c == '"' || c == '\\')
-            o += '\\';
-        o += c;
+    for (unsigned char c : s) {
+        switch (c) {
+        case '"': o += "\\\""; break;
+        case '\\': o += "\\\\"; break;
+        case '\n': o += "\\n"; break;
+        case '\r': o += "\\r"; break;
+        case '\t': o += "\\t"; break;
+        case '\b': o += "\\b"; break;
+        case '\f': o += "\\f"; break;
+        default:
+            if (c < 0x20)
+                o += fmt("\\u%04x", c);
+            else
+                o += static_cast<char>(c);
+        }
     }
     return o;
 }
@@ -790,12 +847,15 @@ int main(int argc, char** argv) {
             o.plugin_id = next();
         else if (a == "--budget-instructions")
             o.budget_instructions = std::strtoull(next(), nullptr, 10);
+        else if (a == "--timeout-seconds")
+            g_child_timeout_s = static_cast<unsigned>(std::strtoul(next(), nullptr, 10));
         else if (a == "--budget-footprint-mb")
             o.budget_footprint_mb = std::strtoull(next(), nullptr, 10);
         else if (a == "--help" || a == "-h") {
             std::printf(
                 "usage: pulp-clap-conformance <plugin.clap> [--plugin-id ID] [--json]\n"
                 "       [--budget-instructions N] [--budget-footprint-mb N]\n"
+                "       [--timeout-seconds N]  kill and fail a check that runs longer (default 60)\n"
                 "       [--expect-fail CHECK]  exit 0 only if CHECK fails (negative controls)\n"
                 "exit: 0 all checks pass, 1 a check failed, 2 module unusable\n");
             return 0;
@@ -821,7 +881,6 @@ int main(int argc, char** argv) {
     std::string id_msg;
     int id_rc = id.empty() ? run_in_child(
                                  [&](std::string& out) {
-                                     alarm(60);
                                      Module m;
                                      if (!m.open(o.path)) {
                                          out = m.error;
@@ -837,7 +896,8 @@ int main(int argc, char** argv) {
     if (id.empty()) {
         if (id_rc != 0) {
             std::fprintf(stderr, "clap-conformance: %s\n",
-                         id_rc >= 128 ? "module crashed while loading"
+                         id_rc == kChildTimedOut ? "module hung while loading (timed out)"
+                         : id_rc >= 128 ? "module crashed while loading"
                          : id_rc == 3 ? "module lists no plug-ins"
                                       : id_msg.c_str());
             return 2;
