@@ -271,6 +271,50 @@ TEST_CASE("Vellum audio widgets resample after set_channel", "[pulp-vellum-audio
     CHECK(scope.frame_info().sequence == 7);
 }
 
+TEST_CASE("Vellum LevelMeter matches legacy thresholds, ballistics, hold, and accessibility",
+          "[pulp-vellum-audio][level-meter]") {
+    pulp::vellum_audio::LevelMeter meter;
+    const auto green = meter.level_color(0.5f);
+    const auto yellow = meter.level_color(0.8f);
+    const auto red = meter.level_color(0.95f);
+    CHECK(green.r < yellow.r);
+    CHECK(green.g > yellow.g);
+    CHECK(red.g < yellow.g);
+    meter.set_levels(0.2f, 0.95f);
+    CHECK(meter.displayed_peak() > 0.0f);
+    CHECK(meter.held_peak() == 0.95f);
+    CHECK(meter.get_current_value() == meter.displayed_peak());
+    const auto held = meter.held_peak();
+    for (int i = 0; i < 120; ++i)
+        meter.set_levels(0.0f, 0.0f);
+    CHECK(meter.displayed_peak() < 0.01f);
+    CHECK(meter.held_peak() < held);
+}
+
+TEST_CASE("Vellum MidiKeyboard hit-tests black keys and emits editor MIDI callbacks",
+          "[pulp-vellum-audio][midi-keyboard]") {
+    pulp::vellum_audio::MidiKeyboard keyboard;
+    keyboard.set_range(60, 64);
+    keyboard.set_bounds({0, 0, 500, 100});
+    std::vector<std::pair<int, float>> ons;
+    std::vector<int> offs;
+    keyboard.on_note_on = [&](int note, float velocity) { ons.emplace_back(note, velocity); };
+    keyboard.on_note_off = [&](int note) { offs.push_back(note); };
+
+    keyboard.on_mouse_down({175.0f, 10.0f}); // C# overlaps the C/D naturals
+    REQUIRE(ons.size() == 1);
+    CHECK(ons.front().first == 61);
+    CHECK(ons.front().second == 0.8f);
+    keyboard.on_mouse_drag({450.0f, 80.0f});
+    REQUIRE(offs.size() == 1);
+    CHECK(offs.front() == 61);
+    REQUIRE(ons.size() == 2);
+    CHECK(ons.back().first == 64);
+    keyboard.on_mouse_up({450.0f, 80.0f});
+    REQUIRE(offs.size() == 2);
+    CHECK(offs.back() == 64);
+}
+
 TEST_CASE("Vellum LevelMeter feed changes are rendered inside its bounds",
           "[pulp-vellum-audio][render]") {
     if (!::vellum::view::raw_rgba_render_available())
