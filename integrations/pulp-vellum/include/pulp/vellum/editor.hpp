@@ -201,7 +201,11 @@ template <typename ViewType> class Editor final : public format::Editor {
         if (host_ == nullptr)
             return;
         if (!format::editor_content_first_open_enabled()) {
+            // The view is shown before its content: present it now and again on
+            // the first idle tick, once the host is visible and before the root
+            // mounts, so the first composited frame is the empty view.
             (void)host_->present_first_frame();
+            view_first_present_pending_ = true;
             return;
         }
         if constexpr (requires(ViewType& view) {
@@ -267,6 +271,10 @@ template <typename ViewType> class Editor final : public format::Editor {
         // parameter values into widgets) gets its tick here, then the host
         // repaints once so meter/scope snapshots are visible even when the
         // Vellum tree has no parameter-driven damage of its own.
+        if (view_first_present_pending_ && host_ != nullptr) {
+            view_first_present_pending_ = false;
+            (void)host_->present_first_frame();
+        }
         if constexpr (requires(ViewType& view) { view.editor_idle(); }) {
             if (root_ != nullptr)
                 root_->editor_idle();
@@ -322,6 +330,7 @@ template <typename ViewType> class Editor final : public format::Editor {
     bool attached_ = false;
     bool closing_ = false;
     bool invalidated_ = false;
+    bool view_first_present_pending_ = false;
     bool content_presentation_deferred_ = false;
     std::chrono::steady_clock::time_point content_ready_deadline_{};
 };

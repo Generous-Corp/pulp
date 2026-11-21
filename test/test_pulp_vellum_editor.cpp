@@ -449,9 +449,13 @@ TEST_CASE("Vellum content-ready roots open view-first when the host asks for it"
     REQUIRE(host != nullptr);
     CHECK_FALSE(deferred);
     REQUIRE(editor->attach({.kind = pulp::format::NativeParentKind::cocoa_view, .handle = host}));
-    // View-first shows the view at once, before its content.
+    // View-first shows the view at once, before its content, and again on the
+    // first idle tick before the root mounts.
     CHECK(host->present_calls == 1);
     editor->idle();
+    CHECK(host->present_calls == 2);
+    editor->idle();
+    CHECK(host->present_calls == 2);
     CHECK(host->resume_calls == 0);
 }
 
