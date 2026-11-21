@@ -28,7 +28,8 @@ PROFILE = "official-release"
 BUILD_PROFILE = "release"
 SHA_RE = re.compile(r"[0-9a-f]{40}")
 VERSION_RE = re.compile(r"[0-9]+\.[0-9]+\.[0-9]+")
-PLATFORM_RE = re.compile(r"(?:darwin|linux|windows)-(?:arm64|x64)")
+# ARM64EC is a separate Windows ABI; the ordinary ARM64 SDK cannot substitute.
+PLATFORM_RE = re.compile(r"(?:(?:darwin|linux|windows)-(?:arm64|x64)|windows-arm64ec)")
 INSPECTOR_SDK_FLOOR = (0, 772, 0)
 PRODUCT_MATRIX = Path(__file__).with_name("release_product_matrix.json")
 BUILD_INFO_PATH = Path("include/pulp/runtime/build_info.hpp")
@@ -423,6 +424,8 @@ def build_release_marker(
     source_sha: str,
     platform: str,
 ) -> dict[str, object]:
+    if not PLATFORM_RE.fullmatch(platform):
+        raise ProvenanceError(f"unsupported SDK platform: {platform!r}")
     version = _read_text(prefix / "version.txt")
     build_type = _read_text(prefix / "sdk_build_type.txt")
     if not VERSION_RE.fullmatch(version):
