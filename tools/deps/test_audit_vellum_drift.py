@@ -842,5 +842,15 @@ class RendererLockDigestTests(unittest.TestCase):
         self.assertTrue(any("hashes to" in problem for problem in problems), problems)
 
 
+class LicenseAuditCheckoutTests(unittest.TestCase):
+    def test_license_audit_checkout_keeps_history_for_the_base_merge_base(self) -> None:
+        # renderer_transition needs origin/<base> and a merge-base with HEAD;
+        # the default shallow checkout has neither, so the audit would fail closed.
+        workflow = (ROOT / ".github" / "workflows" / "license-audit.yml").read_text(
+            encoding="utf-8")
+        checkout = workflow.split("actions/checkout@", 1)[1].split("\n      - ", 1)[0]
+        self.assertIn("fetch-depth: 0", checkout)
+
+
 if __name__ == "__main__":
     unittest.main(argv=[sys.argv[0], *(arg for arg in sys.argv[1:] if not arg.endswith(".lock"))])
