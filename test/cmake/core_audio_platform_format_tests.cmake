@@ -370,6 +370,11 @@ pulp_add_test_suite(pulp-test-step-grid-view LIBRARIES pulp::view pulp::state)
 # Headless adapter tests
 pulp_add_test_suite(pulp-test-headless GROUP pulp-test-group-cap-format
     LIBRARIES pulp::format)
+if(APPLE AND NOT PULP_IOS)
+    pulp_add_test_suite(pulp-test-standalone-persistence-mac
+        SOURCES test_standalone_persistence_mac.mm
+        LIBRARIES pulp::standalone)
+endif()
 pulp_add_test_suite(pulp-test-format-hardening GROUP pulp-test-group-cap-format
     LIBRARIES pulp::format)
 # Processor-level MIDI panic: request, service, voice reset, MIDI-out emission

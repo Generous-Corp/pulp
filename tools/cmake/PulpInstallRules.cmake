@@ -203,6 +203,9 @@ if(TARGET pulp-vellum)
     list(APPEND PULP_SDK_TARGETS pulp-vellum)
     set(PULP_SDK_HAS_VELLUM_BRIDGE ON)
 endif()
+if(TARGET pulp-vellum-scripted)
+    list(APPEND PULP_SDK_TARGETS pulp-vellum-scripted)
+endif()
 # The optional Vellum audio meters/scopes package links Vellum::Value and
 # Vellum::MirrorView_core PUBLIC, so PulpConfig must re-find Vellum for it too.
 if(TARGET pulp-vellum-audio)
