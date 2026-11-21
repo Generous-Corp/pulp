@@ -221,6 +221,10 @@ if(TARGET Pulp::canvas AND TARGET skia::skia)
         set_property(TARGET Pulp::canvas APPEND PROPERTY
             INTERFACE_LINK_LIBRARIES skia::dawn)
     endif()
+    # After the Skia archive, so a consumer that links the static view or canvas
+    # libraries into a plug-in module gets libfontconfig as a needed library
+    # (Linux; PulpLinkFontconfig.cmake explains why).
+    pulp_attach_fontconfig_to_canvas(Pulp::canvas)
 endif()
 
 function(_pulp_add_lowercase_alias imported_target alias_target)
