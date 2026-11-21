@@ -578,7 +578,10 @@ straight:
   host's scale; the contract GUI forwards it to the editor
   (`ContractEditorSession::set_scale`).
 - WebCLAP (`PULP_WCLAP`) leaves the contract GUI out; `PulpWclap.cmake`'s source
-  list carries no contract code.
+  list carries no contract code. It must still compile `host_parameter_edit.cpp`:
+  the adapter uses its `HostWriteEchoGuard` implementation, and the WebCLAP
+  subset does not link native `pulp::format`. The source-closure gate checks
+  this dependency; native adapter tests alone cannot detect its omission.
 
 ### Proportional resize with aspect lock
 
@@ -1502,6 +1505,25 @@ at init, so a harness that sets `set_factory_presets_dir` afterwards must call
 `CLAP_PRESET_DISCOVERY_LOCATION_PLUGIN` loads a library key. The test harness
 `Harness` does not set `plugin.get_extension`; call
 `clap_adapter::clap_get_extension` instead of the vtable slot.
+
+## Host automation mirrored back by the plug-in is not an edit
+
+A plug-in that writes a host-automated value back into the store on the main
+thread (e.g. after quantising it) must not reach the host as an edit: hosts
+treat the parameter as touched and stop applying its envelope. `PulpClapPlugin::host_write_echo_guard`, fed by the outbound param listener, shares
+`HostWriteEchoGuard` with the VST3 bridge: off-main-thread host writes are
+remembered per parameter and a non-host write inside `kWindowNs` is not
+reported unless a gesture is open on it. Do not report from a new listener
+without consulting the guard.
+
+The snapshot-output fallback uses audio-thread captured processor values, not a
+live store read: a concurrent suppressed main-thread mirror must not become an
+output event. Host decode is explicitly scoped separately from processor writes.
+`[echo-concurrent]` interleaves both writers and preserves processor output.
+
+Register processor-output capture before exposing the store to the plug-in.
+Otherwise a reentrant normalizing listener can deliver the nested value first
+and let the outer notification overwrite it with an older value.
 
 ## Host-conformance checker
 

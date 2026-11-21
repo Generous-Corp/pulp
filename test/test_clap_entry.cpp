@@ -24,8 +24,12 @@
 #include <cstring>
 #include <limits>
 #include <optional>
+#include <functional>
+#include <semaphore>
 #include <string>
 #include <stdexcept>
+#include <thread>
+#include <chrono>
 #include <vector>
 
 // Minimal test processor
@@ -37,6 +41,9 @@ inline TestProcessor* g_last_processor = nullptr;
 class TestProcessor : public pulp::format::Processor {
 public:
     TestProcessor() { g_last_processor = this; }
+    std::function<void()> during_process;
+    bool normalize_gain_writes = false;
+    pulp::state::ListenerToken normalizer;
 
     // Note names a test can publish after the plugin is created, so the
     // note-name extension can be exercised against a live adapter.
@@ -64,6 +71,12 @@ public:
         };
     }
     void define_parameters(pulp::state::StateStore& store) override {
+        normalizer = store.add_listener(
+            [this, &store](pulp::state::ParamID id, float value) {
+                if (normalize_gain_writes && id == 1 && value == 8.0f)
+                    store.set_value_rt(id, 7.0f);
+            },
+            pulp::state::ListenerThread::Audio);
         store.add_group({.id = 10, .name = "Oscillators"});
         store.add_group({.id = 11, .name = "Wavetable 1", .parent_id = 10});
         store.add_group({.id = 12, .name = std::string(1100, 'x')});
@@ -106,6 +119,8 @@ public:
                  const pulp::audio::BufferView<const float>& in,
                  pulp::midi::MidiBuffer&, pulp::midi::MidiBuffer&,
                  const pulp::format::ProcessContext&) override {
+        if (during_process)
+            during_process();
         for (std::size_t ch = 0; ch < out.num_channels() && ch < in.num_channels(); ++ch) {
             auto ic = in.channel(ch);
             auto oc = out.channel(ch);
@@ -1293,6 +1308,239 @@ TEST_CASE("CLAP params_flush reports stopped-transport editor gestures in order"
 
     plugin->destroy(plugin);
     clap_entry.deinit();
+}
+
+// ── Host automation is never echoed back as a plug-in edit ───────────────────
+// A plug-in that mirrors a host-written value into the store on the main
+// thread (here: quantised to a whole dB) must not make the adapter report that
+// parameter to the host: hosts treat a reported parameter as touched and stop
+// applying its envelope.
+namespace {
+struct EchoFixture {
+    static constexpr uint32_t kFrames = 64;
+    ParamFlushHost host;
+    pulp::format::clap_adapter::PulpClapPlugin* plugin = nullptr;
+    std::array<std::array<float, kFrames>, 2> in_data{};
+    std::array<std::array<float, kFrames>, 2> out_data{};
+    std::array<float*, 2> in_ptrs{in_data[0].data(), in_data[1].data()};
+    std::array<float*, 2> out_ptrs{out_data[0].data(), out_data[1].data()};
+    clap_audio_buffer_t audio_in{};
+    clap_audio_buffer_t audio_out{};
+
+    explicit EchoFixture(pulp::format::ProcessorFactory factory = test_clap::create_test) {
+        plugin = new pulp::format::clap_adapter::PulpClapPlugin();
+        plugin->factory = factory;
+        plugin->plugin.plugin_data = plugin;
+        plugin->host = &host.host;
+        REQUIRE(pulp::format::clap_adapter::clap_init(&plugin->plugin));
+        REQUIRE(pulp::format::clap_adapter::clap_activate(&plugin->plugin, 48000.0, 32, kFrames));
+        audio_in.channel_count = 2;
+        audio_in.data32 = in_ptrs.data();
+        audio_out.channel_count = 2;
+        audio_out.data32 = out_ptrs.data();
+    }
+    ~EchoFixture() {
+        pulp::format::clap_adapter::clap_deactivate(&plugin->plugin);
+        pulp::format::clap_adapter::clap_destroy(&plugin->plugin);
+    }
+
+    CapturedOutputEvents process_with(std::optional<double> automation, clap_id param_id = 1) {
+        clap_event_param_value_t ev{};
+        ev.header.size = sizeof(ev);
+        ev.header.type = CLAP_EVENT_PARAM_VALUE;
+        ev.header.space_id = CLAP_CORE_EVENT_SPACE_ID;
+        ev.param_id = param_id;
+        ev.note_id = -1;
+        ev.port_index = -1;
+        ev.channel = -1;
+        ev.key = -1;
+        ev.value = automation.value_or(0.0);
+        EventList list;
+        if (automation)
+            list.events.push_back(&ev.header);
+        clap_input_events_t in{.ctx = &list, .size = events_size, .get = events_get};
+        CapturedOutputEvents out;
+        clap_process_t proc{};
+        proc.frames_count = kFrames;
+        proc.audio_inputs = &audio_in;
+        proc.audio_inputs_count = 1;
+        proc.audio_outputs = &audio_out;
+        proc.audio_outputs_count = 1;
+        proc.in_events = &in;
+        proc.out_events = &out.api;
+        REQUIRE(pulp::format::clap_adapter::clap_process(&plugin->plugin, &proc) !=
+                CLAP_PROCESS_ERROR);
+        return out;
+    }
+
+    static std::size_t count_values(const CapturedOutputEvents& out) {
+        std::size_t n = 0;
+        for (std::size_t i = 0; i < out.events.size(); ++i)
+            if (out.at(i)->type == CLAP_EVENT_PARAM_VALUE)
+                ++n;
+        return n;
+    }
+};
+} // namespace
+
+TEST_CASE("CLAP reports the auto-reset of a host-raised trigger",
+          "[clap][params][automation][trigger-reset]") {
+    constexpr clap_id trigger = 100;
+    class TriggerProcessor : public test_clap::TestProcessor {
+        void define_parameters(pulp::state::StateStore& store) override {
+            TestProcessor::define_parameters(store);
+            store.add_parameter({.id = trigger,
+                                 .name = "Reset",
+                                 .range = {0.0f, 1.0f, 0.0f, 1.0f},
+                                 .designation = pulp::state::ParamDesignation::Reset});
+        }
+    };
+    EchoFixture fx([]() -> std::unique_ptr<pulp::format::Processor> {
+        return std::make_unique<TriggerProcessor>();
+    });
+    float observed = 0.0f;
+    test_clap::g_last_processor->during_process = [&] {
+        observed = fx.plugin->store.get_value(trigger);
+    };
+
+    const auto out = fx.process_with(1.0, trigger);
+    CHECK(observed == 1.0f);
+    CHECK(fx.plugin->store.get_value(trigger) == 0.0f);
+    REQUIRE(out.events.size() == 1);
+    REQUIRE(out.at(0)->type == CLAP_EVENT_PARAM_VALUE);
+    const auto* reset = reinterpret_cast<const clap_event_param_value_t*>(out.at(0));
+    CHECK(reset->param_id == trigger);
+    CHECK(reset->value == 0.0);
+    CHECK(EchoFixture::count_values(fx.process_with(std::nullopt)) == 0);
+}
+
+TEST_CASE("CLAP does not echo host automation that the plug-in mirrors back",
+          "[clap][params][automation][echo]") {
+    EchoFixture fx;
+    auto& store = fx.plugin->store;
+    // Settle anything the setup itself reported.
+    (void)fx.process_with(std::nullopt);
+    const int flushes_before = fx.host.flush_requests;
+
+    // 200 blocks of sine automation; after each, the plug-in quantises what it
+    // was given and writes it back on the main thread.
+    std::size_t echoed = 0;
+    for (int block = 0; block < 200; ++block) {
+        const double v = 10.0 * std::sin(block * 0.07) + 3.3;
+        echoed += EchoFixture::count_values(fx.process_with(v));
+        store.set_value(1, std::round(store.get_value(1)));
+    }
+    echoed += EchoFixture::count_values(fx.process_with(std::nullopt));
+    CHECK(echoed == 0);
+    CHECK(fx.host.flush_requests == flushes_before);
+
+    // The same through params.flush, the host's other way to deliver values.
+    clap_event_param_value_t ev{};
+    ev.header.size = sizeof(ev);
+    ev.header.type = CLAP_EVENT_PARAM_VALUE;
+    ev.header.space_id = CLAP_CORE_EVENT_SPACE_ID;
+    ev.param_id = 1;
+    ev.value = -7.4;
+    EventList list{.events = {&ev.header}};
+    clap_input_events_t in{.ctx = &list, .size = events_size, .get = events_get};
+    CapturedOutputEvents flushed;
+    // Active plug-ins get params.flush on the audio thread.
+    std::thread([&] {
+        pulp::format::clap_adapter::clap_params_flush(&fx.plugin->plugin, &in, &flushed.api);
+    }).join();
+    store.set_value(1, std::round(store.get_value(1)));
+    CapturedOutputEvents after;
+    pulp::format::clap_adapter::clap_params_flush(&fx.plugin->plugin, nullptr, &after.api);
+    CHECK(flushed.events.empty());
+    CHECK(after.events.empty());
+    CHECK(fx.host.flush_requests == flushes_before);
+}
+
+TEST_CASE("CLAP still reports plug-in edits next to host automation",
+          "[clap][params][automation][echo]") {
+    EchoFixture fx;
+    auto& store = fx.plugin->store;
+    (void)fx.process_with(std::nullopt);
+
+    // Control: a main-thread write to a parameter the host never touched.
+    store.set_value(3, 25.0f);
+    CHECK(EchoFixture::count_values(fx.process_with(std::nullopt)) == 1);
+
+    // Control: a user gesture on a host-automated parameter still reports.
+    (void)fx.process_with(5.0);
+    store.begin_gesture(1);
+    store.set_value(1, -20.0f);
+    store.end_gesture(1);
+    const auto gesture_out = fx.process_with(std::nullopt);
+    CHECK(EchoFixture::count_values(gesture_out) >= 1);
+
+    // Control: once the echo window has passed, a plug-in write reports again.
+    (void)fx.process_with(6.0);
+    std::this_thread::sleep_for(
+        std::chrono::milliseconds(pulp::format::HostWriteEchoGuard::kWindowNs / 1'000'000 + 50));
+    store.set_value(1, -30.0f);
+    CHECK(EchoFixture::count_values(fx.process_with(std::nullopt)) == 1);
+}
+
+TEST_CASE("CLAP concurrent mirrors cannot leak through snapshot output",
+          "[clap][params][automation][echo][echo-concurrent]") {
+    EchoFixture fx;
+    auto& store = fx.plugin->store;
+    (void)fx.process_with(std::nullopt);
+    const int flushes_before = fx.host.flush_requests;
+    bool processor_before = false;
+    bool processor_after = false;
+    bool normalize = false;
+    SECTION("mirror alone") {}
+    SECTION("processor writes before mirror") {
+        processor_before = true;
+    }
+    SECTION("processor writes after mirror") {
+        processor_after = true;
+    }
+    SECTION("processor listener normalizes before mirror") {
+        processor_before = true;
+        normalize = true;
+        test_clap::g_last_processor->normalize_gain_writes = true;
+    }
+
+    std::binary_semaphore snapshot_reached{0};
+    std::binary_semaphore mirror_finished{0};
+    test_clap::g_last_processor->during_process = [&] {
+        if (processor_before)
+            store.set_value_rt(1, 8.0f);
+        snapshot_reached.release();
+        mirror_finished.acquire();
+        if (processor_after)
+            store.set_value_rt(1, 9.0f);
+    };
+    std::size_t values = 0;
+    double reported = 0.0;
+    std::thread audio([&] {
+        const auto out = fx.process_with(5.3);
+        values = EchoFixture::count_values(out);
+        for (std::size_t i = 0; i < out.events.size(); ++i) {
+            if (out.at(i)->type == CLAP_EVENT_PARAM_VALUE)
+                reported = reinterpret_cast<const clap_event_param_value_t*>(out.at(i))->value;
+        }
+    });
+    const bool reached = snapshot_reached.try_acquire_for(std::chrono::seconds(5));
+    if (reached) {
+        // Keep the timing policy deterministic even when this test is
+        // descheduled on a busy runner. The host write above armed the guard.
+        fx.plugin->host_write_echo_guard.note_host_write(1);
+        store.set_value(1, 5.0f);
+    }
+    mirror_finished.release();
+    audio.join();
+    test_clap::g_last_processor->during_process = {};
+    REQUIRE(reached);
+    CHECK(fx.host.flush_requests == flushes_before);
+    CHECK(values == (processor_before || processor_after ? 1 : 0));
+    if (processor_before)
+        CHECK(reported == (normalize ? 7.0 : 8.0));
+    if (processor_after)
+        CHECK(reported == 9.0);
 }
 
 // ── G1: CLAP resize-contract honoring (WS-1b) ────────────────────────────────
