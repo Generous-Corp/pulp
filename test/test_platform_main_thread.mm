@@ -14,6 +14,7 @@
 #include <chrono>
 #include <memory>
 #include <thread>
+#include <vector>
 
 using pulp::platform::MainThreadScope;
 using pulp::platform::MainThreadTimer;
@@ -300,6 +301,123 @@ TEST_CASE("an idle scope causes no main-thread callouts", "[platform][main-threa
     CFRunLoopRunInMode(kCFRunLoopDefaultMode, 0.3, false);
     timer.cancel();
     REQUIRE(pulp::platform::detail::main_thread_callouts() - armed_before >= 3);
+}
+
+// A repeating timer is re-armed by the run loop itself. The instrument is the
+// layer's own SetNextFireDate counter; the control is the same counter moving
+// when timers are started (once each) and when one-shots fire.
+TEST_CASE("repeating timers are not repositioned on each fire", "[platform][main-thread][rearm]") {
+    ensure_app();
+    pump_for(20ms);
+    MainThreadScope scope;
+    constexpr int kTimers = 8;
+    std::atomic<int> fires{0};
+    std::vector<std::unique_ptr<MainThreadTimer>> timers;
+    for (int i = 0; i < kTimers; ++i) {
+        timers.push_back(std::make_unique<MainThreadTimer>(scope, [&] { ++fires; }));
+    }
+    const auto before_start = pulp::platform::detail::main_thread_timer_rearms();
+    for (auto& t : timers)
+        t->fire_every(10ms);
+    // Starting is the only reposition: one per timer (the control that the
+    // counter sees SetNextFireDate at all).
+    REQUIRE(pulp::platform::detail::main_thread_timer_rearms() - before_start == kTimers);
+
+    const auto armed = pulp::platform::detail::main_thread_timer_rearms();
+    REQUIRE(pump_until([&] { return fires.load() >= kTimers * 5; }, 5000ms));
+    REQUIRE(pulp::platform::detail::main_thread_timer_rearms() == armed);
+    for (auto& t : timers)
+        t->cancel();
+}
+
+TEST_CASE("a repeating timer keeps its rate after a period change and a stop",
+          "[platform][main-thread][rearm]") {
+    ensure_app();
+    pump_for(20ms);
+    MainThreadScope scope;
+    std::atomic<int> fires{0};
+    MainThreadTimer timer(scope, [&] { ++fires; });
+
+    timer.fire_every(500ms);
+    pump_for(60ms);
+    REQUIRE(fires == 0);    // the long period has not elapsed
+    timer.fire_every(10ms); // interval change takes effect now
+    REQUIRE(pump_until([&] { return fires.load() >= 3; }, 3000ms));
+
+    timer.cancel();
+    REQUIRE_FALSE(timer.pending());
+    pump_for(30ms);
+    const int stopped_at = fires.load();
+    pump_for(120ms);
+    REQUIRE(fires == stopped_at); // no fire after stop
+
+    timer.fire_every(10ms); // restart on the same period
+    REQUIRE(pump_until([&] { return fires.load() >= stopped_at + 3; }, 3000ms));
+    timer.cancel();
+}
+
+TEST_CASE("a one-shot fires once, also after a repeating run on the same timer",
+          "[platform][main-thread][rearm]") {
+    ensure_app();
+    pump_for(20ms);
+    MainThreadScope scope;
+    std::atomic<int> fires{0};
+    MainThreadTimer timer(scope, [&] { ++fires; });
+    timer.fire_every(10ms);
+    REQUIRE(pump_until([&] { return fires.load() >= 2; }, 3000ms));
+    timer.cancel();
+    pump_for(30ms);
+    fires = 0;
+
+    timer.fire_after(15ms);
+    REQUIRE(pump_until([&] { return fires.load() >= 1; }, 3000ms));
+    pump_for(150ms); // many native periods would have elapsed
+    REQUIRE(fires == 1);
+    REQUIRE_FALSE(timer.pending());
+}
+
+TEST_CASE("a repeating timer can stop or restart itself inside its callback",
+          "[platform][main-thread][rearm]") {
+    ensure_app();
+    pump_for(20ms);
+    MainThreadScope scope;
+    std::atomic<int> fires{0};
+    std::unique_ptr<MainThreadTimer> timer;
+    timer = std::make_unique<MainThreadTimer>(scope, [&] {
+        if (++fires == 2)
+            timer->cancel();
+    });
+    timer->fire_every(10ms);
+    REQUIRE(pump_until([&] { return fires.load() >= 2; }, 3000ms));
+    pump_for(120ms);
+    REQUIRE(fires == 2);
+
+    // Changing the period inside the callback replaces the underlying timer
+    // while it is firing.
+    std::atomic<int> slow{0};
+    std::unique_ptr<MainThreadTimer> changer;
+    changer = std::make_unique<MainThreadTimer>(scope, [&] {
+        if (++slow == 1)
+            changer->fire_every(7ms);
+    });
+    changer->fire_every(10ms);
+    REQUIRE(pump_until([&] { return slow.load() >= 4; }, 3000ms));
+    changer->cancel();
+}
+
+TEST_CASE("destroying a pending repeating timer stops it", "[platform][main-thread][rearm]") {
+    ensure_app();
+    pump_for(20ms);
+    MainThreadScope scope;
+    std::atomic<int> fires{0};
+    {
+        MainThreadTimer timer(scope, [&] { ++fires; });
+        timer.fire_every(10ms);
+        REQUIRE(pump_until([&] { return fires.load() >= 1; }, 3000ms));
+    }
+    const int at_destroy = fires.load();
+    pump_for(120ms);
+    REQUIRE(fires == at_destroy);
 }
 
 TEST_CASE("teardown hooks run once when the scope is destroyed",
