@@ -1,6 +1,6 @@
 #pragma once
 
-#include <pulp/format/editor_assets.hpp>
+#include <pulp/format/editor_ui_source.hpp>
 #include <pulp/format/processor.hpp>
 #include <pulp/runtime/alive_token.hpp>
 #include <pulp/runtime/exceptions.hpp>
@@ -10,12 +10,10 @@
 #include <pulp/view/scripted_ui.hpp>
 #include <pulp/view/value_channel_set.hpp>
 #include <atomic>
-#include <filesystem>
 #include <memory>
 #include <optional>
 #include <string>
 #include <string_view>
-#include <system_error>
 #include <vector>
 
 namespace pulp::format {
@@ -45,66 +43,10 @@ struct EditorUiInstance {
     bool uses_script_ui = false;
 };
 
-/// The on-disk scripted-UI entry file `assets` declares, if any. Only a dev
-/// build (`PULP_DEV_BUILD`) records one; see select_editor_ui_source().
-inline std::optional<std::filesystem::path> configured_ui_script_path(const EditorAssets& assets) {
-    if (assets.script_path == nullptr || assets.script_path[0] == '\0')
-        return std::nullopt;
-    return std::filesystem::path{assets.script_path};
-}
-
-/// The on-disk theme / design-token file `assets` declares, if any.
-inline std::optional<std::filesystem::path> configured_ui_theme_path(const EditorAssets& assets) {
-    if (assets.theme_path == nullptr || assets.theme_path[0] == '\0')
-        return std::nullopt;
-    return std::filesystem::path{assets.theme_path};
-}
-
-/// The asset directories `assets` declares, split on '|'.
-inline std::vector<std::filesystem::path> configured_ui_asset_roots(const EditorAssets& assets) {
-    std::vector<std::filesystem::path> roots;
-    if (assets.asset_roots == nullptr)
-        return roots;
-    std::string_view raw{assets.asset_roots};
-    while (!raw.empty()) {
-        const auto split = raw.find('|');
-        const auto item = raw.substr(0, split);
-        if (!item.empty()) roots.emplace_back(std::string(item));
-        if (split == std::string_view::npos) break;
-        raw.remove_prefix(split + 1);
-    }
-    return roots;
-}
-
-/// This binary's on-disk scripted-UI entry file (see register_editor_assets()).
-inline std::optional<std::filesystem::path> configured_ui_script_path() {
-    return configured_ui_script_path(registered_editor_assets());
-}
-
-/// This binary's on-disk theme / design-token file.
-inline std::optional<std::filesystem::path> configured_ui_theme_path() {
-    return configured_ui_theme_path(registered_editor_assets());
-}
-
-/// This binary's asset directories.
-inline std::vector<std::filesystem::path> configured_ui_asset_roots() {
-    return configured_ui_asset_roots(registered_editor_assets());
-}
-
 /// The files embedded beside `assets`' script, as the bridge consumes them.
 inline std::vector<view::WidgetBridge::EmbeddedAsset>
 embedded_ui_assets(const EditorAssets& assets) {
-    std::vector<view::WidgetBridge::EmbeddedAsset> files;
-    if (assets.files == nullptr)
-        return files;
-    files.reserve(assets.file_count);
-    for (std::size_t i = 0; i < assets.file_count; ++i) {
-        const auto& file = assets.files[i];
-        if (file.name == nullptr || file.name[0] == '\0' || file.data == nullptr || file.size == 0)
-            continue;
-        files.push_back({file.name, file.data, file.size});
-    }
-    return files;
+    return copy_embedded_editor_files<view::WidgetBridge::EmbeddedAsset>(assets);
 }
 
 /// Where the default scripted editor's document comes from.
@@ -129,38 +71,8 @@ struct EditorUiSource {
     }
 };
 
-/// Pick the document for a default scripted editor from the record the plug-in
-/// registered. The embedded script wins whenever the image carries one; the
-/// on-disk path a dev build also records is honored only for a hot-reloading
-/// editor (the standalone host, or a DAW launched with `PULP_DEV_HOT_RELOAD=1`),
-/// and only while that file exists, so the edit-and-see loop keeps reading the
-/// file the build points at while a shipped image never depends on the
-/// developer's source tree. Without an embedded script the path is used as
-/// before.
 inline EditorUiSource select_editor_ui_source(const EditorAssets& assets, bool enable_hot_reload) {
-    EditorUiSource source;
-    const auto dev_script_path = configured_ui_script_path(assets);
-    const bool dev_file_present = [&] {
-        if (!dev_script_path)
-            return false;
-        std::error_code ec;
-        return std::filesystem::is_regular_file(*dev_script_path, ec) && !ec;
-    }();
-    if (embeds_editor_script(assets) && !(enable_hot_reload && dev_file_present)) {
-        source.script_source.assign(reinterpret_cast<const char*>(assets.script),
-                                    assets.script_size);
-        if (assets.theme != nullptr && assets.theme_size > 0)
-            source.theme_source.assign(reinterpret_cast<const char*>(assets.theme),
-                                       assets.theme_size);
-        source.script_name = assets.script_name != nullptr && assets.script_name[0] != '\0'
-                                 ? assets.script_name
-                                 : "ui.js";
-        source.embedded_assets = embedded_ui_assets(assets);
-        return source;
-    }
-    if (dev_script_path)
-        source.script_path = *dev_script_path;
-    return source;
+    return select_editor_ui_source_as<EditorUiSource>(assets, enable_hot_reload);
 }
 
 /// Builds the scripted editor from `source`, the document

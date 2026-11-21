@@ -32,3 +32,10 @@ target_sources(pulp-vellum PRIVATE src/about_notices.cpp src/swift_motion_bridge
 set_property(TARGET pulp-vellum PROPERTY PULP_VELLUM_HAS_SWIFT_MOTION TRUE)
 target_include_directories(pulp-vellum PRIVATE ${PULP_ROOT_DIR}/apple/Sources/PulpSwift)
 target_link_libraries(pulp-vellum PUBLIC Vellum::MirrorView_core)
+
+if(TARGET Vellum::MirrorView_script)
+    add_library(pulp-vellum-scripted STATIC src/scripted_editor.cpp)
+    add_library(pulp::vellum-scripted ALIAS pulp-vellum-scripted)
+    target_link_libraries(pulp-vellum-scripted PUBLIC pulp::vellum
+        PRIVATE Vellum::MirrorView_script)
+endif()

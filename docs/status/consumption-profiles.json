@@ -330,6 +330,7 @@
       "pulp/format/editor_package.hpp",
       "pulp/format/editor_prewarm.hpp",
       "pulp/format/editor_ui.hpp",
+      "pulp/format/editor_ui_source.hpp",
       "pulp/format/factory_program_table.hpp",
       "pulp/format/format.hpp",
       "pulp/format/generation_routing.hpp",
