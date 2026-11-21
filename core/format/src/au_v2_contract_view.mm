@@ -328,6 +328,15 @@ EditorKeyEvent contract_key_event(unsigned short key_code, NSString* characters,
 
     PULP_AU_CONTRACT_HOST_VIEW_CLASS* view =
         [[PULP_AU_CONTRACT_HOST_VIEW_CLASS alloc] initWithFrame:NSZeroRect];
+    // The DAW shows this container before the editor's first frame, so give it
+    // the plug-in's declared editor colour rather than a default.
+    if (auto rgb = ctx.processor->editor_background()) {
+        view.wantsLayer = YES;
+        const CGFloat r = ((*rgb >> 16) & 0xff) / 255.0;
+        const CGFloat g = ((*rgb >> 8) & 0xff) / 255.0;
+        const CGFloat b = (*rgb & 0xff) / 255.0;
+        view.layer.backgroundColor = [NSColor colorWithSRGBRed:r green:g blue:b alpha:1.0].CGColor;
+    }
     format::ContractEditorSession::HostHooks hooks;
     // The view owns the session, so it outlives every hook call.
     hooks.request_resize = [view](const format::EditorSize& requested) {
