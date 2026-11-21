@@ -79,7 +79,10 @@ routing. For a VST3 bundle, the harness first selects the inner payload whose
 name matches the bundle, then filters multi-architecture payloads by the host
 ABI; an ambiguous or mismatched set is rejected before REAPER launches. These
 fields do not assert every instruction's ISA or native ARM64 execution. CLAP
-uses `clap_path`.
+uses `clap_path_win64` for x64 and `clap_path_winarm64` for ARM hosts.
+The unsuffixed `clap_path` is ignored by Windows REAPER; using it can load a
+system copy instead of the staged artifact. The loaded-module hash check must
+still pass before accepting either format.
 Startup, scan and parameter action have separate bounded budgets. A unique run
 token prevents stale host status from satisfying the handshake. Terminal
 status retains insertion evidence, actual normalized parameter observations,
