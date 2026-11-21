@@ -8,3 +8,9 @@ target_include_directories(pulp-vellum-audio PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>)
 target_compile_features(pulp-vellum-audio PUBLIC cxx_std_20)
 target_link_libraries(pulp-vellum-audio PUBLIC pulp::runtime pulp::dataplane-audio pulp::signal Vellum::Value Vellum::MirrorView_core)
+
+if(PULP_ENABLE_PULP_VELLUM)
+    add_library(pulp-vellum-widget-gallery STATIC src/widget_gallery.cpp)
+    add_library(pulp::vellum-widget-gallery ALIAS pulp-vellum-widget-gallery)
+    target_link_libraries(pulp-vellum-widget-gallery PUBLIC pulp::vellum-audio)
+endif()

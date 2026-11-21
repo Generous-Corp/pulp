@@ -7,16 +7,23 @@
 //
 // Default writes <out>-light.png and <out>-dark.png.
 
+#ifdef PULP_WIDGET_GALLERY_VELLUM
+#include <pulp/vellum_audio/widget_gallery.hpp>
+#include <vellum/view/screenshot.hpp>
+#include <vellum/view/theme_presets.hpp>
+using namespace pulp::vellum_audio;
+using namespace vellum::view;
+#else
 #include <pulp/view/widget_gallery.hpp>
 #include <pulp/view/screenshot.hpp>
 #include <pulp/view/theme_presets.hpp>
+using namespace pulp::view;
+#endif
 
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
 #include <string>
-
-using namespace pulp::view;
 
 int main(int argc, char** argv) {
     std::string out = "widget-gallery";
