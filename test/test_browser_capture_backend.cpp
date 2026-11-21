@@ -470,34 +470,42 @@ TEST_CASE("browser discovery honors explicit, environment, managed, then system"
 TEST_CASE("browser discovery omits macOS app bundles in agent sandboxes",
           "[import-design][browser-capture]") {
 #ifdef __APPLE__
+    TempTree tree("sandbox-app");
+    const auto exec_perms = fs::perms::owner_read | fs::perms::owner_write | fs::perms::owner_exec;
+    const auto bundled = tree.write("Chromium.app/Contents/MacOS/Chromium", "#!/bin/sh\nexit 0\n");
+    fs::permissions(bundled, exec_perms);
+    const auto plain = tree.write("bin/chromium", "#!/bin/sh\nexit 0\n");
+    fs::permissions(plain, exec_perms);
+
     capture::BrowserDiscoveryOptions options;
     options.environment_override = "";
     options.mode_override = "system";
-    options.include_default_system_candidates = true;
+    options.include_default_system_candidates = false;
+    options.system_candidates = {bundled, plain};
 
-    std::vector<capture::BrowserCandidate> without_sandbox;
     {
         ScopedEnv sandbox("CODEX_SANDBOX", "");
-        without_sandbox = capture::collect_browser_candidates(options);
+        const auto candidates = capture::collect_browser_candidates(options);
+        REQUIRE(candidates.size() == 2);
+        CHECK(candidates[0].executable == bundled);
+        CHECK(candidates[1].executable == plain);
     }
-    std::vector<capture::BrowserCandidate> with_sandbox;
     {
         ScopedEnv sandbox("CODEX_SANDBOX", "seatbelt");
-        with_sandbox = capture::collect_browser_candidates(options);
-    }
+        std::vector<fs::path> omitted;
+        const auto candidates = capture::collect_browser_candidates(options, &omitted);
+        REQUIRE(candidates.size() == 1);
+        CHECK(candidates[0].executable == plain);
+        REQUIRE(omitted.size() == 1);
+        CHECK(omitted[0] == bundled);
 
-    REQUIRE(std::any_of(without_sandbox.begin(), without_sandbox.end(), [](const auto& candidate) {
-        return candidate.executable.string().find(".app/") != std::string::npos;
-    }));
-    without_sandbox.erase(std::remove_if(without_sandbox.begin(), without_sandbox.end(),
-                                         [](const auto& candidate) {
-                                             return candidate.executable.string().find(".app/") !=
-                                                    std::string::npos;
-                                         }),
-                          without_sandbox.end());
-    REQUIRE(with_sandbox.size() == without_sandbox.size());
-    for (std::size_t index = 0; index < with_sandbox.size(); ++index)
-        CHECK(with_sandbox[index].executable == without_sandbox[index].executable);
+        // The default table never offers an .app executable in a sandbox,
+        // whatever this host has installed.
+        options.system_candidates.clear();
+        options.include_default_system_candidates = true;
+        for (const auto& candidate : capture::collect_browser_candidates(options))
+            CHECK(candidate.executable.string().find(".app/") == std::string::npos);
+    }
 #else
     SUCCEED("macOS app bundle discovery is platform-specific");
 #endif
@@ -545,11 +553,27 @@ TEST_CASE("browser discovery explains sandbox browser prerequisite",
     options.mode_override = "system";
     options.include_default_system_candidates = false;
     ScopedEnv sandbox("CODEX_SANDBOX", "seatbelt");
+
+    // Nothing was dropped, so the sandbox is not blamed.
+    const auto empty = capture::discover_browser(options);
+    REQUIRE_FALSE(empty.ok());
+    CHECK(empty.diagnostic.message.find("sandbox") == std::string::npos);
+    CHECK(empty.diagnostic.message.find("No compatible") != std::string::npos);
+
+#ifdef __APPLE__
+    TempTree tree("sandbox-diagnostic");
+    const auto bundled =
+        tree.write("Google Chrome.app/Contents/MacOS/Google Chrome", "#!/bin/sh\nexit 0\n");
+    fs::permissions(bundled,
+                    fs::perms::owner_read | fs::perms::owner_write | fs::perms::owner_exec);
+    options.system_candidates = {bundled};
     const auto result = capture::discover_browser(options);
     REQUIRE_FALSE(result.ok());
+    CHECK(result.probes.empty());
     CHECK(result.diagnostic.message.find("cannot start in a sandbox") != std::string::npos);
     CHECK(result.diagnostic.message.find("managed browser or pass one explicitly") !=
           std::string::npos);
+#endif
 }
 
 TEST_CASE("browser modes constrain managed and system discovery",
