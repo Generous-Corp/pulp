@@ -9,6 +9,15 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
      release's bullet block. See docs/guides/versioning.md § Release pipeline
      for the full end-to-end flow. -->
 
+<a id="v11850"></a>
+## [1.185.0] - 2026-11-21
+
+- release/version bump ([#12702](https://github.com/Generous-Corp/pulp/pull/12702))
+- lane/w standalone capture ([#12699](https://github.com/Generous-Corp/pulp/pull/12699))
+- docs/create ui vellum ([#12697](https://github.com/Generous-Corp/pulp/pull/12697))
+- lane/w pulp exe exports ([#12695](https://github.com/Generous-Corp/pulp/pull/12695))
+- feature/pulp vellum scripted editor ([#12690](https://github.com/Generous-Corp/pulp/pull/12690))
+
 <a id="v11840"></a>
 ## [1.184.0] - 2026-11-21
 
@@ -13484,6 +13493,7 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/Generous-Corp/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/Generous-Corp/pulp/pull/2))
 
+[1.185.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.185.0
 [1.184.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.184.0
 [1.183.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.183.0
 [1.182.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.182.0
