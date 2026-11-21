@@ -137,9 +137,12 @@ template <typename ViewType> class Editor final : public format::Editor {
         if constexpr (requires(ViewType& view) {
                           { view.editor_content_ready() } -> std::convertible_to<bool>;
                       }) {
-            options.defer_presentation = true;
-            content_presentation_deferred_ = true;
-            content_ready_deadline_ = std::chrono::steady_clock::now() + content_ready_timeout();
+            if (format::editor_content_first_open_enabled()) {
+                options.defer_presentation = true;
+                content_presentation_deferred_ = true;
+                content_ready_deadline_ =
+                    std::chrono::steady_clock::now() + content_ready_timeout();
+            }
         }
         host_ = ::vellum::view::PluginViewHost::create(*root_, options);
         if (host_ != nullptr && has_design_viewport()) {

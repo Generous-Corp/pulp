@@ -42,6 +42,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <cstdlib>
 #include <functional>
 #include <memory>
 #include <optional>
@@ -57,6 +58,15 @@ class StateStore;
 }
 
 namespace pulp::format {
+
+/// Whether a DAW-hosted editor opens content-first (the default) or view-first.
+/// `PULP_EDITOR_OPEN=view-first` in the host's environment selects view-first,
+/// for an A/B of the two or a host that must not block in its view-creation
+/// call. Read once per editor open.
+inline bool editor_content_first_open_enabled() {
+    const char* v = std::getenv("PULP_EDITOR_OPEN");
+    return !(v && std::string_view(v) == "view-first");
+}
 
 class Processor;
 

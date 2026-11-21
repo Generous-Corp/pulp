@@ -415,6 +415,38 @@ TEST_CASE("Vellum content-ready roots resume at the bounded timeout", "[pulp-vel
     CHECK(host->resume_calls == 1);
 }
 
+TEST_CASE("Vellum content-ready roots open view-first when the host asks for it",
+          "[pulp-vellum][editor]") {
+    setenv("PULP_EDITOR_OPEN", "view-first", 1);
+    struct Restore {
+        ~Restore() {
+            unsetenv("PULP_EDITOR_OPEN");
+        }
+    } restore;
+    using PluginViewHost = ::vellum::view::PluginViewHost;
+    FactoryReset reset;
+    Fixture fixture;
+    Context context(*fixture.port);
+    Processor processor;
+    bool deferred = true;
+    StubHost* host = nullptr;
+    PluginViewHost::set_factory([&](::vellum::view::View&, const PluginViewHost::Options& options) {
+        deferred = options.defer_presentation;
+        auto stub = std::make_unique<StubHost>(options.size);
+        host = stub.get();
+        return stub;
+    });
+
+    pulp::vellum::EditorFactory<ContentReadyView> factory;
+    auto editor = factory.create(processor, context, pulp::format::EditorRole::editor);
+    REQUIRE(editor);
+    REQUIRE(host != nullptr);
+    CHECK_FALSE(deferred);
+    REQUIRE(editor->attach({.kind = pulp::format::NativeParentKind::cocoa_view, .handle = host}));
+    editor->idle();
+    CHECK(host->resume_calls == 0);
+}
+
 TEST_CASE("Vellum roots without content-ready hooks never defer", "[pulp-vellum][editor]") {
     using PluginViewHost = ::vellum::view::PluginViewHost;
     FactoryReset reset;
