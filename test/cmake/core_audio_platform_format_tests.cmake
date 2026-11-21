@@ -639,11 +639,20 @@ if(PULP_HAS_CLAP)
                     null_input=$<TARGET_FILE:pulp-test-clap-conf-null_input>
                     crash_teardown=$<TARGET_FILE:pulp-test-clap-conf-crash_teardown>
                     $<$<BOOL:${APPLE}>:bundle=${CMAKE_CURRENT_BINARY_DIR}/ConfBundle.clap>
+                    state=$<TARGET_FILE:pulp-test-clap-conf-state>)
+            # Each fixture module costs a few seconds of host-side warm-up, so
+            # the full matrix is a slow lane; the robustness test below is the
+            # fast per-PR proof of the checker's own deadline and JSON output.
+            set_tests_properties(clap-conformance-checker PROPERTIES
+                LABELS "format;clap;tools;slow" TIMEOUT 120)
+            add_test(NAME clap-conformance-checker-robustness
+                COMMAND ${Python3_EXECUTABLE}
+                    "${CMAKE_SOURCE_DIR}/tools/audio/clap-conformance/test_clap_conformance.py"
+                    $<TARGET_FILE:pulp-clap-conformance>
                     hang_init=$<TARGET_FILE:pulp-test-clap-conf-hang_init>
                     hang_process=$<TARGET_FILE:pulp-test-clap-conf-hang_process>
-                    control_chars=$<TARGET_FILE:pulp-test-clap-conf-control_chars>
-                    state=$<TARGET_FILE:pulp-test-clap-conf-state>)
-            set_tests_properties(clap-conformance-checker PROPERTIES
+                    control_chars=$<TARGET_FILE:pulp-test-clap-conf-control_chars>)
+            set_tests_properties(clap-conformance-checker-robustness PROPERTIES
                 LABELS "format;clap;tools" TIMEOUT 120)
         endif()
     endif()

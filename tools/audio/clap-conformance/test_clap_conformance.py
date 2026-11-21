@@ -39,7 +39,7 @@ HANG_BOUND_S = 60
 def check_hang(checker, name, module, errors):
     start = time.monotonic()
     proc = subprocess.run(
-        [checker, module, "--json", "--timeout-seconds", "2", "--plugin-id", "dev.pulp.test.conformance-fixture"],
+        [checker, module, "--json", "--timeout-seconds", "1", "--plugin-id", "dev.pulp.test.conformance-fixture"],
         capture_output=True, text=True, encoding="utf-8", timeout=HANG_BOUND_S)
     took = time.monotonic() - start
     if took > HANG_BOUND_S / 2:
@@ -52,7 +52,7 @@ def check_hang(checker, name, module, errors):
     print(name, {k: v["status"] for k, v in checks.items()}, f"{took:.1f}s")
     if name == "hang_init":
         # Without --plugin-id the id lookup itself hangs: module unusable (exit 2).
-        proc = subprocess.run([checker, module, "--json", "--timeout-seconds", "2"],
+        proc = subprocess.run([checker, module, "--json", "--timeout-seconds", "1"],
                               capture_output=True, text=True, encoding="utf-8", timeout=HANG_BOUND_S)
         if proc.returncode != 2 or "timed out" not in proc.stderr:
             errors.append(f"{name}: id lookup hang: exit {proc.returncode}, stderr {proc.stderr!r}")
