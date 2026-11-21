@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import contextlib
 import io
+import json
 import os
 import subprocess
 import sys
@@ -98,6 +99,77 @@ class RendererLockTests(unittest.TestCase):
                                                        reader(renderer_lock(sha=OTHER_SHA)))
         self.assertEqual(status, "mismatch")
         self.assertIn(f"Vellum {OTHER_SHA}", problems[0])
+
+    def test_drift_without_a_transition_record_still_fails(self) -> None:
+        with tempfile.TemporaryDirectory() as td, mock.patch.object(audit, "PIN_TRANSITION_FILE",
+                                                                    str(Path(td) / "missing.json")):
+            status, problems = audit.vellum_renderer_drift(
+                lock_manifest(), reader(renderer_lock(sha=OTHER_SHA)))
+        self.assertEqual(status, "mismatch")
+        self.assertIn("required for a renderer pin transition", problems[0])
+
+    def test_valid_unexpired_transition_covers_drift(self) -> None:
+        transition = {
+            "schema": "pulp.pin-transition.v1", "expires_at": "2026-12-04T00:00:00Z",
+            "signature": "signed-by-test", "owner": "danielraffel", "reason": "cycle",
+            "entries": [{"artifact_id": "renderer/mac-universal", "old_sha256": PULP_SHA,
+                          "new_sha256": OTHER_SHA, "owner": "danielraffel", "reason": "cycle"}],
+        }
+        with tempfile.TemporaryDirectory() as td, mock.patch.object(
+                audit, "PIN_TRANSITION_FILE", str(Path(td) / "transition.json")):
+            Path(audit.PIN_TRANSITION_FILE).write_text(json.dumps(transition), encoding="utf-8")
+            status, problems = audit.vellum_renderer_drift(
+                lock_manifest(), reader(renderer_lock(sha=OTHER_SHA)))
+        self.assertEqual(status, "match")
+        self.assertEqual(problems, [])
+
+    def test_expired_transition_fails_closed(self) -> None:
+        transition = {"schema": "pulp.pin-transition.v1", "expires_at": "2020-01-01T00:00:00Z",
+                      "signature": "signed", "owner": "owner", "reason": "reason",
+                      "entries": [{"artifact_id": "renderer/mac-universal", "old_sha256": PULP_SHA,
+                                   "new_sha256": OTHER_SHA, "owner": "owner", "reason": "reason"}]}
+        with tempfile.TemporaryDirectory() as td, mock.patch.object(
+                audit, "PIN_TRANSITION_FILE", str(Path(td) / "transition.json")):
+            Path(audit.PIN_TRANSITION_FILE).write_text(json.dumps(transition), encoding="utf-8")
+            status, problems = audit.vellum_renderer_drift(
+                lock_manifest(), reader(renderer_lock(sha=OTHER_SHA)))
+        self.assertEqual(status, "mismatch")
+        self.assertIn("expired", problems[0])
+
+    def test_unsigned_transition_fails_closed(self) -> None:
+        transition = {"schema": "pulp.pin-transition.v1", "expires_at": "2026-12-04T00:00:00Z",
+                      "owner": "owner", "reason": "reason",
+                      "entries": [{"artifact_id": "renderer/mac-universal", "old_sha256": PULP_SHA,
+                                   "new_sha256": OTHER_SHA, "owner": "owner", "reason": "reason"}]}
+        with tempfile.TemporaryDirectory() as td, mock.patch.object(
+                audit, "PIN_TRANSITION_FILE", str(Path(td) / "transition.json")):
+            Path(audit.PIN_TRANSITION_FILE).write_text(json.dumps(transition), encoding="utf-8")
+            status, problems = audit.vellum_renderer_drift(
+                lock_manifest(), reader(renderer_lock(sha=OTHER_SHA)))
+        self.assertEqual(status, "mismatch")
+        self.assertIn("unsigned", problems[0])
+
+    def test_transition_digest_mismatch_fails_closed(self) -> None:
+        transition = {"schema": "pulp.pin-transition.v1", "expires_at": "2026-12-04T00:00:00Z",
+                      "signature": "signed", "owner": "owner", "reason": "reason",
+                      "entries": [{"artifact_id": "renderer/mac-universal", "old_sha256": "c" * 64,
+                                   "new_sha256": "d" * 64, "owner": "owner", "reason": "reason"}]}
+        with tempfile.TemporaryDirectory() as td, mock.patch.object(
+                audit, "PIN_TRANSITION_FILE", str(Path(td) / "transition.json")):
+            Path(audit.PIN_TRANSITION_FILE).write_text(json.dumps(transition), encoding="utf-8")
+            status, problems = audit.vellum_renderer_drift(
+                lock_manifest(), reader(renderer_lock(sha=OTHER_SHA)))
+        self.assertEqual(status, "mismatch")
+        self.assertIn("does not name the observed", problems[0])
+
+    def test_malformed_transition_fails_closed(self) -> None:
+        with tempfile.TemporaryDirectory() as td, mock.patch.object(
+                audit, "PIN_TRANSITION_FILE", str(Path(td) / "transition.json")):
+            Path(audit.PIN_TRANSITION_FILE).write_text("{not-json", encoding="utf-8")
+            status, problems = audit.vellum_renderer_drift(
+                lock_manifest(), reader(renderer_lock(sha=OTHER_SHA)))
+        self.assertEqual(status, "mismatch")
+        self.assertIn("unreadable", problems[0])
 
     def test_a_lock_milestone_that_differs_fails(self) -> None:
         status, problems = audit.vellum_renderer_drift(lock_manifest(),
