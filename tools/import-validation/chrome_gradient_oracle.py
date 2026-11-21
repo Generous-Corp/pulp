@@ -55,8 +55,11 @@ CHROME = os.environ.get(
 def refuse_installed_app_in_sandbox():
     if (os.environ.get("CODEX_SANDBOX") and
             any(part.endswith(".app") for part in CHROME.split(os.sep))):
-        sys.exit("SKIP: installed browser apps cannot start in a sandbox; "
-                 "install a managed browser or set PULP_CHROME explicitly")
+        # Exit 77 is the skip status; sys.exit(<str>) would exit 1 (a failure).
+        print("SKIP: installed browser apps cannot start in a sandbox; "
+              "install a managed browser or set PULP_CHROME explicitly",
+              file=sys.stderr)
+        sys.exit(77)
 
 W, H = 160, 100
 ROWS = (0, 25, 50, 75, 99)

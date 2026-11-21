@@ -8,7 +8,9 @@ size, never Chrome's exit status.
 
 from __future__ import annotations
 
+import contextlib
 import importlib.util
+import io
 import os
 import stat
 import sys
@@ -104,21 +106,27 @@ class ScreenshotVerdictTest(unittest.TestCase):
     def test_installed_app_is_skipped_in_sandbox(self):
         oracle.CHROME = str(Path(self._tmp.name) / "Google Chrome.app" /
                             "Contents" / "MacOS" / "Google Chrome")
-        with mock.patch.dict(os.environ, {"CODEX_SANDBOX": "seatbelt"}):
+        stderr = io.StringIO()
+        with mock.patch.dict(os.environ, {"CODEX_SANDBOX": "seatbelt"}), \
+                contextlib.redirect_stderr(stderr):
             with self.assertRaises(SystemExit) as ctx:
                 oracle.render("linear-gradient(#ff0000, #0000ff)")
-        self.assertEqual(ctx.exception.code.__class__, str)
-        self.assertIn("cannot start in a sandbox", ctx.exception.code)
+        # 77 is the skip status; a string message would exit 1 (a failure).
+        self.assertEqual(ctx.exception.code, 77)
+        self.assertIn("cannot start in a sandbox", stderr.getvalue())
 
     def test_backdrop_oracle_skips_installed_app_in_sandbox(self):
         old_chrome = backdrop_oracle.CHROME
         self.addCleanup(setattr, backdrop_oracle, "CHROME", old_chrome)
         backdrop_oracle.CHROME = str(Path(self._tmp.name) / "Chromium.app" /
                                     "Contents" / "MacOS" / "Chromium")
-        with mock.patch.dict(os.environ, {"CODEX_SANDBOX": "seatbelt"}):
+        stderr = io.StringIO()
+        with mock.patch.dict(os.environ, {"CODEX_SANDBOX": "seatbelt"}), \
+                contextlib.redirect_stderr(stderr):
             with self.assertRaises(SystemExit) as ctx:
                 backdrop_oracle.render()
-        self.assertIn("cannot start in a sandbox", ctx.exception.code)
+        self.assertEqual(ctx.exception.code, 77)
+        self.assertIn("cannot start in a sandbox", stderr.getvalue())
 
 
 class ColumnMeanTest(unittest.TestCase):
