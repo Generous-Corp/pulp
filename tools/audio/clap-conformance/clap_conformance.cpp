@@ -17,14 +17,14 @@
 #include <clap/clap.h>
 
 #include <algorithm>
+#include <cerrno>
+#include <chrono>
 #include <cmath>
 #include <cstdarg>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
-#include <cerrno>
-#include <chrono>
 #include <string>
 #include <vector>
 
@@ -815,13 +815,27 @@ std::string json_escape(const std::string& s) {
     std::string o;
     for (unsigned char c : s) {
         switch (c) {
-        case '"': o += "\\\""; break;
-        case '\\': o += "\\\\"; break;
-        case '\n': o += "\\n"; break;
-        case '\r': o += "\\r"; break;
-        case '\t': o += "\\t"; break;
-        case '\b': o += "\\b"; break;
-        case '\f': o += "\\f"; break;
+        case '"':
+            o += "\\\"";
+            break;
+        case '\\':
+            o += "\\\\";
+            break;
+        case '\n':
+            o += "\\n";
+            break;
+        case '\r':
+            o += "\\r";
+            break;
+        case '\t':
+            o += "\\t";
+            break;
+        case '\b':
+            o += "\\b";
+            break;
+        case '\f':
+            o += "\\f";
+            break;
         default:
             if (c < 0x20)
                 o += fmt("\\u%04x", c);
@@ -855,7 +869,8 @@ int main(int argc, char** argv) {
             std::printf(
                 "usage: pulp-clap-conformance <plugin.clap> [--plugin-id ID] [--json]\n"
                 "       [--budget-instructions N] [--budget-footprint-mb N]\n"
-                "       [--timeout-seconds N]  kill and fail a check that runs longer (default 60)\n"
+                "       [--timeout-seconds N]  kill and fail a check that runs longer (default "
+                "60)\n"
                 "       [--expect-fail CHECK]  exit 0 only if CHECK fails (negative controls)\n"
                 "exit: 0 all checks pass, 1 a check failed, 2 module unusable\n");
             return 0;
@@ -897,9 +912,9 @@ int main(int argc, char** argv) {
         if (id_rc != 0) {
             std::fprintf(stderr, "clap-conformance: %s\n",
                          id_rc == kChildTimedOut ? "module hung while loading (timed out)"
-                         : id_rc >= 128 ? "module crashed while loading"
-                         : id_rc == 3 ? "module lists no plug-ins"
-                                      : id_msg.c_str());
+                         : id_rc >= 128          ? "module crashed while loading"
+                         : id_rc == 3            ? "module lists no plug-ins"
+                                                 : id_msg.c_str());
             return 2;
         }
         id = id_msg;
