@@ -8,7 +8,7 @@ add_library(pulp::vellum-audio ALIAS pulp-vellum-audio)
 target_include_directories(pulp-vellum-audio PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>)
 target_compile_features(pulp-vellum-audio PUBLIC cxx_std_20)
-target_link_libraries(pulp-vellum-audio PUBLIC pulp::runtime pulp::signal Vellum::Value Vellum::MirrorView_core)
+target_link_libraries(pulp-vellum-audio PUBLIC pulp::runtime pulp::dataplane-audio pulp::signal Vellum::Value Vellum::MirrorView_core)
 if(TARGET pulp-vellum-scripted)
     target_link_libraries(pulp-vellum-scripted PUBLIC pulp::vellum-audio)
     target_compile_definitions(pulp-vellum-scripted PRIVATE PULP_VELLUM_AUDIO=1)
