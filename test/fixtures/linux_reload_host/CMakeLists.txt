@@ -71,10 +71,13 @@ if(PULP_LDD AND PULP_READELF AND PULP_NM)
     add_test(NAME no-unresolved-symbols-PulpReloadHostFixture_CLAP
         COMMAND ${CMAKE_COMMAND} -DLDD=${PULP_LDD} -DREADELF=${PULP_READELF}
             -DMODULE=$<TARGET_FILE:PulpReloadHostFixture_CLAP>
-            -DNM=${PULP_NM} -DREQUIRE_FONTCONFIG=ON
+            -DNM=${PULP_NM} -DREQUIRE_FONTCONFIG=${PULP_HAS_SKIA}
             -P ${_unresolved_check})
     add_library(pulp-unresolved-symbol-control MODULE
         ${CMAKE_SOURCE_DIR}/test/fixtures/unresolved_symbol_module/module.cpp)
+    # Exercise the dependency-free ELF case even when the toolchain does not
+    # default to --as-needed. The probe must still detect the undefined symbol.
+    target_link_options(pulp-unresolved-symbol-control PRIVATE "LINKER:--as-needed")
     add_test(NAME no-unresolved-symbols-control
         COMMAND ${CMAKE_COMMAND} -DLDD=${PULP_LDD} -DREADELF=${PULP_READELF}
             -DMODULE=$<TARGET_FILE:pulp-unresolved-symbol-control> -DEXPECT=unresolved

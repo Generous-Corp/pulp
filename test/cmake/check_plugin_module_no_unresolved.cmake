@@ -36,10 +36,10 @@ string(REGEX MATCHALL "undefined symbol: [^\n ]+" unresolved "${all}")
 list(LENGTH unresolved n)
 execute_process(COMMAND "${READELF}" -d "${MODULE}"
     RESULT_VARIABLE rc2 OUTPUT_VARIABLE dyn)
-# A module with no dependencies has no NEEDED entries, so only a readelf
-# failure or a non-ELF file stops here.
-if(NOT rc2 EQUAL 0 OR NOT dyn MATCHES "Dynamic section|There is no dynamic section")
-    message(FATAL_ERROR "readelf -d could not read ${MODULE}")
+# A dependency-free control is still a dynamic ELF module. With --as-needed
+# it can have no DT_NEEDED entries; DT_NULL terminates every dynamic section.
+if(NOT rc2 EQUAL 0 OR NOT dyn MATCHES "\\(NULL\\)")
+    message(FATAL_ERROR "readelf -d could not read the dynamic section of ${MODULE}")
 endif()
 set(names_fontconfig FALSE)
 if(dyn MATCHES "\\(NEEDED\\)[^\n]*libfontconfig")

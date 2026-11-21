@@ -24,6 +24,7 @@
 
 #include <atomic>
 #include <chrono>
+#include <cstdint>
 #include <memory>
 #include <optional>
 #include <thread>
@@ -71,6 +72,11 @@ class ContractProcessor final : public pulp::format::Processor {
     pulp::format::EditorFactory* editor_factory() override {
         return has_factory_ ? &factory_ : nullptr;
     }
+    std::optional<std::uint32_t> editor_background() const override {
+        return background;
+    }
+
+    std::optional<std::uint32_t> background;
 
   private:
     bool has_factory_;
@@ -508,6 +514,50 @@ TEST_CASE("disposing the AU instance off the main thread never waits for a block
         [view release];
     }
     AudioComponentInstanceDispose(au);
+}
+
+TEST_CASE("an AU v2 contract container shows the plug-in's declared editor colour",
+          "[auv2][editor-host][au-contract]") {
+    EditorEnvironment env;
+    reset_contract_recording();
+    ScopedManualSnapTimer settle;
+
+    SECTION("a declared colour backs the container before the first frame") {
+        FakeInstance instance(true);
+        instance.processor->background = 0x05070A;
+        g_instance = &instance;
+        AudioUnit au = fake_audio_unit();
+        @autoreleasepool {
+            NSView* view = [open_view(au) retain];
+            REQUIRE(view != nil);
+            REQUIRE(view.layer != nil);
+            NSColor* colour = [NSColor colorWithCGColor:view.layer.backgroundColor];
+            REQUIRE(colour != nil);
+            NSColor* srgb = [colour colorUsingColorSpace:NSColorSpace.sRGBColorSpace];
+            REQUIRE(srgb != nil);
+            CHECK(static_cast<int>(srgb.redComponent * 255.0 + 0.5) == 0x05);
+            CHECK(static_cast<int>(srgb.greenComponent * 255.0 + 0.5) == 0x07);
+            CHECK(static_cast<int>(srgb.blueComponent * 255.0 + 0.5) == 0x0A);
+            CHECK(srgb.alphaComponent == 1.0);
+            [view release];
+        }
+        AudioComponentInstanceDispose(au);
+        g_instance = nullptr;
+    }
+
+    SECTION("no declared colour leaves the container's backing alone") {
+        FakeInstance instance(true);
+        g_instance = &instance;
+        AudioUnit au = fake_audio_unit();
+        @autoreleasepool {
+            NSView* view = [open_view(au) retain];
+            REQUIRE(view != nil);
+            CHECK((view.layer == nil || view.layer.backgroundColor == nullptr));
+            [view release];
+        }
+        AudioComponentInstanceDispose(au);
+        g_instance = nullptr;
+    }
 }
 
 TEST_CASE("AU v2 serves no contract view without an editor factory or in CI",

@@ -34,6 +34,11 @@ if(PULP_BUILD_TESTS AND TARGET Catch2::Catch2WithMain)
         target_link_libraries(pulp-test-pulp-vellum-editor PRIVATE
             pulp::vellum Vellum::MirrorView_core Catch2::Catch2WithMain
             Threads::Threads)
+        if(TARGET Vellum::MirrorView_script)
+            target_link_libraries(pulp-test-pulp-vellum-editor PRIVATE Vellum::MirrorView_script)
+            target_compile_definitions(pulp-test-pulp-vellum-editor PRIVATE
+                PULP_TEST_VELLUM_SCRIPTED_UI=1)
+        endif()
         catch_discover_tests(pulp-test-pulp-vellum-editor PROPERTIES LABELS pulp-vellum-editor)
 
         add_executable(pulp-test-pulp-vellum-about-notices
