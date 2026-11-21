@@ -184,7 +184,7 @@ struct MainThreadTimerState : std::enable_shared_from_this<MainThreadTimerState>
     bool pending = false;
     CFTimeInterval period = 0; // > 0 while repeating
     CFTimeInterval native_interval = 0; // interval the CF timer was created with
-    bool align_pending = false; // a grid-eligible repeat still owes its move onto the grid
+    bool align_pending = false;         // a grid-eligible repeat still owes its move onto the grid
 
     void park() {
         pending = false;
@@ -268,7 +268,8 @@ struct MainThreadTimerState : std::enable_shared_from_this<MainThreadTimerState>
             // period, and every same-period timer lands on the same tick.
             self->align_pending = false;
             const CFAbsoluteTime now = CFAbsoluteTimeGetCurrent();
-            const CFAbsoluteTime next = std::ceil((now + self->period) / self->period) * self->period;
+            const CFAbsoluteTime next =
+                std::ceil((now + self->period) / self->period) * self->period;
             set_next_fire(self->timer, next);
         }
         // Hold the callback itself: the timer may be destroyed while it runs.
