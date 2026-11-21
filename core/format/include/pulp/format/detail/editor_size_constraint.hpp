@@ -22,14 +22,11 @@ constexpr bool editor_resizable(const ViewSize& hints) {
     return !(hints.min_width == hints.max_width && hints.min_height == hints.max_height);
 }
 
-/// Bring (width, height) inside a resizable editor's hints. With an aspect
+/// Bring a nonzero (width, height) inside the declared hints. With an aspect
 /// ratio the result is the largest box at that ratio that fits the request,
 /// then moved inside min/max without leaving the ratio; without one each axis
-/// is clamped on its own. False for a zero request or a non-resizable editor,
-/// leaving the arguments untouched.
-inline bool constrain_to_hints(const ViewSize& hints, std::uint32_t& width, std::uint32_t& height) {
-    if (width == 0 || height == 0 || !editor_resizable(hints))
-        return false;
+/// is clamped on its own.
+inline void clamp_to_hints(const ViewSize& hints, std::uint32_t& width, std::uint32_t& height) {
     auto clamp = [](std::uint32_t v, std::uint32_t lo, std::uint32_t hi) {
         if (hi > 0 && v > hi)
             v = hi;
@@ -38,7 +35,7 @@ inline bool constrain_to_hints(const ViewSize& hints, std::uint32_t& width, std:
     if (!(hints.aspect_ratio > 0.0)) {
         width = clamp(width, hints.min_width, hints.max_width);
         height = clamp(height, hints.min_height, hints.max_height);
-        return true;
+        return;
     }
     const double ratio = hints.aspect_ratio;
     // The result is a box (w, round(w / ratio)): fixing the width and deriving
@@ -78,6 +75,13 @@ inline bool constrain_to_hints(const ViewSize& hints, std::uint32_t& width, std:
     w = std::clamp(w, lo, hi);
     width = w;
     height = height_for(w);
+}
+
+/// False for a zero request or a non-resizable editor, leaving the size unchanged.
+inline bool constrain_to_hints(const ViewSize& hints, std::uint32_t& width, std::uint32_t& height) {
+    if (width == 0 || height == 0 || !editor_resizable(hints))
+        return false;
+    clamp_to_hints(hints, width, height);
     return true;
 }
 

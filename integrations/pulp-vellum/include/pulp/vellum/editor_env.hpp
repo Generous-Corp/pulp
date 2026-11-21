@@ -6,6 +6,7 @@
 /// Kept apart from editor.hpp so a root view, and a headless test or capture
 /// of it, compiles without Vellum's plug-in view host.
 
+#include <pulp/format/detail/editor_size_constraint.hpp>
 #include <pulp/format/editor_host.hpp>
 #include <pulp/vellum/param_port_model.hpp>
 
@@ -13,6 +14,7 @@
 
 #include <functional>
 #include <memory>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -30,7 +32,16 @@ struct EditorEnv {
 
     /// Ask the host to resize. The host applies any accepted size via Editor::set_size().
     bool request_resize(const format::EditorSize& size) const {
-        return lifetime_ && lifetime_->open && context.request_resize(size);
+        if (!lifetime_ || !lifetime_->open)
+            return false;
+        if (const auto& hints = lifetime_->size_hints) {
+            if (size.width == 0 || size.height == 0)
+                return false;
+            auto constrained = size;
+            format::detail::clamp_to_hints(*hints, constrained.width, constrained.height);
+            return context.request_resize(constrained);
+        }
+        return context.request_resize(size);
     }
 
     using NativeMessageHandler = std::function<std::string(std::string_view)>;
@@ -55,6 +66,7 @@ struct EditorEnv {
     // reopened editor starts a fresh identity, even if its root is reused.
     struct Attachment {
         bool open = true;
+        std::optional<format::ViewSize> size_hints;
     };
     std::shared_ptr<Attachment> lifetime_ = std::make_shared<Attachment>();
 };

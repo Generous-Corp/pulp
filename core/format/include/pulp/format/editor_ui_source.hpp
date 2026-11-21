@@ -13,8 +13,8 @@
 namespace pulp::format {
 
 /// Whether a DAW-hosted editor should enable scripted-UI + theme hot reload
-/// (item 1.3). OFF by default — a shipping plugin must not watch and reload from
-/// disk inside a host — but a developer opts in for the edit→see-it loop by
+/// (item 1.3). OFF by default: a shipping plugin must not watch and reload from
+/// disk inside a host, but a developer opts in for the edit→see-it loop by
 /// exporting `PULP_DEV_HOT_RELOAD=1` in the DAW's environment. (The standalone
 /// app always enables it; it IS the dev tool.) Polling already runs on every
 /// editor tick, so this only decides whether the watcher acts. Kept header-inline
