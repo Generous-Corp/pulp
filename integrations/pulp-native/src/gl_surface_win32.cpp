@@ -408,15 +408,14 @@ struct WglWindow final : GlSurface::Impl, MessageSink {
         KeyEvent key;
         key.kind = down ? KeyKind::down : KeyKind::up;
         key.key = key_for_win32_vk(vk, (lparam & (1 << 24)) != 0,
-                                    static_cast<std::uint32_t>((lparam >> 16) & 0xff));
+                                   static_cast<std::uint32_t>((lparam >> 16) & 0xff));
         key.native_code = static_cast<std::uint16_t>(vk);
         key.modifiers = current_modifiers();
         key.timestamp = GetMessageTime() / 1000.0;
-        const std::uint64_t press_id =
-            (static_cast<std::uint64_t>(Win32TakenKeys::id_from_lparam(
-                 static_cast<std::uint64_t>(lparam)))
-             << 32) |
-            vk;
+        const std::uint64_t press_id = (static_cast<std::uint64_t>(Win32TakenKeys::id_from_lparam(
+                                            static_cast<std::uint64_t>(lparam)))
+                                        << 32) |
+                                       vk;
         const auto known = keys_down.find(press_id);
         key.repeat = down && known != keys_down.end();
         // Whether the client goes first is decided at the first press and kept
@@ -436,7 +435,8 @@ struct WglWindow final : GlSurface::Impl, MessageSink {
             // are matched by scan code, so a taken key that makes none leaves
             // the next typed character alone.
             if (taken && down)
-                taken_keys.taken(Win32TakenKeys::id_from_lparam(static_cast<std::uint64_t>(lparam)));
+                taken_keys.taken(
+                    Win32TakenKeys::id_from_lparam(static_cast<std::uint64_t>(lparam)));
         }
         if (!down)
             taken_keys.released(Win32TakenKeys::id_from_lparam(static_cast<std::uint64_t>(lparam)));

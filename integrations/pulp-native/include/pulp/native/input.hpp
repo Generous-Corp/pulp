@@ -378,7 +378,7 @@ Key key_for_win32_vk(std::uint32_t vk, bool extended, std::uint32_t scan_code = 
 /// and extended bit of `lParam`, so a taken key that makes no character (an
 /// arrow, a shortcut) never swallows a later, unrelated one.
 class Win32TakenKeys {
-public:
+  public:
     /// The scan-code identity of a key message's `lParam`: the scan code with
     /// the extended bit above it.
     static std::uint32_t id_from_lparam(std::uint64_t lparam) noexcept {
@@ -397,7 +397,7 @@ public:
         ids_.clear();
     }
 
-private:
+  private:
     std::vector<std::uint32_t> ids_;
 };
 
