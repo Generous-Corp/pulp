@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import contextlib
+import datetime
 import io
 import json
 import os
@@ -100,76 +101,110 @@ class RendererLockTests(unittest.TestCase):
         self.assertEqual(status, "mismatch")
         self.assertIn(f"Vellum {OTHER_SHA}", problems[0])
 
-    def test_drift_without_a_transition_record_still_fails(self) -> None:
-        with tempfile.TemporaryDirectory() as td, mock.patch.object(audit, "PIN_TRANSITION_FILE",
-                                                                    str(Path(td) / "missing.json")):
-            status, problems = audit.vellum_renderer_drift(
-                lock_manifest(), reader(renderer_lock(sha=OTHER_SHA)))
-        self.assertEqual(status, "mismatch")
-        self.assertIn("required for a renderer pin transition", problems[0])
+    @contextlib.contextmanager
+    def transition_repo(self, transition: dict | None, *, commit_record: bool):
+        temporary = tempfile.TemporaryDirectory()
+        repo = Path(temporary.name)
+        git = ["git", "-C", str(repo), "-c", "user.email=t@example.invalid",
+               "-c", "user.name=transition-test"]
+        subprocess.run([*git, "init", "-q", "-b", "main"], check=True)
+        if transition is not None:
+            record = repo / audit.PIN_TRANSITION_FILE
+            record.parent.mkdir(parents=True, exist_ok=True)
+            record.write_text(json.dumps(transition), encoding="utf-8")
+            if commit_record:
+                subprocess.run([*git, "add", audit.PIN_TRANSITION_FILE], check=True)
+        subprocess.run([*git, "commit", "-q", "--allow-empty", "-m", "base"], check=True)
+        base = subprocess.run([*git, "rev-parse", "HEAD"], check=True,
+                              capture_output=True, text=True).stdout.strip()
+        subprocess.run([*git, "update-ref", "refs/remotes/origin/main", base], check=True)
+        subprocess.run([*git, "checkout", "-q", "-b", "work"], check=True)
+        with mock.patch.object(audit, "ROOT", repo), mock.patch.dict(
+                os.environ, {"GITHUB_BASE_REF": "main"}):
+            yield repo
+        temporary.cleanup()
 
-    def test_valid_unexpired_transition_covers_drift(self) -> None:
-        transition = {
-            "schema": "pulp.pin-transition.v1", "expires_at": "2026-12-04T00:00:00Z",
-            "signature": "signed-by-test", "owner": "danielraffel", "reason": "cycle",
+    def transition(self, now: datetime.datetime, **overrides) -> dict:
+        value = {
+            "schema": "pulp.pin-transition.v1",
+            "issued_at": (now - datetime.timedelta(days=1)).isoformat().replace("+00:00", "Z"),
+            "expires_at": (now + datetime.timedelta(days=1)).isoformat().replace("+00:00", "Z"),
+            "owner": "danielraffel",
+            "reason": "cycle",
             "entries": [{"artifact_id": "renderer/mac-universal", "old_sha256": PULP_SHA,
                           "new_sha256": OTHER_SHA, "owner": "danielraffel", "reason": "cycle"}],
         }
-        with tempfile.TemporaryDirectory() as td, mock.patch.object(
-                audit, "PIN_TRANSITION_FILE", str(Path(td) / "transition.json")):
-            Path(audit.PIN_TRANSITION_FILE).write_text(json.dumps(transition), encoding="utf-8")
-            status, problems = audit.vellum_renderer_drift(
-                lock_manifest(), reader(renderer_lock(sha=OTHER_SHA)))
+        value.update(overrides)
+        return value
+
+    def drift(self, now: datetime.datetime) -> tuple[str, list[str]]:
+        return audit.vellum_renderer_drift(lock_manifest(),
+                                            reader(renderer_lock(sha=OTHER_SHA)), now=now)
+
+    def test_working_tree_record_is_ignored(self) -> None:
+        now = datetime.datetime.now(datetime.timezone.utc)
+        with self.transition_repo(self.transition(now), commit_record=False) as repo:
+            (repo / audit.PIN_TRANSITION_FILE).parent.mkdir(parents=True, exist_ok=True)
+            (repo / audit.PIN_TRANSITION_FILE).write_text(
+                json.dumps(self.transition(now)), encoding="utf-8")
+            status, problems = self.drift(now)
+        self.assertEqual(status, "mismatch")
+        self.assertIn("required on the base", problems[0])
+
+    def test_record_added_by_this_pr_fails_closed(self) -> None:
+        now = datetime.datetime.now(datetime.timezone.utc)
+        with self.transition_repo(None, commit_record=False) as repo:
+            record = repo / audit.PIN_TRANSITION_FILE
+            record.parent.mkdir(parents=True, exist_ok=True)
+            record.write_text(json.dumps(self.transition(now)), encoding="utf-8")
+            git = ["git", "-C", str(repo), "-c", "user.email=t@example.invalid",
+                   "-c", "user.name=transition-test"]
+            subprocess.run([*git, "add", audit.PIN_TRANSITION_FILE], check=True)
+            subprocess.run([*git, "commit", "-q", "-m", "add record"], check=True)
+            status, problems = self.drift(now)
+        self.assertEqual(status, "mismatch")
+        self.assertIn("lands first in its own owner-approved PR", problems[0])
+
+    def test_valid_base_transition_covers_drift(self) -> None:
+        now = datetime.datetime.now(datetime.timezone.utc)
+        with self.transition_repo(self.transition(now), commit_record=True):
+            status, problems = self.drift(now)
         self.assertEqual(status, "match")
         self.assertEqual(problems, [])
 
     def test_expired_transition_fails_closed(self) -> None:
-        transition = {"schema": "pulp.pin-transition.v1", "expires_at": "2020-01-01T00:00:00Z",
-                      "signature": "signed", "owner": "owner", "reason": "reason",
-                      "entries": [{"artifact_id": "renderer/mac-universal", "old_sha256": PULP_SHA,
-                                   "new_sha256": OTHER_SHA, "owner": "owner", "reason": "reason"}]}
-        with tempfile.TemporaryDirectory() as td, mock.patch.object(
-                audit, "PIN_TRANSITION_FILE", str(Path(td) / "transition.json")):
-            Path(audit.PIN_TRANSITION_FILE).write_text(json.dumps(transition), encoding="utf-8")
-            status, problems = audit.vellum_renderer_drift(
-                lock_manifest(), reader(renderer_lock(sha=OTHER_SHA)))
+        now = datetime.datetime.now(datetime.timezone.utc)
+        transition = self.transition(
+            now, expires_at=(now - datetime.timedelta(seconds=1)).isoformat().replace("+00:00", "Z"))
+        with self.transition_repo(transition, commit_record=True):
+            status, problems = self.drift(now)
         self.assertEqual(status, "mismatch")
         self.assertIn("expired", problems[0])
 
-    def test_unsigned_transition_fails_closed(self) -> None:
-        transition = {"schema": "pulp.pin-transition.v1", "expires_at": "2026-12-04T00:00:00Z",
-                      "owner": "owner", "reason": "reason",
-                      "entries": [{"artifact_id": "renderer/mac-universal", "old_sha256": PULP_SHA,
-                                   "new_sha256": OTHER_SHA, "owner": "owner", "reason": "reason"}]}
-        with tempfile.TemporaryDirectory() as td, mock.patch.object(
-                audit, "PIN_TRANSITION_FILE", str(Path(td) / "transition.json")):
-            Path(audit.PIN_TRANSITION_FILE).write_text(json.dumps(transition), encoding="utf-8")
-            status, problems = audit.vellum_renderer_drift(
-                lock_manifest(), reader(renderer_lock(sha=OTHER_SHA)))
+    def test_overlong_transition_fails_closed(self) -> None:
+        now = datetime.datetime.now(datetime.timezone.utc)
+        transition = self.transition(
+            now, expires_at=(now + datetime.timedelta(days=15)).isoformat().replace("+00:00", "Z"))
+        with self.transition_repo(transition, commit_record=True):
+            status, problems = self.drift(now)
         self.assertEqual(status, "mismatch")
-        self.assertIn("unsigned", problems[0])
+        self.assertIn("at most 14 days", problems[0])
 
-    def test_transition_digest_mismatch_fails_closed(self) -> None:
-        transition = {"schema": "pulp.pin-transition.v1", "expires_at": "2026-12-04T00:00:00Z",
-                      "signature": "signed", "owner": "owner", "reason": "reason",
-                      "entries": [{"artifact_id": "renderer/mac-universal", "old_sha256": "c" * 64,
-                                   "new_sha256": "d" * 64, "owner": "owner", "reason": "reason"}]}
-        with tempfile.TemporaryDirectory() as td, mock.patch.object(
-                audit, "PIN_TRANSITION_FILE", str(Path(td) / "transition.json")):
-            Path(audit.PIN_TRANSITION_FILE).write_text(json.dumps(transition), encoding="utf-8")
-            status, problems = audit.vellum_renderer_drift(
-                lock_manifest(), reader(renderer_lock(sha=OTHER_SHA)))
+    def test_future_issued_at_fails_closed(self) -> None:
+        now = datetime.datetime.now(datetime.timezone.utc)
+        transition = self.transition(
+            now, issued_at=(now + datetime.timedelta(seconds=1)).isoformat().replace("+00:00", "Z"))
+        with self.transition_repo(transition, commit_record=True):
+            status, problems = self.drift(now)
         self.assertEqual(status, "mismatch")
-        self.assertIn("does not name the observed", problems[0])
+        self.assertIn("future", problems[0])
 
     def test_malformed_transition_fails_closed(self) -> None:
-        with tempfile.TemporaryDirectory() as td, mock.patch.object(
-                audit, "PIN_TRANSITION_FILE", str(Path(td) / "transition.json")):
-            Path(audit.PIN_TRANSITION_FILE).write_text("{not-json", encoding="utf-8")
-            status, problems = audit.vellum_renderer_drift(
-                lock_manifest(), reader(renderer_lock(sha=OTHER_SHA)))
+        now = datetime.datetime.now(datetime.timezone.utc)
+        with self.transition_repo({"schema": "wrong"}, commit_record=True):
+            status, problems = self.drift(now)
         self.assertEqual(status, "mismatch")
-        self.assertIn("unreadable", problems[0])
+        self.assertIn("invalid schema", problems[0])
 
     def test_a_lock_milestone_that_differs_fails(self) -> None:
         status, problems = audit.vellum_renderer_drift(lock_manifest(),
