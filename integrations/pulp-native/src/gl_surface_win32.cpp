@@ -440,21 +440,21 @@ struct WglWindow final : GlSurface::Impl, MessageSink {
         }
         if (!down)
             taken_keys.released(Win32TakenKeys::id_from_lparam(static_cast<std::uint64_t>(lparam)));
-        // A client-first key in a text field is typed, not sent to the host. A
-        // key-up follows its key-down: a client-first key goes to the host on
-        // release only if its press did, so the host never sees an unmatched up.
+        // Whether the host sees a key is decided with its first press and kept
+        // for its repeats and its release, so it never gets an unmatched repeat
+        // or key-up. A client-first key in a text field is typed, not sent.
         bool forward;
-        if (down)
+        if (known != keys_down.end())
+            forward = was_forwarded;
+        else if (down)
             forward = !taken && !(client_first && keyboard_focus == KeyboardFocus::text);
         else
-            forward = !taken && (!client_first || was_forwarded);
+            forward = true; // a release whose press this window never saw
         if (down) {
-            KeyPress& press = keys_down[press_id];
             if (known == keys_down.end()) {
+                KeyPress& press = keys_down[press_id];
                 press.client_first = client_first;
                 press.forwarded_down = forward;
-            } else if (forward) {
-                press.forwarded_down = true;
             }
         } else if (known != keys_down.end()) {
             keys_down.erase(press_id);
