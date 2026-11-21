@@ -486,17 +486,15 @@ TEST_CASE("browser discovery omits macOS app bundles in agent sandboxes",
         with_sandbox = capture::collect_browser_candidates(options);
     }
 
-    REQUIRE(std::any_of(
-        without_sandbox.begin(), without_sandbox.end(), [](const auto& candidate) {
-            return candidate.executable.string().find(".app/") != std::string::npos;
-        }));
-    without_sandbox.erase(
-        std::remove_if(without_sandbox.begin(), without_sandbox.end(),
-                       [](const auto& candidate) {
-                           return candidate.executable.string().find(".app/") !=
-                               std::string::npos;
-                       }),
-        without_sandbox.end());
+    REQUIRE(std::any_of(without_sandbox.begin(), without_sandbox.end(), [](const auto& candidate) {
+        return candidate.executable.string().find(".app/") != std::string::npos;
+    }));
+    without_sandbox.erase(std::remove_if(without_sandbox.begin(), without_sandbox.end(),
+                                         [](const auto& candidate) {
+                                             return candidate.executable.string().find(".app/") !=
+                                                    std::string::npos;
+                                         }),
+                          without_sandbox.end());
     REQUIRE(with_sandbox.size() == without_sandbox.size());
     for (std::size_t index = 0; index < with_sandbox.size(); ++index)
         CHECK(with_sandbox[index].executable == without_sandbox[index].executable);
@@ -514,10 +512,9 @@ TEST_CASE("browser discovery explains sandbox browser prerequisite",
     ScopedEnv sandbox("CODEX_SANDBOX", "seatbelt");
     const auto result = capture::discover_browser(options);
     REQUIRE_FALSE(result.ok());
-    CHECK(result.diagnostic.message.find(
-              "cannot start in a sandbox") != std::string::npos);
-    CHECK(result.diagnostic.message.find(
-              "managed browser or pass one explicitly") != std::string::npos);
+    CHECK(result.diagnostic.message.find("cannot start in a sandbox") != std::string::npos);
+    CHECK(result.diagnostic.message.find("managed browser or pass one explicitly") !=
+          std::string::npos);
 }
 
 TEST_CASE("browser modes constrain managed and system discovery",
