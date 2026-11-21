@@ -949,6 +949,14 @@ add_test(NAME cmake-sdk-provenance-contract
 set_tests_properties(cmake-sdk-provenance-contract PROPERTIES
     LABELS "cmake;sdk;provenance"
     TIMEOUT 30)
+add_test(NAME cmake-source-install-sha-at-install
+    COMMAND ${CMAKE_COMMAND}
+        -DPULP_SOURCE_DIR=${CMAKE_SOURCE_DIR}
+        -DFIXTURE_DIR=${CMAKE_BINARY_DIR}/test-source-install-sha-at-install
+        -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/test_pulp_source_install_sha.cmake)
+set_tests_properties(cmake-source-install-sha-at-install PROPERTIES
+    LABELS "cmake;sdk;provenance"
+    TIMEOUT 60)
 # PULP_PROFILE contract: release seeds the enforced options OFF, refuses a
 # contradicting -D, stale cache or cached PULP_DEV_BUILD=ON, and only
 # PULP_PROFILE_ALLOW_OVERRIDE (with a warning) lets one through. Eight fixture
