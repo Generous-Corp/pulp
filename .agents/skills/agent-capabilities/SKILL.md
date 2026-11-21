@@ -1683,6 +1683,12 @@ the bypass trailer by reflex:
   `OPTIONAL`, and `PulpConfig.cmake` only registers it when the file exists, so
   an SDK built without Python 3 still configures consumers.
 
+- **The source-install provenance stamp**: `PulpStampSourceInstall.cmake.in`
+  resolves the source commit and dirty state when the SDK is installed, not when
+  it was configured, so an incremental build and install after new commits
+  names the commit its binaries came from. It writes provenance JSON only; no
+  header or covered root changes.
+
 ## A platform header installed for per-binary recompilation is not capability surface
 
 `PulpInstallRules.cmake` installs more than public API. The macOS ObjC cluster
