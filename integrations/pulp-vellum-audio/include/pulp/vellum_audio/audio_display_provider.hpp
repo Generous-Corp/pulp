@@ -9,6 +9,8 @@
 /// publish path is allocation-free and never waits for the editor.
 
 #include <pulp/runtime/triple_buffer.hpp>
+#include <pulp/vellum_audio/audio_display_types.hpp>
+#include <pulp/vellum_audio/audio_widget_registration.hpp>
 
 #include <vellum/value/value_feed.hpp>
 
@@ -21,22 +23,16 @@
 #include <string>
 #include <vector>
 
-namespace pulp::vellum_audio {
+namespace vellum::view {
+class View;
+}
 
-struct AudioFrameInfo {
-    float viewport_min_hz = 20.0f;
-    float viewport_max_hz = 20000.0f;
-    float floor_db = -120.0f;
-    double sample_rate = 48000.0;
-    std::uint64_t epoch = 0;
-    std::uint32_t sequence = 0;
-    std::uint32_t dropped_frames = 0;
-};
+namespace pulp::vellum_audio {
 
 class AudioDisplayProvider final : public ::vellum::value::ValueFeed {
   public:
-    static constexpr std::size_t kMaxMeterChannels = 32;
-    static constexpr std::size_t kMaxScopeSamples = 4096;
+    static constexpr std::size_t kMaxMeterChannels = ::pulp::vellum_audio::kMaxMeterChannels;
+    static constexpr std::size_t kMaxScopeSamples = ::pulp::vellum_audio::kMaxScopeSamples;
 
     struct ChannelSpec {
         std::string name;
