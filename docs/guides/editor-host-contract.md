@@ -89,6 +89,41 @@ one host process therefore never share or override each other's editor choice.
 A processor can also provide a factory by overriding
 `Processor::editor_factory()`.
 
+### Vellum editor roots
+
+`pulp::vellum::EditorFactory<Root>` constructs a Vellum root with
+`(EditorEnv&, format::Processor&)` when that constructor is available and with
+`(EditorEnv&)` otherwise. A root can return a `format::EditorSize` from
+`preferred_editor_size()` to set the initial window and root bounds. The default
+is 400×300. Use `env.request_resize(size)` to ask the host for a different
+size. The host applies accepted sizes through `Editor::set_size()`.
+
+A root authored at a fixed design size returns a `format::ViewSize` from
+`editor_view_size()` instead. Its preferred size opens the editor, its minimum,
+maximum and aspect ratio become the editor's size hints, and every host size is
+clamped to them. When it declares `design_width` and `design_height`, the root
+is laid out once at that size and the plug-in view host scales its paint and
+maps input into design coordinates; the window size never re-lays it out.
+
+The host shows `Processor::editor_background()` before the first frame and
+wherever the root does not paint. On AU v2 the view container is backed with
+the same colour, so the DAW never flashes the SDK default.
+
+Optional `editor_opened()` and `editor_closing()` methods run after successful
+native attachment and before detachment or invalidation, respectively. Use
+`editor_idle()` to poll a deferred scripted session. A root that publishes a
+session through processor state should check that the published session still
+belongs to that root before clearing it.
+
+For a root-owned `vellum::view::ScriptedUiSession`, construct the session with
+`env.params` and register the existing JSON dispatcher with
+`session.attach_native_message_handler(name, env.native_message_handler(dispatch))`.
+Link `Vellum::MirrorView_script` for this SDK API. Register before the first
+script load to serve messages during evaluation. Registrations stop dispatching
+when the editor closes. Detach them with
+`session.detach_native_message_handler(name)` before destroying their captures,
+and register fresh handlers when reopening the same root.
+
 ## Extending the contract
 
 `Editor` and `EditorContext` are implemented in different binaries (a UI
