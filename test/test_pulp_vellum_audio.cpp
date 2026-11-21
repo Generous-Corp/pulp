@@ -381,6 +381,29 @@ TEST_CASE("Vellum LevelMeter requests repaint while decaying without new publica
     const auto before = repaint_requests();
     meter.sample(); // same publication: ballistics decay, so paint inputs changed
     CHECK(repaint_requests() > before);
+    for (int i = 0; i < 600; ++i) // let decay and peak hold settle completely
+        meter.sample();
+    const auto settled = repaint_requests();
+    for (int i = 0; i < 10; ++i)
+        meter.sample();
+    CHECK(repaint_requests() == settled); // an idle meter does not repaint every tick
+}
+
+TEST_CASE("Vellum MidiKeyboard gives a lone accidental range usable geometry",
+          "[pulp-vellum-audio][midi-keyboard]") {
+    for (const auto orientation : {pulp::vellum_audio::MidiKeyboard::Orientation::horizontal,
+                                   pulp::vellum_audio::MidiKeyboard::Orientation::vertical}) {
+        pulp::vellum_audio::MidiKeyboard keyboard;
+        keyboard.set_range(61, 61);
+        keyboard.set_orientation(orientation);
+        keyboard.set_bounds({0, 0, 200, 80});
+        std::vector<int> ons;
+        keyboard.on_note_on = [&](int note, float) { ons.push_back(note); };
+        keyboard.on_mouse_down({100.0f, 40.0f});
+        REQUIRE(ons.size() == 1);
+        CHECK(ons.front() == 61);
+        keyboard.on_mouse_up({100.0f, 40.0f});
+    }
 }
 
 TEST_CASE("Vellum MidiKeyboard appearance setters request repaint",

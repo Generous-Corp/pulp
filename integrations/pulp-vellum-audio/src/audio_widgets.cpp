@@ -101,6 +101,8 @@ float MidiKeyboard::white_key_width() const {
         const float top = bounds.height * row / rows;
         return {0, top, bounds.width, bounds.height / rows};
     }
+    if (white_key_count() == 0) // the range is one accidental: it owns the whole keyboard
+        return {0, 0, bounds.width, bounds.height};
     const float white_width = white_key_width();
     int white_index = 0;
     for (int n = first_note_; n < note; ++n)
@@ -244,8 +246,10 @@ void LevelMeter::sample() noexcept {
             stale_ = true;
             rms_ = peak_ = 0.0f;
         }
-        (void)ballistics_.update(0.0f, 0.0f, 1.0f / 60.0f);
-        request_repaint(); // decay and peak-hold release must stay visible
+        // Decay and peak-hold release must stay visible, but a settled meter
+        // must not repaint every tick: update() reports real movement only.
+        if (ballistics_.update(0.0f, 0.0f, 1.0f / 60.0f))
+            request_repaint();
         return;
     }
     std::array<float, AudioDisplayProvider::kMaxMeterChannels> rms{};
@@ -270,8 +274,8 @@ void LevelMeter::sample() noexcept {
     // A frame with zero channels is not consumed: stay stale and retry next tick.
     stale_ = true;
     rms_ = peak_ = 0.0f;
-    (void)ballistics_.update(0.0f, 0.0f, 1.0f / 60.0f);
-    request_repaint();
+    if (ballistics_.update(0.0f, 0.0f, 1.0f / 60.0f))
+        request_repaint();
 }
 
 void LevelMeter::paint(::vellum::canvas::Canvas& canvas) {
