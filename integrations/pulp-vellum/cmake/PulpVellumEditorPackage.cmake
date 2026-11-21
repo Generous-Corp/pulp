@@ -104,7 +104,7 @@ function(pulp_add_vellum_editor_package package)
     unset(_pulp_vellum_target)
 endfunction()
 
-# Built-in package for UI_SCRIPT. Keep its script library out of other Vellum editors.
+# Built-in package for UI_SCRIPT.
 function(_pulp_vellum_scripted_package context out_var)
     if(TARGET Pulp::vellum-scripted)
         set(_scripted Pulp::vellum-scripted)

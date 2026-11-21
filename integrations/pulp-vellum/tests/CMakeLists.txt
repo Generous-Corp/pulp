@@ -26,6 +26,17 @@ if(PULP_BUILD_TESTS AND TARGET Catch2::Catch2WithMain)
             LABELS pulp-vellum TIMEOUT 30)
     endif()
 
+    if(CMAKE_SYSTEM_NAME STREQUAL "Darwin" AND TARGET Vellum::MirrorView_script)
+        add_executable(pulp-test-pulp-vellum-prewarm
+            ${PULP_ROOT_DIR}/test/test_pulp_vellum_editor_prewarm.cpp)
+        target_link_libraries(pulp-test-pulp-vellum-prewarm PRIVATE
+            pulp::vellum Vellum::MirrorView_script Catch2::Catch2WithMain)
+        add_test(NAME pulp.vellum-editor-prewarm COMMAND pulp-test-pulp-vellum-prewarm)
+        set_tests_properties(pulp.vellum-editor-prewarm PROPERTIES
+            LABELS pulp-vellum-editor TIMEOUT 30
+            ENVIRONMENT "CI=0;PULP_HEADLESS=0;PULP_TEST_MODE=0;PULP_DISABLE_PLUGIN_EDITOR=0;PULP_EDITOR_PREWARM=1")
+    endif()
+
     # The editor tests need Vellum's mirrored view layer; skip them for an SDK
     # without it so the parameter-bridge tests still build.
     if(TARGET Vellum::MirrorView_core)

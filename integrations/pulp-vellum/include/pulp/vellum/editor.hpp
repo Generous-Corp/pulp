@@ -28,6 +28,12 @@
 #include <utility>
 
 namespace pulp::vellum {
+namespace detail {
+
+// Pull the scheduler registrar into the plug-in image before any editor opens.
+void link_editor_prewarm() noexcept;
+
+} // namespace detail
 
 /// Install Dawn's proc table before Vellum creates the first GPU editor host.
 /// The process owns that table; the installed Vellum SDK registers it through
@@ -68,6 +74,7 @@ template <typename ViewType> class Editor final : public format::Editor {
     template <typename MakeRoot>
     Editor(format::EditorContext& context, std::string_view bundle_id, MakeRoot make_root)
         : model_(context.params()), env_{context, model_, nullptr} {
+        detail::link_editor_prewarm();
         if (auto* visuals = context.visuals()) {
             visual_feed_ = std::make_unique<VisualPortFeed>(*visuals);
             env_.visuals = visual_feed_.get();
@@ -223,6 +230,8 @@ template <typename ViewType> class Editor final : public format::Editor {
 
 template <typename ViewType> class EditorFactory final : public format::EditorFactory {
   public:
+    EditorFactory() { detail::link_editor_prewarm(); }
+
     bool supports(format::EditorRole role) const override {
         return role == format::EditorRole::editor || role == format::EditorRole::inspector;
     }

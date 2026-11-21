@@ -8,6 +8,7 @@
 find_package(Vellum CONFIG REQUIRED GLOBAL)
 
 add_library(pulp-vellum STATIC
+    src/editor_prewarm.cpp
     src/mapping.cpp
     src/param_port_model.cpp
     src/visual_port_feed.cpp)
@@ -34,6 +35,10 @@ target_include_directories(pulp-vellum PRIVATE ${PULP_ROOT_DIR}/apple/Sources/Pu
 target_link_libraries(pulp-vellum PUBLIC Vellum::MirrorView_core)
 
 if(TARGET Vellum::MirrorView_script)
+    # Custom roots can declare scripts for prewarm without using the scripted editor.
+    target_compile_definitions(pulp-vellum PRIVATE PULP_VELLUM_HAS_SCRIPT_PREWARM)
+    target_link_libraries(pulp-vellum PRIVATE Vellum::MirrorView_script)
+
     add_library(pulp-vellum-scripted STATIC src/scripted_editor.cpp)
     add_library(pulp::vellum-scripted ALIAS pulp-vellum-scripted)
     target_link_libraries(pulp-vellum-scripted PUBLIC pulp::vellum

@@ -1,12 +1,10 @@
 #include <pulp/vellum/scripted_editor.hpp>
 
-#include <pulp/format/editor_prewarm.hpp>
 #include <pulp/format/editor_ui_source.hpp>
 #include <pulp/runtime/log.hpp>
 #include <pulp/vellum/editor.hpp>
 
 #include <vellum/view/scripted_ui.hpp>
-#include <vellum/view/scripted_ui_prewarm.hpp>
 
 #include <cstdint>
 #include <string>
@@ -87,19 +85,6 @@ class ScriptedEditorRoot final : public ::vellum::view::View {
     ::vellum::view::ScriptedUiSession session_;
     ::vellum::view::PluginViewHost::GpuSurfaceSubscription gpu_subscription_;
 };
-
-void schedule_scripted_ui_prewarm(const format::Processor::EditorPrewarm& request) {
-    ::vellum::view::prewarm_scripted_ui({
-        {request.scripts.begin(), request.scripts.end()},
-        {request.materialized_documents.begin(), request.materialized_documents.end()},
-    });
-}
-
-// This object is linked into the image by the scripted editor package's factory.
-[[maybe_unused]] const bool prewarm_installed = [] {
-    format::set_editor_prewarm_scheduler(&schedule_scripted_ui_prewarm);
-    return true;
-}();
 
 } // namespace
 
