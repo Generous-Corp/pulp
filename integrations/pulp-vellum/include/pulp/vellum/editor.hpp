@@ -21,7 +21,11 @@
 #include <vellum/view/view.hpp>
 
 #include <concepts>
+#include <algorithm>
+#include <chrono>
+#include <cstdlib>
 #include <cstdint>
+#include <limits>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -78,6 +82,20 @@ template <typename ViewType> class Editor final : public format::Editor {
               processor.editor_background()) {}
 
   private:
+    static std::chrono::milliseconds content_ready_timeout() {
+        constexpr auto default_timeout = std::chrono::milliseconds(1000);
+        const char* value = std::getenv("PULP_VELLUM_EDITOR_CONTENT_READY_TIMEOUT_MS");
+        if (value == nullptr || *value == '\0')
+            return default_timeout;
+        char* end = nullptr;
+        const auto parsed = std::strtoull(value, &end, 10);
+        if (end == value || *end != '\0')
+            return default_timeout;
+        const auto bounded = std::min<std::uint64_t>(
+            parsed, static_cast<std::uint64_t>(std::numeric_limits<std::int64_t>::max()));
+        return std::chrono::milliseconds(static_cast<std::int64_t>(bounded));
+    }
+
     template <typename MakeRoot>
     Editor(format::EditorContext& context, std::string_view bundle_id, MakeRoot make_root,
            std::optional<std::uint32_t> background = std::nullopt)
@@ -116,6 +134,13 @@ template <typename ViewType> class Editor final : public format::Editor {
         // the first frame and wherever the root does not paint.
         if (background)
             options.background_rgb = *background & 0xFFFFFFu;
+        if constexpr (requires(ViewType& view) {
+                          { view.editor_content_ready() } -> std::convertible_to<bool>;
+                      }) {
+            options.defer_presentation = true;
+            content_presentation_deferred_ = true;
+            content_ready_deadline_ = std::chrono::steady_clock::now() + content_ready_timeout();
+        }
         host_ = ::vellum::view::PluginViewHost::create(*root_, options);
         if (host_ != nullptr && has_design_viewport()) {
             host_->set_design_viewport(static_cast<float>(view_size_->design_width),
@@ -220,6 +245,16 @@ template <typename ViewType> class Editor final : public format::Editor {
             if (root_ != nullptr)
                 root_->editor_idle();
         }
+        if constexpr (requires(ViewType& view) {
+                          { view.editor_content_ready() } -> std::convertible_to<bool>;
+                      }) {
+            if (content_presentation_deferred_ && host_ != nullptr &&
+                (root_->editor_content_ready() ||
+                 std::chrono::steady_clock::now() >= content_ready_deadline_)) {
+                host_->resume_presentation();
+                content_presentation_deferred_ = false;
+            }
+        }
         if (host_ != nullptr)
             host_->repaint();
     }
@@ -261,6 +296,8 @@ template <typename ViewType> class Editor final : public format::Editor {
     bool attached_ = false;
     bool closing_ = false;
     bool invalidated_ = false;
+    bool content_presentation_deferred_ = false;
+    std::chrono::steady_clock::time_point content_ready_deadline_{};
 };
 
 template <typename ViewType> class EditorFactory final : public format::EditorFactory {

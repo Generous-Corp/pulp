@@ -37,6 +37,10 @@ template <typename Session> class ScriptedEditorRoot final : public ::vellum::vi
         return preferred_;
     }
 
+    bool editor_content_ready() const {
+        return !session_.document_load_pending() && session_.bridge() != nullptr;
+    }
+
     void editor_opened() {
         if (auto* host = plugin_view_host()) {
             gpu_subscription_ = host->observe_gpu_surface(

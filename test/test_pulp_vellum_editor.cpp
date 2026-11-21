@@ -25,6 +25,7 @@
 #endif
 
 #include <cstdint>
+#include <cstdlib>
 #include <memory>
 #include <optional>
 
@@ -136,6 +137,9 @@ class StubHost final : public ::vellum::view::PluginViewHost {
         attached_ = false;
     }
     void repaint() override {}
+    void resume_presentation() override {
+        ++resume_calls;
+    }
     void set_size(uint32_t width, uint32_t height) override {
         size_ = {width, height};
     }
@@ -157,6 +161,7 @@ class StubHost final : public ::vellum::view::PluginViewHost {
     float design_width = 0;
     float design_height = 0;
     float aspect_ratio = 0;
+    int resume_calls = 0;
 
   private:
     Size size_;
@@ -190,6 +195,17 @@ class RecordingHost final : public ::vellum::view::PluginViewHost {
 class EmptyView final : public ::vellum::view::View {
   public:
     explicit EmptyView(pulp::vellum::EditorEnv&) {}
+};
+
+class ContentReadyView final : public ::vellum::view::View {
+  public:
+    explicit ContentReadyView(pulp::vellum::EditorEnv&) {}
+
+    bool editor_content_ready() const {
+        return ready;
+    }
+
+    bool ready = false;
 };
 
 // Counts the editor's idle ticks and records the bounds it was laid out to.
@@ -330,6 +346,91 @@ TEST_CASE("Vellum editor factory supports editor and inspector roles", "[pulp-ve
 
     editor->invalidate();
     editor.reset();
+}
+
+struct ContentReadyTimeoutOverride {
+    explicit ContentReadyTimeoutOverride(const char* value) {
+        setenv("PULP_VELLUM_EDITOR_CONTENT_READY_TIMEOUT_MS", value, 1);
+    }
+    ~ContentReadyTimeoutOverride() {
+        unsetenv("PULP_VELLUM_EDITOR_CONTENT_READY_TIMEOUT_MS");
+    }
+};
+
+TEST_CASE("Vellum content-ready roots defer until their first ready idle",
+          "[pulp-vellum][editor]") {
+    using PluginViewHost = ::vellum::view::PluginViewHost;
+    FactoryReset reset;
+    Fixture fixture;
+    Context context(*fixture.port);
+    Processor processor;
+    ContentReadyView* root = nullptr;
+    StubHost* host = nullptr;
+    bool deferred = false;
+    PluginViewHost::set_factory(
+        [&](::vellum::view::View& view, const PluginViewHost::Options& options) {
+            root = &static_cast<ContentReadyView&>(view);
+            deferred = options.defer_presentation;
+            auto stub = std::make_unique<StubHost>(options.size);
+            host = stub.get();
+            return stub;
+        });
+
+    pulp::vellum::EditorFactory<ContentReadyView> factory;
+    auto editor = factory.create(processor, context, pulp::format::EditorRole::editor);
+    REQUIRE(editor);
+    REQUIRE(deferred);
+    REQUIRE(root != nullptr);
+    REQUIRE(host != nullptr);
+    REQUIRE(editor->attach({.kind = pulp::format::NativeParentKind::cocoa_view, .handle = host}));
+    editor->idle();
+    CHECK(host->resume_calls == 0);
+    root->ready = true;
+    editor->idle();
+    CHECK(host->resume_calls == 1);
+    editor->idle();
+    CHECK(host->resume_calls == 1);
+}
+
+TEST_CASE("Vellum content-ready roots resume at the bounded timeout", "[pulp-vellum][editor]") {
+    ContentReadyTimeoutOverride timeout("0");
+    using PluginViewHost = ::vellum::view::PluginViewHost;
+    FactoryReset reset;
+    Fixture fixture;
+    Context context(*fixture.port);
+    Processor processor;
+    StubHost* host = nullptr;
+    PluginViewHost::set_factory([&](::vellum::view::View&, const PluginViewHost::Options& options) {
+        auto stub = std::make_unique<StubHost>(options.size);
+        host = stub.get();
+        return stub;
+    });
+
+    pulp::vellum::EditorFactory<ContentReadyView> factory;
+    auto editor = factory.create(processor, context, pulp::format::EditorRole::editor);
+    REQUIRE(editor);
+    REQUIRE(host != nullptr);
+    REQUIRE(editor->attach({.kind = pulp::format::NativeParentKind::cocoa_view, .handle = host}));
+    editor->idle();
+    CHECK(host->resume_calls == 1);
+}
+
+TEST_CASE("Vellum roots without content-ready hooks never defer", "[pulp-vellum][editor]") {
+    using PluginViewHost = ::vellum::view::PluginViewHost;
+    FactoryReset reset;
+    Fixture fixture;
+    Context context(*fixture.port);
+    Processor processor;
+    bool deferred = true;
+    PluginViewHost::set_factory([&](::vellum::view::View&, const PluginViewHost::Options& options) {
+        deferred = options.defer_presentation;
+        return std::unique_ptr<PluginViewHost>(std::make_unique<StubHost>(options.size));
+    });
+
+    pulp::vellum::EditorFactory<EmptyView> factory;
+    auto editor = factory.create(processor, context, pulp::format::EditorRole::editor);
+    REQUIRE(editor);
+    CHECK_FALSE(deferred);
 }
 
 TEST_CASE("Vellum view observes a bridged parameter after the UI pump", "[pulp-vellum][editor]") {

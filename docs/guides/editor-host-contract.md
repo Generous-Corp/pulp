@@ -115,6 +115,14 @@ native attachment and before detachment or invalidation, respectively. Use
 session through processor state should check that the published session still
 belongs to that root before clearing it.
 
+A root may also provide `bool editor_content_ready() const`. Vellum editors
+with this hook keep native presentation deferred while the host paints the
+declared background colour. `Editor::idle()` resumes presentation on the first
+tick where the hook returns true. A one-second deadline still resumes a root
+that never reports readiness. Set
+`PULP_VELLUM_EDITOR_CONTENT_READY_TIMEOUT_MS` to change that deadline for a
+process. Roots without the hook retain immediate presentation.
+
 For a root-owned `vellum::view::ScriptedUiSession`, construct the session with
 `env.params` and register the existing JSON dispatcher with
 `session.attach_native_message_handler(name, env.native_message_handler(dispatch))`.
