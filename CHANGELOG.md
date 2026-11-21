@@ -9,6 +9,16 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
      release's bullet block. See docs/guides/versioning.md § Release pipeline
      for the full end-to-end flow. -->
 
+<a id="v11830"></a>
+## [1.183.0] - 2026-11-21
+
+- release/version bump ([#12687](https://github.com/Generous-Corp/pulp/pull/12687))
+- fix/macos repeating timer no rearm ([#12691](https://github.com/Generous-Corp/pulp/pull/12691))
+- fix/clap scan without processor ([#12680](https://github.com/Generous-Corp/pulp/pull/12680))
+- feature/pulp vellum editor size hints ([#12689](https://github.com/Generous-Corp/pulp/pull/12689))
+- release/version bump ([#12685](https://github.com/Generous-Corp/pulp/pull/12685))
+- feature/pulp vellum editor compat ([#12684](https://github.com/Generous-Corp/pulp/pull/12684))
+
 <a id="v11820"></a>
 ## [1.182.0] - 2026-11-21
 
@@ -13469,6 +13479,7 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/Generous-Corp/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/Generous-Corp/pulp/pull/2))
 
+[1.183.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.183.0
 [1.182.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.182.0
 [1.181.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.181.0
 [1.180.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.180.0
