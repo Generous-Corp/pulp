@@ -39,8 +39,8 @@ struct EditorEnv {
     /// It accepts calls before the first attach and until this attachment closes.
     /// Register again after reattaching. Detach the handler before destroying its captures.
     NativeMessageHandler native_message_handler(NativeMessageHandler handler) const {
-        return [lifetime = std::weak_ptr(lifetime_), handler = std::move(handler)](
-                   std::string_view json) -> std::string {
+        return [lifetime = std::weak_ptr(lifetime_),
+                handler = std::move(handler)](std::string_view json) -> std::string {
             const auto attachment = lifetime.lock();
             if (!attachment || !attachment->open || !handler)
                 return R"({"ok":false,"error":"editor message handler unavailable"})";

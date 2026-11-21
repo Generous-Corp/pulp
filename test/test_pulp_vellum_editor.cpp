@@ -223,14 +223,14 @@ struct HookFixture {
     std::unique_ptr<pulp::format::Editor> editor;
 
     HookFixture() {
-        PluginViewHost::set_factory([this](::vellum::view::View& view,
-                                          const PluginViewHost::Options& options) {
-            root = &static_cast<HookView&>(view);
-            root->lifecycle = &lifecycle;
-            auto stub = std::make_unique<StubHost>(options.size);
-            host = stub.get();
-            return stub;
-        });
+        PluginViewHost::set_factory(
+            [this](::vellum::view::View& view, const PluginViewHost::Options& options) {
+                root = &static_cast<HookView&>(view);
+                root->lifecycle = &lifecycle;
+                auto stub = std::make_unique<StubHost>(options.size);
+                host = stub.get();
+                return stub;
+            });
         pulp::vellum::EditorFactory<HookView> factory;
         editor = factory.create(processor, context, pulp::format::EditorRole::editor);
         REQUIRE(host != nullptr);
@@ -465,8 +465,8 @@ TEST_CASE("A Vellum root receives lifecycle callbacks at native attachment edges
     HookFixture f;
     f.editor->detach();
     CHECK(f.editor->attach({.kind = pulp::format::NativeParentKind::none}));
-    CHECK_FALSE(f.editor->attach(
-        {.kind = pulp::format::NativeParentKind::cocoa_view, .handle = &f}));
+    CHECK_FALSE(
+        f.editor->attach({.kind = pulp::format::NativeParentKind::cocoa_view, .handle = &f}));
     CHECK(f.lifecycle.opens == 0);
     CHECK(f.lifecycle.closes == 0);
     REQUIRE(f.editor->attach(f.parent()));
@@ -509,8 +509,8 @@ TEST_CASE("Vellum native messages are scoped to the editor attachment that regis
         {.script_source = R"JS(createLabel('response', editorMessage('{"type":"ping"}'), '');)JS"});
     int calls = 0;
     auto register_handler = [&](const pulp::vellum::EditorEnv& env) {
-        session.attach_native_message_handler("editorMessage", env.native_message_handler(
-            [&calls](std::string_view json) {
+        session.attach_native_message_handler(
+            "editorMessage", env.native_message_handler([&calls](std::string_view json) {
                 ++calls;
                 CHECK(json == R"({"type":"ping"})");
                 return R"({"ok":true,"type":"pong"})";

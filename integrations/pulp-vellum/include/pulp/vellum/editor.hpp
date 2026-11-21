@@ -74,7 +74,9 @@ template <typename ViewType> class Editor final : public format::Editor {
         }
         root_ = make_root(env_);
         if constexpr (requires(ViewType& view) {
-                          { view.preferred_editor_size() } -> std::convertible_to<format::EditorSize>;
+                          {
+                              view.preferred_editor_size()
+                          } -> std::convertible_to<format::EditorSize>;
                       }) {
             const format::EditorSize preferred = root_->preferred_editor_size();
             if (preferred.width != 0 && preferred.height != 0)
@@ -228,9 +230,7 @@ template <typename ViewType> class EditorFactory final : public format::EditorFa
     std::unique_ptr<format::Editor> create(format::Processor& processor,
                                            format::EditorContext& context,
                                            format::EditorRole role) override {
-        return supports(role)
-                   ? std::make_unique<Editor<ViewType>>(context, processor)
-                   : nullptr;
+        return supports(role) ? std::make_unique<Editor<ViewType>>(context, processor) : nullptr;
     }
 };
 
