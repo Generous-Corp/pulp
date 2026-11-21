@@ -11,6 +11,10 @@
 #include <vellum/value/param_model.hpp>
 #include <vellum/view/plugin_view_host.hpp>
 #include <vellum/view/view.hpp>
+#if defined(PULP_TEST_VELLUM_SCRIPTED_UI)
+#include <vellum/view/scripted_ui.hpp>
+#include <vellum/view/widgets.hpp>
+#endif
 
 #include <memory>
 
@@ -25,8 +29,10 @@ class Context final : public pulp::format::EditorContext {
     pulp::format::VisualPort* visuals() override {
         return nullptr;
     }
-    bool request_resize(const pulp::format::EditorSize&) override {
-        return false;
+    bool request_resize(const pulp::format::EditorSize& size) override {
+        ++resize_requests;
+        requested_size = size;
+        return accept_resize;
     }
     bool host_action(const pulp::format::HostActionRequest&) override {
         return false;
@@ -34,6 +40,10 @@ class Context final : public pulp::format::EditorContext {
     pulp::format::EditorHostKind host_kind() const override {
         return pulp::format::EditorHostKind::plugin;
     }
+
+    int resize_requests = 0;
+    pulp::format::EditorSize requested_size;
+    bool accept_resize = false;
 
   private:
     pulp::format::ParamPort& params_;
@@ -87,11 +97,20 @@ class Fixture {
 
 class StubHost final : public ::vellum::view::PluginViewHost {
   public:
+    explicit StubHost(Size size = {}) : size_(size) {}
+
     ::vellum::view::NativeViewHandle native_handle() override {
         return this;
     }
-    void attach_to_parent(::vellum::view::NativeViewHandle) override {}
-    void detach() override {}
+    void attach_to_parent(::vellum::view::NativeViewHandle parent) override {
+        attached_ = parent == this;
+    }
+    bool is_attached() const noexcept override {
+        return attached_;
+    }
+    void detach() override {
+        attached_ = false;
+    }
     void repaint() override {}
     void set_size(uint32_t width, uint32_t height) override {
         size_ = {width, height};
@@ -102,6 +121,7 @@ class StubHost final : public ::vellum::view::PluginViewHost {
 
   private:
     Size size_;
+    bool attached_ = false;
 };
 
 // Records which host the root points at when its host starts being destroyed.
@@ -155,6 +175,72 @@ struct FactoryReset {
     }
 };
 
+struct LifecycleProbe {
+    int opens = 0;
+    int closes = 0;
+    int ticks = 0;
+    bool host_attached_at_open = false;
+    bool host_attached_at_close = false;
+};
+
+class HookView final : public ::vellum::view::View {
+  public:
+    explicit HookView(pulp::vellum::EditorEnv& env) : env(env) {}
+    HookView(pulp::vellum::EditorEnv& env, pulp::format::Processor& processor)
+        : env(env), processor(&processor) {}
+
+    static pulp::format::EditorSize preferred_editor_size() {
+        return {532, 316, 1.0};
+    }
+
+    void editor_opened() {
+        ++lifecycle->opens;
+        lifecycle->host_attached_at_open = plugin_view_host()->is_attached();
+    }
+    void editor_closing() {
+        ++lifecycle->closes;
+        lifecycle->host_attached_at_close = plugin_view_host()->is_attached();
+    }
+    void editor_idle() {
+        ++lifecycle->ticks;
+    }
+
+    pulp::vellum::EditorEnv& env;
+    pulp::format::Processor* processor = nullptr;
+    LifecycleProbe* lifecycle = nullptr;
+};
+
+struct HookFixture {
+    using PluginViewHost = ::vellum::view::PluginViewHost;
+
+    FactoryReset reset;
+    Fixture fixture;
+    Context context{*fixture.port};
+    Processor processor;
+    LifecycleProbe lifecycle;
+    HookView* root = nullptr;
+    StubHost* host = nullptr;
+    std::unique_ptr<pulp::format::Editor> editor;
+
+    HookFixture() {
+        PluginViewHost::set_factory(
+            [this](::vellum::view::View& view, const PluginViewHost::Options& options) {
+                root = &static_cast<HookView&>(view);
+                root->lifecycle = &lifecycle;
+                auto stub = std::make_unique<StubHost>(options.size);
+                host = stub.get();
+                return stub;
+            });
+        pulp::vellum::EditorFactory<HookView> factory;
+        editor = factory.create(processor, context, pulp::format::EditorRole::editor);
+        REQUIRE(host != nullptr);
+    }
+
+    pulp::format::NativeParent parent() const {
+        return {.kind = pulp::format::NativeParentKind::cocoa_view, .handle = host};
+    }
+};
+
 } // namespace
 
 TEST_CASE("Vellum editor factory supports editor and inspector roles", "[pulp-vellum][editor]") {
@@ -170,6 +256,8 @@ TEST_CASE("Vellum editor factory supports editor and inspector roles", "[pulp-ve
 
     auto editor = factory.create(processor, context, pulp::format::EditorRole::editor);
     REQUIRE(editor);
+    CHECK(editor->size().width == 400);
+    CHECK(editor->size().height == 300);
     REQUIRE(editor->attach({.kind = pulp::format::NativeParentKind::none}));
     // An X11 parent carries window_id, not handle; the editor must not claim a
     // parent kind its attach path cannot use.
@@ -334,3 +422,127 @@ TEST_CASE("A Vellum editor lays out its root and ticks it on idle", "[pulp-vellu
     CHECK(g_idle_width == 640.0f);
     CHECK(g_idle_height == 480.0f);
 }
+
+TEST_CASE("A Vellum root can opt into processor access", "[pulp-vellum][editor][processor-hook]") {
+    HookFixture f;
+    CHECK(f.root->processor == &f.processor);
+    CHECK(&f.root->env.context == &f.context);
+}
+
+TEST_CASE("A Vellum root supplies the initial size and requests host resizing",
+          "[pulp-vellum][editor][resize-hook]") {
+    HookFixture f;
+    CHECK(f.editor->size().width == 532);
+    CHECK(f.editor->size().height == 316);
+    CHECK(f.editor->size_hints().preferred_width == 532);
+    CHECK(f.editor->size_hints().preferred_height == 316);
+    CHECK(f.host->get_size().width == 532);
+    CHECK(f.host->get_size().height == 316);
+    CHECK(f.root->bounds().width == 532.0f);
+    CHECK(f.root->bounds().height == 316.0f);
+
+    REQUIRE(f.editor->attach(f.parent()));
+    CHECK_FALSE(f.root->env.request_resize({700, 530, 1.5}));
+    CHECK(f.context.resize_requests == 1);
+    f.context.accept_resize = true;
+    REQUIRE(f.root->env.request_resize({700, 530, 1.5}));
+    CHECK(f.context.resize_requests == 2);
+    CHECK(f.context.requested_size.width == 700);
+    CHECK(f.context.requested_size.height == 530);
+    CHECK(f.context.requested_size.scale == 1.5);
+    CHECK(f.editor->size().width == 532);
+    REQUIRE(f.editor->set_size(f.context.requested_size));
+    CHECK(f.host->get_size().width == 700);
+    CHECK(f.root->bounds().height == 530.0f);
+
+    f.editor->detach();
+    CHECK_FALSE(f.root->env.request_resize({700, 530, 1.5}));
+    CHECK(f.context.resize_requests == 2);
+}
+
+TEST_CASE("A Vellum root receives lifecycle callbacks at native attachment edges",
+          "[pulp-vellum][editor][lifecycle-hook]") {
+    HookFixture f;
+    f.editor->detach();
+    CHECK(f.editor->attach({.kind = pulp::format::NativeParentKind::none}));
+    CHECK_FALSE(
+        f.editor->attach({.kind = pulp::format::NativeParentKind::cocoa_view, .handle = &f}));
+    CHECK(f.lifecycle.opens == 0);
+    CHECK(f.lifecycle.closes == 0);
+    REQUIRE(f.editor->attach(f.parent()));
+    CHECK_FALSE(f.editor->attach(f.parent()));
+    CHECK(f.lifecycle.opens == 1);
+    CHECK(f.lifecycle.host_attached_at_open);
+    f.editor->idle();
+    CHECK(f.lifecycle.ticks == 1);
+
+    f.editor->detach();
+    f.editor->detach();
+    CHECK(f.lifecycle.closes == 1);
+    CHECK(f.lifecycle.host_attached_at_close);
+    CHECK_FALSE(f.host->is_attached());
+    f.editor->idle();
+    CHECK(f.lifecycle.ticks == 1);
+
+    REQUIRE(f.editor->attach(f.parent()));
+    CHECK(f.lifecycle.opens == 2);
+    f.editor->invalidate();
+    CHECK(f.lifecycle.closes == 2);
+    CHECK(f.root->plugin_view_host() == nullptr);
+    f.editor->idle();
+    CHECK(f.lifecycle.ticks == 1);
+    CHECK_FALSE(f.editor->set_size({640, 480, 1.0}));
+    f.editor.reset();
+    CHECK(f.lifecycle.closes == 2);
+}
+
+#if defined(PULP_TEST_VELLUM_SCRIPTED_UI)
+TEST_CASE("Vellum native messages are scoped to the editor attachment that registered them",
+          "[pulp-vellum][editor][message-hook]") {
+    HookFixture f;
+    auto retained_env = f.root->env;
+    // Keep an independent scripted root alive so a delivery can be attempted
+    // even after the editor that supplied its handler is destroyed.
+    ::vellum::view::View script_root;
+    ::vellum::view::ScriptedUiSession session(
+        script_root, *f.fixture.model,
+        {.script_source = R"JS(createLabel('response', editorMessage('{"type":"ping"}'), '');)JS"});
+    int calls = 0;
+    auto register_handler = [&](const pulp::vellum::EditorEnv& env) {
+        session.attach_native_message_handler(
+            "editorMessage", env.native_message_handler([&calls](std::string_view json) {
+                ++calls;
+                CHECK(json == R"({"type":"ping"})");
+                return R"({"ok":true,"type":"pong"})";
+            }));
+    };
+    auto response = [&] {
+        std::string error;
+        const bool loaded = session.load(&error);
+        INFO(error);
+        REQUIRE(loaded);
+        REQUIRE(session.bridge() != nullptr);
+        auto* label = dynamic_cast<::vellum::view::Label*>(session.bridge()->widget("response"));
+        REQUIRE(label != nullptr);
+        return std::string(label->text());
+    };
+
+    register_handler(f.root->env);
+    CHECK(response() == R"({"ok":true,"type":"pong"})");
+    CHECK(calls == 1);
+    REQUIRE(f.editor->attach(f.parent()));
+    f.editor->detach();
+    REQUIRE(f.editor->attach(f.parent()));
+    CHECK(response() == R"({"ok":false,"error":"editor message handler unavailable"})");
+    CHECK(calls == 1);
+    register_handler(f.root->env);
+    CHECK(response() == R"({"ok":true,"type":"pong"})");
+    CHECK(calls == 2);
+    f.editor.reset();
+    CHECK(response() == R"({"ok":false,"error":"editor message handler unavailable"})");
+    CHECK(calls == 2);
+    CHECK_FALSE(retained_env.request_resize({600, 400, 1.0}));
+    CHECK(f.context.resize_requests == 0);
+    session.detach_native_message_handler("editorMessage");
+}
+#endif
