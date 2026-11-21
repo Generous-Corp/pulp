@@ -132,6 +132,10 @@ struct MainThreadTimerState;
 /// main thread nothing without counting unrelated run-loop wake-ups.
 std::uint64_t main_thread_callouts() noexcept;
 #if defined(__APPLE__)
+/// How many times a timer was repositioned in the main run loop with
+/// CFRunLoopTimerSetNextFireDate, process-wide: once per start or one-shot
+/// fire, never per fire of a repeating timer.
+std::uint64_t main_thread_timer_rearms() noexcept;
 /// How many run-loop sources the scopes of this binary have installed on the
 /// main run loop: 0 with no live scope, otherwise 1, however many scopes there
 /// are (they share one source, so an idle scope adds nothing to each wake).
