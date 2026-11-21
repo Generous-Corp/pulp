@@ -311,6 +311,8 @@ jobs:
         # un-excluded. Keep remaining exclusions named, not path-wide, so the
         # rest of the ASan matrix still gates (#3113).
         run: |
+          mkdir -p "$RUNNER_TEMP/ctest-logs"
+          ctest --test-dir build-asan --show-only=json-v1 > "$RUNNER_TEMP/ctest-logs/selected.json" || true
           # A timing assertion measures the sanitizer, not the code: ASan and
           # UBSan add interception and shadow-memory work on every access, so a
           # throughput or latency bound written for an ordinary build cannot
@@ -333,7 +335,18 @@ jobs:
             -j$(sysctl -n hw.ncpu) \
             --timeout 120 \
             --label-exclude 'validation|slow|performance|bench|quality-lab|gate-inventory|^sdk$|^installed-sdk$' \
-            --exclude-regex 'graph-paced-timing-matrix-selftest|hover -> click -> drag record/replay produces matching motion fixture|cmake-ios-auv3-configure|cmake-ios-hostapp-links|fdn reverb stays bounded and decaying for every parameter vector|WebSocketChannel echoes a >126-byte message'
+            --exclude-regex 'graph-paced-timing-matrix-selftest|hover -> click -> drag record/replay produces matching motion fixture|cmake-ios-auv3-configure|cmake-ios-hostapp-links|fdn reverb stays bounded and decaying for every parameter vector|WebSocketChannel echoes a >126-byte message' \
+            --output-junit "$RUNNER_TEMP/ctest-logs/ctest.junit.xml"
+
+      - name: Upload ASan ctest evidence
+        if: always()
+        uses: actions/upload-artifact@v7.0.2
+        with:
+          name: ctest-logs-asan
+          path: |
+            ${{ runner.temp }}/ctest-logs/ctest.junit.xml
+            ${{ runner.temp }}/ctest-logs/selected.json
+          if-no-files-found: ignore
 
   tsan:
     needs: resolve-runners
@@ -505,6 +518,8 @@ jobs:
         # ConnectedChildProcess is process/IPC timing-sensitive under sanitizer
         # instrumentation and remains covered by the regular Build/Test lane.
         run: |
+          mkdir -p "$RUNNER_TEMP/ctest-logs"
+          ctest --test-dir build-ubsan --show-only=json-v1 > "$RUNNER_TEMP/ctest-logs/selected.json" || true
           # A timing assertion measures the sanitizer, not the code: ASan and
           # UBSan add interception and shadow-memory work on every access, so a
           # throughput or latency bound written for an ordinary build cannot
@@ -522,7 +537,18 @@ jobs:
             -j$(sysctl -n hw.ncpu) \
             --timeout 120 \
             --label-exclude 'validation|slow|performance|bench|quality-lab|gate-inventory' \
-            --exclude-regex 'graph-paced-timing-matrix-selftest|Toolbar add items|deflate empty payload round-trips through raw helpers|IPC named pipe observes abrupt peer death|cmake-ios-auv3-configure|cmake-ios-hostapp-links|MountedVolumeListChangeDetector stop wakes a long poll promptly|ConnectedChildProcess'
+            --exclude-regex 'graph-paced-timing-matrix-selftest|Toolbar add items|deflate empty payload round-trips through raw helpers|IPC named pipe observes abrupt peer death|cmake-ios-auv3-configure|cmake-ios-hostapp-links|MountedVolumeListChangeDetector stop wakes a long poll promptly|ConnectedChildProcess' \
+            --output-junit "$RUNNER_TEMP/ctest-logs/ctest.junit.xml"
+
+      - name: Upload UBSan ctest evidence
+        if: always()
+        uses: actions/upload-artifact@v7.0.2
+        with:
+          name: ctest-logs-ubsan
+          path: |
+            ${{ runner.temp }}/ctest-logs/ctest.junit.xml
+            ${{ runner.temp }}/ctest-logs/selected.json
+          if-no-files-found: ignore
 
   rtsan:
     needs: resolve-runners
