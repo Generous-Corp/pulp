@@ -350,6 +350,43 @@ PointerButton pointer_button_for_x11(unsigned button, int& number) noexcept;
 /// button.
 bool wheel_delta_for_x11_button(unsigned button, double& dx, double& dy) noexcept;
 
+/// The X11 core cursor-font shape (`XC_*`) for `cursor`: `XC_left_ptr` for the
+/// arrow, `XC_hand2` for the pointing hand, `XC_xterm` for the I-beam, and so
+/// on. Pure; the X11 backend passes it to `XCreateFontCursor`.
+unsigned x11_cursor_shape(Cursor cursor) noexcept;
+
+// ── Win32 translation ────────────────────────────────────────────────────────
+//
+// Pure tables over Win32 message values, with no Windows headers, so they are
+// built and tested on every platform; the Win32 surface backend feeds them what
+// its window procedure receives.
+
+/// The key for a virtual-key code (`VK_*`); `extended` is the extended-key bit
+/// of `lParam` (bit 24), which tells the Enter on the keypad from the main one.
+/// `Key::unknown` for a code with no key.
+Key key_for_win32_vk(std::uint32_t vk, bool extended) noexcept;
+
+/// Modifier bits from the states of the modifier keys.
+std::uint32_t modifiers_from_win32_keys(bool shift, bool control, bool alt, bool windows,
+                                        bool caps_lock) noexcept;
+
+/// `PointerEvent::buttons_held` from the `MK_*` bits of a mouse message's
+/// `wParam`: bit 0 left, bit 1 right, bit 2 middle, and bits 3 and 4 for the
+/// two extra buttons.
+std::uint32_t buttons_held_from_win32_mk(unsigned mk) noexcept;
+
+/// Wheel lines for a `WM_MOUSEWHEEL` / `WM_MOUSEHWHEEL` delta (`WHEEL_DELTA`
+/// is 120 per detent), with the sign convention of `WheelEvent`: a vertical
+/// wheel turned away from the user (positive delta) moves content down. A
+/// horizontal delta is positive when the wheel tilts right, which moves content
+/// left, so pass `horizontal` to flip it.
+double win32_wheel_lines(int delta, bool horizontal) noexcept;
+
+/// The system cursor resource id (`IDC_*`) for `cursor`; the Win32 backend
+/// passes it to `LoadCursor`. Windows has no open-hand or grab cursor: the
+/// pointing hand stands for the open hand and the four-way arrow for the closed.
+unsigned win32_cursor_resource(Cursor cursor) noexcept;
+
 /// The `NSCursor*` for `cursor`. A cursor the running system has no public
 /// equivalent for falls back to the arrow; `cursor_is_native` says which.
 void* ns_cursor_for(Cursor cursor);

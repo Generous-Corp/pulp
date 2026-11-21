@@ -367,7 +367,7 @@ rendering:
     status: experimental
     platform: linux
     ci_test: pulp-test-native-gl-surface-x11
-    notes: pulp::native::GlSurface on X11 (integrations/pulp-native) gives an editor that brings its own renderer a child window of the host's X11 window with a GLX context on a render-thread connection, following the host window's size and delivering pointer, wheel, key, text and focus input when the editor calls dispatch_events(). Covered under a virtual X server on a software renderer (llvmpipe) with synthesized X events and the X test extension; not run on a hardware GPU or in a DAW. No drops, cursors or input method (text is ASCII and Latin-1).
+    notes: pulp::native::GlSurface on X11 (integrations/pulp-native) gives an editor that brings its own renderer a child window of the host's X11 window with a GLX context on a render-thread connection, following the host window's size and delivering pointer, wheel, key, text and focus input when the editor calls dispatch_events(). Covered under a virtual X server on a software renderer (llvmpipe) with synthesized X events and the X test extension; not run on a hardware GPU or in a DAW. Cursor shapes follow set_cursor (checked through XFixes). No drops or input method (text is ASCII and Latin-1).
   coregraphics_fallback:
     status: usable
     platform: macos

@@ -22,6 +22,9 @@
 #if defined(PULP_TEST_HAS_XTEST)
 #include <X11/extensions/XTest.h>
 #endif
+#if defined(PULP_TEST_HAS_XFIXES)
+#include <X11/extensions/Xfixes.h>
+#endif
 
 #include <dirent.h>
 
@@ -1029,4 +1032,72 @@ TEST_CASE("a drag that leaves the window is still delivered to it", "[native][gl
     REQUIRE(pointer.back().y == 500.0);
     REQUIRE(pointer.back().buttons_held == 0u);
 }
+#endif
+
+#if defined(PULP_TEST_HAS_XTEST) && defined(PULP_TEST_HAS_XFIXES)
+
+namespace {
+
+// The serial of the cursor the server shows under the pointer now.
+unsigned long shown_cursor_serial(Display* d) {
+    XSync(d, False);
+    XFixesCursorImage* image = XFixesGetCursorImage(d);
+    if (image == nullptr)
+        return 0;
+    const unsigned long serial = image->cursor_serial;
+    XFree(image);
+    return serial;
+}
+
+void put_pointer(Display* d, int x, int y) {
+    XTestFakeMotionEvent(d, 0, x, y, 0);
+    XSync(d, False);
+}
+
+} // namespace
+
+TEST_CASE("the cursor over the surface follows set_cursor", "[native][gl-surface][x11]") {
+    HostConnection conn;
+    int event_base = 0;
+    int error_base = 0;
+    int major = 0;
+    int minor = 0;
+    if (!XTestQueryExtension(conn.display, &event_base, &error_base, &major, &minor) ||
+        !XFixesQueryExtension(conn.display, &event_base, &error_base)) {
+        if (env_set("PULP_TEST_REQUIRE_X11_DISPLAY"))
+            FAIL("the X test or XFixes extension is missing");
+        SKIP("no XTEST or XFIXES extension on this X server");
+    }
+    HostWindow host(conn.display);
+    // The pointer outside every window shows the root's cursor.
+    put_pointer(conn.display, 900, 700);
+    const unsigned long root_cursor = shown_cursor_serial(conn.display);
+    REQUIRE(root_cursor != 0);
+
+    auto surface = GlSurface::create(any_driver());
+    surface->set_cursor(pulp::native::Cursor::crosshair); // before attaching: applied on attach
+    REQUIRE(surface->attach(host.handle()));
+    put_pointer(conn.display, 50, 50);
+    const unsigned long crosshair = shown_cursor_serial(conn.display);
+    REQUIRE(crosshair != root_cursor);
+
+    surface->set_cursor(pulp::native::Cursor::ibeam);
+    const unsigned long ibeam = shown_cursor_serial(conn.display);
+    REQUIRE(ibeam != crosshair);
+    REQUIRE(ibeam != root_cursor);
+    surface->set_cursor(pulp::native::Cursor::pointing_hand);
+    const unsigned long hand = shown_cursor_serial(conn.display);
+    REQUIRE(hand != ibeam);
+    REQUIRE(hand != crosshair);
+
+    // The same cursor again is the same cursor object, not a new one.
+    surface->set_cursor(pulp::native::Cursor::ibeam);
+    REQUIRE(shown_cursor_serial(conn.display) == ibeam);
+
+    // Detached, the window and its cursor are gone.
+    surface->detach();
+    put_pointer(conn.display, 52, 52);
+    REQUIRE(shown_cursor_serial(conn.display) != ibeam);
+}
+
 #endif
