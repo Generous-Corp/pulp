@@ -6,6 +6,10 @@
 #include <pulp/vellum/editor.hpp>
 #include <vellum/view/scripted_ui.hpp>
 
+#if defined(PULP_VELLUM_AUDIO)
+#include <pulp/vellum_audio/audio_widget_registration.hpp>
+#endif
+
 #include <cstdint>
 #include <string>
 
@@ -19,9 +23,15 @@ template <typename Session> class ScriptedEditorRoot final : public ::vellum::vi
     ScriptedEditorRoot(EditorEnv& env, format::Processor& processor)
         : processor_(processor), preferred_(processor.view_size()),
           supports_reload_(processor.supports_editor_reload()),
+#if defined(PULP_VELLUM_AUDIO)
+          visuals_(env.visuals),
+#endif
           session_(*this, env.params, script_options(processor, env.context.host_kind())) {
         set_theme(::vellum::view::Theme::dark());
         flex().direction = ::vellum::view::FlexDirection::column;
+#if defined(PULP_VELLUM_AUDIO)
+        ::pulp::vellum_audio::register_audio_widgets();
+#endif
         session_.set_host_kind(env.context.host_kind() == format::EditorHostKind::standalone
                                    ? "standalone"
                                    : "plugin");
@@ -57,6 +67,9 @@ template <typename Session> class ScriptedEditorRoot final : public ::vellum::vi
                 reload_generation_ = generation;
         }
         session_.poll();
+#if defined(PULP_VELLUM_AUDIO)
+        ::pulp::vellum_audio::sample_audio_widgets(*this, visuals_);
+#endif
     }
 
   private:
@@ -64,6 +77,9 @@ template <typename Session> class ScriptedEditorRoot final : public ::vellum::vi
     format::ViewSize preferred_;
     bool supports_reload_;
     std::uint64_t reload_generation_ = 0;
+#if defined(PULP_VELLUM_AUDIO)
+    ::vellum::value::ValueFeed* visuals_;
+#endif
     Session session_;
     ::vellum::view::PluginViewHost::GpuSurfaceSubscription gpu_subscription_;
 };
