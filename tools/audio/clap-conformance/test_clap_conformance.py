@@ -12,8 +12,10 @@ EXPECT_FAIL = {
     "heavy_memory": "scan-cost",
     "heavy_cpu": "scan-cost",
     "echo": "automation-echo",
+    "echo_main": "automation-echo",
     "null_input": "input-ports",
     "state": "state-round-trip",
+    "crash_teardown": "automation-echo",
 }
 
 
@@ -37,6 +39,8 @@ def main():
                 errors.append(f"{name}: {cname} should FAIL, got {c['status']} ({c['detail']})")
             if not expected and c["status"] == "FAIL":
                 errors.append(f"{name}: {cname} should not fail ({c['detail']})")
+            if name == "crash_teardown" and cname == "automation-echo" and "crashed" not in c["detail"]:
+                errors.append(f"{name}: crash not reported against its check: {c['detail']}")
             if not expected and c["status"] == "SKIP" and name in ("pulp", "good"):
                 errors.append(f"{name}: {cname} was skipped ({c['detail']})")
         print(name, {k: v["status"] for k, v in checks.items()})

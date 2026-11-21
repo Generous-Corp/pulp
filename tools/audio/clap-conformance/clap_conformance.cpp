@@ -32,11 +32,14 @@ int main() {
     return 2;
 }
 #else
+#include <dirent.h>
 #include <dlfcn.h>
 #include <sys/resource.h>
+#include <sys/stat.h>
 #include <sys/wait.h>
 #include <unistd.h>
 #if defined(__APPLE__)
+#include <CoreFoundation/CoreFoundation.h>
 #include <libproc.h>
 #endif
 
@@ -140,21 +143,47 @@ struct OutCount {
     int param_value = 0;
     int gesture_begin = 0;
     int gesture_end = 0;
+    // When `counting` is false events are dropped; when `ids` is non-empty only
+    // events for those parameters are counted.
+    bool counting = true;
+    std::vector<clap_id> ids;
     int total() const {
         return param_value + gesture_begin + gesture_end;
+    }
+    bool wants(clap_id id) const {
+        if (!counting)
+            return false;
+        if (ids.empty())
+            return true;
+        return std::find(ids.begin(), ids.end(), id) != ids.end();
     }
 };
 bool out_push(const clap_output_events_t* l, const clap_event_header_t* h) {
     auto* c = static_cast<OutCount*>(l->ctx);
     if (h->space_id == CLAP_CORE_EVENT_SPACE_ID) {
-        if (h->type == CLAP_EVENT_PARAM_VALUE)
-            c->param_value++;
-        else if (h->type == CLAP_EVENT_PARAM_GESTURE_BEGIN)
-            c->gesture_begin++;
-        else if (h->type == CLAP_EVENT_PARAM_GESTURE_END)
-            c->gesture_end++;
+        if (h->type == CLAP_EVENT_PARAM_VALUE) {
+            if (c->wants(reinterpret_cast<const clap_event_param_value_t*>(h)->param_id))
+                c->param_value++;
+        } else if (h->type == CLAP_EVENT_PARAM_GESTURE_BEGIN) {
+            if (c->wants(reinterpret_cast<const clap_event_param_gesture_t*>(h)->param_id))
+                c->gesture_begin++;
+        } else if (h->type == CLAP_EVENT_PARAM_GESTURE_END) {
+            if (c->wants(reinterpret_cast<const clap_event_param_gesture_t*>(h)->param_id))
+                c->gesture_end++;
+        }
     }
     return true;
+}
+
+// Turn the process main run loop for about `seconds`, the way a host's main
+// thread does between audio blocks. Plug-ins that publish from main-thread posts
+// only act when this runs.
+void turn_main_loop(double seconds) {
+#if defined(__APPLE__)
+    CFRunLoopRunInMode(kCFRunLoopDefaultMode, seconds, false);
+#else
+    usleep(static_cast<useconds_t>(seconds * 1e6));
+#endif
 }
 
 // ---- module + instance ----------------------------------------------------
@@ -165,8 +194,37 @@ struct Module {
     const clap_plugin_factory_t* factory = nullptr;
     std::string error;
 
+    // A macOS .clap is a bundle directory: dlopen its executable, but hand the
+    // bundle path to entry->init as the CLAP spec says.
+    static std::string executable_for(const std::string& path) {
+        struct stat st{};
+        if (stat(path.c_str(), &st) != 0 || !S_ISDIR(st.st_mode))
+            return path;
+        std::string dir = path;
+        while (dir.size() > 1 && dir.back() == '/')
+            dir.pop_back();
+        const std::string macos = dir + "/Contents/MacOS";
+        std::string stem = dir.substr(dir.find_last_of('/') + 1);
+        const auto dot = stem.rfind('.');
+        if (dot != std::string::npos)
+            stem.resize(dot);
+        if (stat((macos + "/" + stem).c_str(), &st) == 0)
+            return macos + "/" + stem;
+        if (DIR* d = opendir(macos.c_str())) {
+            std::string first;
+            while (dirent* e = readdir(d)) {
+                if (e->d_name[0] != '.' && first.empty())
+                    first = e->d_name;
+            }
+            closedir(d);
+            if (!first.empty())
+                return macos + "/" + first;
+        }
+        return path;
+    }
+
     bool open(const std::string& path) {
-        dl = dlopen(path.c_str(), RTLD_NOW | RTLD_LOCAL);
+        dl = dlopen(executable_for(path).c_str(), RTLD_NOW | RTLD_LOCAL);
         if (!dl) {
             error = std::string("dlopen failed: ") + dlerror();
             return false;
@@ -393,6 +451,34 @@ template <class Fn> int run_in_child(Fn&& fn, std::string* captured = nullptr) {
     return WEXITSTATUS(status);
 }
 
+// Runs a check in a forked child that opens the module itself, so a crash is
+// reported against this check and the others still run.
+template <class Fn> Result run_check_forked(const char* name, Fn&& fn) {
+    Result r{name, "FAIL", ""};
+    std::string msg;
+    int rc = run_in_child(
+        [&](std::string& out) {
+            alarm(120);
+            Result cr{name, "FAIL", ""};
+            fn(cr);
+            out = cr.status + '\x1f' + cr.detail;
+            return 0;
+        },
+        &msg);
+    if (rc >= 128) {
+        r.detail = fmt("crashed (signal %d) inside the plug-in during this check", rc - 128);
+        return r;
+    }
+    const auto sep = msg.find('\x1f');
+    if (rc != 0 || sep == std::string::npos) {
+        r.detail = "check did not complete";
+        return r;
+    }
+    r.status = msg.substr(0, sep);
+    r.detail = msg.substr(sep + 1);
+    return r;
+}
+
 std::string first_plugin_id(const clap_plugin_factory_t* f) {
     if (f->get_plugin_count(f) == 0)
         return {};
@@ -442,30 +528,74 @@ Result check_scan_cost(const Options& o) {
     return r;
 }
 
-Result check_automation_echo(Module& m, const std::string& id) {
-    Result r{"automation-echo", "FAIL", ""};
+// Drive at most this many parameters: every parameter at once makes a plug-in's
+// own dependent-value publishes indistinguishable from an echo.
+constexpr size_t kMaxDrivenParams = 4;
+
+void check_automation_echo(const Options& o, const std::string& id, Result& r) {
+    Module m;
+    if (!m.open(o.path)) {
+        r.detail = m.error;
+        return;
+    }
     Instance inst;
     std::string err;
     if (!inst.create(m, id, err)) {
         r.detail = err;
-        return r;
+        return;
     }
-    std::vector<clap_param_info_t> ps;
+    std::vector<clap_param_info_t> all;
     for (auto& i : inst.infos)
         if (automatable(i))
-            ps.push_back(i);
-    if (ps.empty()) {
+            all.push_back(i);
+    if (all.empty()) {
         inst.destroy();
         r.status = "SKIP";
         r.detail = "plug-in exposes no automatable parameters";
-        return r;
+        return;
     }
+    std::vector<clap_param_info_t> ps;
+    const size_t n = std::min(all.size(), kMaxDrivenParams);
+    for (size_t k = 0; k < n; ++k)
+        ps.push_back(all[k * all.size() / n]);
+
+    constexpr double kBlockSeconds = Block::kFrames / 48000.0;
     Block blk(inst);
     OutCount out;
-    int blocks = 0;
-    for (int b = 0; b < 48; ++b) {
+    for (auto& i : ps)
+        out.ids.push_back(i.id);
+
+    auto service = [&](OutCount& oc) {
+        turn_main_loop(kBlockSeconds);
+        if (inst.hs.request_callback) {
+            inst.hs.request_callback = 0;
+            inst.p->on_main_thread(inst.p);
+        }
+        if (inst.hs.request_flush && inst.params) {
+            inst.hs.request_flush = 0;
+            InQueue empty;
+            clap_input_events_t ie{&empty, in_size, in_get};
+            clap_output_events_t oe{&oc, out_push};
+            inst.params->flush(inst.p, &ie, &oe);
+        }
+    };
+
+    // About 2 s of empty blocks with the main loop turning, so boot-time
+    // publishes happen before anything is counted.
+    out.counting = false;
+    const int warm = static_cast<int>(2.0 / kBlockSeconds);
+    for (int b = 0; b < warm; ++b) {
         InQueue q;
-        if (b < 32) {
+        blk.run(inst, q, out, 0);
+        service(out);
+    }
+
+    // Driven window plus a settle tail, counting only the driven parameters.
+    out.counting = true;
+    const int driven = 100, settle = 40;
+    for (int b = 0; b < driven + settle; ++b) {
+        InQueue q;
+        if (b < driven) {
             for (auto& i : ps) {
                 double span = i.max_value - i.min_value;
                 double v = i.min_value + span * (0.5 + 0.4 * std::sin(0.3 * b + i.id));
@@ -474,32 +604,15 @@ Result check_automation_echo(Module& m, const std::string& id) {
             }
         }
         blk.run(inst, q, out, 0);
-        if (inst.hs.request_callback) {
-            inst.hs.request_callback = 0;
-            inst.p->on_main_thread(inst.p);
-        }
-        ++blocks;
+        service(out);
     }
-    if (inst.params) {
-        InQueue q;
-        for (auto& i : ps)
-            q.ev.push_back(make_param_event(i, i.default_value, 0));
-        clap_input_events_t ie{&q, in_size, in_get};
-        OutCount fo;
-        clap_output_events_t oe{&fo, out_push};
-        inst.params->flush(inst.p, &ie, &oe);
-        out.param_value += fo.param_value;
-        out.gesture_begin += fo.gesture_begin;
-        out.gesture_end += fo.gesture_end;
-    }
-    r.detail =
-        fmt("%zu param(s) driven over %d blocks; out-events: %d param-value, %d gesture-begin, "
-            "%d gesture-end; host request_flush calls: %d",
-            ps.size(), blocks, out.param_value, out.gesture_begin, out.gesture_end,
-            inst.hs.request_flush);
+    r.detail = fmt("%zu of %zu automatable param(s) driven over %d blocks after a %d-block warm-up "
+                   "with the main loop turning; out-events for them: %d param-value, %d "
+                   "gesture-begin, %d gesture-end",
+                   ps.size(), all.size(), driven, warm, out.param_value, out.gesture_begin,
+                   out.gesture_end);
     r.status = out.total() == 0 ? "PASS" : "FAIL";
     inst.destroy();
-    return r;
 }
 
 Result check_input_ports(const Options& o, const std::string& id) {
@@ -586,19 +699,23 @@ bool save_state(Instance& inst, std::vector<uint8_t>& out) {
     return true;
 }
 
-Result check_state_round_trip(Module& m, const std::string& id) {
-    Result r{"state-round-trip", "FAIL", ""};
+void check_state_round_trip(const Options& o, const std::string& id, Result& r) {
+    Module m;
+    if (!m.open(o.path)) {
+        r.detail = m.error;
+        return;
+    }
     Instance a;
     std::string err;
     if (!a.create(m, id, err)) {
         r.detail = err;
-        return r;
+        return;
     }
     if (!a.state) {
         a.destroy();
         r.status = "SKIP";
         r.detail = "plug-in has no state extension";
-        return r;
+        return;
     }
     // Move every automatable parameter off its default so the state is not trivial.
     Block blk(a);
@@ -613,13 +730,13 @@ Result check_state_round_trip(Module& m, const std::string& id) {
     if (!save_state(a, s1)) {
         a.destroy();
         r.detail = "state.save failed";
-        return r;
+        return;
     }
     Instance b;
     if (!b.create(m, id, err)) {
         a.destroy();
         r.detail = "second instance: " + err;
-        return r;
+        return;
     }
     Src src{&s1, 0};
     clap_istream_t is{&src, src_read};
@@ -629,11 +746,11 @@ Result check_state_round_trip(Module& m, const std::string& id) {
     b.destroy();
     if (!loaded) {
         r.detail = fmt("state.load failed on a fresh instance (%zu bytes)", s1.size());
-        return r;
+        return;
     }
     if (!saved) {
         r.detail = "state.save failed after load";
-        return r;
+        return;
     }
     if (s1 == s2) {
         r.status = "PASS";
@@ -645,7 +762,7 @@ Result check_state_round_trip(Module& m, const std::string& id) {
         r.detail = fmt("save/load/save differs: %zu vs %zu bytes, first difference at byte %zu",
                        s1.size(), s2.size(), at);
     }
-    return r;
+    return;
 }
 
 std::string json_escape(const std::string& s) {
@@ -690,38 +807,66 @@ int main(int argc, char** argv) {
         return 2;
     }
 
+    // Plug-ins log to stdout; keep that out of our report. The report goes to
+    // the original stdout, everything the plug-in prints goes to stderr.
+    std::fflush(stdout);
+    FILE* report = fdopen(dup(STDOUT_FILENO), "w");
+    dup2(STDERR_FILENO, STDOUT_FILENO);
+    if (!report)
+        report = stderr;
+
+    // Find the plug-in id in a child: a module that crashes on load is a result
+    // of the scan check, not a reason to print nothing.
+    std::string id = o.plugin_id;
+    std::string id_msg;
+    int id_rc = id.empty() ? run_in_child(
+                                 [&](std::string& out) {
+                                     alarm(60);
+                                     Module m;
+                                     if (!m.open(o.path)) {
+                                         out = m.error;
+                                         return 2;
+                                     }
+                                     out = first_plugin_id(m.factory);
+                                     return out.empty() ? 3 : 0;
+                                 },
+                                 &id_msg)
+                           : 0;
     std::vector<Result> results;
     results.push_back(check_scan_cost(o));
-
-    Module m;
-    if (!m.open(o.path)) {
-        std::fprintf(stderr, "clap-conformance: %s\n", m.error.c_str());
-        return 2;
-    }
-    const std::string id = o.plugin_id.empty() ? first_plugin_id(m.factory) : o.plugin_id;
     if (id.empty()) {
-        std::fprintf(stderr, "clap-conformance: module lists no plug-ins\n");
-        return 2;
+        if (id_rc != 0) {
+            std::fprintf(stderr, "clap-conformance: %s\n",
+                         id_rc >= 128 ? "module crashed while loading"
+                         : id_rc == 3 ? "module lists no plug-ins"
+                                      : id_msg.c_str());
+            return 2;
+        }
+        id = id_msg;
     }
-    results.push_back(check_automation_echo(m, id));
+    results.push_back(
+        run_check_forked("automation-echo", [&](Result& r) { check_automation_echo(o, id, r); }));
     results.push_back(check_input_ports(o, id));
-    results.push_back(check_state_round_trip(m, id));
+    results.push_back(
+        run_check_forked("state-round-trip", [&](Result& r) { check_state_round_trip(o, id, r); }));
 
     bool failed = false;
     for (auto& r : results)
         failed |= r.status == "FAIL";
     if (o.json) {
-        std::printf("{\"plugin\":\"%s\",\"checks\":[", json_escape(id).c_str());
+        std::fprintf(report, "{\"plugin\":\"%s\",\"checks\":[", json_escape(id).c_str());
         for (size_t i = 0; i < results.size(); ++i)
-            std::printf("%s{\"name\":\"%s\",\"status\":\"%s\",\"detail\":\"%s\"}", i ? "," : "",
-                        results[i].name.c_str(), results[i].status.c_str(),
-                        json_escape(results[i].detail).c_str());
-        std::printf("]}\n");
+            std::fprintf(report, "%s{\"name\":\"%s\",\"status\":\"%s\",\"detail\":\"%s\"}",
+                         i ? "," : "", results[i].name.c_str(), results[i].status.c_str(),
+                         json_escape(results[i].detail).c_str());
+        std::fprintf(report, "]}\n");
     } else {
-        std::printf("plug-in: %s\n", id.c_str());
+        std::fprintf(report, "plug-in: %s\n", id.c_str());
         for (auto& r : results)
-            std::printf("  %-4s %-17s %s\n", r.status.c_str(), r.name.c_str(), r.detail.c_str());
+            std::fprintf(report, "  %-4s %-17s %s\n", r.status.c_str(), r.name.c_str(),
+                         r.detail.c_str());
     }
+    std::fflush(report);
     if (!o.expect_fail.empty()) {
         for (auto& r : results)
             if (r.name == o.expect_fail)

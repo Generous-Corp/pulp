@@ -600,7 +600,11 @@ if(PULP_HAS_CLAP)
         set_target_properties(pulp-test-clap-conf-pulp PROPERTIES
             OUTPUT_NAME "ConfPulp" PREFIX "" SUFFIX ".clap")
         set(_conf_modules pulp-test-clap-conf-pulp)
-        foreach(_v good HEAVY_MEMORY HEAVY_CPU ECHO NULL_INPUT STATE)
+        set(_conf_variants good HEAVY_MEMORY HEAVY_CPU ECHO NULL_INPUT STATE CRASH_TEARDOWN)
+        if(APPLE)
+            list(APPEND _conf_variants ECHO_MAIN)
+        endif()
+        foreach(_v ${_conf_variants})
             string(TOLOWER ${_v} _lv)
             add_library(pulp-test-clap-conf-${_lv} MODULE ${_conf_dir}/conformance_fixture_clap.cpp)
             target_link_libraries(pulp-test-clap-conf-${_lv} PRIVATE clap)
@@ -611,6 +615,15 @@ if(PULP_HAS_CLAP)
                 OUTPUT_NAME "Conf_${_lv}" PREFIX "" SUFFIX ".clap")
             list(APPEND _conf_modules pulp-test-clap-conf-${_lv})
         endforeach()
+        if(APPLE)
+            # A macOS bundle: Contents/MacOS/<exe>, handed to the checker by its
+            # bundle path.
+            add_custom_target(pulp-test-clap-conf-bundle ALL
+                COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_CURRENT_BINARY_DIR}/ConfBundle.clap/Contents/MacOS
+                COMMAND ${CMAKE_COMMAND} -E copy $<TARGET_FILE:pulp-test-clap-conf-good>
+                    ${CMAKE_CURRENT_BINARY_DIR}/ConfBundle.clap/Contents/MacOS/ConfBundle
+                DEPENDS pulp-test-clap-conf-good)
+        endif()
         find_package(Python3 COMPONENTS Interpreter QUIET)
         if(Python3_Interpreter_FOUND)
             add_test(NAME clap-conformance-checker
@@ -622,7 +635,10 @@ if(PULP_HAS_CLAP)
                     heavy_memory=$<TARGET_FILE:pulp-test-clap-conf-heavy_memory>
                     heavy_cpu=$<TARGET_FILE:pulp-test-clap-conf-heavy_cpu>
                     echo=$<TARGET_FILE:pulp-test-clap-conf-echo>
+                    $<$<BOOL:${APPLE}>:echo_main=$<TARGET_FILE:pulp-test-clap-conf-echo_main>>
                     null_input=$<TARGET_FILE:pulp-test-clap-conf-null_input>
+                    crash_teardown=$<TARGET_FILE:pulp-test-clap-conf-crash_teardown>
+                    $<$<BOOL:${APPLE}>:bundle=${CMAKE_CURRENT_BINARY_DIR}/ConfBundle.clap>
                     state=$<TARGET_FILE:pulp-test-clap-conf-state>)
             set_tests_properties(clap-conformance-checker PROPERTIES
                 LABELS "format;clap;tools" TIMEOUT 120)

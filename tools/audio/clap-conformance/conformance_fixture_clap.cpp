@@ -7,12 +7,21 @@
 //   BREAK_HEAVY_CPU     entry init burns about a billion instructions
 //   BREAK_ECHO          every host parameter event is sent back as an out-event
 //                       with a gesture pair, and a flush is requested
+//   BREAK_ECHO_MAIN     the host parameter event is posted to the main queue and
+//                       written back as an out-event only once the host main loop
+//                       has turned (macOS only; elsewhere it echoes nothing)
+//   BREAK_CRASH_TEARDOWN  destroy() aborts after a long run (more than 300 blocks)
 //   BREAK_NULL_INPUT    process reads the first input channel without checking
 //                       that the host supplied one
 //   BREAK_STATE         state.save embeds a per-save counter
 
 #include <clap/clap.h>
 
+#if defined(BREAK_ECHO_MAIN) && defined(__APPLE__)
+#include <dispatch/dispatch.h>
+#endif
+
+#include <atomic>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
@@ -24,6 +33,8 @@ struct Plug {
     clap_plugin_t plugin;
     const clap_host_t* host;
     double value[2] = {0.5, 0.5};
+    std::atomic<int> echo_pending[2] = {0, 0};
+    int blocks = 0;
 };
 
 const char* const kFeatures[] = {CLAP_PLUGIN_FEATURE_AUDIO_EFFECT, nullptr};
@@ -68,7 +79,31 @@ bool params_text_to_value(const clap_plugin_t*, clap_id, const char* t, double* 
     return true;
 }
 
+#if defined(BREAK_ECHO_MAIN) && defined(__APPLE__)
+struct EchoPost {
+    Plug* plug;
+    uint32_t index;
+};
+void echo_post_cb(void* ctx) {
+    auto* e = static_cast<EchoPost*>(ctx);
+    e->plug->echo_pending[e->index].store(1);
+    delete e;
+}
+#endif
+
 void handle_in(Plug* s, const clap_input_events_t* in, const clap_output_events_t* out) {
+#if defined(BREAK_ECHO_MAIN) && defined(__APPLE__)
+    for (uint32_t k = 0; k < 2; ++k) {
+        if (s->echo_pending[k].exchange(0)) {
+            clap_event_param_value_t e{};
+            e.header = {sizeof(e), 0, CLAP_CORE_EVENT_SPACE_ID, CLAP_EVENT_PARAM_VALUE, 0};
+            e.param_id = 100 + k;
+            e.note_id = e.port_index = e.channel = e.key = -1;
+            e.value = s->value[k];
+            out->try_push(out, &e.header);
+        }
+    }
+#endif
     for (uint32_t i = 0; i < in->size(in); ++i) {
         const clap_event_header_t* h = in->get(in, i);
         if (h->space_id != CLAP_CORE_EVENT_SPACE_ID || h->type != CLAP_EVENT_PARAM_VALUE)
@@ -76,6 +111,11 @@ void handle_in(Plug* s, const clap_input_events_t* in, const clap_output_events_
         auto* e = reinterpret_cast<const clap_event_param_value_t*>(h);
         if (e->param_id >= 100 && e->param_id <= 101)
             s->value[e->param_id - 100] = e->value;
+#if defined(BREAK_ECHO_MAIN) && defined(__APPLE__)
+        if (e->param_id >= 100 && e->param_id <= 101)
+            dispatch_async_f(dispatch_get_main_queue(), new EchoPost{s, e->param_id - 100},
+                             echo_post_cb);
+#endif
 #ifdef BREAK_ECHO
         clap_event_param_gesture_t g{};
         g.header = {sizeof(g), 0, CLAP_CORE_EVENT_SPACE_ID, CLAP_EVENT_PARAM_GESTURE_BEGIN, 0};
@@ -143,6 +183,10 @@ bool p_init(const clap_plugin_t*) {
     return true;
 }
 void p_destroy(const clap_plugin_t* p) {
+#ifdef BREAK_CRASH_TEARDOWN
+    if (static_cast<Plug*>(p->plugin_data)->blocks > 300)
+        std::abort();
+#endif
     delete static_cast<Plug*>(p->plugin_data);
 }
 bool p_activate(const clap_plugin_t*, double, uint32_t, uint32_t) {
@@ -156,6 +200,7 @@ void p_stop(const clap_plugin_t*) {}
 void p_reset(const clap_plugin_t*) {}
 clap_process_status p_process(const clap_plugin_t* p, const clap_process_t* pr) {
     auto* self = static_cast<Plug*>(p->plugin_data);
+    ++self->blocks;
     handle_in(self, pr->in_events, pr->out_events);
 #ifdef BREAK_NULL_INPUT
     volatile float probe = pr->audio_inputs[0].data32[0][0];
@@ -203,6 +248,8 @@ const clap_plugin_t* f_create(const clap_plugin_factory_t*, const clap_host_t* h
 const clap_plugin_factory_t kFactory = {f_count, f_desc, f_create};
 
 bool e_init(const char*) {
+    // Plug-ins commonly log to stdout; the checker's report must survive it.
+    std::printf("conformance fixture loaded\n");
 #if defined(BREAK_HEAVY_MEMORY)
     const size_t n = 128u << 20;
     auto* m = static_cast<volatile char*>(std::malloc(n));
