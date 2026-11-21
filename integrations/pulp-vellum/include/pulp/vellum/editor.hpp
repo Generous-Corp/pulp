@@ -265,7 +265,9 @@ template <typename ViewType> class Editor final : public format::Editor {
 
 template <typename ViewType> class EditorFactory final : public format::EditorFactory {
   public:
-    EditorFactory() { detail::link_editor_prewarm(); }
+    EditorFactory() {
+        detail::link_editor_prewarm();
+    }
 
     bool supports(format::EditorRole role) const override {
         return role == format::EditorRole::editor || role == format::EditorRole::inspector;
