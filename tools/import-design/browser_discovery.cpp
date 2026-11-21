@@ -186,22 +186,28 @@ std::optional<fs::path> managed_current_browser(const fs::path& root) {
 std::vector<fs::path> default_system_browser_paths() {
     std::vector<fs::path> paths;
 #ifdef __APPLE__
-    paths.emplace_back(
-        "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome");
-    paths.emplace_back(
-        "/Applications/Google Chrome for Testing.app/Contents/MacOS/"
-        "Google Chrome for Testing");
-    paths.emplace_back(
-        "/Applications/Chromium.app/Contents/MacOS/Chromium");
-    if (const char* home = std::getenv("HOME"); home && *home) {
-        const fs::path applications = fs::path(home) / "Applications";
-        paths.push_back(
-            applications / "Google Chrome.app/Contents/MacOS/Google Chrome");
-        paths.push_back(
-            applications / "Google Chrome for Testing.app/Contents/MacOS/"
+    const bool in_agent_sandbox = [] {
+        const char* value = std::getenv("CODEX_SANDBOX");
+        return value && *value;
+    }();
+    if (!in_agent_sandbox) {
+        paths.emplace_back(
+            "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome");
+        paths.emplace_back(
+            "/Applications/Google Chrome for Testing.app/Contents/MacOS/"
             "Google Chrome for Testing");
-        paths.push_back(applications /
-                        "Chromium.app/Contents/MacOS/Chromium");
+        paths.emplace_back(
+            "/Applications/Chromium.app/Contents/MacOS/Chromium");
+        if (const char* home = std::getenv("HOME"); home && *home) {
+            const fs::path applications = fs::path(home) / "Applications";
+            paths.push_back(
+                applications / "Google Chrome.app/Contents/MacOS/Google Chrome");
+            paths.push_back(
+                applications / "Google Chrome for Testing.app/Contents/MacOS/"
+                "Google Chrome for Testing");
+            paths.push_back(applications /
+                            "Chromium.app/Contents/MacOS/Chromium");
+        }
     }
 #elif defined(_WIN32)
     auto append_from = [&](const char* variable, const fs::path& suffix) {
@@ -228,8 +234,16 @@ std::vector<fs::path> default_system_browser_paths() {
         "chromium-browser"};
 #endif
     for (const auto name : names) {
-        if (auto found = platform::find_on_path(std::string(name)))
+        if (auto found = platform::find_on_path(std::string(name))) {
+#ifdef __APPLE__
+            if (in_agent_sandbox && std::any_of(
+                    found->begin(), found->end(), [](const fs::path& component) {
+                        return component.extension() == ".app";
+                    }))
+                continue;
+#endif
             paths.push_back(*found);
+        }
     }
     return paths;
 }

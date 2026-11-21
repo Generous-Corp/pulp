@@ -15,6 +15,7 @@ import sys
 import tempfile
 import textwrap
 import unittest
+from unittest import mock
 from pathlib import Path
 
 try:
@@ -28,6 +29,13 @@ SPEC = importlib.util.spec_from_file_location("chrome_gradient_oracle", SCRIPT)
 assert SPEC is not None and SPEC.loader is not None
 oracle = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(oracle)
+
+BACKDROP_SCRIPT = SCRIPT.with_name("chrome_backdrop_opacity_oracle.py")
+BACKDROP_SPEC = importlib.util.spec_from_file_location(
+    "chrome_backdrop_opacity_oracle", BACKDROP_SCRIPT)
+assert BACKDROP_SPEC is not None and BACKDROP_SPEC.loader is not None
+backdrop_oracle = importlib.util.module_from_spec(BACKDROP_SPEC)
+BACKDROP_SPEC.loader.exec_module(backdrop_oracle)
 
 # Each fake reads the same --screenshot / --window-size flags Chrome does.
 # `mode` selects what it leaves behind and how it exits.
@@ -92,6 +100,25 @@ class ScreenshotVerdictTest(unittest.TestCase):
         with self.assertRaises(SystemExit) as ctx:
             oracle.render("linear-gradient(#ff0000, #0000ff)", w=40, h=30)
         self.assertIn("unreadable screenshot", str(ctx.exception.code))
+
+    def test_installed_app_is_skipped_in_sandbox(self):
+        oracle.CHROME = str(Path(self._tmp.name) / "Google Chrome.app" /
+                            "Contents" / "MacOS" / "Google Chrome")
+        with mock.patch.dict(os.environ, {"CODEX_SANDBOX": "seatbelt"}):
+            with self.assertRaises(SystemExit) as ctx:
+                oracle.render("linear-gradient(#ff0000, #0000ff)")
+        self.assertEqual(ctx.exception.code.__class__, str)
+        self.assertIn("cannot start in a sandbox", ctx.exception.code)
+
+    def test_backdrop_oracle_skips_installed_app_in_sandbox(self):
+        old_chrome = backdrop_oracle.CHROME
+        self.addCleanup(setattr, backdrop_oracle, "CHROME", old_chrome)
+        backdrop_oracle.CHROME = str(Path(self._tmp.name) / "Chromium.app" /
+                                    "Contents" / "MacOS" / "Chromium")
+        with mock.patch.dict(os.environ, {"CODEX_SANDBOX": "seatbelt"}):
+            with self.assertRaises(SystemExit) as ctx:
+                backdrop_oracle.render()
+        self.assertIn("cannot start in a sandbox", ctx.exception.code)
 
 
 class ColumnMeanTest(unittest.TestCase):
