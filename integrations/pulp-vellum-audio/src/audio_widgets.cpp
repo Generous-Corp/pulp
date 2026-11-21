@@ -33,6 +33,10 @@ void LevelMeter::set_levels(float primary, float secondary) {
     return resolve_color("meter.green", ::vellum::canvas::Color::rgba8(80, 200, 80));
 }
 
+::vellum::canvas::Color LevelMeter::bar_color(float level) const {
+    return fill_override_ ? *fill_override_ : level_color(level);
+}
+
 MidiKeyboard::MidiKeyboard() {
     set_focusable(true);
     set_access_role(::vellum::view::View::AccessRole::group);
@@ -215,13 +219,13 @@ void LevelMeter::set_level_fill(std::optional<::vellum::canvas::Color> backgroun
     if (background)
         background_ = *background;
     if (!gradient.empty())
-        fill_ = gradient.back();
+        fill_override_ = gradient.back();
     request_repaint();
 }
 
 void LevelMeter::clear_level_fill() {
     background_ = {0.08f, 0.08f, 0.1f, 1.0f};
-    fill_ = {0.25f, 0.85f, 0.35f, 1.0f};
+    fill_override_.reset();
     request_repaint();
 }
 
@@ -241,6 +245,7 @@ void LevelMeter::sample() noexcept {
             rms_ = peak_ = 0.0f;
         }
         (void)ballistics_.update(0.0f, 0.0f, 1.0f / 60.0f);
+        request_repaint(); // decay and peak-hold release must stay visible
         return;
     }
     std::array<float, AudioDisplayProvider::kMaxMeterChannels> rms{};
@@ -266,6 +271,7 @@ void LevelMeter::sample() noexcept {
     stale_ = true;
     rms_ = peak_ = 0.0f;
     (void)ballistics_.update(0.0f, 0.0f, 1.0f / 60.0f);
+    request_repaint();
 }
 
 void LevelMeter::paint(::vellum::canvas::Canvas& canvas) {
@@ -276,7 +282,7 @@ void LevelMeter::paint(::vellum::canvas::Canvas& canvas) {
     const float length = vertical ? b.height : b.width;
     const float level = std::clamp(ballistics_.display_rms, 0.0f, 1.0f);
     const float fill = std::round(level * length);
-    canvas.set_fill_color(level_color(level));
+    canvas.set_fill_color(bar_color(level));
     const float cross = vertical ? b.width * std::clamp(bar_ratio_, 0.05f, 1.0f) : b.height;
     if (vertical)
         canvas.fill_rect((b.width - cross) * 0.5f, b.height - fill, cross, fill);

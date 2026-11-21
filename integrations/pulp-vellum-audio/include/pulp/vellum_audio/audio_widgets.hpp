@@ -74,6 +74,9 @@ class LevelMeter final : public ::vellum::view::View,
         return ballistics_.held_peak;
     }
     [[nodiscard]] ::vellum::canvas::Color level_color(float level) const;
+    /// Colour paint() uses for the bar: the explicit set_level_fill() colour
+    /// when one is configured, otherwise the threshold colour for @p level.
+    [[nodiscard]] ::vellum::canvas::Color bar_color(float level) const;
     [[nodiscard]] bool stale() const noexcept {
         return stale_;
     }
@@ -91,7 +94,8 @@ class LevelMeter final : public ::vellum::view::View,
     float bar_ratio_ = 1.0f;
     Orientation orientation_ = Orientation::vertical;
     ::vellum::canvas::Color background_{0.08f, 0.08f, 0.1f, 1.0f};
-    ::vellum::canvas::Color fill_{0.25f, 0.85f, 0.35f, 1.0f};
+    // Explicit fill from set_level_fill(); unset means theme threshold colours.
+    std::optional<::vellum::canvas::Color> fill_override_;
     AudioFrameInfo info_;
     std::uint32_t last_publish_ = 0;
     std::uint32_t quiet_ticks_ = 0;
@@ -128,12 +132,14 @@ class MidiKeyboard final : public ::vellum::view::View {
     }
     void set_show_note_names(bool show) {
         show_names_ = show;
+        request_repaint();
     }
     bool show_note_names() const {
         return show_names_;
     }
     void set_highlight_color(::vellum::canvas::Color color) {
         highlight_color_ = color;
+        request_repaint();
     }
 
     void paint(::vellum::canvas::Canvas& canvas) override;

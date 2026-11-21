@@ -15,6 +15,7 @@
 #include <chrono>
 #include <cstdint>
 #include <memory>
+#include <optional>
 #include <string>
 #include <thread>
 #include <vector>
@@ -59,6 +60,12 @@ void require_feed_render_contract(const RenderedFrame& first, const RenderedFram
         }
     }
     CHECK(changed);
+}
+
+// Repaint requests Vellum has recorded process-wide; a paint-input setter that
+// forgets request_repaint() leaves this unchanged.
+std::uint64_t repaint_requests() {
+    return ::vellum::view::View::damage_request_count();
 }
 
 } // namespace
@@ -324,6 +331,67 @@ TEST_CASE("Vellum LevelMeter matches legacy thresholds, ballistics, hold, and ac
         meter.set_levels(0.0f, 0.0f);
     CHECK(meter.displayed_peak() < 0.01f);
     CHECK(meter.held_peak() < held);
+}
+
+TEST_CASE("Vellum LevelMeter honours an explicit level fill over threshold colours",
+          "[pulp-vellum-audio][level-meter]") {
+    pulp::vellum_audio::LevelMeter meter;
+    const ::vellum::canvas::Color blue{0.0f, 0.0f, 1.0f, 1.0f};
+    CHECK(meter.bar_color(0.5f) == meter.level_color(0.5f));
+    meter.set_level_fill(std::nullopt, {blue});
+    CHECK(meter.bar_color(0.5f) == blue);
+    CHECK(meter.bar_color(0.95f) == blue);
+    meter.clear_level_fill();
+    CHECK(meter.bar_color(0.5f) == meter.level_color(0.5f));
+    CHECK(meter.bar_color(0.95f) == meter.level_color(0.95f));
+}
+
+TEST_CASE("Vellum LevelMeter renders its explicit level fill colour",
+          "[pulp-vellum-audio][level-meter][render]") {
+    if (!::vellum::view::raw_rgba_render_available())
+        SKIP("Vellum CPU raster backend unavailable");
+    pulp::vellum_audio::LevelMeter meter;
+    meter.set_bounds({0, 0, 128, 96});
+    meter.set_level_fill(::vellum::canvas::Color{0.0f, 0.0f, 0.0f, 1.0f},
+                         {::vellum::canvas::Color{0.0f, 0.0f, 1.0f, 1.0f}});
+    meter.set_levels(1.0f, 0.0f); // full-height bar after one ballistics tick
+    for (int i = 0; i < 120; ++i)
+        meter.set_levels(1.0f, 0.0f);
+    const auto frame = render(meter);
+    REQUIRE(frame.width == 128);
+    // Sample near the bottom centre, inside the bar and away from peak lines.
+    const auto offset = static_cast<std::size_t>(90) * frame.width * 4 + 64 * 4;
+    CHECK(frame.pixels[offset + 0] < 32);
+    CHECK(frame.pixels[offset + 1] < 32);
+    CHECK(frame.pixels[offset + 2] > 220);
+}
+
+TEST_CASE("Vellum LevelMeter requests repaint while decaying without new publications",
+          "[pulp-vellum-audio][level-meter]") {
+    pulp::vellum_audio::AudioDisplayProvider provider({
+        {.name = "level", .shape = ::vellum::value::ChannelShape::meter},
+    });
+    const auto level = provider.find("level", ::vellum::value::ChannelShape::meter);
+    REQUIRE(level);
+    pulp::vellum_audio::LevelMeter meter(&provider);
+    meter.set_channel(*level);
+    meter.set_bounds({0, 0, 16, 96});
+    provider.publish_meter(*level, std::array{0.8f}, std::array{0.9f});
+    meter.sample();
+    const auto before = repaint_requests();
+    meter.sample(); // same publication: ballistics decay, so paint inputs changed
+    CHECK(repaint_requests() > before);
+}
+
+TEST_CASE("Vellum MidiKeyboard appearance setters request repaint",
+          "[pulp-vellum-audio][midi-keyboard]") {
+    pulp::vellum_audio::MidiKeyboard keyboard;
+    auto before = repaint_requests();
+    keyboard.set_show_note_names(true);
+    CHECK(repaint_requests() > before);
+    before = repaint_requests();
+    keyboard.set_highlight_color({1.0f, 0.0f, 0.0f, 1.0f});
+    CHECK(repaint_requests() > before);
 }
 
 TEST_CASE("Vellum MidiKeyboard hit-tests black keys and emits editor MIDI callbacks",
