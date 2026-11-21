@@ -136,6 +136,14 @@ class StubHost final : public ::vellum::view::PluginViewHost {
         attached_ = false;
     }
     void repaint() override {}
+    bool present_first_frame() override {
+        ++present_first_frame_calls;
+        return present_first_frame_result;
+    }
+    std::vector<std::uint8_t> capture_back_buffer_png() override {
+        ++capture_back_buffer_calls;
+        return capture_bytes;
+    }
     void set_size(uint32_t width, uint32_t height) override {
         size_ = {width, height};
     }
@@ -154,6 +162,10 @@ class StubHost final : public ::vellum::view::PluginViewHost {
 
     int design_viewport_calls = 0;
     int fixed_aspect_calls = 0;
+    int present_first_frame_calls = 0;
+    int capture_back_buffer_calls = 0;
+    bool present_first_frame_result = true;
+    std::vector<std::uint8_t> capture_bytes = {0x89, 'P', 'N', 'G'};
     float design_width = 0;
     float design_height = 0;
     float aspect_ratio = 0;
@@ -477,6 +489,18 @@ TEST_CASE("A Vellum editor lays out its root and ticks it on idle", "[pulp-vellu
     CHECK(g_idle_ticks == 2);
     CHECK(g_idle_width == 640.0f);
     CHECK(g_idle_height == 480.0f);
+}
+
+TEST_CASE("A Vellum editor captures through its PluginViewHost", "[pulp-vellum][editor][capture]") {
+    HookFixture f;
+    auto* automation = f.editor->automation();
+    REQUIRE(automation != nullptr);
+
+    std::vector<std::uint8_t> png;
+    REQUIRE(automation->capture_png(png));
+    CHECK(png == f.host->capture_bytes);
+    CHECK(f.host->present_first_frame_calls == 1);
+    CHECK(f.host->capture_back_buffer_calls == 1);
 }
 
 TEST_CASE("A Vellum root can opt into processor access", "[pulp-vellum][editor][processor-hook]") {
