@@ -406,6 +406,33 @@ TEST_CASE("Vellum MidiKeyboard gives a lone accidental range usable geometry",
     }
 }
 
+TEST_CASE("Vellum MidiKeyboard keeps boundary accidentals fully inside the keyboard",
+          "[pulp-vellum-audio][midi-keyboard]") {
+    using Orientation = pulp::vellum_audio::MidiKeyboard::Orientation;
+    struct Case {
+        int first, last, accidental;
+        float probe; // inside the shifted key, outside one centred off the edge
+    };
+    // 61-62 starts on C#, 60-61 ends on C#: the accidental sits at an edge.
+    for (const auto c : {Case{61, 62, 61, 100.0f}, Case{60, 61, 61, 100.0f}}) {
+        for (const auto orientation : {Orientation::horizontal, Orientation::vertical}) {
+            pulp::vellum_audio::MidiKeyboard keyboard;
+            keyboard.set_range(c.first, c.last);
+            keyboard.set_orientation(orientation);
+            keyboard.set_bounds({0, 0, 200, 200});
+            std::vector<int> ons;
+            keyboard.on_note_on = [&](int note, float) { ons.push_back(note); };
+            const ::vellum::view::Point edge = orientation == Orientation::horizontal
+                                                   ? ::vellum::view::Point{c.probe, 10.0f}
+                                                   : ::vellum::view::Point{10.0f, c.probe};
+            keyboard.on_mouse_down(edge);
+            REQUIRE(ons.size() == 1);
+            CHECK(ons.front() == c.accidental);
+            keyboard.on_mouse_up(edge);
+        }
+    }
+}
+
 TEST_CASE("Vellum MidiKeyboard appearance setters request repaint",
           "[pulp-vellum-audio][midi-keyboard]") {
     pulp::vellum_audio::MidiKeyboard keyboard;

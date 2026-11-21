@@ -141,10 +141,13 @@ float MidiKeyboard::white_key_width() const {
     const float black_width = white_width * 0.6f;
     const float black_height = (horizontal ? bounds.height : bounds.width) * 0.6f;
     const float offset = white_width - black_width * 0.5f;
-    return horizontal ? ::vellum::view::Rect{white_index * white_width + offset - white_width, 0,
-                                             black_width, black_height}
-                      : ::vellum::view::Rect{0, white_index * white_width + offset - white_width,
-                                             black_height, black_width};
+    // A range that starts or ends on an accidental has no natural on that side,
+    // so the centred key would hang off the keyboard; shift it fully inside.
+    const float extent = horizontal ? bounds.width : bounds.height;
+    const float start = std::clamp(white_index * white_width + offset - white_width, 0.0f,
+                                   std::max(0.0f, extent - black_width));
+    return horizontal ? ::vellum::view::Rect{start, 0, black_width, black_height}
+                      : ::vellum::view::Rect{0, start, black_height, black_width};
 }
 
 int MidiKeyboard::note_at_position(::vellum::view::Point pos) const {
