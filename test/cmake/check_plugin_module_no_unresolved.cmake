@@ -79,12 +79,20 @@ else()
     if(n EQUAL 0)
         message(FATAL_ERROR "${MODULE}: expected unresolved symbols but found none; the probe cannot see the defect")
     endif()
-    # ldd -r exits nonzero when it cannot bind a symbol. Text alone (from a
-    # malformed or failed invocation) must not satisfy the negative control.
-    # RESULT_VARIABLE is a string, not a number, when ldd could not be run.
-    if(NOT "${rc}" MATCHES "^[0-9]+$" OR "${rc}" EQUAL 0)
-        message(FATAL_ERROR "${MODULE}: ldd -r reported undefined symbols but its exit status was '${rc}'; "
-            "the unresolved verdict needs a numeric nonzero ldd exit status:\n${all}")
+    # Text alone (from a malformed or failed invocation) must not satisfy the
+    # negative control. ldd must have run (RESULT_VARIABLE is a string, not a
+    # number, when it could not be launched) and each diagnostic must be in the
+    # loader's own form "undefined symbol: NAME<TAB>(<object>)". The exit status
+    # is not trusted: glibc's ldd exits 0 for a shared object that has no
+    # PT_INTERP ("statically linked") even while it lists unresolved symbols.
+    if(NOT "${rc}" MATCHES "^[0-9]+$")
+        message(FATAL_ERROR "${MODULE}: ldd -r could not run (result '${rc}'):\n${all}")
+    endif()
+    string(REGEX MATCHALL "undefined symbol: [^\n ]+[ \t]+\\([^\n)]+\\)" loader_form "${all}")
+    list(LENGTH loader_form n_loader)
+    if(n_loader EQUAL 0)
+        message(FATAL_ERROR "${MODULE}: undefined-symbol text is not in the loader's "
+            "'undefined symbol: NAME (object)' form, so it was not printed by ldd -r:\n${all}")
     endif()
 endif()
 message(STATUS "${MODULE}: ${n} unresolved symbols; libfontconfig needed: ${names_fontconfig}")
