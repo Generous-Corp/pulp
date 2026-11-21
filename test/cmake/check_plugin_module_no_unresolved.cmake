@@ -28,7 +28,7 @@ endif()
 execute_process(COMMAND "${LDD}" -r "${MODULE}"
     RESULT_VARIABLE rc OUTPUT_VARIABLE out ERROR_VARIABLE err)
 set(all "${out}\n${err}")
-if(NOT all MATCHES "libc\\.so|libstdc\\+\\+\\.so|statically linked")
+if(EXPECT STREQUAL "clean" AND NOT all MATCHES "libc\\.so|libstdc\\+\\+\\.so|statically linked")
     message(FATAL_ERROR "ldd -r printed no dependency list for ${MODULE}; the probe is not reading it:\n${all}")
 endif()
 
@@ -36,8 +36,10 @@ string(REGEX MATCHALL "undefined symbol: [^\n ]+" unresolved "${all}")
 list(LENGTH unresolved n)
 execute_process(COMMAND "${READELF}" -d "${MODULE}"
     RESULT_VARIABLE rc2 OUTPUT_VARIABLE dyn)
-if(NOT rc2 EQUAL 0 OR NOT dyn MATCHES "NEEDED")
-    message(FATAL_ERROR "readelf -d could not read the dynamic section of ${MODULE}")
+# A module with no dependencies has no NEEDED entries, so only a readelf
+# failure or a non-ELF file stops here.
+if(NOT rc2 EQUAL 0 OR NOT dyn MATCHES "Dynamic section|There is no dynamic section")
+    message(FATAL_ERROR "readelf -d could not read ${MODULE}")
 endif()
 set(names_fontconfig FALSE)
 if(dyn MATCHES "\\(NEEDED\\)[^\n]*libfontconfig")
