@@ -31,7 +31,7 @@ foreach(case IN ITEMS undef-exit0 undef-exit1)
         "-DLDD=${WORK_DIR}/ldd-${case}" "-DREADELF=${WORK_DIR}/readelf"
         "-DMODULE=${WORK_DIR}/module.so" -DEXPECT=unresolved -P "${probe}"
         RESULT_VARIABLE rc OUTPUT_VARIABLE out ERROR_VARIABLE err)
-    if(case STREQUAL "undef-exit0" AND (rc EQUAL 0 OR NOT err MATCHES "exited 0"))
+    if(case STREQUAL "undef-exit0" AND (rc EQUAL 0 OR NOT err MATCHES "exit status was"))
         message(FATAL_ERROR "unresolved mode accepted a zero ldd exit: ${out} ${err}")
     elseif(case STREQUAL "undef-exit1" AND NOT rc EQUAL 0)
         message(FATAL_ERROR "unresolved mode rejected a genuine nonzero exit: ${out} ${err}")
