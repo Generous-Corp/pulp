@@ -260,9 +260,10 @@ class MainThreadScope {
 /// run-loop modes. One-shots have zero tolerance (millisecond granularity);
 /// repeating timers get a tenth of their period (at least 5 ms, at most half
 /// the period) so timers started at different moments can share wake-ups.
-/// Repeating timers of 50 ms or more also fire on a grid of their period on
-/// the absolute clock, so same-period timers started at different moments fire
-/// in one run-loop pass; the first fire is never earlier than the period.
+/// Repeating timers of 50 ms or more fire their first callback one period
+/// after fire_every(), then move onto a grid of their period on the absolute
+/// clock, so same-period timers started at different moments fire in one
+/// run-loop pass from the second fire on.
 ///
 /// It is one-shot and reschedulable: fire_after() replaces any pending fire.
 /// fire_every() repeats until cancel() or another fire_after(). All members

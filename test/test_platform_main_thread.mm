@@ -522,6 +522,31 @@ TEST_CASE("repeating timers carry a tolerance and one-shots do not",
     timer.cancel();
 }
 
+TEST_CASE("a repeating timer's first fire stays one period away",
+          "[platform][main-thread][rearm][coalesce]") {
+    ensure_app();
+    MainThreadScope scope;
+    std::atomic<int> fires{0};
+    MainThreadTimer timer(scope, [&] { ++fires; });
+    // Start just after a 200 ms grid point, where rounding the first fire up
+    // to the grid would add almost a whole extra period.
+    for (;;) {
+        const double phase = std::fmod(CFAbsoluteTimeGetCurrent(), 0.2);
+        if (phase > 0.01 && phase < 0.03)
+            break;
+        pump_for(2ms);
+    }
+    const auto start = std::chrono::steady_clock::now();
+    timer.fire_every(200ms);
+    while (fires == 0 && std::chrono::steady_clock::now() - start < 600ms)
+        pump_for(2ms);
+    const auto first = std::chrono::steady_clock::now() - start;
+    timer.cancel();
+    REQUIRE(fires >= 1);
+    REQUIRE(first >= 195ms);
+    REQUIRE(first <= 200ms + 20ms + 60ms); // period + tolerance + scheduling slack
+}
+
 TEST_CASE("teardown hooks run once when the scope is destroyed",
           "[platform][main-thread][teardown]") {
     int ran = 0, removed = 0;

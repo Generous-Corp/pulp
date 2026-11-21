@@ -184,6 +184,7 @@ struct MainThreadTimerState : std::enable_shared_from_this<MainThreadTimerState>
     bool pending = false;
     CFTimeInterval period = 0; // > 0 while repeating
     CFTimeInterval native_interval = 0; // interval the CF timer was created with
+    bool align_pending = false; // a grid-eligible repeat still owes its move onto the grid
 
     void park() {
         pending = false;
@@ -238,13 +239,12 @@ struct MainThreadTimerState : std::enable_shared_from_this<MainThreadTimerState>
         CFRunLoopTimerSetTolerance(timer, repeat > 0 ? repeating_tolerance(repeat) : 0);
         pending = true;
         period = repeat;
-        CFAbsoluteTime first = CFAbsoluteTimeGetCurrent() + delay;
-        // Repeating timers of one period share a grid on the absolute clock,
-        // so timers started at different moments fire in the same run-loop
-        // pass. The first fire is never earlier than asked for.
-        if (repeat >= kGridMinPeriod && delay == repeat)
-            first = std::ceil(first / repeat) * repeat;
-        set_next_fire(timer, first);
+        // The first fire is exactly one delay away (the documented contract).
+        // A repeating timer of one period then moves onto a grid on the
+        // absolute clock after that first fire, so timers started at
+        // different moments fire in the same run-loop pass from then on.
+        align_pending = repeat >= kGridMinPeriod && delay == repeat;
+        set_next_fire(timer, CFAbsoluteTimeGetCurrent() + delay);
     }
 
     static void fire(CFRunLoopTimerRef, void* info) {
@@ -260,8 +260,18 @@ struct MainThreadTimerState : std::enable_shared_from_this<MainThreadTimerState>
                 return;
         }
         // A repeating timer is re-armed by the run loop; only a one-shot parks.
-        if (self->period <= 0)
+        if (self->period <= 0) {
             self->park();
+        } else if (self->align_pending) {
+            // After the first fire, put the next one on the period's grid,
+            // at least half a period away so no interval gets short.
+            self->align_pending = false;
+            const CFAbsoluteTime now = CFAbsoluteTimeGetCurrent();
+            CFAbsoluteTime next = (std::floor(now / self->period) + 1) * self->period;
+            if (next - now < self->period / 2)
+                next += self->period;
+            set_next_fire(self->timer, next);
+        }
         // Hold the callback itself: the timer may be destroyed while it runs.
         std::shared_ptr<std::function<void()>> fn = self->on_fire;
         if (fn && *fn)
