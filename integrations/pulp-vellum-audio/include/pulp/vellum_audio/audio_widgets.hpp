@@ -2,6 +2,7 @@
 
 #include <pulp/signal/spectrum_bin_mapping.hpp>
 #include <pulp/vellum_audio/audio_display_types.hpp>
+#include <pulp/vellum_audio/audio_widget_registration.hpp>
 #include <vellum/view/data_display.hpp>
 #include <vellum/view/view.hpp>
 #include <vellum/value/value_feed.hpp>

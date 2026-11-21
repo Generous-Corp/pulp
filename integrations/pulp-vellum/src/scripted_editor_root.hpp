@@ -7,7 +7,7 @@
 #include <vellum/view/scripted_ui.hpp>
 
 #if defined(PULP_VELLUM_AUDIO)
-#include <pulp/vellum_audio/audio_display_provider.hpp>
+#include <pulp/vellum_audio/audio_widget_registration.hpp>
 #endif
 
 #include <cstdint>

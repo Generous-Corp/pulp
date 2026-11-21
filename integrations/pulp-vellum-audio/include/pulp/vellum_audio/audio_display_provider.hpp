@@ -10,6 +10,7 @@
 
 #include <pulp/runtime/triple_buffer.hpp>
 #include <pulp/vellum_audio/audio_display_types.hpp>
+#include <pulp/vellum_audio/audio_widget_registration.hpp>
 
 #include <vellum/value/value_feed.hpp>
 
@@ -104,11 +105,5 @@ class AudioDisplayProvider final : public ::vellum::value::ValueFeed {
     [[nodiscard]] const Channel* at(std::size_t index) const noexcept;
     std::deque<Channel> channels_;
 };
-
-/// Register the Vellum script factories for createMeter and createSpectrum.
-void register_audio_widgets();
-
-/// Bind and sample the audio displays in an editor's mounted view tree.
-void sample_audio_widgets(::vellum::view::View& root, ::vellum::value::ValueFeed* feed);
 
 } // namespace pulp::vellum_audio
