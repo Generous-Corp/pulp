@@ -17,7 +17,9 @@
 #include <vellum/view/widgets.hpp>
 #endif
 
+#include <cstdint>
 #include <memory>
+#include <optional>
 
 namespace {
 
@@ -60,6 +62,11 @@ class Processor final : public pulp::format::Processor {
     void process(pulp::audio::BufferView<float>&, const pulp::audio::BufferView<const float>&,
                  pulp::midi::MidiBuffer&, pulp::midi::MidiBuffer&,
                  const pulp::format::ProcessContext&) override {}
+    std::optional<std::uint32_t> editor_background() const override {
+        return background;
+    }
+
+    std::optional<std::uint32_t> background;
 };
 
 class TestView final : public ::vellum::view::View {
@@ -691,3 +698,34 @@ TEST_CASE("Vellum native messages are scoped to the editor attachment that regis
     session.detach_native_message_handler("editorMessage");
 }
 #endif
+
+TEST_CASE("Vellum editor host opens on the plug-in's declared editor colour",
+          "[pulp-vellum][editor][host]") {
+    using ::vellum::view::PluginViewHost;
+    FactoryReset reset;
+    std::optional<std::uint32_t> seen;
+    PluginViewHost::set_factory(
+        [&seen](::vellum::view::View&, const PluginViewHost::Options& options) {
+            seen = options.background_rgb;
+            return std::unique_ptr<PluginViewHost>(std::make_unique<StubHost>(options.size));
+        });
+    Fixture fixture;
+    Context context(*fixture.port);
+    pulp::vellum::EditorFactory<TestView> factory;
+
+    SECTION("a declared colour reaches the host") {
+        Processor processor;
+        processor.background = 0x05070A;
+        auto editor = factory.create(processor, context, pulp::format::EditorRole::editor);
+        REQUIRE(editor);
+        REQUIRE(seen.has_value());
+        CHECK(*seen == 0x05070Au);
+    }
+    SECTION("no declared colour keeps the host default") {
+        Processor processor;
+        auto editor = factory.create(processor, context, pulp::format::EditorRole::editor);
+        REQUIRE(editor);
+        REQUIRE(seen.has_value());
+        CHECK(*seen == ::vellum::view::kEditorHostClearRgb);
+    }
+}

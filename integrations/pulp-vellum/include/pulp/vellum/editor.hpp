@@ -21,6 +21,7 @@
 #include <vellum/view/view.hpp>
 
 #include <concepts>
+#include <cstdint>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -60,16 +61,20 @@ template <typename ViewType> class Editor final : public format::Editor {
                  [](EditorEnv& env) { return std::make_unique<ViewType>(env); }) {}
 
     Editor(format::EditorContext& context, format::Processor& processor)
-        : Editor(context, processor.descriptor().bundle_id, [&processor](EditorEnv& env) {
-              if constexpr (std::is_constructible_v<ViewType, EditorEnv&, format::Processor&>)
-                  return std::make_unique<ViewType>(env, processor);
-              else
-                  return std::make_unique<ViewType>(env);
-          }) {}
+        : Editor(
+              context, processor.descriptor().bundle_id,
+              [&processor](EditorEnv& env) {
+                  if constexpr (std::is_constructible_v<ViewType, EditorEnv&, format::Processor&>)
+                      return std::make_unique<ViewType>(env, processor);
+                  else
+                      return std::make_unique<ViewType>(env);
+              },
+              processor.editor_background()) {}
 
   private:
     template <typename MakeRoot>
-    Editor(format::EditorContext& context, std::string_view bundle_id, MakeRoot make_root)
+    Editor(format::EditorContext& context, std::string_view bundle_id, MakeRoot make_root,
+           std::optional<std::uint32_t> background = std::nullopt)
         : model_(context.params()), env_{context, model_, nullptr} {
         if (auto* visuals = context.visuals()) {
             visual_feed_ = std::make_unique<VisualPortFeed>(*visuals);
@@ -100,6 +105,10 @@ template <typename ViewType> class Editor final : public format::Editor {
         ::vellum::view::PluginViewHost::Options options;
         options.size = {size_.width, size_.height};
         options.use_gpu = true;
+        // The plug-in's declared editor colour is what the host shows before
+        // the first frame and wherever the root does not paint.
+        if (background)
+            options.background_rgb = *background & 0xFFFFFFu;
         host_ = ::vellum::view::PluginViewHost::create(*root_, options);
         if (host_ != nullptr && has_design_viewport()) {
             host_->set_design_viewport(static_cast<float>(view_size_->design_width),
