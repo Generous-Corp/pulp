@@ -306,8 +306,7 @@ TEST_CASE("an idle scope causes no main-thread callouts", "[platform][main-threa
 // A repeating timer is re-armed by the run loop itself. The instrument is the
 // layer's own SetNextFireDate counter; the control is the same counter moving
 // when timers are started (once each) and when one-shots fire.
-TEST_CASE("repeating timers are not repositioned on each fire",
-          "[platform][main-thread][rearm]") {
+TEST_CASE("repeating timers are not repositioned on each fire", "[platform][main-thread][rearm]") {
     ensure_app();
     pump_for(20ms);
     MainThreadScope scope;
@@ -341,7 +340,7 @@ TEST_CASE("a repeating timer keeps its rate after a period change and a stop",
 
     timer.fire_every(500ms);
     pump_for(60ms);
-    REQUIRE(fires == 0); // the long period has not elapsed
+    REQUIRE(fires == 0);    // the long period has not elapsed
     timer.fire_every(10ms); // interval change takes effect now
     REQUIRE(pump_until([&] { return fires.load() >= 3; }, 3000ms));
 
