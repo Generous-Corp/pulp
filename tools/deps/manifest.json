@@ -1387,7 +1387,7 @@
         "skia_branch": "chrome/m158",
         "skia_commit": "be7d7c3e996e567eda7dc9774274f7a0103cdb8c",
         "built_dawn": "1716e88cc9e58398fab5d4473f7f2e858667b677",
-        "skia_builder_ref": "312f05e24a5d5a45d4a3e70ca70ff3ccff1b4d97",
+        "skia_builder_ref": "1b97010d2f025b4331a9c0db9481c440d1f33042",
         "skia_builder_fork": "https://github.com/danielraffel/skia-builder",
         "skia_python_smoke_version": "144.0.post2",
         "release_assets": {
@@ -1408,16 +1408,16 @@
             "sha256": "74c31d020cd18f1f9e544b1d8440bcc293e82982e50a9777a3940d84e2ccd666"
           },
           "mac-arm64": {
-            "url": "https://github.com/danielraffel/skia-builder/releases/download/chrome/m158/skia-build-mac-universal-gpu-release.zip",
-            "sha256": "dca73c0eee5b0f6d129fe357d0754f7165c6b436051e0de947aeedd3e1bde250"
+            "url": "https://github.com/danielraffel/skia-builder/releases/download/chrome/m158-attested.1/skia-build-mac-universal-gpu-release.zip",
+            "sha256": "1779c7d1ba5c73a0d6a1f33b77fbf30774bbd9f7542c1c42cc5129f57e99fbd4"
           },
           "mac-universal": {
-            "url": "https://github.com/danielraffel/skia-builder/releases/download/chrome/m158/skia-build-mac-universal-gpu-release.zip",
-            "sha256": "dca73c0eee5b0f6d129fe357d0754f7165c6b436051e0de947aeedd3e1bde250"
+            "url": "https://github.com/danielraffel/skia-builder/releases/download/chrome/m158-attested.1/skia-build-mac-universal-gpu-release.zip",
+            "sha256": "1779c7d1ba5c73a0d6a1f33b77fbf30774bbd9f7542c1c42cc5129f57e99fbd4"
           },
           "mac-x86_64": {
-            "url": "https://github.com/danielraffel/skia-builder/releases/download/chrome/m158/skia-build-mac-universal-gpu-release.zip",
-            "sha256": "dca73c0eee5b0f6d129fe357d0754f7165c6b436051e0de947aeedd3e1bde250"
+            "url": "https://github.com/danielraffel/skia-builder/releases/download/chrome/m158-attested.1/skia-build-mac-universal-gpu-release.zip",
+            "sha256": "1779c7d1ba5c73a0d6a1f33b77fbf30774bbd9f7542c1c42cc5129f57e99fbd4"
           },
           "wasm-wasm32": {
             "url": "https://github.com/danielraffel/skia-builder/releases/download/chrome/m158/skia-build-wasm-wasm32-gpu-release.zip",
