@@ -1,7 +1,6 @@
 #pragma once
 
 #include <pulp/signal/spectrum_bin_mapping.hpp>
-#include <pulp/dataplane/audio_bridge.hpp>
 #include <pulp/vellum_audio/audio_display_types.hpp>
 #include <pulp/vellum_audio/audio_widget_registration.hpp>
 #include <vellum/view/accessibility.hpp>
@@ -13,8 +12,13 @@
 #include <cstddef>
 #include <cstdint>
 #include <functional>
+#include <memory>
 #include <optional>
 #include <vector>
+
+namespace pulp::dataplane {
+struct MeterBallistics;
+} // namespace pulp::dataplane
 
 namespace pulp::vellum_audio {
 
@@ -23,9 +27,8 @@ class LevelMeter final : public ::vellum::view::View,
                          public ::vellum::view::AccessibilityValueInterface,
                          public ::vellum::view::LevelDisplay {
   public:
-    explicit LevelMeter(::vellum::value::ValueFeed* feed = nullptr) noexcept : feed_(feed) {
-        set_access_role(::vellum::view::View::AccessRole::meter);
-    }
+    explicit LevelMeter(::vellum::value::ValueFeed* feed = nullptr);
+    ~LevelMeter() override;
     void set_feed(::vellum::value::ValueFeed* feed, std::size_t channel) noexcept;
     /// Switches channel and resets the sampling cursor and displayed state,
     /// exactly as set_feed does, so the next sample() reads the new channel.
@@ -35,9 +38,7 @@ class LevelMeter final : public ::vellum::view::View,
     void sample() noexcept;
     void paint(::vellum::canvas::Canvas& canvas) override;
 
-    double get_current_value() const override {
-        return ballistics_.display_peak;
-    }
+    double get_current_value() const override;
     void set_current_value(double) override {}
     double get_minimum_value() const override {
         return 0.0;
@@ -64,15 +65,9 @@ class LevelMeter final : public ::vellum::view::View,
     [[nodiscard]] float peak() const noexcept {
         return peak_;
     }
-    [[nodiscard]] float displayed_peak() const noexcept {
-        return ballistics_.display_peak;
-    }
-    [[nodiscard]] float displayed_rms() const noexcept {
-        return ballistics_.display_rms;
-    }
-    [[nodiscard]] float held_peak() const noexcept {
-        return ballistics_.held_peak;
-    }
+    [[nodiscard]] float displayed_peak() const noexcept;
+    [[nodiscard]] float displayed_rms() const noexcept;
+    [[nodiscard]] float held_peak() const noexcept;
     [[nodiscard]] ::vellum::canvas::Color level_color(float level) const;
     /// Colour paint() uses for the bar: the explicit set_level_fill() colour
     /// when one is configured, otherwise the threshold colour for @p level.
@@ -90,7 +85,9 @@ class LevelMeter final : public ::vellum::view::View,
     std::size_t channel_ = 0;
     float rms_ = 0.0f;
     float peak_ = 0.0f;
-    pulp::dataplane::MeterBallistics ballistics_;
+    // Behind a pointer so this header does not pull audio_bridge.hpp (and
+    // triple_buffer.hpp) into every widget consumer.
+    std::unique_ptr<pulp::dataplane::MeterBallistics> ballistics_;
     float bar_ratio_ = 1.0f;
     Orientation orientation_ = Orientation::vertical;
     ::vellum::canvas::Color background_{0.08f, 0.08f, 0.1f, 1.0f};

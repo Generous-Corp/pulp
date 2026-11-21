@@ -1,11 +1,36 @@
 #include <pulp/vellum_audio/audio_widgets.hpp>
+#include <pulp/dataplane/audio_bridge.hpp>
 #include <pulp/vellum_audio/audio_display_provider.hpp>
 
 #include <algorithm>
 #include <cmath>
+#include <memory>
 #include <string>
 
 namespace pulp::vellum_audio {
+
+LevelMeter::LevelMeter(::vellum::value::ValueFeed* feed)
+    : feed_(feed), ballistics_(std::make_unique<pulp::dataplane::MeterBallistics>()) {
+    set_access_role(::vellum::view::View::AccessRole::meter);
+}
+
+LevelMeter::~LevelMeter() = default;
+
+double LevelMeter::get_current_value() const {
+    return ballistics_->display_peak;
+}
+
+float LevelMeter::displayed_peak() const noexcept {
+    return ballistics_->display_peak;
+}
+
+float LevelMeter::displayed_rms() const noexcept {
+    return ballistics_->display_rms;
+}
+
+float LevelMeter::held_peak() const noexcept {
+    return ballistics_->held_peak;
+}
 
 void LevelMeter::set_feed(::vellum::value::ValueFeed* feed, std::size_t channel) noexcept {
     feed_ = feed;
@@ -14,13 +39,13 @@ void LevelMeter::set_feed(::vellum::value::ValueFeed* feed, std::size_t channel)
     quiet_ticks_ = 0;
     stale_ = true;
     rms_ = peak_ = 0.0f;
-    ballistics_ = {};
+    *ballistics_ = {};
 }
 
 void LevelMeter::set_levels(float primary, float secondary) {
     rms_ = std::clamp(primary, 0.0f, 1.0f);
     peak_ = std::clamp(secondary, 0.0f, 1.0f);
-    (void)ballistics_.update(peak_, rms_, 1.0f / 60.0f);
+    (void)ballistics_->update(peak_, rms_, 1.0f / 60.0f);
     stale_ = false;
     request_repaint();
 }
@@ -248,7 +273,7 @@ void LevelMeter::sample() noexcept {
         }
         // Decay and peak-hold release must stay visible, but a settled meter
         // must not repaint every tick: update() reports real movement only.
-        if (ballistics_.update(0.0f, 0.0f, 1.0f / 60.0f))
+        if (ballistics_->update(0.0f, 0.0f, 1.0f / 60.0f))
             request_repaint();
         return;
     }
@@ -263,7 +288,7 @@ void LevelMeter::sample() noexcept {
     if (count != 0) {
         rms_ = std::clamp(rms[0], 0.0f, 1.0f);
         peak_ = std::clamp(peak[0], 0.0f, 1.0f);
-        (void)ballistics_.update(peak_, rms_, 1.0f / 60.0f);
+        (void)ballistics_->update(peak_, rms_, 1.0f / 60.0f);
         stale_ = false;
         info_ = next_info;
         last_publish_ = published;
@@ -274,7 +299,7 @@ void LevelMeter::sample() noexcept {
     // A frame with zero channels is not consumed: stay stale and retry next tick.
     stale_ = true;
     rms_ = peak_ = 0.0f;
-    if (ballistics_.update(0.0f, 0.0f, 1.0f / 60.0f))
+    if (ballistics_->update(0.0f, 0.0f, 1.0f / 60.0f))
         request_repaint();
 }
 
@@ -284,7 +309,7 @@ void LevelMeter::paint(::vellum::canvas::Canvas& canvas) {
     canvas.fill_rect(0, 0, b.width, b.height);
     const bool vertical = orientation_ == Orientation::vertical;
     const float length = vertical ? b.height : b.width;
-    const float level = std::clamp(ballistics_.display_rms, 0.0f, 1.0f);
+    const float level = std::clamp(ballistics_->display_rms, 0.0f, 1.0f);
     const float fill = std::round(level * length);
     canvas.set_fill_color(bar_color(level));
     const float cross = vertical ? b.width * std::clamp(bar_ratio_, 0.05f, 1.0f) : b.height;
@@ -294,14 +319,14 @@ void LevelMeter::paint(::vellum::canvas::Canvas& canvas) {
         canvas.fill_rect(0, (b.height - cross) * 0.5f, fill, cross);
     canvas.set_stroke_color({1.0f, 1.0f, 1.0f, 1.0f});
     canvas.set_line_width(1.0f);
-    const float peak_pos = std::round(std::clamp(ballistics_.display_peak, 0.0f, 1.0f) * length);
+    const float peak_pos = std::round(std::clamp(ballistics_->display_peak, 0.0f, 1.0f) * length);
     if (vertical)
         canvas.stroke_line(0, b.height - peak_pos, b.width, b.height - peak_pos);
     else
         canvas.stroke_line(peak_pos, 0, peak_pos, b.height);
-    const float held_pos = std::round(std::clamp(ballistics_.held_peak, 0.0f, 1.0f) * length);
+    const float held_pos = std::round(std::clamp(ballistics_->held_peak, 0.0f, 1.0f) * length);
     canvas.set_stroke_color(
-        ballistics_.held_peak > 0.9f
+        ballistics_->held_peak > 0.9f
             ? resolve_color("accent.error", ::vellum::canvas::Color::rgba8(255, 50, 50))
             : ::vellum::canvas::Color::rgba8(255, 100, 100));
     canvas.set_line_width(2.0f);
