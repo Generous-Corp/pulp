@@ -37,3 +37,12 @@ foreach(case IN ITEMS undef-exit0 undef-exit1)
         message(FATAL_ERROR "unresolved mode rejected a genuine nonzero exit: ${out} ${err}")
     endif()
 endforeach()
+
+# A missing ldd yields a non-numeric result string; it must not pass either.
+execute_process(COMMAND "${CMAKE_COMMAND}"
+    "-DLDD=${WORK_DIR}/ldd-missing" "-DREADELF=${WORK_DIR}/readelf"
+    "-DMODULE=${WORK_DIR}/module.so" -DEXPECT=unresolved -P "${probe}"
+    RESULT_VARIABLE rc OUTPUT_VARIABLE out ERROR_VARIABLE err)
+if(rc EQUAL 0)
+    message(FATAL_ERROR "unresolved mode accepted an ldd that could not run: ${out} ${err}")
+endif()
