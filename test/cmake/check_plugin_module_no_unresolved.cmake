@@ -9,6 +9,11 @@
 # has to resolve Skia's Fc* calls through its own dependencies. EXPECT defaults
 # to clean; EXPECT=unresolved inverts the verdict and serves as the negative
 # control (a module linked without the fix must report the Fc* names).
+#
+# -DNM=<nm> -DREQUIRE_FONTCONFIG=ON makes the clean verdict non-vacuous: the
+# module must reference Fc* functions (so it really carries Skia's font code)
+# AND name libfontconfig as needed. A module that references none would pass
+# the unresolved-symbol probe whether or not the fix exists.
 
 if(NOT LDD OR NOT READELF OR NOT MODULE)
     message(FATAL_ERROR "usage: -DLDD=<ldd> -DREADELF=<readelf> -DMODULE=<so> [-DEXPECT=clean|unresolved]")
@@ -37,6 +42,26 @@ endif()
 set(names_fontconfig FALSE)
 if(dyn MATCHES "\\(NEEDED\\)[^\n]*libfontconfig")
     set(names_fontconfig TRUE)
+endif()
+
+if(REQUIRE_FONTCONFIG AND EXPECT STREQUAL "clean")
+    if(NOT NM)
+        message(FATAL_ERROR "REQUIRE_FONTCONFIG needs -DNM=<nm>")
+    endif()
+    execute_process(COMMAND "${NM}" -D --undefined-only "${MODULE}"
+        RESULT_VARIABLE rc3 OUTPUT_VARIABLE undef)
+    if(NOT rc3 EQUAL 0)
+        message(FATAL_ERROR "nm failed for ${MODULE}")
+    endif()
+    string(REGEX MATCHALL "U Fc[A-Za-z]+" fc_refs "${undef}")
+    list(LENGTH fc_refs fc_count)
+    if(fc_count EQUAL 0)
+        message(FATAL_ERROR "${MODULE} references no Fc* function, so this check cannot show the fontconfig fix; "
+            "the fixture no longer carries Skia's font code")
+    endif()
+    if(NOT names_fontconfig)
+        message(FATAL_ERROR "${MODULE} references ${fc_count} Fc* functions but does not name libfontconfig as needed")
+    endif()
 endif()
 
 if(EXPECT STREQUAL "clean")

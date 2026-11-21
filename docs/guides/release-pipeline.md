@@ -581,8 +581,8 @@ in `ldd`. Such a plug-in loads only in a host that already has fontconfig.
 shipped in the SDK's `lib/cmake/Pulp/`) on each Linux VST3, CLAP, LV2 and AAX
 module that has an editor, which records `libfontconfig` as a needed library
 under `--no-as-needed`. The `no-unresolved-symbols-*` tests run `ldd -r` on built modules and fail on any
-undefined symbol: `PulpReloadHostFixture_CLAP` in the core test tree
-(`test/fixtures/linux_reload_host`, which runs on the required Linux lanes) and
+undefined symbol (the fixture check also requires `Fc*` references and a `libfontconfig` entry, so it cannot pass vacuously): `PulpReloadHostFixture_CLAP` in the core test tree
+(`test/fixtures/linux_reload_host`; the Linux legs of the merge-group run and the nightly cross-platform check run it, both advisory, since only the macOS gate is required) and
 the PulpEffect VST3 and CLAP modules when examples are built.
 `no-unresolved-symbols-control` runs the same probe on a module with a
 deliberate undefined symbol and must report it. SDK consumers

@@ -65,11 +65,13 @@ set_tests_properties(linux-reload-host-cycle PROPERTIES
 # must report, so a probe that cannot see the defect fails here.
 find_program(PULP_LDD ldd)
 find_program(PULP_READELF readelf)
-if(PULP_LDD AND PULP_READELF)
+find_program(PULP_NM nm)
+if(PULP_LDD AND PULP_READELF AND PULP_NM)
     set(_unresolved_check ${CMAKE_SOURCE_DIR}/test/cmake/check_plugin_module_no_unresolved.cmake)
     add_test(NAME no-unresolved-symbols-PulpReloadHostFixture_CLAP
         COMMAND ${CMAKE_COMMAND} -DLDD=${PULP_LDD} -DREADELF=${PULP_READELF}
             -DMODULE=$<TARGET_FILE:PulpReloadHostFixture_CLAP>
+            -DNM=${PULP_NM} -DREQUIRE_FONTCONFIG=ON
             -P ${_unresolved_check})
     add_library(pulp-unresolved-symbol-control MODULE
         ${CMAKE_SOURCE_DIR}/test/fixtures/unresolved_symbol_module/module.cpp)
