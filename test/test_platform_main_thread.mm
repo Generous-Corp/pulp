@@ -463,8 +463,7 @@ TEST_CASE("staggered repeating timers share main-thread wake-ups",
         WakeCounter counter;
         for (int i = 0; i < kTimers; ++i) {
             CFRunLoopTimerRef t = CFRunLoopTimerCreate(
-                kCFAllocatorDefault,
-                CFAbsoluteTimeGetCurrent() + 0.2 + 0.025 * i, 0.2, 0, 0,
+                kCFAllocatorDefault, CFAbsoluteTimeGetCurrent() + 0.2 + 0.025 * i, 0.2, 0, 0,
                 [](CFRunLoopTimerRef, void*) { ++raw_fires; }, nullptr);
             CFRunLoopTimerSetTolerance(t, 0);
             CFRunLoopAddTimer(CFRunLoopGetMain(), t, kCFRunLoopCommonModes);
@@ -505,7 +504,7 @@ TEST_CASE("staggered repeating timers share main-thread wake-ups",
     REQUIRE(fires >= static_cast<int>(kTimers * periods * 0.8));
     REQUIRE(fires <= static_cast<int>(kTimers * periods * 1.2) + kTimers);
     // Wake-ups are well below one per timer per period.
-    REQUIRE(wakes < control_wakes * 0.7);
+    REQUIRE(wakes < control_wakes * 0.4);
 }
 
 TEST_CASE("repeating timers carry a tolerance and one-shots do not",

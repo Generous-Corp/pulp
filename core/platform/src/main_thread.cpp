@@ -1,6 +1,7 @@
 #include <pulp/platform/main_thread.hpp>
 
 #include <atomic>
+#include <cmath>
 #include <deque>
 #include <mutex>
 #include <utility>
@@ -32,6 +33,9 @@ CFTimeInterval repeating_tolerance(CFTimeInterval period) {
     const CFTimeInterval tol = period / 10 > kMin ? period / 10 : kMin;
     return tol > period / 2 ? period / 2 : tol;
 }
+
+// Repeating timers at least this long are aligned to a common grid.
+constexpr CFTimeInterval kGridMinPeriod = 0.05;
 
 std::atomic<std::uint64_t> g_rearms{0};
 
@@ -234,7 +238,13 @@ struct MainThreadTimerState : std::enable_shared_from_this<MainThreadTimerState>
         CFRunLoopTimerSetTolerance(timer, repeat > 0 ? repeating_tolerance(repeat) : 0);
         pending = true;
         period = repeat;
-        set_next_fire(timer, CFAbsoluteTimeGetCurrent() + delay);
+        CFAbsoluteTime first = CFAbsoluteTimeGetCurrent() + delay;
+        // Repeating timers of one period share a grid on the absolute clock,
+        // so timers started at different moments fire in the same run-loop
+        // pass. The first fire is never earlier than asked for.
+        if (repeat >= kGridMinPeriod && delay == repeat)
+            first = std::ceil(first / repeat) * repeat;
+        set_next_fire(timer, first);
     }
 
     static void fire(CFRunLoopTimerRef, void* info) {
