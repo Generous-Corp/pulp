@@ -12,6 +12,7 @@
 
 #include <atomic>
 #include <chrono>
+#include <cmath>
 #include <memory>
 #include <thread>
 #include <vector>
