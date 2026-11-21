@@ -116,7 +116,7 @@ class RendererLockTests(unittest.TestCase):
                 subprocess.run([*git, "add", audit.PIN_TRANSITION_FILE], check=True)
         subprocess.run([*git, "commit", "-q", "--allow-empty", "-m", "base"], check=True)
         base = subprocess.run([*git, "rev-parse", "HEAD"], check=True,
-                              capture_output=True, text=True).stdout.strip()
+                              capture_output=True, text=True, encoding="utf-8").stdout.strip()
         subprocess.run([*git, "update-ref", "refs/remotes/origin/main", base], check=True)
         subprocess.run([*git, "checkout", "-q", "-b", "work"], check=True)
         with mock.patch.object(audit, "ROOT", repo), mock.patch.dict(
