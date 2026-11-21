@@ -257,7 +257,9 @@ class MainThreadScope {
 };
 
 /// A main-thread timer bound to a MainThreadScope, firing in the common
-/// run-loop modes with zero tolerance (millisecond granularity).
+/// run-loop modes. One-shots have zero tolerance (millisecond granularity);
+/// repeating timers get a tenth of their period (at least 5 ms, at most half
+/// the period) so timers started at different moments can share wake-ups.
 ///
 /// It is one-shot and reschedulable: fire_after() replaces any pending fire.
 /// fire_every() repeats until cancel() or another fire_after(). All members
@@ -285,7 +287,7 @@ class MainThreadTimer {
     /// When the run loop will fire this timer next, read back from the
     /// run-loop timer itself; nullopt when nothing is pending.
     std::optional<std::chrono::steady_clock::time_point> next_fire() const;
-    /// The tolerance the run loop was given for this timer (zero by design).
+    /// The tolerance the run loop was given for this timer (zero for one-shots, a tenth of the period for repeating timers).
     std::chrono::microseconds tolerance() const;
 
   private:
