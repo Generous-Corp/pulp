@@ -1,4 +1,5 @@
 #include <pulp/vellum_audio/audio_widgets.hpp>
+#include <pulp/vellum_audio/audio_display_provider.hpp>
 
 #include <algorithm>
 #include <cmath>
@@ -6,7 +7,7 @@
 
 namespace pulp::vellum_audio {
 
-void LevelMeter::set_feed(AudioDisplayProvider* feed, std::size_t channel) noexcept {
+void LevelMeter::set_feed(::vellum::value::ValueFeed* feed, std::size_t channel) noexcept {
     feed_ = feed;
     channel_ = channel;
     last_publish_ = 0;
@@ -245,7 +246,12 @@ void LevelMeter::sample() noexcept {
     std::array<float, AudioDisplayProvider::kMaxMeterChannels> rms{};
     std::array<float, AudioDisplayProvider::kMaxMeterChannels> peak{};
     AudioFrameInfo next_info;
-    if (feed_->read_meter(channel_, rms, peak, next_info) != 0) {
+    const auto count = [&] {
+        if (auto* audio = dynamic_cast<AudioDisplayProvider*>(feed_))
+            return audio->read_meter(channel_, rms, peak, next_info);
+        return feed_->read_meter(channel_, rms, peak);
+    }();
+    if (count != 0) {
         rms_ = std::clamp(rms[0], 0.0f, 1.0f);
         peak_ = std::clamp(peak[0], 0.0f, 1.0f);
         (void)ballistics_.update(peak_, rms_, 1.0f / 60.0f);
@@ -295,7 +301,7 @@ void LevelMeter::paint(::vellum::canvas::Canvas& canvas) {
         canvas.stroke_line(held_pos, 0, held_pos, b.height);
 }
 
-void AnalyzerScope::set_feed(AudioDisplayProvider* feed, std::size_t channel) noexcept {
+void AnalyzerScope::set_feed(::vellum::value::ValueFeed* feed, std::size_t channel) noexcept {
     feed_ = feed;
     channel_ = channel;
     last_publish_ = 0;
@@ -348,7 +354,11 @@ void AnalyzerScope::sample() noexcept {
         return;
     }
     AudioFrameInfo next_info;
-    const auto count = feed_->read_vector(channel_, bins_, next_info);
+    const auto count = [&] {
+        if (auto* audio = dynamic_cast<AudioDisplayProvider*>(feed_))
+            return audio->read_vector(channel_, bins_, next_info);
+        return feed_->read_vector(channel_, bins_);
+    }();
     if (!map_bins_(bins_.data(), count)) {
         stale_ = true;
         return;

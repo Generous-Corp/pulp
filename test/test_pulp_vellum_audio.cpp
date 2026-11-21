@@ -1,8 +1,10 @@
 #include <pulp/vellum_audio/audio_display_provider.hpp>
 #include <pulp/vellum_audio/audio_widgets.hpp>
+#include <vellum/view/data_display.hpp>
 
 #include <vellum/view/screenshot.hpp>
 
+#include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 
 #include "support/thread_progress.hpp"
@@ -13,6 +15,7 @@
 #include <chrono>
 #include <cstdint>
 #include <memory>
+#include <string>
 #include <thread>
 #include <vector>
 
@@ -182,6 +185,38 @@ TEST_CASE("Vellum audio widgets snapshot feed values", "[pulp-vellum-audio]") {
     scope.sample();
     CHECK_FALSE(scope.stale());
     CHECK(scope.column_count() == 3);
+}
+
+TEST_CASE("Vellum audio widgets register scripted display factories",
+          "[pulp-vellum-audio][scripted-editor]") {
+    using Provider = pulp::vellum_audio::AudioDisplayProvider;
+    Provider provider({{"meter", "", vellum::value::ChannelShape::meter},
+                       {"scope", "", vellum::value::ChannelShape::vector}});
+    pulp::vellum_audio::register_audio_widgets();
+
+    auto meter = vellum::view::make_data_display("pulp.level");
+    auto scope = vellum::view::make_data_display("pulp.bins");
+    REQUIRE(meter);
+    REQUIRE(scope);
+    auto* level = dynamic_cast<pulp::vellum_audio::LevelMeter*>(meter.get());
+    auto* analyzer = dynamic_cast<pulp::vellum_audio::AnalyzerScope*>(scope.get());
+    REQUIRE(level);
+    REQUIRE(analyzer);
+
+    const std::array<float, 1> rms{0.6f};
+    const std::array<float, 1> peak{0.8f};
+    provider.publish_meter(0, rms, peak);
+    const std::array<float, 3> bins{-60.0f, -30.0f, -6.0f};
+    provider.publish_scope(1, bins);
+    level->set_feed(&provider, 0);
+    analyzer->set_feed(&provider, 1);
+    level->sample();
+    analyzer->sample();
+    CHECK(level->rms() == Catch::Approx(0.6f));
+    CHECK(level->peak() == Catch::Approx(0.8f));
+    CHECK(analyzer->column_count() == bins.size());
+    CHECK_FALSE(level->stale());
+    CHECK_FALSE(analyzer->stale());
 }
 
 TEST_CASE("Vellum AnalyzerScope keeps its mapping across stale periods and set_feed",

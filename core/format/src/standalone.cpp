@@ -2,6 +2,7 @@
 #include <pulp/format/audio_workgroup_client.hpp>
 #include <pulp/format/app_updates.hpp>
 #include <pulp/format/detail/standalone_environment.hpp>
+#include <pulp/format/detail/standalone_persistence.hpp>
 #include <pulp/format/detail/standalone_contract_editor.hpp>
 #include <pulp/format/detail/standalone_settings_window.hpp>
 #include <pulp/format/detail/standalone_key_driver.hpp>
@@ -1000,6 +1001,7 @@ bool StandaloneApp::run_with_editor(bool use_gpu) {
     command_registry_.reset();
 
     const auto effective_config = detail::standalone_config_from_environment(config_);
+    detail::configure_standalone_persistence(effective_config.headless);
 #if !PULP_STANDALONE_INSPECTOR
     if ((!effective_config.inspector_profile.empty()
          && effective_config.inspector_profile != "off")

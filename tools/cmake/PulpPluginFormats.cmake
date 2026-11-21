@@ -170,8 +170,8 @@ function(_pulp_add_vst3 target name bundle_id version manufacturer category)
         target_compile_definitions(${target}_VST3 PRIVATE PULP_VST3_GUI=1)
         _pulp_apply_view_mac_objc_suffix(${target}_VST3)
         _pulp_dev_shared_ui_attach(${target} ${target}_VST3 _pulp_dev_shared)
-        _pulp_apply_ui_script_definition(${target}_VST3 "${PULP_${target}_UI_SCRIPT}")
     endif()
+    _pulp_apply_ui_script_definition(${target}_VST3 "${PULP_${target}_UI_SCRIPT}")
     _pulp_apply_macho_exports(${target}_VST3 "${target}_VST3"
         "_bundleEntry"
         "_bundleExit"
@@ -407,8 +407,8 @@ function(_pulp_add_clap target name bundle_id version manufacturer category)
         target_compile_definitions(${target}_CLAP PRIVATE PULP_CLAP_GUI=1)
         _pulp_apply_view_mac_objc_suffix(${target}_CLAP)
         _pulp_dev_shared_ui_attach(${target} ${target}_CLAP _pulp_dev_shared)
-        _pulp_apply_ui_script_definition(${target}_CLAP "${PULP_${target}_UI_SCRIPT}")
     endif()
+    _pulp_apply_ui_script_definition(${target}_CLAP "${PULP_${target}_UI_SCRIPT}")
     _pulp_apply_macho_exports(${target}_CLAP "${target}_CLAP"
         "_clap_entry")
     _pulp_apply_elf_exports(${target}_CLAP "${target}_CLAP"
@@ -779,9 +779,7 @@ function(_pulp_add_au target name bundle_id version manufacturer category plugin
     # this target also inherit).
     set_target_properties(${target}_AU PROPERTIES CXX_STANDARD 23)
     target_compile_features(${target}_AU PUBLIC cxx_std_23)
-    if(NOT PULP_${target}_NO_EDITOR)
-        _pulp_apply_ui_script_definition(${target}_AU "${PULP_${target}_UI_SCRIPT}")
-    endif()
+    _pulp_apply_ui_script_definition(${target}_AU "${PULP_${target}_UI_SCRIPT}")
     target_include_directories(${target}_AU PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 
     # AudioUnitSDK 1.4 headers (`AUUtility.h`) use `std::expected` /

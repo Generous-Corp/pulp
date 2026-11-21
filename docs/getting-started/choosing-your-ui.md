@@ -18,10 +18,20 @@ stages the verified SDK, then prints the `CMAKE_PREFIX_PATH` a Vellum UI
 project uses to find it. Other platforms continue with an audio-only setup
 until a Vellum SDK asset is published for that platform.
 
-`pulp create --ui vellum` is not accepted yet: the CLI refuses every `--ui`
-value except `none` until the pulp-vellum editor package ships. Until then,
-create the project without `--ui` and point its CMake configure at the staged
-SDK.
+`pulp create --ui vellum` generates a plug-in whose editor is a Vellum view
+built through the pulp-vellum editor package (`pulp_add_vellum_editor_package`).
+The `effect` and `instrument` templates support it, including their standalone
+variants. Templates that use a script UI refuse it. Configure the project with
+the staged SDK on `CMAKE_PREFIX_PATH`, or pass `Pulp_DIR` and `Vellum_DIR`:
+
+```sh
+pulp create "My Effect" --type effect --ui vellum
+cmake -S "My Effect" -B build -DPulp_DIR=<pulp-sdk>/lib/cmake/Pulp \
+      -DVellum_DIR=<vellum-sdk>/lib/cmake/Vellum
+cmake --build build
+```
+
+Every format bundle carries the Vellum runtime libraries it needs.
 
 ## DSP only
 

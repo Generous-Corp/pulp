@@ -39,6 +39,32 @@ if(PULP_BUILD_TESTS AND TARGET Catch2::Catch2WithMain)
             target_compile_definitions(pulp-test-pulp-vellum-editor PRIVATE
                 PULP_TEST_VELLUM_SCRIPTED_UI=1)
         endif()
+        if(TARGET pulp-vellum-scripted)
+            add_executable(pulp-test-vellum-scripted-wiring test_scripted_editor_wiring.cpp)
+            target_link_libraries(pulp-test-vellum-scripted-wiring PRIVATE
+                pulp-vellum-scripted Vellum::MirrorView_script Catch2::Catch2WithMain Threads::Threads)
+            # Keep format-core's environment gate deterministic in CI. This
+            # executable records the external GPU/session and scheduler edges.
+            add_test(NAME pulp-vellum-scripted-wiring
+                COMMAND ${CMAKE_COMMAND} -E env CI=0 PULP_HEADLESS=0 PULP_TEST_MODE=0
+                    PULP_DISABLE_PLUGIN_EDITOR=0 PULP_EDITOR_PREWARM=1 DISPLAY=:0
+                    $<TARGET_FILE:pulp-test-vellum-scripted-wiring>)
+            set_tests_properties(pulp-vellum-scripted-wiring PROPERTIES
+                LABELS pulp-vellum-editor TIMEOUT 30)
+            target_compile_definitions(pulp-test-pulp-vellum-editor PRIVATE
+                PULP_TEST_VELLUM_SCRIPTED_EDITOR=1)
+            if(TARGET pulp-vellum-audio)
+                target_compile_definitions(pulp-test-vellum-scripted-wiring PRIVATE
+                    PULP_VELLUM_AUDIO=1)
+                target_compile_definitions(pulp-test-pulp-vellum-editor PRIVATE
+                    PULP_TEST_VELLUM_SCRIPTED_AUDIO=1)
+            endif()
+            _pulp_vellum_scripted_package("scripted editor fixture" _scripted_package)
+            target_link_libraries(pulp-test-pulp-vellum-editor PRIVATE "${_scripted_package}")
+            _pulp_apply_ui_script_definition(pulp-test-pulp-vellum-editor
+                "${PULP_ROOT_DIR}/test/fixtures/scripted-editor/main.js")
+            set_property(TARGET pulp-test-pulp-vellum-editor PROPERTY PULP_VELLUM_SCRIPTED_EDITOR TRUE)
+        endif()
         catch_discover_tests(pulp-test-pulp-vellum-editor PROPERTIES LABELS pulp-vellum-editor)
 
         add_executable(pulp-test-pulp-vellum-about-notices
