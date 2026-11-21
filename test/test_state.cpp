@@ -3522,7 +3522,6 @@ TEST_CASE("StateStore::set_values_rt lets the last write to a parameter win",
     listener.reset();
 }
 
-
 // ── StateScanGate: per-block scans of a large store ─────────────────────────
 
 namespace {
@@ -3537,8 +3536,8 @@ struct ScanFixture {
     std::size_t reads = 0;
     ScanFixture() {
         for (std::size_t i = 0; i < kScanParams; ++i)
-            store.add_parameter(make_param_info(kScanBase + static_cast<std::uint32_t>(i), "P",
-                                                "", {0.0f, 1.0f, 0.0f}));
+            store.add_parameter(make_param_info(kScanBase + static_cast<std::uint32_t>(i), "P", "",
+                                                {0.0f, 1.0f, 0.0f}));
         for (std::size_t i = 0; i < kScanParams; ++i)
             readers.push_back(store.param_reader(kScanBase + static_cast<std::uint32_t>(i)));
         seen.assign(kScanParams, 0.0f);
