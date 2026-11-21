@@ -446,3 +446,12 @@ the requested tracing sentinel state. Keep its source/build/toolchain artifacts
 with the campaign; an already-built bundle or receipt assertion is not proof.
 
 A3 v2 additionally binds each DAW campaign's sample provenance and exact trace bytes, then reruns the prepared analyzer and checks campaign, instance, process, GPU-evidence, trace-evidence, category, and completeness identity. A JSON sidecar alone is never terminal proof.
+
+### Windows exact-artifact scan routing
+
+Use `tools/testing/daw-smoke/windows/windows_editor_smoke.ps1` from the active
+Windows desktop. Windows REAPER reads `clap_path_win64` for x64 hosts and
+`clap_path_winarm64` for ARM hosts, rather than the unsuffixed `clap_path`.
+A system plugin can otherwise be selected despite a staged scan directory.
+Require the actual loaded module path/hash to match the staged manifest;
+parameter registration or editor presence alone cannot establish identity.
