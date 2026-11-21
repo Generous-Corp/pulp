@@ -92,7 +92,16 @@ function(pulp_reload_host target)
     if(WIN32)
         return()
     elseif(APPLE)
-        target_link_options(${target} PRIVATE -Wl,-export_dynamic)
+        # Export only the Pulp ABI needed by thin reload logic. -export_dynamic
+        # publishes every global symbol in the executable, including Dawn,
+        # Tint, Skia, and abseil internals that may be provided by another
+        # image in the process.
+        target_link_options(${target} PRIVATE
+            "-Wl,-exported_symbol,__ZN4pulp*"
+            "-Wl,-exported_symbol,__ZNK4pulp*"
+            "-Wl,-exported_symbol,__ZTVN4pulp*"
+            "-Wl,-exported_symbol,__ZTIN4pulp*"
+            "-Wl,-exported_symbol,__ZTSN4pulp*")
     else()  # Linux / other ELF
         target_link_options(${target} PRIVATE -rdynamic)
         # A Linux plug-in's version script exports only its entry points
