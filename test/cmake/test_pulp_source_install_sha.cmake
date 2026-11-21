@@ -104,4 +104,72 @@ file(READ "${FIXTURE_DIR}/prefix/payload.txt" _installed_payload)
 if(NOT _installed_payload STREQUAL "advanced\n")
     message(FATAL_ERROR "fixture did not install the payload built from the advanced checkout")
 endif()
-message(STATUS "PASS: source install SHA follows install-time HEAD (${_expected_sha})")
+
+# A later incremental build must refresh the source-install marker in the same
+# prefix rather than copying new payloads and then failing on the old marker.
+file(WRITE "${FIXTURE_DIR}/source/payload.txt" "second\n")
+execute_process(COMMAND git add payload.txt
+    WORKING_DIRECTORY "${FIXTURE_DIR}/source" RESULT_VARIABLE _git_add_second_rc)
+execute_process(COMMAND git commit --quiet -m second
+    WORKING_DIRECTORY "${FIXTURE_DIR}/source" RESULT_VARIABLE _git_commit_second_rc)
+if(_git_add_second_rc OR _git_commit_second_rc)
+    message(FATAL_ERROR "could not advance fixture repository a second time")
+endif()
+execute_process(COMMAND git -C "${FIXTURE_DIR}/source" rev-parse HEAD
+    OUTPUT_VARIABLE _second_expected_sha OUTPUT_STRIP_TRAILING_WHITESPACE
+    RESULT_VARIABLE _second_head_rc)
+if(NOT _second_head_rc EQUAL 0)
+    message(FATAL_ERROR "could not read second fixture HEAD")
+endif()
+execute_process(COMMAND "${CMAKE_COMMAND}" --build "${FIXTURE_DIR}/build"
+    RESULT_VARIABLE _second_build_rc OUTPUT_VARIABLE _second_build_out
+    ERROR_VARIABLE _second_build_err)
+if(NOT _second_build_rc EQUAL 0)
+    message(FATAL_ERROR "second fixture build failed:\n${_second_build_out}\n${_second_build_err}")
+endif()
+file(APPEND "${FIXTURE_DIR}/source/payload.txt" "second local edit\n")
+# Force the second install to copy the newly built payload even on filesystems
+# whose timestamp resolution makes the source and destination look equal.
+file(REMOVE "${FIXTURE_DIR}/prefix/payload.txt")
+execute_process(COMMAND "${CMAKE_COMMAND}" --install "${FIXTURE_DIR}/build"
+    --prefix "${FIXTURE_DIR}/prefix"
+    RESULT_VARIABLE _second_install_rc OUTPUT_VARIABLE _second_install_out
+    ERROR_VARIABLE _second_install_err)
+if(NOT _second_install_rc EQUAL 0)
+    message(FATAL_ERROR
+        "repeated fixture install failed:\n${_second_install_out}\n${_second_install_err}")
+endif()
+file(READ "${FIXTURE_DIR}/prefix/sdk-provenance.json" _second_provenance)
+string(JSON _second_installed_sha ERROR_VARIABLE _second_sha_error GET
+    "${_second_provenance}" source_git_sha)
+if(_second_sha_error OR NOT _second_installed_sha STREQUAL _second_expected_sha)
+    message(FATAL_ERROR
+        "repeated install did not refresh source SHA: expected=${_second_expected_sha} "
+        "installed=${_second_installed_sha}\n${_second_provenance}")
+endif()
+string(JSON _second_installed_dirty GET "${_second_provenance}" source_git_dirty)
+if(NOT _second_installed_dirty)
+    message(FATAL_ERROR "repeated install did not record the tracked edit")
+endif()
+file(READ "${FIXTURE_DIR}/prefix/payload.txt" _second_installed_payload)
+if(NOT _second_installed_payload STREQUAL "second\n")
+    message(FATAL_ERROR "repeated install did not install the second payload")
+endif()
+
+# A release marker is immutable and must still reject a source-install refresh.
+set(_release_prefix "${FIXTURE_DIR}/release-prefix")
+file(MAKE_DIRECTORY "${_release_prefix}")
+set(_release_marker "{\n  \"schema\": \"pulp.sdk-provenance.v1\",\n  \"kind\": \"release\",\n  \"distribution_eligible\": true,\n  \"source_git_sha\": \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"\n}\n")
+file(WRITE "${_release_prefix}/sdk-provenance.json" "${_release_marker}")
+execute_process(COMMAND "${CMAKE_COMMAND}" --install "${FIXTURE_DIR}/build"
+    --prefix "${_release_prefix}"
+    RESULT_VARIABLE _release_install_rc OUTPUT_VARIABLE _release_install_out
+    ERROR_VARIABLE _release_install_err)
+if(_release_install_rc EQUAL 0)
+    message(FATAL_ERROR "source install replaced an existing release marker")
+endif()
+file(READ "${_release_prefix}/sdk-provenance.json" _retained_release_marker)
+if(NOT _retained_release_marker STREQUAL _release_marker)
+    message(FATAL_ERROR "source install modified the existing release marker")
+endif()
+message(STATUS "PASS: source install SHA follows repeated install-time HEAD (${_second_expected_sha})")
