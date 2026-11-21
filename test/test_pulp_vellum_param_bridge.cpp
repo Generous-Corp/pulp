@@ -9,6 +9,7 @@
 #include <pulp/format/editor_host.hpp>
 #include <pulp/format/host_parameter_edit.hpp>
 #include <pulp/state/store.hpp>
+#include <pulp/vellum/editor_env.hpp>
 #include <pulp/vellum/mapping.hpp>
 #include <pulp/vellum/param_port_model.hpp>
 #include <pulp/vellum/visual_port_feed.hpp>
@@ -610,4 +611,55 @@ TEST_CASE("the visual feed enforces its documented event limit", "[pulp-vellum][
     std::vector<vellum::value::ChannelEvent> few(3);
     REQUIRE(feed.read_events(0, few) == 3);
     REQUIRE(few[2].frame_index == 2);
+}
+
+namespace {
+class EnvContext final : public pulp::format::EditorContext {
+  public:
+    explicit EnvContext(pulp::format::ParamPort& params) : params_(params) {}
+    pulp::format::ParamPort& params() override {
+        return params_;
+    }
+    pulp::format::VisualPort* visuals() override {
+        return nullptr;
+    }
+    bool request_resize(const pulp::format::EditorSize&) override {
+        return false;
+    }
+    bool host_action(const pulp::format::HostActionRequest&) override {
+        return false;
+    }
+    pulp::format::EditorHostKind host_kind() const override {
+        return pulp::format::EditorHostKind::plugin;
+    }
+
+  private:
+    pulp::format::ParamPort& params_;
+};
+} // namespace
+
+// A root view needs only EditorEnv, which editor_env.hpp provides without
+// Vellum's plug-in view host; this binary links no view layer.
+TEST_CASE("EditorEnv carries the bridge to a root view without the view host",
+          "[pulp-vellum][editor-env]") {
+    Fixture f;
+    EnvContext context(*f.port);
+    pulp::vellum::EditorEnv env{context, *f.model};
+    CHECK(&env.context.params() == f.port.get());
+    CHECK(env.visuals == nullptr);
+
+    const auto gain = env.params.resolve("Gain");
+    REQUIRE(gain.valid());
+    double observed = -1.0;
+    auto subscription =
+        env.params.subscribe([&](::vellum::value::ParamHandle handle, double value) {
+            if (handle == gain)
+                observed = value;
+        });
+    f.store.set_value_rt(kGain, 0.25f);
+    f.tick();
+    CHECK(observed == 0.25);
+
+    env.params.set_normalized(gain, 0.75);
+    CHECK(f.store.get_value(kGain) == 0.75f);
 }

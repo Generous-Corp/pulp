@@ -596,7 +596,6 @@ int cmd_create(const std::vector<std::string>& args) {
         {"UI_MODE_LINE", ui == "none" ? "NO_EDITOR" : ""},
         {"VIEW_HEADER", lower_name_underscored + "_view.hpp"},
         {"VIEW_TYPE", ns + "::" + class_name + "View"},
-        {"VELLUM_SOURCE_LINE", ui == "vellum" ? lower_name_underscored + "_view.cpp" : ""},
         {"VELLUM_EDITOR_LINE", ui == "vellum"
                                    ? "pulp_add_vellum_editor_package(" + class_name +
                                          "_VellumEditor\n"
@@ -607,6 +606,9 @@ int cmd_create(const std::vector<std::string>& args) {
                                          ns + "::" + class_name +
                                          "View\n"
                                          "    VIEW_INCLUDE_DIRS \"${CMAKE_CURRENT_SOURCE_DIR}\"\n"
+                                         "    SOURCES \"" +
+                                         lower_name_underscored +
+                                         "_view.cpp\"\n"
                                          ")"
                                    : ""},
         {"VELLUM_FIND_LINE", ui == "vellum" ? "find_package(Vellum CONFIG REQUIRED)" : ""},

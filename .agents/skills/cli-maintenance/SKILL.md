@@ -2359,6 +2359,20 @@ than compiling that source again. An edit to the processor body then
 recompiles one object and relinks each format; when the body lived in the
 header, every format's entry TU and the test recompiled it.
 
+A `--ui vellum` view source belongs to the editor package, not the plug-in:
+the CLIs emit it as `pulp_add_vellum_editor_package(... SOURCES "<name>_view.cpp")`,
+which compiles it in each format target that links the package. Listed under
+the plug-in's `SOURCES` it compiles in `<target>_Core`, which has no Vellum
+include paths, and a real installed SDK fails on `vellum/value/param_model.hpp`.
+The shell-out test caught this only after its fake Vellum headers moved off
+Pulp's own include path; a fake reachable from every Pulp target proves
+nothing about which target can see it.
+
+An out-of-tree `pulp create --output <dir>` reads `tools/templates/standalone/`,
+not `tools/templates/<type>/`. When a test or a control edits a template to
+see what breaks, edit the standalone copy, or the run reads an unchanged file
+and passes.
+
 ## The macOS CLI force-load list names implementation archives, not modules
 
 `tools/cli/CMakeLists.txt` force-loads a fixed list of static archives into

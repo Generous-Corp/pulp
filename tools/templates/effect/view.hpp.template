@@ -1,13 +1,37 @@
 #pragma once
 
-#include <pulp/vellum/editor.hpp>
+#include <pulp/vellum/editor_env.hpp>
+#include <vellum/view/parameter_binding.hpp>
 #include <vellum/view/view.hpp>
+#include <vellum/view/widgets.hpp>
+
+#include <memory>
 
 namespace {{NAMESPACE}} {
 
+// The editor's root view: one Vellum knob bound to the "Mix" parameter
+// through the editor's ParamPortModel. Dragging the knob is a host gesture;
+// automation and preset loads move it.
 class {{CLASS_NAME}}View final : public ::vellum::view::View {
 public:
-    explicit {{CLASS_NAME}}View(::pulp::vellum::EditorEnv&) {}
+    explicit {{CLASS_NAME}}View(::pulp::vellum::EditorEnv& env) {
+        flex().align_items = ::vellum::view::FlexAlign::center;
+        flex().justify_content = ::vellum::view::FlexJustify::center;
+        auto knob = std::make_unique<::vellum::view::Knob>();
+        knob->set_label("Mix");
+        knob->flex().preferred_width = 100.0f;
+        knob->flex().preferred_height = 100.0f;
+        mix_knob_ = knob.get();
+        add_child(std::move(knob));
+        mix_binding_ = ::vellum::view::bind_parameter(*mix_knob_, env.params,
+                                                      env.params.resolve("Mix"));
+    }
+
+    ::vellum::view::Knob& mix_knob() { return *mix_knob_; }
+
+private:
+    ::vellum::view::Knob* mix_knob_ = nullptr;
+    ::vellum::view::ParameterBinding mix_binding_;
 };
 
 } // namespace {{NAMESPACE}}
