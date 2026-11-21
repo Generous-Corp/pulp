@@ -370,6 +370,11 @@ pulp_add_test_suite(pulp-test-step-grid-view LIBRARIES pulp::view pulp::state)
 # Headless adapter tests
 pulp_add_test_suite(pulp-test-headless GROUP pulp-test-group-cap-format
     LIBRARIES pulp::format)
+if(APPLE AND NOT PULP_IOS)
+    pulp_add_test_suite(pulp-test-standalone-persistence-mac
+        SOURCES test_standalone_persistence_mac.mm
+        LIBRARIES pulp::standalone)
+endif()
 pulp_add_test_suite(pulp-test-format-hardening GROUP pulp-test-group-cap-format
     LIBRARIES pulp::format)
 # Processor-level MIDI panic: request, service, voice reset, MIDI-out emission
@@ -566,6 +571,25 @@ if(PULP_HAS_CLAP)
     target_link_libraries(pulp-test-clap-bundle-entry PRIVATE pulp::format clap Catch2::Catch2WithMain)
     target_compile_definitions(pulp-test-clap-bundle-entry PRIVATE PULP_CLAP_GUI=1)
     catch_discover_tests(pulp-test-clap-bundle-entry)
+
+    # Host scan without a Processor: a static descriptor answers module init and
+    # descriptor reads; the fallback path still builds one.
+    add_executable(pulp-test-clap-scan-without-processor test_clap_scan_without_processor.cpp
+        ${CMAKE_SOURCE_DIR}/core/format/src/clap_adapter.cpp
+        ${CMAKE_SOURCE_DIR}/core/format/src/clap_remote_controls.cpp
+    )
+    target_link_libraries(pulp-test-clap-scan-without-processor PRIVATE pulp::format clap Catch2::Catch2WithMain)
+    target_compile_definitions(pulp-test-clap-scan-without-processor PRIVATE PULP_CLAP_GUI=1)
+    catch_discover_tests(pulp-test-clap-scan-without-processor)
+
+    # The single-plugin macro emits clap_entry and needs a separate executable.
+    add_executable(pulp-test-clap-single-scan-without-processor test_clap_single_scan_without_processor.cpp
+        ${CMAKE_SOURCE_DIR}/core/format/src/clap_adapter.cpp
+        ${CMAKE_SOURCE_DIR}/core/format/src/clap_remote_controls.cpp
+    )
+    target_link_libraries(pulp-test-clap-single-scan-without-processor PRIVATE pulp::format clap Catch2::Catch2WithMain)
+    target_compile_definitions(pulp-test-clap-single-scan-without-processor PRIVATE PULP_CLAP_GUI=1)
+    catch_discover_tests(pulp-test-clap-single-scan-without-processor)
 
     # CLAP inbound/outbound MIDI event coverage + steady-state RT process guard.
     #

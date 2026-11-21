@@ -7,6 +7,7 @@
 #include <pulp/runtime/trace.hpp>
 #include <pulp/format/detail/host_sample_position.hpp>
 #include <pulp/format/clap_adapter.hpp>
+#include <pulp/format/descriptor_agreement.hpp>
 #include <pulp/format/editor_prewarm.hpp>
 #include <pulp/format/adapter_boundary.hpp>
 #include <pulp/format/max_block_contract.hpp>
@@ -269,6 +270,8 @@ bool clap_init(const clap_plugin_t* plugin) {
     self->owner_alive.reset();
     self->processor = self->factory();
     if (!self->processor) return false;
+    if (self->descriptor_is_static)
+        check_descriptor_agreement(self->descriptor_snapshot, self->processor->descriptor());
     self->panic_state = self->processor->panic_state();
     self->panic_state->attach(self->processor->descriptor().produces_midi);
     self->sample_accurate_params = self->processor->wants_sample_accurate_parameters();

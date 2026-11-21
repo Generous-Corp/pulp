@@ -170,8 +170,8 @@ function(_pulp_add_vst3 target name bundle_id version manufacturer category)
         target_compile_definitions(${target}_VST3 PRIVATE PULP_VST3_GUI=1)
         _pulp_apply_view_mac_objc_suffix(${target}_VST3)
         _pulp_dev_shared_ui_attach(${target} ${target}_VST3 _pulp_dev_shared)
-        _pulp_apply_ui_script_definition(${target}_VST3 "${PULP_${target}_UI_SCRIPT}")
     endif()
+    _pulp_apply_ui_script_definition(${target}_VST3 "${PULP_${target}_UI_SCRIPT}")
     _pulp_apply_macho_exports(${target}_VST3 "${target}_VST3"
         "_bundleEntry"
         "_bundleExit"
@@ -284,6 +284,7 @@ function(_pulp_add_vst3 target name bundle_id version manufacturer category)
     # a missing definition silently skip staging entirely.
     if(PULP_${target}_NO_EDITOR)
         _pulp_mark_editorless_runtime(${target}_VST3)
+        _pulp_stage_ui_package_runtime(${target} ${target}_VST3)
     else()
         pulp_stage_runtime_dependencies(${target}_VST3)
     endif()
@@ -325,6 +326,7 @@ function(_pulp_add_vst3 target name bundle_id version manufacturer category)
             endforeach()
             unset(_pulp_vst3_runtime_file)
         endif()
+        _pulp_copy_ui_package_runtime(${target}_VST3 "${_pulp_vst3_windows_contents}")
     endif()
     if(UNIX AND NOT APPLE AND NOT ANDROID)
         add_custom_command(TARGET ${target}_VST3 POST_BUILD
@@ -350,6 +352,7 @@ function(_pulp_add_vst3 target name bundle_id version manufacturer category)
             endforeach()
             unset(_pulp_vst3_runtime_file)
         endif()
+        _pulp_copy_ui_package_runtime(${target}_VST3 "${_pulp_vst3_linux_contents}")
     endif()
     pulp_assert_runtime_dependencies_staged(${target}_VST3)
     # Attach build-info only after runtime staging has marked the target.  The
@@ -404,8 +407,8 @@ function(_pulp_add_clap target name bundle_id version manufacturer category)
         target_compile_definitions(${target}_CLAP PRIVATE PULP_CLAP_GUI=1)
         _pulp_apply_view_mac_objc_suffix(${target}_CLAP)
         _pulp_dev_shared_ui_attach(${target} ${target}_CLAP _pulp_dev_shared)
-        _pulp_apply_ui_script_definition(${target}_CLAP "${PULP_${target}_UI_SCRIPT}")
     endif()
+    _pulp_apply_ui_script_definition(${target}_CLAP "${PULP_${target}_UI_SCRIPT}")
     _pulp_apply_macho_exports(${target}_CLAP "${target}_CLAP"
         "_clap_entry")
     _pulp_apply_elf_exports(${target}_CLAP "${target}_CLAP"
@@ -471,6 +474,7 @@ function(_pulp_add_clap target name bundle_id version manufacturer category)
     # a missing definition silently skip staging entirely.
     if(PULP_${target}_NO_EDITOR)
         _pulp_mark_editorless_runtime(${target}_CLAP)
+        _pulp_stage_ui_package_runtime(${target} ${target}_CLAP)
     else()
         pulp_stage_runtime_dependencies(${target}_CLAP)
     endif()
@@ -531,6 +535,7 @@ function(_pulp_add_lv2 target name bundle_id version manufacturer category)
     # the same configure-time assertion and post-build staging path.
     if(PULP_${target}_NO_EDITOR)
         _pulp_mark_editorless_runtime(${target}_LV2)
+        _pulp_stage_ui_package_runtime(${target} ${target}_LV2)
     else()
         pulp_stage_runtime_dependencies(${target}_LV2)
     endif()
@@ -774,9 +779,7 @@ function(_pulp_add_au target name bundle_id version manufacturer category plugin
     # this target also inherit).
     set_target_properties(${target}_AU PROPERTIES CXX_STANDARD 23)
     target_compile_features(${target}_AU PUBLIC cxx_std_23)
-    if(NOT PULP_${target}_NO_EDITOR)
-        _pulp_apply_ui_script_definition(${target}_AU "${PULP_${target}_UI_SCRIPT}")
-    endif()
+    _pulp_apply_ui_script_definition(${target}_AU "${PULP_${target}_UI_SCRIPT}")
     target_include_directories(${target}_AU PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 
     # AudioUnitSDK 1.4 headers (`AUUtility.h`) use `std::expected` /
@@ -839,6 +842,7 @@ function(_pulp_add_au target name bundle_id version manufacturer category plugin
     # a missing definition silently skip staging entirely.
     if(PULP_${target}_NO_EDITOR)
         _pulp_mark_editorless_runtime(${target}_AU)
+        _pulp_stage_ui_package_runtime(${target} ${target}_AU)
     else()
         pulp_stage_runtime_dependencies(${target}_AU)
     endif()

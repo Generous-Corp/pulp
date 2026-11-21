@@ -1,22 +1,16 @@
-/// @file test_motion_swift_bridge.cpp
-/// Catch2 unit tests for the Swift bridge C ABI in
-/// `apple/Sources/PulpSwift/PulpMotionBridge.cpp`. Exercises the publish
-/// channel shim, the ambient-provenance slot, and the geometry-trace
-/// register/update/detach lifecycle without needing a Swift compiler.
-
 #include "PulpBridge.h"
 
-#include <pulp/view/frame_clock.hpp>
-#include <pulp/view/motion.hpp>
+#include <vellum/view/frame_clock.hpp>
+#include <vellum/view/motion.hpp>
 
-#include <catch2/catch_test_macros.hpp>
 #include <catch2/catch_approx.hpp>
+#include <catch2/catch_test_macros.hpp>
 
 #include <string>
 #include <vector>
 
-using pulp::view::FrameClock;
-using namespace pulp::view::motion;
+using vellum::view::FrameClock;
+using namespace vellum::view::motion;
 
 namespace {
 
@@ -24,14 +18,14 @@ namespace {
 /// enable tracing, and install a buffer sink that captures every
 /// SampleEvent (including `TraceStarted`).
 class BridgeFixture {
-public:
+  public:
     BridgeFixture() {
         Coordinator::instance().reset();
         Coordinator::instance().bind(clock);
         Coordinator::instance().set_firehose(true);
         Coordinator::instance().set_tracing_enabled(true);
-        sink_id = Coordinator::instance().add_sink(
-            [this](const SampleEvent& e) { buffer.push_back(e); });
+        sink_id =
+            Coordinator::instance().add_sink([this](const SampleEvent& e) { buffer.push_back(e); });
     }
     ~BridgeFixture() {
         pulp_motion_clear_ambient_provenance();
@@ -43,18 +37,17 @@ public:
     int sink_id = 0;
 };
 
-std::size_t count_kind(const std::vector<SampleEvent>& b,
-                       SampleEvent::Kind k,
+std::size_t count_kind(const std::vector<SampleEvent>& b, SampleEvent::Kind k,
                        const std::string& metric = {}) {
     std::size_t n = 0;
     for (const auto& e : b) {
-        if (e.kind == k && (metric.empty() || e.metric_name == metric)) ++n;
+        if (e.kind == k && (metric.empty() || e.metric_name == metric))
+            ++n;
     }
     return n;
 }
 
-const SampleEvent* first_of(const std::vector<SampleEvent>& b,
-                            SampleEvent::Kind k,
+const SampleEvent* first_of(const std::vector<SampleEvent>& b, SampleEvent::Kind k,
                             const std::string& metric = {}) {
     for (const auto& e : b) {
         if (e.kind == k && (metric.empty() || e.metric_name == metric))
@@ -63,18 +56,17 @@ const SampleEvent* first_of(const std::vector<SampleEvent>& b,
     return nullptr;
 }
 
-}  // namespace
+} // namespace
 
 // ── Off by default ────────────────────────────────────────────────────
 
-TEST_CASE("pulp_motion shim is a no-op when tracing is disabled",
-          "[motion][swift-bridge]") {
+TEST_CASE("pulp_motion shim is a no-op when tracing is disabled", "[motion][swift-bridge]") {
     Coordinator::instance().reset();
     REQUIRE_FALSE(pulp_motion_tracing_enabled());
 
     std::vector<SampleEvent> buf;
-    const int sink = Coordinator::instance().add_sink(
-        [&](const SampleEvent& e) { buf.push_back(e); });
+    const int sink =
+        Coordinator::instance().add_sink([&](const SampleEvent& e) { buf.push_back(e); });
     (void)sink;
 
     pulp_motion_publish_value("OffView", "opacity", 0.5, 0.001, 3);
@@ -83,7 +75,7 @@ TEST_CASE("pulp_motion shim is a no-op when tracing is disabled",
     pulp_motion_publish_components("OffView", "pt", keys, vals, 2, 0.001, 3);
 
     const int trace_id = pulp_motion_register_geometry_trace("OffView", 30);
-    REQUIRE(trace_id == 0);  // returns 0 when tracing is disabled
+    REQUIRE(trace_id == 0); // returns 0 when tracing is disabled
     pulp_motion_update_geometry(trace_id, "frame", 0.0, 0.0, 100.0, 50.0);
     pulp_motion_detach_trace(trace_id);
 
@@ -93,8 +85,7 @@ TEST_CASE("pulp_motion shim is a no-op when tracing is disabled",
 
 // ── Publish value / components ────────────────────────────────────────
 
-TEST_CASE("pulp_motion_publish_value routes to the Coordinator",
-          "[motion][swift-bridge]") {
+TEST_CASE("pulp_motion_publish_value routes to the Coordinator", "[motion][swift-bridge]") {
     BridgeFixture fx;
     REQUIRE(pulp_motion_tracing_enabled());
 
@@ -122,7 +113,7 @@ TEST_CASE("pulp_motion_publish_components emits sorted multi-component events",
     const auto* baseline = first_of(fx.buffer, SampleEvent::Kind::Baseline, "frame");
     REQUIRE(baseline != nullptr);
     REQUIRE(baseline->components.size() == 2);
-    REQUIRE(baseline->components[0].first == "x");  // sorted
+    REQUIRE(baseline->components[0].first == "x"); // sorted
     REQUIRE(baseline->components[1].first == "y");
 }
 
@@ -140,8 +131,7 @@ TEST_CASE("pulp_motion_publish_components tolerates empty and null inputs",
     REQUIRE(count_kind(fx.buffer, SampleEvent::Kind::Baseline, "p") == 0);
 }
 
-TEST_CASE("pulp_motion bridge normalizes null C strings",
-          "[motion][swift-bridge]") {
+TEST_CASE("pulp_motion bridge normalizes null C strings", "[motion][swift-bridge]") {
     BridgeFixture fx;
 
     pulp_motion_publish_value(nullptr, nullptr, 0.0, 0.001, 3);
@@ -194,8 +184,7 @@ TEST_CASE("pulp_motion_set_ambient_provenance stamps subsequent publishes",
           "[motion][swift-bridge]") {
     BridgeFixture fx;
 
-    pulp_motion_set_ambient_provenance("swiftui", "CardView",
-                                       "PulpMotion.swift", 42);
+    pulp_motion_set_ambient_provenance("swiftui", "CardView", "PulpMotion.swift", 42);
     pulp_motion_publish_value("Card", "opacity", 0.0, 0.001, 3);
     pulp_motion_publish_value("Card", "opacity", 1.0, 0.001, 3);
 
@@ -214,7 +203,8 @@ TEST_CASE("pulp_motion_set_ambient_provenance stamps subsequent publishes",
     const SampleEvent* card2_baseline = nullptr;
     for (const auto& e : fx.buffer) {
         if (e.kind == SampleEvent::Kind::Baseline && e.view_name == "Card2") {
-            card2_baseline = &e; break;
+            card2_baseline = &e;
+            break;
         }
     }
     REQUIRE(card2_baseline != nullptr);
@@ -235,13 +225,16 @@ TEST_CASE("pulp_motion_register_geometry_trace round-trips through FrameClock",
     pulp_motion_update_geometry(id, "frame", 10.0, 20.0, 100.0, 50.0);
     // Tick @ 60fps ≈ 16.6 ms; sampler is gated to 30fps so we need ≥ 2
     // ticks before the first sample fires.
-    for (int i = 0; i < 5; ++i) fx.clock.tick(1.0f / 60.0f);
+    for (int i = 0; i < 5; ++i)
+        fx.clock.tick(1.0f / 60.0f);
 
     // Now change the rect to trigger a Start/End burst.
     pulp_motion_update_geometry(id, "frame", 10.0, 120.0, 100.0, 50.0);
-    for (int i = 0; i < 5; ++i) fx.clock.tick(1.0f / 60.0f);
+    for (int i = 0; i < 5; ++i)
+        fx.clock.tick(1.0f / 60.0f);
     // Stabilize so the burst closes.
-    for (int i = 0; i < 10; ++i) fx.clock.tick(1.0f / 60.0f);
+    for (int i = 0; i < 10; ++i)
+        fx.clock.tick(1.0f / 60.0f);
 
     REQUIRE(count_kind(fx.buffer, SampleEvent::Kind::TraceStarted) >= 1);
     REQUIRE(count_kind(fx.buffer, SampleEvent::Kind::Baseline, "frame") >= 1);
@@ -258,7 +251,8 @@ TEST_CASE("pulp_motion_register_geometry_trace round-trips through FrameClock",
     const std::size_t pre_detach = fx.buffer.size();
     pulp_motion_detach_trace(id);
     pulp_motion_update_geometry(id, "frame", 999.0, 999.0, 999.0, 999.0);
-    for (int i = 0; i < 10; ++i) fx.clock.tick(1.0f / 60.0f);
+    for (int i = 0; i < 10; ++i)
+        fx.clock.tick(1.0f / 60.0f);
 
     // The non-empty stabilization may have appended End events between
     // the snapshot and the detach call, so allow a small slack — but
@@ -266,8 +260,10 @@ TEST_CASE("pulp_motion_register_geometry_trace round-trips through FrameClock",
     std::size_t post_starts = 0;
     for (std::size_t i = pre_detach; i < fx.buffer.size(); ++i) {
         const auto& e = fx.buffer[i];
-        if (e.metric_name != "frame") continue;
-        if (e.kind == SampleEvent::Kind::Start) ++post_starts;
+        if (e.metric_name != "frame")
+            continue;
+        if (e.kind == SampleEvent::Kind::Start)
+            ++post_starts;
     }
     REQUIRE(post_starts == 0);
 
@@ -283,7 +279,7 @@ TEST_CASE("pulp_motion_update_geometry with a non-default metric also emits",
     REQUIRE(id > 0);
 
     // Use a metric name other than "frame" — the bridge routes this
-    // through `publish_components` on the "swiftui" view name.
+    // through `publish_components` under the registered view name.
     pulp_motion_update_geometry(id, "scroll", 0.0, 0.0, 320.0, 480.0);
     pulp_motion_update_geometry(id, "scroll", 0.0, 100.0, 320.0, 480.0);
     pulp_motion_update_geometry(id, "scroll", 0.0, 200.0, 320.0, 480.0);
@@ -320,8 +316,7 @@ TEST_CASE("pulp_motion_update_geometry keeps frame metrics on the sampled trace 
     pulp_motion_detach_trace(id);
 }
 
-TEST_CASE("pulp_motion geometry registry survives coordinator reset",
-          "[motion][swift-bridge]") {
+TEST_CASE("pulp_motion geometry registry survives coordinator reset", "[motion][swift-bridge]") {
     BridgeFixture fx;
 
     const int first = pulp_motion_register_geometry_trace("ViewA", 30);
@@ -331,9 +326,12 @@ TEST_CASE("pulp_motion geometry registry survives coordinator reset",
 
     pulp_motion_update_geometry(first, "frame", 0.0, 0.0, 100.0, 100.0);
     pulp_motion_update_geometry(second, "frame", 10.0, 20.0, 50.0, 50.0);
-    for (int i = 0; i < 3; ++i) fx.clock.tick(1.0f / 60.0f);
+    for (int i = 0; i < 3; ++i)
+        fx.clock.tick(1.0f / 60.0f);
 
     Coordinator::instance().reset();
+    pulp_motion_detach_trace(first);
+    pulp_motion_detach_trace(second);
     Coordinator::instance().bind(fx.clock);
     Coordinator::instance().set_firehose(true);
     Coordinator::instance().set_tracing_enabled(true);
@@ -343,16 +341,27 @@ TEST_CASE("pulp_motion geometry registry survives coordinator reset",
     pulp_motion_detach_trace(fresh);
 }
 
-TEST_CASE("pulp_motion geometry bridge ignores unknown trace ids",
-          "[motion][swift-bridge]") {
+TEST_CASE("pulp_motion geometry bridge ignores unknown trace ids", "[motion][swift-bridge]") {
     BridgeFixture fx;
 
+    const int id = pulp_motion_register_geometry_trace("KnownView", 60);
+    REQUIRE(id > 0);
+    fx.clock.tick(1.0f / 60.0f);
+    REQUIRE(count_kind(fx.buffer, SampleEvent::Kind::Baseline, "frame") == 1);
+    fx.buffer.clear();
+
     pulp_motion_update_geometry(123456, "frame", 1.0, 2.0, 3.0, 4.0);
-    pulp_motion_detach_trace(123456);
-    for (int i = 0; i < 4; ++i) fx.clock.tick(1.0f / 60.0f);
+    for (int i = 0; i < 4; ++i)
+        fx.clock.tick(1.0f / 60.0f);
 
     REQUIRE(count_kind(fx.buffer, SampleEvent::Kind::Baseline, "frame") == 0);
     REQUIRE(count_kind(fx.buffer, SampleEvent::Kind::Start, "frame") == 0);
+
+    pulp_motion_detach_trace(123456);
+    pulp_motion_update_geometry(id, "bounds", 1.0, 2.0, 3.0, 4.0);
+    REQUIRE(count_kind(fx.buffer, SampleEvent::Kind::Baseline, "bounds") == 1);
+
+    pulp_motion_detach_trace(id);
 }
 
 TEST_CASE("pulp_motion geometry bridge detaches one trace without silencing others",

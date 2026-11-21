@@ -116,6 +116,9 @@ struct PulpClapPlugin {
     // instead of a shared global. Once `processor` exists, callbacks prefer its
     // live descriptor.
     PluginDescriptor descriptor_snapshot{};
+    // True when descriptor_snapshot came from a plug-in's static descriptor
+    // rather than a built Processor; clap_init() then verifies they agree.
+    bool descriptor_is_static = false;
 
     // Host accommodations, resolved once in clap_init() via the runtime
     // policy. Adapters consult these instead of hardcoding workarounds.

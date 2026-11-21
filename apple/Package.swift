@@ -19,7 +19,6 @@ let package = Package(
             path: "Sources/PulpSwift",
             exclude: [
                 "PulpBridge.cpp",
-                "PulpMotionBridge.cpp",
                 "PulpBridge.h",
             ],
             sources: [

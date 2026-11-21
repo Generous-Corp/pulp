@@ -272,6 +272,12 @@ file is a view-free `AUCocoaUIBase` factory whose class names
 (`PulpAUContractViewFactory_<MFR>_<CODE>` and `PulpAUContractHostView_...`) are
 per plug-in, and the factory class is exported. Things to keep straight:
 
+- The DAW shows the returned container before the editor's first frame, so the
+  factory backs its layer with `Processor::editor_background()` when the
+  plug-in declares one. Without that, a first-frame colour check sees the
+  container's default, not the plug-in's colour, even when the editor itself
+  opens on the right one.
+
 - The factory returns a container `NSView` that owns a `ContractEditorSession`.
   The editor attaches into the container at creation, so the container is its
   `NativeParent` for its whole life. Host frame changes, backing-scale changes,
