@@ -86,6 +86,13 @@ Load-bearing facts, each a trap if forgotten:
 - Each record is also published to the shared keyed registry (`registry.hpp`,
   see the `auv2` skill) at init for cross-format enumeration / editor assets.
 - Single-plugin `PULP_CLAP_PLUGIN` is unchanged behaviourally; a bundle is opt-in.
+- Scan cost: `init_record` builds a Processor only to read `descriptor()`. A heavy
+  constructor makes every host scan expensive (measured up to ~18 G instructions /
+  1 GB per scan). `PULP_CLAP_PLUGIN_WITH_DESCRIPTOR(factory, descriptor_fn)` and
+  `PULP_CLAP_BUNDLE_PLUGIN_WITH_DESCRIPTOR(Ident, factory, descriptor_fn)` store a
+  `PluginDescriptor()` function on the record so init/enumeration build nothing; the
+  Processor is built at `create_plugin`/`init`. `descriptor()` must return the same
+  value (have it call the function). Test: `test/test_clap_scan_without_processor.cpp`.
 
 Tests: `test/test_clap_bundle_entry.cpp` (two plugins, one entry) and the
 migrated `test/test_clap_entry.cpp` (single-plugin contract + per-instance

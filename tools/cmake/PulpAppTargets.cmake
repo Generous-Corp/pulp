@@ -245,6 +245,7 @@ function(_pulp_add_standalone target name bundle_id version processor_factory)
             CACHE INTERNAL "" FORCE)
     endif()
     _pulp_apply_ui_script_definition(${target}_Standalone "${PULP_${target}_UI_SCRIPT}")
+    _pulp_apply_macho_executable_exports(${target}_Standalone "${target}_Standalone")
     # The view layer's per-binary Objective-C classes; a view-free standalone
     # (UI <package>) has no view layer for them.
     if(NOT PULP_${target}_VIEW_FREE_STANDALONE)
@@ -336,6 +337,8 @@ function(pulp_add_app target)
             PULP_BUNDLE_ID="${APP_BUNDLE_ID}"
         )
     endif()
+
+    _pulp_apply_macho_executable_exports(${target} "${target}")
 
     message(STATUS "Pulp app: ${target}")
 endfunction()

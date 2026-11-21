@@ -36,6 +36,24 @@ The plugin descriptor (id, name, vendor, version, features) is derived automatic
 | `Instrument` | `CLAP_PLUGIN_FEATURE_INSTRUMENT` |
 | `MidiEffect` | `CLAP_PLUGIN_FEATURE_NOTE_EFFECT` |
 
+#### Cheap host scans: declare the descriptor statically
+
+By default `entry_init()` builds one `Processor` and reads its `descriptor()`, so a host scan (load the module, read the descriptors, unload) pays for one construction. If your constructor loads data or builds DSP, give the entry a descriptor function and the scan constructs nothing; the Processor is built on `create_plugin()`/`init`:
+
+```cpp
+pulp::format::PluginDescriptor my_descriptor() { return { /* same fields as below */ }; }
+
+class MyProcessor : public pulp::format::Processor {
+    pulp::format::PluginDescriptor descriptor() const override { return my_descriptor(); }
+    // ...
+};
+
+PULP_CLAP_PLUGIN_WITH_DESCRIPTOR(create_my_processor, my_descriptor)
+// bundles: PULP_CLAP_BUNDLE_PLUGIN_WITH_DESCRIPTOR(Ident, create_fn, my_descriptor)
+```
+
+Have `descriptor()` return the same function so the two answers cannot drift. `PULP_CLAP_PLUGIN` alone keeps the old behaviour. VST3 and AU entries do not build a Processor to describe the plug-in.
+
 ### Parameter Sync
 
 **Host to plugin:** During `clap_process()`, the adapter iterates `in_events`,

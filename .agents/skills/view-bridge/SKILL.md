@@ -4144,3 +4144,11 @@ New test code that needs an ordered-in `NSWindow` calls `order_in_window` and
 `activate_app_for_window` instead of `makeKeyAndOrderFront` /
 `activateIgnoringOtherApps`, or parks the window at a far-off-screen origin.
 `test_foreign_framework_coexistence.mm` proves the policy and that frames still present.
+
+## CLAP descriptor without a Processor
+
+`clap_entry.hpp` builds a Processor in `entry_init` only to read `descriptor()`;
+an editor-bearing plug-in with a heavy constructor pays that on every host scan.
+`PULP_CLAP_PLUGIN_WITH_DESCRIPTOR` / `PULP_CLAP_BUNDLE_PLUGIN_WITH_DESCRIPTOR`
+answer descriptor queries from a function, so the Processor (and its editor
+state) is built only at `create_plugin`/`init`. See the `clap` skill.

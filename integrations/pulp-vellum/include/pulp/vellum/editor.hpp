@@ -217,7 +217,26 @@ template <typename ViewType> class Editor final : public format::Editor {
             host_->repaint();
     }
 
+    format::EditorAutomation* automation() override {
+        return &automation_;
+    }
+
   private:
+    class Automation final : public format::EditorAutomation {
+      public:
+        explicit Automation(Editor& editor) : editor_(editor) {}
+
+        bool capture_png(std::vector<std::uint8_t>& png) override {
+            if (editor_.host_ == nullptr || !editor_.host_->present_first_frame())
+                return false;
+            png = editor_.host_->capture_back_buffer_png();
+            return !png.empty();
+        }
+
+      private:
+        Editor& editor_;
+    };
+
     void close_attachment() {
         if (env_.lifetime_)
             env_.lifetime_->open = false;
@@ -249,6 +268,7 @@ template <typename ViewType> class Editor final : public format::Editor {
     EditorEnv env_;
     std::unique_ptr<ViewType> root_;
     std::unique_ptr<::vellum::view::PluginViewHost> host_;
+    Automation automation_{*this};
     std::optional<format::ViewSize> view_size_;
     format::EditorSize size_{400, 300, 1.0};
     bool attached_ = false;
