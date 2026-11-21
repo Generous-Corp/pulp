@@ -5,6 +5,8 @@
 ///
 /// A plug-in editor type derives from `vellum::view::View` and accepts an
 /// `EditorEnv&` or `(EditorEnv&, format::Processor&)` in its constructor.
+/// It can return a `format::ViewSize` from `editor_view_size()` to declare
+/// resize constraints and an authored viewport.
 /// Each window has its own `ParamPortModel` for subscriptions and gesture
 /// lifetime while all edits still use Pulp's existing parameter bridge.
 
@@ -19,8 +21,10 @@
 #include <vellum/view/view.hpp>
 
 #include <concepts>
+#include <cstdint>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <type_traits>
@@ -63,16 +67,20 @@ template <typename ViewType> class Editor final : public format::Editor {
                  [](EditorEnv& env) { return std::make_unique<ViewType>(env); }) {}
 
     Editor(format::EditorContext& context, format::Processor& processor)
-        : Editor(context, processor.descriptor().bundle_id, [&processor](EditorEnv& env) {
-              if constexpr (std::is_constructible_v<ViewType, EditorEnv&, format::Processor&>)
-                  return std::make_unique<ViewType>(env, processor);
-              else
-                  return std::make_unique<ViewType>(env);
-          }) {}
+        : Editor(
+              context, processor.descriptor().bundle_id,
+              [&processor](EditorEnv& env) {
+                  if constexpr (std::is_constructible_v<ViewType, EditorEnv&, format::Processor&>)
+                      return std::make_unique<ViewType>(env, processor);
+                  else
+                      return std::make_unique<ViewType>(env);
+              },
+              processor.editor_background()) {}
 
   private:
     template <typename MakeRoot>
-    Editor(format::EditorContext& context, std::string_view bundle_id, MakeRoot make_root)
+    Editor(format::EditorContext& context, std::string_view bundle_id, MakeRoot make_root,
+           std::optional<std::uint32_t> background = std::nullopt)
         : model_(context.params()), env_{context, model_, nullptr} {
         detail::link_editor_prewarm();
         if (auto* visuals = context.visuals()) {
@@ -81,10 +89,17 @@ template <typename ViewType> class Editor final : public format::Editor {
         }
         root_ = make_root(env_);
         if constexpr (requires(ViewType& view) {
-                          {
-                              view.preferred_editor_size()
-                          } -> std::convertible_to<format::EditorSize>;
+                          { view.editor_view_size() } -> std::convertible_to<format::ViewSize>;
                       }) {
+            view_size_ = root_->editor_view_size();
+            env_.lifetime_->size_hints = view_size_;
+            if (view_size_->preferred_width != 0 && view_size_->preferred_height != 0)
+                size_ = {view_size_->preferred_width, view_size_->preferred_height, size_.scale};
+        } else if constexpr (requires(ViewType& view) {
+                                 {
+                                     view.preferred_editor_size()
+                                 } -> std::convertible_to<format::EditorSize>;
+                             }) {
             const format::EditorSize preferred = root_->preferred_editor_size();
             if (preferred.width != 0 && preferred.height != 0)
                 size_ = preferred;
@@ -97,7 +112,16 @@ template <typename ViewType> class Editor final : public format::Editor {
         ::vellum::view::PluginViewHost::Options options;
         options.size = {size_.width, size_.height};
         options.use_gpu = true;
+        // The plug-in's declared editor colour is what the host shows before
+        // the first frame and wherever the root does not paint.
+        if (background)
+            options.background_rgb = *background & 0xFFFFFFu;
         host_ = ::vellum::view::PluginViewHost::create(*root_, options);
+        if (host_ != nullptr && has_design_viewport()) {
+            host_->set_design_viewport(static_cast<float>(view_size_->design_width),
+                                       static_cast<float>(view_size_->design_height));
+            host_->set_fixed_aspect_ratio(static_cast<float>(view_size_->aspect_ratio));
+        }
     }
 
   public:
@@ -130,8 +154,10 @@ template <typename ViewType> class Editor final : public format::Editor {
             return false;
         if (!host_->try_attach_to_parent(parent.handle))
             return false;
-        if (!env_.lifetime_)
+        if (!env_.lifetime_) {
             env_.lifetime_ = std::make_shared<EditorEnv::Attachment>();
+            env_.lifetime_->size_hints = view_size_;
+        }
         attached_ = true;
         if constexpr (requires(ViewType& view) { view.editor_opened(); })
             root_->editor_opened();
@@ -163,13 +189,17 @@ template <typename ViewType> class Editor final : public format::Editor {
         if (closing_ || invalidated_ || size.width == 0 || size.height == 0)
             return false;
         size_ = size;
+        if (view_size_)
+            format::detail::clamp_to_hints(*view_size_, size_.width, size_.height);
         layout_root();
         if (host_ != nullptr)
-            host_->set_size(size.width, size.height);
+            host_->set_size(size_.width, size_.height);
         return true;
     }
 
     format::ViewSize size_hints() const override {
+        if (view_size_)
+            return *view_size_;
         format::ViewSize hints;
         hints.preferred_width = size_.width;
         hints.preferred_height = size_.height;
@@ -207,13 +237,17 @@ template <typename ViewType> class Editor final : public format::Editor {
         closing_ = false;
     }
 
-    // The GPU plug-in host draws the root at its current bounds and leaves
-    // layout to its owner, so the editor sizes the root to the editor.
+    bool has_design_viewport() const {
+        return view_size_ && view_size_->design_width != 0 && view_size_->design_height != 0;
+    }
+
     void layout_root() {
         if (root_ == nullptr)
             return;
-        root_->set_bounds(
-            {0, 0, static_cast<float>(size_.width), static_cast<float>(size_.height)});
+        const bool design = has_design_viewport();
+        const auto width = design ? view_size_->design_width : size_.width;
+        const auto height = design ? view_size_->design_height : size_.height;
+        root_->set_bounds({0, 0, static_cast<float>(width), static_cast<float>(height)});
         root_->layout_children();
     }
 
@@ -222,6 +256,7 @@ template <typename ViewType> class Editor final : public format::Editor {
     EditorEnv env_;
     std::unique_ptr<ViewType> root_;
     std::unique_ptr<::vellum::view::PluginViewHost> host_;
+    std::optional<format::ViewSize> view_size_;
     format::EditorSize size_{400, 300, 1.0};
     bool attached_ = false;
     bool closing_ = false;

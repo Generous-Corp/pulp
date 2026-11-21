@@ -2918,6 +2918,14 @@ registration. Plain `UI_SCRIPT` still installs the legacy scripted builder,
 and AutoUi stays on the legacy view path. Vellum audio widgets still need
 script factory registration and a `VisualPortFeed` data-channel adapter.
 
+Test this route through the public CMake selector: setting the final target's
+`PULP_VELLUM_SCRIPTED_EDITOR` property by hand cannot detect a missing package
+hookup. For lifecycle forwarding, use the private scripted root with a recording
+session and a real host observer registry; publish a new surface after close to
+prove the subscription was removed, then reopen to prove it is re-established.
+Keep the prewarm recorder in its own executable so it can replace Vellum's
+external scheduler without changing the ordinary scripted editor tests.
+
 `pulp_add_plugin(UI_SCRIPT)` no longer ships a plug-in that reads `ui.js` from
 the developer's absolute source path at every editor open. The script's bytes,
 the `theme.json` beside it, and the asset files beside it (images, fonts,
