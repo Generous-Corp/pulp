@@ -75,3 +75,44 @@ TEST_CASE("every cursor maps to a Win32 system cursor", "[native][input][win32]"
     REQUIRE(win32_cursor_resource(Cursor::open_hand) ==
             win32_cursor_resource(Cursor::pointing_hand));
 }
+
+TEST_CASE("Win32 generic modifier keys take their side from lParam", "[native][input][win32]") {
+    // VK_SHIFT: the scan code tells the sides apart (0x2a left, 0x36 right).
+    REQUIRE(key_for_win32_vk(0x10, false, 0x2a) == Key::shift_left);
+    REQUIRE(key_for_win32_vk(0x10, false, 0x36) == Key::shift_right);
+    // VK_CONTROL and VK_MENU: the right-hand key sets the extended bit.
+    REQUIRE(key_for_win32_vk(0x11, false, 0x1d) == Key::control_left);
+    REQUIRE(key_for_win32_vk(0x11, true, 0x1d) == Key::control_right);
+    REQUIRE(key_for_win32_vk(0x12, false, 0x38) == Key::option_left);
+    REQUIRE(key_for_win32_vk(0x12, true, 0x38) == Key::option_right);
+    // The side-specific codes need no help.
+    REQUIRE(key_for_win32_vk(0xa1, false) == Key::shift_right);
+    REQUIRE(key_for_win32_vk(0xa5, false) == Key::option_right);
+}
+
+TEST_CASE("a taken key swallows only the characters it makes", "[native][input][win32]") {
+    // lParam: scan code in bits 16-23, extended bit 24.
+    const auto id = [](unsigned scan, bool ext) {
+        return Win32TakenKeys::id_from_lparam((std::uint64_t{scan} << 16) |
+                                              (ext ? (std::uint64_t{1} << 24) : 0));
+    };
+    Win32TakenKeys keys;
+    // A taken key that makes no character (the Left arrow, scan 0x4b extended)
+    // must leave the next typed character, 'a' (scan 0x1e), alone.
+    keys.taken(id(0x4b, true));
+    REQUIRE_FALSE(keys.suppresses_char(id(0x1e, false)));
+    keys.released(id(0x4b, true));
+
+    // A taken key that does type is swallowed, repeats included, until released.
+    keys.taken(id(0x1e, false));
+    REQUIRE(keys.suppresses_char(id(0x1e, false)));
+    keys.taken(id(0x1e, false)); // a repeat does not stack
+    keys.released(id(0x1e, false));
+    REQUIRE_FALSE(keys.suppresses_char(id(0x1e, false)));
+
+    // The extended bit separates the keypad key from the main one.
+    keys.taken(id(0x1c, true));
+    REQUIRE_FALSE(keys.suppresses_char(id(0x1c, false)));
+    keys.clear();
+    REQUIRE_FALSE(keys.suppresses_char(id(0x1c, true)));
+}

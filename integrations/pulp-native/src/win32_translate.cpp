@@ -4,9 +4,11 @@
 
 #include <pulp/native/input.hpp>
 
+#include <algorithm>
+
 namespace pulp::native {
 
-Key key_for_win32_vk(std::uint32_t vk, bool extended) noexcept {
+Key key_for_win32_vk(std::uint32_t vk, bool extended, std::uint32_t scan_code) noexcept {
     if (vk >= 0x41 && vk <= 0x5a) // 'A'..'Z'
         return static_cast<Key>(static_cast<std::uint16_t>(Key::a) + (vk - 0x41));
     if (vk >= 0x30 && vk <= 0x39) // '0'..'9'
@@ -78,17 +80,20 @@ Key key_for_win32_vk(std::uint32_t vk, bool extended) noexcept {
         return Key::right_bracket;
     case 0xde:
         return Key::quote;
-    case 0x10: // VK_SHIFT, before the side is known
+    case 0x10: // VK_SHIFT: both sides, told apart by the scan code
+        return (scan_code & 0xff) == 0x36 ? Key::shift_right : Key::shift_left;
     case 0xa0:
         return Key::shift_left;
     case 0xa1:
         return Key::shift_right;
-    case 0x11:
+    case 0x11: // VK_CONTROL: the right key sets the extended bit
+        return extended ? Key::control_right : Key::control_left;
     case 0xa2:
         return Key::control_left;
     case 0xa3:
         return Key::control_right;
-    case 0x12:
+    case 0x12: // VK_MENU: the right Alt (AltGr) sets the extended bit
+        return extended ? Key::option_right : Key::option_left;
     case 0xa4:
         return Key::option_left;
     case 0xa5:
@@ -110,6 +115,19 @@ Key key_for_win32_vk(std::uint32_t vk, bool extended) noexcept {
     default:
         return Key::unknown;
     }
+}
+
+void Win32TakenKeys::taken(std::uint32_t id) {
+    if (!suppresses_char(id))
+        ids_.push_back(id);
+}
+
+void Win32TakenKeys::released(std::uint32_t id) {
+    ids_.erase(std::remove(ids_.begin(), ids_.end(), id), ids_.end());
+}
+
+bool Win32TakenKeys::suppresses_char(std::uint32_t id) const noexcept {
+    return std::find(ids_.begin(), ids_.end(), id) != ids_.end();
 }
 
 std::uint32_t modifiers_from_win32_keys(bool shift, bool control, bool alt, bool windows,

@@ -150,7 +150,7 @@ struct WglWindow final : GlSurface::Impl, MessageSink {
     bool holding_focus = false;
     bool pointer_inside = false;
     std::unordered_map<unsigned, bool> keys_down; // virtual key -> client went first
-    bool skip_next_char = false;
+    Win32TakenKeys taken_keys; // taken key-downs whose characters are dropped
     DWORD last_press_time = 0;
     unsigned last_press_button = 0;
     int last_press_x = 0;
@@ -236,6 +236,7 @@ struct WglWindow final : GlSurface::Impl, MessageSink {
         SetWindowLongPtrW(hwnd, GWLP_USERDATA,
                           reinterpret_cast<LONG_PTR>(static_cast<MessageSink*>(this)));
         keys_down.clear();
+        taken_keys.clear();
         click_count = 0;
         pointer_inside = false;
         hdc = GetDC(hwnd);
@@ -400,7 +401,8 @@ struct WglWindow final : GlSurface::Impl, MessageSink {
         const unsigned vk = static_cast<unsigned>(wparam);
         KeyEvent key;
         key.kind = down ? KeyKind::down : KeyKind::up;
-        key.key = key_for_win32_vk(vk, (lparam & (1 << 24)) != 0);
+        key.key = key_for_win32_vk(vk, (lparam & (1 << 24)) != 0,
+                                    static_cast<std::uint32_t>((lparam >> 16) & 0xff));
         key.native_code = static_cast<std::uint16_t>(vk);
         key.modifiers = current_modifiers();
         key.timestamp = GetMessageTime() / 1000.0;
@@ -421,9 +423,14 @@ struct WglWindow final : GlSurface::Impl, MessageSink {
         bool taken = false;
         if (client_first) {
             taken = input.key && input.key(key);
-            // A key the client took is not also typed.
-            skip_next_char = taken && down;
+            // A key the client took is not also typed. The characters it makes
+            // are matched by scan code, so a taken key that makes none leaves
+            // the next typed character alone.
+            if (taken && down)
+                taken_keys.taken(Win32TakenKeys::id_from_lparam(static_cast<std::uint64_t>(lparam)));
         }
+        if (!down)
+            taken_keys.released(Win32TakenKeys::id_from_lparam(static_cast<std::uint64_t>(lparam)));
         if (!taken && !(client_first && down && keyboard_focus == KeyboardFocus::text)) {
             HWND parent = GetParent(hwnd);
             if (parent != nullptr)
@@ -431,11 +438,10 @@ struct WglWindow final : GlSurface::Impl, MessageSink {
         }
     }
 
-    void on_char(WPARAM wparam) {
-        if (skip_next_char) {
-            skip_next_char = false;
+    void on_char(WPARAM wparam, LPARAM lparam) {
+        if (taken_keys.suppresses_char(
+                Win32TakenKeys::id_from_lparam(static_cast<std::uint64_t>(lparam))))
             return;
-        }
         if (keyboard_focus != KeyboardFocus::text || !input.text)
             return;
         // UTF-16 to UTF-8; a surrogate pair arrives as two WM_CHAR messages.
@@ -508,10 +514,12 @@ struct WglWindow final : GlSurface::Impl, MessageSink {
             on_key(message, wparam, lparam);
             return true;
         case WM_CHAR:
-            on_char(wparam);
+            on_char(wparam, lparam);
             return true;
         case WM_SETFOCUS:
         case WM_KILLFOCUS:
+            // A release can go to another window: forget the taken keys.
+            taken_keys.clear();
             if (input.focus) {
                 FocusEvent focus;
                 focus.focused = message == WM_SETFOCUS;
@@ -704,6 +712,7 @@ struct WglWindow final : GlSurface::Impl, MessageSink {
     }
 
     void detach_window() override {
+        taken_keys.clear();
         if (hwnd != nullptr) {
             release_keyboard();
             // No message reaches this object once the window starts to go.
@@ -725,6 +734,7 @@ struct WglWindow final : GlSurface::Impl, MessageSink {
         // The parent, and with it the child window and its DC, are already
         // gone or going: drop the handles without touching them.
         holding_focus = false;
+        taken_keys.clear();
         hwnd = nullptr;
         hdc = nullptr;
     }

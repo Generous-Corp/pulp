@@ -17,6 +17,7 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <vector>
 
 namespace pulp::native {
 
@@ -364,7 +365,41 @@ unsigned x11_cursor_shape(Cursor cursor) noexcept;
 /// The key for a virtual-key code (`VK_*`); `extended` is the extended-key bit
 /// of `lParam` (bit 24), which tells the Enter on the keypad from the main one.
 /// `Key::unknown` for a code with no key.
-Key key_for_win32_vk(std::uint32_t vk, bool extended) noexcept;
+///
+/// Win32 reports Shift, Ctrl and Alt as the generic `VK_SHIFT`, `VK_CONTROL`
+/// and `VK_MENU` for both sides, so the side comes from `lParam`: the scan code
+/// (bits 16-23, 0x36 for right Shift) for Shift, and the extended bit for Ctrl
+/// and Alt. Pass `scan_code` for those; the side-specific `VK_L*` / `VK_R*`
+/// codes ignore it.
+Key key_for_win32_vk(std::uint32_t vk, bool extended, std::uint32_t scan_code = 0) noexcept;
+
+/// Which key-downs the client took, so the `WM_CHAR` they generate can be
+/// dropped and nothing else is. A character is tied to its key by the scan code
+/// and extended bit of `lParam`, so a taken key that makes no character (an
+/// arrow, a shortcut) never swallows a later, unrelated one.
+class Win32TakenKeys {
+public:
+    /// The scan-code identity of a key message's `lParam`: the scan code with
+    /// the extended bit above it.
+    static std::uint32_t id_from_lparam(std::uint64_t lparam) noexcept {
+        return static_cast<std::uint32_t>((lparam >> 16) & 0xff) |
+               (static_cast<std::uint32_t>((lparam >> 24) & 1) << 8);
+    }
+    /// The client took the key-down with this id (its repeats too).
+    void taken(std::uint32_t id);
+    /// The key was released; its characters are over.
+    void released(std::uint32_t id);
+    /// Whether a `WM_CHAR` with this id comes from a taken key.
+    bool suppresses_char(std::uint32_t id) const noexcept;
+    /// Forget everything: focus changed or the window went away, so releases
+    /// may never arrive.
+    void clear() noexcept {
+        ids_.clear();
+    }
+
+private:
+    std::vector<std::uint32_t> ids_;
+};
 
 /// Modifier bits from the states of the modifier keys.
 std::uint32_t modifiers_from_win32_keys(bool shift, bool control, bool alt, bool windows,
