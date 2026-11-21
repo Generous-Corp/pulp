@@ -298,6 +298,22 @@ error. Things that are easy to get wrong:
 - A test that installs a hook with `install_plugin_editor_factory_hook()` must
   clear it (`nullptr`) before it ends, or every later test in the grouped
   binary sees a factory on a headless processor.
+- A package that loads shared libraries lists them as
+  `PULP_EDITOR_RUNTIME_LIBRARIES`. Without it a UI-package module, which skips
+  `pulp_stage_runtime_dependencies()` because it is `NO_EDITOR`, keeps CMake's
+  build rpaths into the SDK: it loads on the build machine and nowhere else,
+  and only the AU's post-build relocatable check notices.
+  `_pulp_stage_ui_package_runtime()` copies them and sets an `@loader_path`-only
+  rpath, and it must run before the module's own post-build checks.
+- Vellum's SDK defines `vellum::view::PluginViewHost::create()`, its factory
+  registry and the macOS GPU host (Skia on Dawn into the view's
+  `CAMetalLayer`). Pulp defines none of them: a second definition in a
+  plug-in would win silently over the SDK's. A Vellum SDK without the export
+  fails at configure, not at link.
+- The process owns Dawn's proc table, so the editor glue registers the Dawn
+  bootstrap once per plug-in image, keyed by the bundle id, before the first
+  `create()`. Without it the host comes back null ("Dawn proc table
+  unavailable"), which reads like a GPU failure but is a missing bootstrap.
 
 ### The editor-host acceptance test is one command
 
@@ -2896,6 +2912,20 @@ case so the degradation is visible rather than mysterious.
 
 ## The UI_SCRIPT editor is embedded; the on-disk path is a dev-build override
 
+With the Vellum bridge enabled, `pulp_add_plugin(UI_SCRIPT ... UI_ENGINE vellum)`
+routes a script-only plug-in to the Vellum editor package using the same asset
+registration. Plain `UI_SCRIPT` still installs the legacy scripted builder,
+and AutoUi stays on the legacy view path. Vellum audio widgets still need
+script factory registration and a `VisualPortFeed` data-channel adapter.
+
+Test this route through the public CMake selector: setting the final target's
+`PULP_VELLUM_SCRIPTED_EDITOR` property by hand cannot detect a missing package
+hookup. For lifecycle forwarding, use the private scripted root with a recording
+session and a real host observer registry; publish a new surface after close to
+prove the subscription was removed, then reopen to prove it is re-established.
+Keep the prewarm recorder in its own executable so it can replace Vellum's
+external scheduler without changing the ordinary scripted editor tests.
+
 `pulp_add_plugin(UI_SCRIPT)` no longer ships a plug-in that reads `ui.js` from
 the developer's absolute source path at every editor open. The script's bytes,
 the `theme.json` beside it, and the asset files beside it (images, fonts,
@@ -2910,7 +2940,8 @@ and a generated header returns them as the embedded half of a
 later `pulp_use_kit_ui` selection still lands) includes that header, so one static
 initializer registers the embedded editor and the on-disk paths together, and
 the data archive's members are referenced from a direct source and survive
-the link. `select_editor_ui_source()` in `editor_ui.hpp` is the pure decision;
+the link. `select_editor_ui_source_as()` in `editor_ui_source.hpp` makes the
+shared source decision, with a legacy wrapper in `editor_ui.hpp`;
 `test_headless.cpp` tests its matrix and `test_view_bridge.cpp` opens an
 embedded registration through a real ViewBridge.
 
@@ -4113,3 +4144,11 @@ New test code that needs an ordered-in `NSWindow` calls `order_in_window` and
 `activate_app_for_window` instead of `makeKeyAndOrderFront` /
 `activateIgnoringOtherApps`, or parks the window at a far-off-screen origin.
 `test_foreign_framework_coexistence.mm` proves the policy and that frames still present.
+
+## CLAP descriptor without a Processor
+
+`clap_entry.hpp` builds a Processor in `entry_init` only to read `descriptor()`;
+an editor-bearing plug-in with a heavy constructor pays that on every host scan.
+`PULP_CLAP_PLUGIN_WITH_DESCRIPTOR` / `PULP_CLAP_BUNDLE_PLUGIN_WITH_DESCRIPTOR`
+answer descriptor queries from a function, so the Processor (and its editor
+state) is built only at `create_plugin`/`init`. See the `clap` skill.

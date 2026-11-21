@@ -6190,6 +6190,14 @@ bisectable.
   tests from local `LastTest.log` data and, when none exists, exits 3, which
   gates.sh lists as NOT CHECKED rather than a pass. An unresolvable `TIMEOUT` or
   `LABELS` variable fails closed.
+- **Clock-in-tests lint and timezone matrix.** A Python test that reads the real
+  clock beside a pinned date fails every run once the calendar crosses a window it
+  assumed (the 2026-11-19 00:00 UTC outage of the required versioning check).
+  `clock_in_tests_lint.py` (in `gates.sh` and pre-push, diff-scoped) rejects a
+  newly added or edited `datetime.now`, `date.today`, `time.time` and similar
+  line in `tools/**/test_*.py` unless it carries `# clock-ok: <reason>`. The
+  baseline file is used only by `--all`; diff scans require the marker even for
+  lines listed in that baseline.
 - **Release builds must pass `-DPULP_BUILD_EXAMPLES=OFF`.** The
   `pulp-design-tool` example hard-fails CMake configure when `PULP_HAS_SKIA`
   is FALSE (belt-and-suspenders, code 78). `sign-and-release.yml` builds on a

@@ -2,6 +2,7 @@
 
 #include <cstdint>
 #include <functional>
+#include <memory>
 #include <span>
 #include <vector>
 
@@ -19,6 +20,11 @@ using EnvelopeMigrationFn =
                        std::vector<uint8_t>& destination)>;
 
 uint32_t current_envelope_version();
+
+/// CRC-32 (IEEE 802.3, reflected, init and final xor 0xFFFFFFFF) used by the
+/// host state envelope and the AU compact state. Table driven, eight bytes per
+/// step; the value is identical to the bitwise definition.
+[[nodiscard]] uint32_t crc32(std::span<const uint8_t> bytes) noexcept;
 
 enum class RestoreBlobFormat : uint8_t {
     unknown,
@@ -95,6 +101,21 @@ std::vector<uint8_t> serialize(const state::StateStore& store,
 bool deserialize(std::span<const uint8_t> bytes,
                  state::StateStore& store,
                  Processor& processor);
+
+/// The processor-owned payload a host blob carries: the published snapshot when
+/// the processor has one, else a fresh serialize_plugin_state(). Never null; an
+/// empty vector means the processor has no payload of its own. A published
+/// snapshot is shared, not copied.
+std::shared_ptr<const std::vector<uint8_t>> plugin_state_payload(const Processor& processor);
+
+/// Restore from an already-split parameter payload and plugin payload.
+///
+/// @p store_blob is a StateStore::serialize() blob. This is the second half of
+/// deserialize(): the same schema probe, listener-silent restore, and rollback
+/// of both layers when either is rejected. Adapters that carry the two payloads
+/// in their own container call this instead of re-wrapping them in an envelope.
+bool deserialize_parts(std::span<const uint8_t> store_blob, std::span<const uint8_t> plugin_blob,
+                       state::StateStore& store, Processor& processor);
 
 } // namespace plugin_state_io
 } // namespace pulp::format

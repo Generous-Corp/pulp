@@ -87,7 +87,7 @@ void pulp_free(void* ptr);
 
 // ── Motion observability ────────────────────────────────────────────────
 //
-// Swift bridge for `pulp::view::motion` (see core/view/include/pulp/view/motion.hpp).
+// Swift bridge for `vellum::view::motion` in the pulp-vellum integration.
 // Mirrors the publish channel + ambient-provenance API for SwiftUI / UIKit /
 // AppKit callers (Pulp's iOS AUv3 editors, Swift host apps, `PulpSwift/`).
 //

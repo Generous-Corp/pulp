@@ -1,10 +1,10 @@
 # Installs the gpu-runtime subproject this build fetched into a scratch prefix
 # and drives pulp_find_gpu_runtime_package() against it from child projects:
 #   function  : the SDK's own find succeeds and yields the device targets;
-#   components: find_package() naming components fails, the package behaviour
-#               the function exists to avoid (if the package starts marking its
-#               components found, this case flips and the function can request
-#               them again);
+#   components: find_package() naming components succeeds; gpu-runtime 0.2.0
+#               marks its installed components found (0.1.x did not, which
+#               is why the function checks them itself instead of requesting
+#               them);
 #   no-dawn   : without the locked Dawn build the function refuses.
 #   cmake -DMODULE=<PulpGpuRuntimeRecord.cmake> -DRUNTIME_BUILD_DIR=<dir>
 #         -DSKIA_DIR=<dir> -DVERSION=<x.y.z> -DWORK_DIR=<dir> -P check_gpu_runtime_package_find.cmake
@@ -34,10 +34,12 @@ foreach(_case function components no-dawn)
         "include(\"${MODULE}\")\nset(GPU_RUNTIME_SKIA_DIR \"${_skia}\")\n${_find}\n")
     execute_process(COMMAND "${CMAKE_COMMAND}" -S "${_source}" -B "${_source}/build"
         RESULT_VARIABLE _result OUTPUT_QUIET ERROR_VARIABLE _error)
-    if(_case STREQUAL "function" AND NOT _result EQUAL 0)
-        message(FATAL_ERROR "the SDK's gpu-runtime find failed: ${_error}")
-    elseif(NOT _case STREQUAL "function" AND _result EQUAL 0)
-        message(FATAL_ERROR "case ${_case} was accepted")
+    if(_case STREQUAL "no-dawn")
+        if(_result EQUAL 0)
+            message(FATAL_ERROR "case ${_case} was accepted")
+        endif()
+    elseif(NOT _result EQUAL 0)
+        message(FATAL_ERROR "the SDK's gpu-runtime find (${_case}) failed: ${_error}")
     endif()
 endforeach()
 message(STATUS "gpu-runtime package find: ok")

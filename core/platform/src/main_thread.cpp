@@ -1,6 +1,7 @@
 #include <pulp/platform/main_thread.hpp>
 
 #include <atomic>
+#include <cmath>
 #include <deque>
 #include <mutex>
 #include <utility>
@@ -21,8 +22,27 @@ std::atomic<std::uint64_t> g_callouts{0};
 
 // A timer that is not due is parked this far ahead. CFRunLoopTimer invalidates
 // a non-repeating timer once it fires, so every timer here is created
-// repeating with this interval and rescheduled with SetNextFireDate.
+// repeating and, when not in use, parked with SetNextFireDate. A timer used for
+// fire_every is created with its period as the native interval, so the run
+// loop re-arms it and a fire costs no reposition in the loop's timer list.
 constexpr CFTimeInterval kParked = 1.0e10;
+
+// A tenth of the period, at least a few milliseconds, at most half the period.
+CFTimeInterval repeating_tolerance(CFTimeInterval period) {
+    constexpr CFTimeInterval kMin = 0.005;
+    const CFTimeInterval tol = period / 10 > kMin ? period / 10 : kMin;
+    return tol > period / 2 ? period / 2 : tol;
+}
+
+// Repeating timers at least this long are aligned to a common grid.
+constexpr CFTimeInterval kGridMinPeriod = 0.05;
+
+std::atomic<std::uint64_t> g_rearms{0};
+
+void set_next_fire(CFRunLoopTimerRef timer, CFTimeInterval at) {
+    g_rearms.fetch_add(1, std::memory_order_relaxed);
+    CFRunLoopTimerSetNextFireDate(timer, at);
+}
 
 void run_contained(const std::function<void()>& fn) noexcept {
     try {
@@ -163,12 +183,28 @@ struct MainThreadTimerState : std::enable_shared_from_this<MainThreadTimerState>
     CFRunLoopTimerRef timer = nullptr;
     bool pending = false;
     CFTimeInterval period = 0; // > 0 while repeating
+    CFTimeInterval native_interval = 0; // interval the CF timer was created with
+    bool align_pending = false;         // a grid-eligible repeat still owes its move onto the grid
 
     void park() {
         pending = false;
         period = 0;
         if (timer != nullptr)
-            CFRunLoopTimerSetNextFireDate(timer, CFAbsoluteTimeGetCurrent() + kParked);
+            set_next_fire(timer, CFAbsoluteTimeGetCurrent() + kParked);
+    }
+
+    // Create a CF timer whose native interval is `interval`, parked.
+    static CFRunLoopTimerRef make_timer(MainThreadTimerState* owner, CFTimeInterval interval) {
+        CFRunLoopTimerContext context{};
+        context.info = owner;
+        CFRunLoopTimerRef t =
+            CFRunLoopTimerCreate(kCFAllocatorDefault, CFAbsoluteTimeGetCurrent() + kParked,
+                                 interval, 0, 0, &MainThreadTimerState::fire, &context);
+        if (t == nullptr)
+            return nullptr;
+        CFRunLoopTimerSetTolerance(t, 0);
+        CFRunLoopAddTimer(CFRunLoopGetMain(), t, kCFRunLoopCommonModes);
+        return t;
     }
 
     // Stop for good: the run loop drops its callback into this binary.
@@ -185,9 +221,30 @@ struct MainThreadTimerState : std::enable_shared_from_this<MainThreadTimerState>
     void schedule(CFTimeInterval delay, CFTimeInterval repeat) {
         if (timer == nullptr)
             return;
+        // A repeating schedule needs the timer's native interval to be its
+        // period; replace the timer when it differs (a period change, or the
+        // first repeat after one-shots). The old timer is dropped, not re-armed.
+        if (repeat > 0 && native_interval != repeat) {
+            CFRunLoopTimerRef fresh = make_timer(this, repeat);
+            if (fresh == nullptr)
+                return;
+            CFRunLoopTimerInvalidate(timer);
+            CFRelease(timer);
+            timer = fresh;
+            native_interval = repeat;
+        }
+        // Repeating timers may be coalesced by the system: timers of one
+        // process whose phases differ then wake the main thread together
+        // instead of once each. One-shots stay exact.
+        CFRunLoopTimerSetTolerance(timer, repeat > 0 ? repeating_tolerance(repeat) : 0);
         pending = true;
         period = repeat;
-        CFRunLoopTimerSetNextFireDate(timer, CFAbsoluteTimeGetCurrent() + delay);
+        // The first fire is exactly one delay away (the documented contract).
+        // A repeating timer of one period then moves onto a grid on the
+        // absolute clock after that first fire, so timers started at
+        // different moments fire in the same run-loop pass from then on.
+        align_pending = repeat >= kGridMinPeriod && delay == repeat;
+        set_next_fire(timer, CFAbsoluteTimeGetCurrent() + delay);
     }
 
     static void fire(CFRunLoopTimerRef, void* info) {
@@ -202,10 +259,19 @@ struct MainThreadTimerState : std::enable_shared_from_this<MainThreadTimerState>
             if (!owner->alive)
                 return;
         }
-        if (self->period > 0)
-            CFRunLoopTimerSetNextFireDate(self->timer, CFAbsoluteTimeGetCurrent() + self->period);
-        else
+        // A repeating timer is re-armed by the run loop; only a one-shot parks.
+        if (self->period <= 0) {
             self->park();
+        } else if (self->align_pending) {
+            // After the first fire, put the next one on the first grid tick at
+            // least one full period away: no interval is ever shorter than the
+            // period, and every same-period timer lands on the same tick.
+            self->align_pending = false;
+            const CFAbsoluteTime now = CFAbsoluteTimeGetCurrent();
+            const CFAbsoluteTime next =
+                std::ceil((now + self->period) / self->period) * self->period;
+            set_next_fire(self->timer, next);
+        }
         // Hold the callback itself: the timer may be destroyed while it runs.
         std::shared_ptr<std::function<void()>> fn = self->on_fire;
         if (fn && *fn)
@@ -215,6 +281,10 @@ struct MainThreadTimerState : std::enable_shared_from_this<MainThreadTimerState>
 
 std::uint64_t main_thread_callouts() noexcept {
     return g_callouts.load(std::memory_order_relaxed);
+}
+
+std::uint64_t main_thread_timer_rearms() noexcept {
+    return g_rearms.load(std::memory_order_relaxed);
 }
 
 std::size_t main_thread_source_count() noexcept {
@@ -322,15 +392,10 @@ MainThreadTimer::MainThreadTimer(MainThreadScope& scope, std::function<void()> o
         if (!scope.state_->alive)
             return;
     }
-    CFRunLoopTimerContext context{};
-    context.info = state_.get();
-    state_->timer =
-        CFRunLoopTimerCreate(kCFAllocatorDefault, CFAbsoluteTimeGetCurrent() + kParked, kParked, 0,
-                             0, &detail::MainThreadTimerState::fire, &context);
+    state_->native_interval = kParked;
+    state_->timer = detail::MainThreadTimerState::make_timer(state_.get(), kParked);
     if (state_->timer == nullptr)
         return;
-    CFRunLoopTimerSetTolerance(state_->timer, 0);
-    CFRunLoopAddTimer(CFRunLoopGetMain(), state_->timer, kCFRunLoopCommonModes);
     scope.state_->timers.push_back(state_.get());
 }
 

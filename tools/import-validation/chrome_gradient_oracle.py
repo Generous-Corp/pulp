@@ -51,6 +51,18 @@ except ImportError:
 CHROME = os.environ.get(
     "PULP_CHROME", "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome")
 
+
+def refuse_installed_app_in_sandbox():
+    # Check the resolved path too: a symlink can point into an .app bundle.
+    paths = (CHROME, os.path.realpath(CHROME))
+    if (os.environ.get("CODEX_SANDBOX") and
+            any(part.endswith(".app") for path in paths for part in path.split(os.sep))):
+        # Exit 77 is the skip status; sys.exit(<str>) would exit 1 (a failure).
+        print("SKIP: installed browser apps cannot start in a sandbox; "
+              "install a managed browser or set PULP_CHROME explicitly",
+              file=sys.stderr)
+        sys.exit(77)
+
 W, H = 160, 100
 ROWS = (0, 25, 50, 75, 99)
 COLS = (0, 40, 80, 120, 159)
@@ -96,6 +108,7 @@ COLOR_CASES = [
 
 
 def render(css, w=W, h=H, backdrop="#0f0"):
+    refuse_installed_app_in_sandbox()
     if not os.path.exists(CHROME):
         sys.exit(f"Chrome not found at {CHROME}; set PULP_CHROME")
     tmp = tempfile.mkdtemp(prefix="pulp-gradient-oracle-")

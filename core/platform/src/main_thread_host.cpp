@@ -9,6 +9,12 @@
 // Timers are the host's periodic timers; a one-shot removes itself when it
 // fires.
 //
+// On Windows a host has no such loop to lend (VST3 has no IRunLoop there, and
+// many CLAP hosts offer no timer-support). When none is registered, a scope
+// falls back to a message-only window on the creating thread
+// (main_thread_win32.cpp), driven through the same HostRunLoop seam. A
+// registered host loop always wins.
+//
 // Nothing here calls the host except on the UI thread, and every host
 // registration is removed before the scope, the timer or the loop goes away,
 // so the host holds no callback into this binary afterwards.
@@ -22,6 +28,10 @@
 #include <mutex>
 #include <utility>
 #include <vector>
+
+#if defined(_WIN32)
+#include "main_thread_win32.hpp"
+#endif
 
 #if defined(__unix__) || defined(__linux__)
 #include <fcntl.h>
@@ -56,6 +66,9 @@ struct MainThreadScopeState;
 struct LoopBinding {
     HostRunLoopToken token = 0;
     HostRunLoop* loop = nullptr; // null once unregistered
+    // The Windows message-window fallback rather than a host's loop. Posts
+    // wake it with a window message instead of a descriptor.
+    bool builtin = false;
     std::vector<std::weak_ptr<MainThreadScopeState>> scopes;
 };
 
@@ -69,6 +82,8 @@ struct MainThreadScopeState : std::enable_shared_from_this<MainThreadScopeState>
     // by finishing inline rather than treating the scope as gone.
     bool alive = true;
     bool accepting = true;
+    // Builtin loop only: this scope is already waiting for a drain message.
+    bool drain_requested = false;
     std::deque<std::function<void()>> queue;
     std::shared_ptr<LoopBinding> binding;
     int wake_read = -1;
@@ -96,6 +111,15 @@ struct MainThreadScopeState : std::enable_shared_from_this<MainThreadScopeState>
         if (!accepting)
             return false;
         queue.push_back(std::move(fn));
+#if defined(_WIN32)
+        if (binding && binding->builtin && !drain_requested) {
+            std::weak_ptr<MainThreadScopeState> weak = weak_from_this();
+            drain_requested = win32_fallback_request_drain([weak] {
+                if (auto state = weak.lock())
+                    state->drain();
+            });
+        }
+#endif
 #if defined(PULP_MAIN_THREAD_HAS_WAKE_PIPE)
         if (wake_write >= 0) {
             const char byte = 1;
@@ -122,6 +146,7 @@ struct MainThreadScopeState : std::enable_shared_from_this<MainThreadScopeState>
         std::deque<std::function<void()>> batch;
         {
             std::lock_guard<std::mutex> lock(mutex);
+            drain_requested = false;
             if (!accepting)
                 return;
             batch.swap(queue);
@@ -278,6 +303,19 @@ std::shared_ptr<detail::LoopBinding> current_binding() {
     return r.stack.empty() ? nullptr : r.stack.back();
 }
 
+#if defined(_WIN32)
+// The binding every fallback scope shares. Never destroyed, like the loop.
+std::shared_ptr<detail::LoopBinding> fallback_binding() {
+    static auto* binding = [] {
+        auto* b = new std::shared_ptr<detail::LoopBinding>(std::make_shared<detail::LoopBinding>());
+        (*b)->loop = &detail::win32_fallback_loop();
+        (*b)->builtin = true;
+        return b;
+    }();
+    return *binding;
+}
+#endif
+
 } // namespace
 
 HostRunLoopToken register_host_run_loop(HostRunLoop& loop) {
@@ -324,25 +362,49 @@ bool unregister_host_run_loop(HostRunLoopToken token) {
 }
 
 bool main_thread_supported() noexcept {
-    return current_binding() != nullptr;
+    if (current_binding() != nullptr)
+        return true;
+#if defined(_WIN32)
+    // The fallback is a backend while its window exists.
+    return detail::win32_fallback_live();
+#else
+    return false;
+#endif
 }
 
 bool is_main_thread() noexcept {
-    Registry& r = registry();
-    std::lock_guard<std::mutex> lock(r.mutex);
-    if (r.stack.empty())
-        return false;
-    return r.stack.back()->loop->on_ui_thread();
+    {
+        Registry& r = registry();
+        std::lock_guard<std::mutex> lock(r.mutex);
+        if (!r.stack.empty())
+            return r.stack.back()->loop->on_ui_thread();
+    }
+#if defined(_WIN32)
+    return detail::win32_fallback_on_ui_thread();
+#else
+    return false;
+#endif
 }
 
 MainThreadScope::MainThreadScope() : state_(std::make_shared<detail::MainThreadScopeState>()) {
     auto binding = current_binding();
+#if defined(_WIN32)
+    if (!binding && detail::win32_fallback_acquire()) {
+        binding = fallback_binding();
+        state_->binding = binding;
+    }
+#endif
     HostRunLoop* loop = binding ? binding->loop : nullptr;
     if (loop == nullptr) {
         state_->accepting = false;
         return;
     }
     state_->binding = binding;
+    if (binding->builtin) {
+        // Posts wake the window; timers are its timers. No descriptor, no poll.
+        binding->scopes.push_back(state_);
+        return;
+    }
     std::weak_ptr<detail::MainThreadScopeState> weak = state_;
     auto wake = [weak] {
         if (auto state = weak.lock())
@@ -393,6 +455,10 @@ MainThreadScope::~MainThreadScope() {
                                   }),
                    list.end());
     }
+#if defined(_WIN32)
+    if (state_->binding && state_->binding->builtin && state_->binding->scopes.empty())
+        detail::win32_fallback_release(); // the last scope: no window outlives it
+#endif
     state_->tearing_down = true;
     auto teardowns = std::move(state_->teardowns);
     for (auto& entry : teardowns)

@@ -1,0 +1,10 @@
+{
+ "name": "swift-bridge-split-guard",
+ "record": {
+  "entry": "tools/scripts/swift_bridge_split_guard.py",
+  "inputs": [
+   "tools/scripts/swift_bridge_split_guard.py"
+  ],
+  "kind": "python"
+ }
+}

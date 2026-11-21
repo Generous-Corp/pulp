@@ -280,6 +280,7 @@ IOS_COMPILE_REQUIRED_PATTERNS = (
     "test/test_pulp_vellum_param_bridge.cpp",
     "test/test_pulp_vellum_audio.cpp",
     "test/test_pulp_vellum_editor.cpp",
+    "test/test_pulp_vellum_about_notices.cpp",
     "test/test_control_phase15_aggregate_e2e.cpp",
     "test/mac_objc_coload_probe.cpp",
     "test/cmake/plugin_lab_clap_roundtrip.cmake",
@@ -287,6 +288,7 @@ IOS_COMPILE_REQUIRED_PATTERNS = (
     "test/cmake/check_plugin_module_dead_strip.cmake",
     "test/cmake/check_plugin_module_editor_stack.cmake",
     "test/cmake/check_plugin_module_no_script_runtime.cmake",
+    "test/cmake/check_plugin_module_no_unresolved.cmake",
     "test/cmake/x9_hosted_format_receipt.cmake",
     # The isolated CLAP consumer and its worker/protocol tests are compiled
     # by the hosted-worker CMake registration reached by the iOS configure.

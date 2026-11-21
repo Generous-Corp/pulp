@@ -1046,6 +1046,19 @@ how the echo got through. Do not "fix" it to Main.
 
 Coverage: `pulp-test-host-parameter-edit`.
 
+### A plug-in that mirrors host automation back is not an edit
+
+Host automation arrives on the audio thread and the plug-in may later
+write the value back into the store on the main thread (typically after
+quantising it). By thread alone that looks like an editor edit, and hosts
+such as REAPER then stop applying the parameter's envelope.
+`HostWriteEchoGuard` (in `host_parameter_edit.hpp`) remembers off-main-thread
+host writes per parameter; the bridge, the CLAP listener and the AU listener
+skip reporting a non-host write to a parameter the host wrote within
+`kWindowNs`, unless the editor holds a gesture on it. Host writes made on the
+main thread arm nothing. Coverage: `[echo]` cases in `pulp-test-vst3-plugin-state`,
+`pulp-test-clap-entry` and `pulp-test-host-parameter-edit`.
+
 ### `param_snapshot_` is **post-input-events, pre-process**
 
 Same contract as CLAP — host events are applied first, then snapshot,
@@ -1659,3 +1672,14 @@ that is already current is ignored on purpose, so a host that replays the
 restored selection cannot undo restored edits. A plug-in with no presets publishes no list and
 no extra parameter. `set_factory_presets_directory()` re-points discovery and
 must run before `initialize()`. Tests: test_vst3_program_list.cpp.
+
+Host automation decode must carry `ScopedHostParameterWrite`; the audio thread
+also runs processor writes, so its thread identity is not host provenance.
+Processor output values are captured inline under `ScopedProcessorParameterWrite`
+for both f32 and f64 dispatch, including trigger resets. Snapshot output uses
+those captured values to prevent concurrent main-thread mirrors from escaping
+through `outputParameterChanges` after the edit bridge suppresses them.
+
+Register processor-output capture before exposing the store to the plug-in.
+Otherwise a reentrant normalizing listener can deliver the nested value first
+and let the outer notification overwrite it with an older value.

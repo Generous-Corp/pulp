@@ -9,7 +9,16 @@
 #   PULP_EDITOR_FACTORY_HEADER    the header on the package's include path
 #                                 that declares it
 #
-# An installed package lists both in its targets' EXPORT_PROPERTIES so they
+# and may declare a third:
+#
+#   PULP_EDITOR_RUNTIME_LIBRARIES shared-library targets the editor loads at
+#                                 run time. Each plug-in module copies them
+#                                 beside its binary and finds them through an
+#                                 @loader_path rpath, so the bundle carries its
+#                                 editor's libraries instead of pointing at the
+#                                 SDK it was built against.
+#
+# An installed package lists them in its targets' EXPORT_PROPERTIES so they
 # survive install(EXPORT).
 #
 # For each format and standalone target of the plug-in, pulp_add_plugin links
@@ -109,13 +118,94 @@ struct PulpPluginEditorFactoryRegistrar {
 } // namespace
 " @ONLY)
 
+    # An AUv3 extension loads its editor from a framework inside a container
+    # app, and nothing stages UI package libraries there yet. Refuse instead
+    # of shipping an extension whose editor cannot load.
+    get_target_property(_runtime_libraries "${ui}" PULP_EDITOR_RUNTIME_LIBRARIES)
+    if(_runtime_libraries AND (TARGET "${target}_AUv3" OR TARGET "${target}_AUv3Framework"))
+        message(FATAL_ERROR
+            "pulp_add_plugin(${target}): UI package '${ui}' needs runtime libraries "
+            "(${_runtime_libraries}), which the AUv3 format cannot carry yet; drop AUv3 "
+            "from FORMATS for this plug-in")
+    endif()
+
+    get_property(_vellum_scripted TARGET "${ui}" PROPERTY PULP_VELLUM_SCRIPTED_EDITOR)
     foreach(_suffix IN LISTS _PULP_UI_PACKAGE_TARGET_SUFFIXES)
         set(_format_target "${target}_${_suffix}")
         if(TARGET "${_format_target}")
             target_sources("${_format_target}" PRIVATE "${_source}")
             target_link_libraries("${_format_target}" PRIVATE "${ui}")
             set_property(TARGET "${_format_target}" PROPERTY PULP_UI_PACKAGE "${ui}")
+            if(_vellum_scripted)
+                set_property(TARGET "${_format_target}" PROPERTY PULP_VELLUM_SCRIPTED_EDITOR TRUE)
+            endif()
         endif()
     endforeach()
     _pulp_warn_ui_package_formats("${target}" "${ui}")
+endfunction()
+
+# Stage the UI package's runtime libraries beside `module`, a format or
+# standalone target of plug-in `plugin`. Called while the format target is
+# created, before its post-build checks, so the relocatable check sees the
+# staged copies. A plug-in without a UI package, or a package that declares no
+# runtime libraries, is left unchanged.
+function(_pulp_stage_ui_package_runtime plugin module)
+    set(_ui "${PULP_${plugin}_UI_PACKAGE}")
+    if(NOT _ui OR NOT TARGET "${_ui}" OR NOT TARGET "${module}")
+        return()
+    endif()
+    get_target_property(_libraries "${_ui}" PULP_EDITOR_RUNTIME_LIBRARIES)
+    if(NOT _libraries)
+        return()
+    endif()
+    foreach(_library IN LISTS _libraries)
+        if(NOT TARGET "${_library}")
+            message(FATAL_ERROR
+                "pulp_add_plugin(${plugin}): UI package '${_ui}' lists runtime library "
+                "'${_library}', which is not a target")
+        endif()
+        add_custom_command(TARGET "${module}" POST_BUILD
+            COMMAND "${CMAKE_COMMAND}" -E copy_if_different
+                "$<TARGET_FILE:${_library}>" "$<TARGET_FILE_DIR:${module}>"
+            COMMENT "Staging $<TARGET_FILE_NAME:${_library}> beside ${module}"
+            VERBATIM)
+    endforeach()
+    if(APPLE)
+        set(_origin "@loader_path")
+    else()
+        set(_origin "$ORIGIN")
+    endif()
+    # The module finds the staged copies only; the SDK's own directory is not a
+    # build rpath, so a missing copy fails here rather than on another machine.
+    set_target_properties("${module}" PROPERTIES BUILD_WITH_INSTALL_RPATH TRUE)
+    if(APPLE)
+        set_target_properties("${module}" PROPERTIES MACOSX_RPATH TRUE)
+    endif()
+    get_target_property(_rpath "${module}" INSTALL_RPATH)
+    if(NOT _rpath OR NOT _origin IN_LIST _rpath)
+        set_property(TARGET "${module}" APPEND PROPERTY INSTALL_RPATH "${_origin}")
+    endif()
+    set_property(TARGET "${module}" PROPERTY PULP_UI_PACKAGE_RUNTIME_LIBRARIES "${_libraries}")
+endfunction()
+
+# Copy the UI package runtime libraries staged beside `module` into `dest`, the
+# directory of an assembled bundle that carries a copy of the module (the
+# Windows and Linux VST3 Contents/<arch> folders). The module's $ORIGIN or
+# @loader_path rpath then finds them there too.
+function(_pulp_copy_ui_package_runtime module dest)
+    if(NOT TARGET "${module}")
+        return()
+    endif()
+    get_target_property(_libraries "${module}" PULP_UI_PACKAGE_RUNTIME_LIBRARIES)
+    if(NOT _libraries)
+        return()
+    endif()
+    foreach(_library IN LISTS _libraries)
+        add_custom_command(TARGET "${module}" POST_BUILD
+            COMMAND "${CMAKE_COMMAND}" -E make_directory "${dest}"
+            COMMAND "${CMAKE_COMMAND}" -E copy_if_different
+                "$<TARGET_FILE_DIR:${module}>/$<TARGET_FILE_NAME:${_library}>" "${dest}"
+            COMMENT "Copying $<TARGET_FILE_NAME:${_library}> into the ${module} bundle"
+            VERBATIM)
+    endforeach()
 endfunction()

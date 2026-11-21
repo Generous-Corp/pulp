@@ -109,6 +109,10 @@ if(NOT APPLE)
     # The main thread is a host's: scopes and timers run through the
     # HostRunLoop an adapter registers.
     target_sources(pulp-platform PRIVATE src/main_thread_host.cpp)
+    if(WIN32)
+        # No host loop to lend on Windows: a message-only window stands in.
+        target_sources(pulp-platform PRIVATE src/main_thread_win32.cpp)
+    endif()
 endif()
 
 if(NOT (APPLE AND NOT IOS))

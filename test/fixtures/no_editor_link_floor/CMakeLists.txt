@@ -66,7 +66,7 @@ foreach(_fmt IN LISTS _no_editor_formats)
     # The UI stacks a project chooses with `pulp create --ui`: an audio-only
     # (--ui none) plug-in reaches neither the Vellum bridge nor RmlUi, under
     # any of their Pulp or installed-SDK target names.
-    foreach(_forbidden pulp-vellum pulp-rmlui-native pulp-rmlui-native-metal
+    foreach(_forbidden pulp-vellum pulp-vellum-audio pulp-rmlui-native pulp-rmlui-native-metal
                        pulp-view-rmlui-importer-adapter)
         if(_forbidden IN_LIST _no_editor_closure)
             message(FATAL_ERROR
@@ -154,3 +154,47 @@ add_test(NAME no-editor-link-floor-runtime-pattern
 set_tests_properties(no-editor-link-floor-runtime-pattern PROPERTIES
     LABELS "pr;link-contract" TIMEOUT 60)
 
+
+# The ThirdPartyNotices file in each bundle comes from that bundle's own link
+# closure: the no-editor bundles list no UI stack, the control lists its own.
+#
+# The control also links two stand-in SDKs after pulp_add_plugin() returns, so
+# the closure is shown to be read at the end of the configure: one registers a
+# manifest (with one entry behind a feature that is off), the other has none
+# and must be reported under sdks_without_manifest.
+add_library(NoticesProbe::probe INTERFACE IMPORTED)
+add_library(NoticesUnclaimed::probe INTERFACE IMPORTED)
+target_link_libraries(PulpNoEditorLinkFloorControl_CLAP PRIVATE
+    NoticesProbe::probe NoticesUnclaimed::probe)
+pulp_add_notice_manifest("${CMAKE_CURRENT_SOURCE_DIR}/notices_probe/notices.json")
+set(PULP_NOTICES_PROBE_DISABLED_FEATURE OFF CACHE INTERNAL "")
+set(_no_editor_notices "")
+set(_no_editor_format_sdk_CLAP CLAP)
+set(_no_editor_format_sdk_VST3 "VST3 SDK")
+set(_no_editor_format_sdk_AU AudioUnitSDK)
+foreach(_fmt IN LISTS _no_editor_formats)
+    _pulp_notices_output(_notices PulpNoEditorLinkFloor_${_fmt} ${_fmt}
+        "Pulp No Editor Link Floor" ThirdPartyNotices.json)
+    list(APPEND _no_editor_notices "${_no_editor_format_sdk_${_fmt}}=${_notices}")
+endforeach()
+string(REPLACE ";" "|" _no_editor_notices "${_no_editor_notices}")
+_pulp_notices_output(_control_notices PulpNoEditorLinkFloorControl_CLAP CLAP
+    "Pulp No Editor Link Floor Control" ThirdPartyNotices.json)
+set(_control_notice_requires CLAP Yoga "Notices Probe Component")
+if(_no_editor_control_gpu AND PULP_HAS_SKIA)
+    list(APPEND _control_notice_requires Skia)
+    if(PULP_SKIA_PROVIDES_DAWN)
+        list(APPEND _control_notice_requires Dawn)
+    endif()
+endif()
+string(REPLACE ";" "|" _control_notice_requires "${_control_notice_requires}")
+add_test(NAME plugin-third-party-notices
+    COMMAND "${CMAKE_COMMAND}"
+        "-DNO_EDITOR=${_no_editor_notices}"
+        "-DCONTROL=${_control_notices}"
+        "-DCONTROL_REQUIRES=${_control_notice_requires}"
+        "-DCONTROL_FORBIDS=Notices Probe Disabled Feature"
+        "-DCONTROL_MISSING_SDKS=NoticesUnclaimed"
+        -P "${CMAKE_CURRENT_SOURCE_DIR}/check_third_party_notices.cmake")
+set_tests_properties(plugin-third-party-notices PROPERTIES
+    LABELS "format;link-contract;artifact" TIMEOUT 60)

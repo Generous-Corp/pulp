@@ -8,7 +8,7 @@ include(${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpMacOsArch.cmake)  # macOS ar
 include(${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpMinOs.cmake)
 
 project(Pulp
-    VERSION 1.172.1
+    VERSION 1.188.2
     DESCRIPTION "Cross-platform audio plugin and application framework"
     HOMEPAGE_URL "https://github.com/Generous-Corp/pulp"
     LANGUAGES CXX C
@@ -582,13 +582,15 @@ if(APPLE)
     list(APPEND _pulp_standalone_core_sources
         core/format/src/standalone_key_driver_mac.mm
         core/format/src/standalone_settings_window_mac.mm
-        core/format/src/standalone_contract_editor_mac.mm)
+        core/format/src/standalone_contract_editor_mac.mm
+        core/format/src/standalone_persistence_mac.mm)
     list(APPEND _pulp_standalone_view_sources core/format/src/standalone_updater_mac.mm)
 else()
     list(APPEND _pulp_standalone_core_sources
         core/format/src/standalone_key_driver_stub.cpp
         core/format/src/standalone_settings_window_stub.cpp
-        core/format/src/standalone_contract_editor_stub.cpp)
+        core/format/src/standalone_contract_editor_stub.cpp
+        core/format/src/standalone_persistence_stub.cpp)
     list(APPEND _pulp_standalone_view_sources core/format/src/standalone_updater_stub.cpp)
 endif()
 set(_pulp_standalone_sources ${_pulp_standalone_core_sources} ${_pulp_standalone_view_sources})
@@ -995,6 +997,10 @@ endif()
 # included after the module targets exist and before the consumers that assert
 # a bound over them (examples/, tools/).
 include(PulpLinkFloor)
+
+# Pulp's own third-party notices manifest, unioned into each plug-in bundle's
+# ThirdPartyNotices files by pulp_add_plugin().
+pulp_generate_sdk_notices()
 
 # pulp::signal must reach the pulp-simd kernels without pulp-runtime, whose
 # archive carries the HTTP/TLS stack. pulp-test-simd-signal-link links only

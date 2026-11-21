@@ -10,6 +10,9 @@
 #include <pulp/format/clap_adapter.hpp>
 #include "../examples/pulp-gain/pulp_gain.hpp"
 #include <pulp/format/host_quirks.hpp>
+#include <pulp/runtime/log_sink.hpp>
+#include <algorithm>
+#include <memory>
 #include <clap/ext/preset-load.h>
 #include <clap/ext/note-name.h>
 #include <clap/ext/remote-controls.h>
@@ -21,8 +24,12 @@
 #include <cstring>
 #include <limits>
 #include <optional>
+#include <functional>
+#include <semaphore>
 #include <string>
 #include <stdexcept>
+#include <thread>
+#include <chrono>
 #include <vector>
 
 // Minimal test processor
@@ -34,6 +41,9 @@ inline TestProcessor* g_last_processor = nullptr;
 class TestProcessor : public pulp::format::Processor {
 public:
     TestProcessor() { g_last_processor = this; }
+    std::function<void()> during_process;
+    bool normalize_gain_writes = false;
+    pulp::state::ListenerToken normalizer;
 
     // Note names a test can publish after the plugin is created, so the
     // note-name extension can be exercised against a live adapter.
@@ -61,6 +71,12 @@ public:
         };
     }
     void define_parameters(pulp::state::StateStore& store) override {
+        normalizer = store.add_listener(
+            [this, &store](pulp::state::ParamID id, float value) {
+                if (normalize_gain_writes && id == 1 && value == 8.0f)
+                    store.set_value_rt(id, 7.0f);
+            },
+            pulp::state::ListenerThread::Audio);
         store.add_group({.id = 10, .name = "Oscillators"});
         store.add_group({.id = 11, .name = "Wavetable 1", .parent_id = 10});
         store.add_group({.id = 12, .name = std::string(1100, 'x')});
@@ -103,6 +119,8 @@ public:
                  const pulp::audio::BufferView<const float>& in,
                  pulp::midi::MidiBuffer&, pulp::midi::MidiBuffer&,
                  const pulp::format::ProcessContext&) override {
+        if (during_process)
+            during_process();
         for (std::size_t ch = 0; ch < out.num_channels() && ch < in.num_channels(); ++ch) {
             auto ic = in.channel(ch);
             auto oc = out.channel(ch);
@@ -1292,6 +1310,239 @@ TEST_CASE("CLAP params_flush reports stopped-transport editor gestures in order"
     clap_entry.deinit();
 }
 
+// ── Host automation is never echoed back as a plug-in edit ───────────────────
+// A plug-in that mirrors a host-written value into the store on the main
+// thread (here: quantised to a whole dB) must not make the adapter report that
+// parameter to the host: hosts treat a reported parameter as touched and stop
+// applying its envelope.
+namespace {
+struct EchoFixture {
+    static constexpr uint32_t kFrames = 64;
+    ParamFlushHost host;
+    pulp::format::clap_adapter::PulpClapPlugin* plugin = nullptr;
+    std::array<std::array<float, kFrames>, 2> in_data{};
+    std::array<std::array<float, kFrames>, 2> out_data{};
+    std::array<float*, 2> in_ptrs{in_data[0].data(), in_data[1].data()};
+    std::array<float*, 2> out_ptrs{out_data[0].data(), out_data[1].data()};
+    clap_audio_buffer_t audio_in{};
+    clap_audio_buffer_t audio_out{};
+
+    explicit EchoFixture(pulp::format::ProcessorFactory factory = test_clap::create_test) {
+        plugin = new pulp::format::clap_adapter::PulpClapPlugin();
+        plugin->factory = factory;
+        plugin->plugin.plugin_data = plugin;
+        plugin->host = &host.host;
+        REQUIRE(pulp::format::clap_adapter::clap_init(&plugin->plugin));
+        REQUIRE(pulp::format::clap_adapter::clap_activate(&plugin->plugin, 48000.0, 32, kFrames));
+        audio_in.channel_count = 2;
+        audio_in.data32 = in_ptrs.data();
+        audio_out.channel_count = 2;
+        audio_out.data32 = out_ptrs.data();
+    }
+    ~EchoFixture() {
+        pulp::format::clap_adapter::clap_deactivate(&plugin->plugin);
+        pulp::format::clap_adapter::clap_destroy(&plugin->plugin);
+    }
+
+    CapturedOutputEvents process_with(std::optional<double> automation, clap_id param_id = 1) {
+        clap_event_param_value_t ev{};
+        ev.header.size = sizeof(ev);
+        ev.header.type = CLAP_EVENT_PARAM_VALUE;
+        ev.header.space_id = CLAP_CORE_EVENT_SPACE_ID;
+        ev.param_id = param_id;
+        ev.note_id = -1;
+        ev.port_index = -1;
+        ev.channel = -1;
+        ev.key = -1;
+        ev.value = automation.value_or(0.0);
+        EventList list;
+        if (automation)
+            list.events.push_back(&ev.header);
+        clap_input_events_t in{.ctx = &list, .size = events_size, .get = events_get};
+        CapturedOutputEvents out;
+        clap_process_t proc{};
+        proc.frames_count = kFrames;
+        proc.audio_inputs = &audio_in;
+        proc.audio_inputs_count = 1;
+        proc.audio_outputs = &audio_out;
+        proc.audio_outputs_count = 1;
+        proc.in_events = &in;
+        proc.out_events = &out.api;
+        REQUIRE(pulp::format::clap_adapter::clap_process(&plugin->plugin, &proc) !=
+                CLAP_PROCESS_ERROR);
+        return out;
+    }
+
+    static std::size_t count_values(const CapturedOutputEvents& out) {
+        std::size_t n = 0;
+        for (std::size_t i = 0; i < out.events.size(); ++i)
+            if (out.at(i)->type == CLAP_EVENT_PARAM_VALUE)
+                ++n;
+        return n;
+    }
+};
+} // namespace
+
+TEST_CASE("CLAP reports the auto-reset of a host-raised trigger",
+          "[clap][params][automation][trigger-reset]") {
+    constexpr clap_id trigger = 100;
+    class TriggerProcessor : public test_clap::TestProcessor {
+        void define_parameters(pulp::state::StateStore& store) override {
+            TestProcessor::define_parameters(store);
+            store.add_parameter({.id = trigger,
+                                 .name = "Reset",
+                                 .range = {0.0f, 1.0f, 0.0f, 1.0f},
+                                 .designation = pulp::state::ParamDesignation::Reset});
+        }
+    };
+    EchoFixture fx([]() -> std::unique_ptr<pulp::format::Processor> {
+        return std::make_unique<TriggerProcessor>();
+    });
+    float observed = 0.0f;
+    test_clap::g_last_processor->during_process = [&] {
+        observed = fx.plugin->store.get_value(trigger);
+    };
+
+    const auto out = fx.process_with(1.0, trigger);
+    CHECK(observed == 1.0f);
+    CHECK(fx.plugin->store.get_value(trigger) == 0.0f);
+    REQUIRE(out.events.size() == 1);
+    REQUIRE(out.at(0)->type == CLAP_EVENT_PARAM_VALUE);
+    const auto* reset = reinterpret_cast<const clap_event_param_value_t*>(out.at(0));
+    CHECK(reset->param_id == trigger);
+    CHECK(reset->value == 0.0);
+    CHECK(EchoFixture::count_values(fx.process_with(std::nullopt)) == 0);
+}
+
+TEST_CASE("CLAP does not echo host automation that the plug-in mirrors back",
+          "[clap][params][automation][echo]") {
+    EchoFixture fx;
+    auto& store = fx.plugin->store;
+    // Settle anything the setup itself reported.
+    (void)fx.process_with(std::nullopt);
+    const int flushes_before = fx.host.flush_requests;
+
+    // 200 blocks of sine automation; after each, the plug-in quantises what it
+    // was given and writes it back on the main thread.
+    std::size_t echoed = 0;
+    for (int block = 0; block < 200; ++block) {
+        const double v = 10.0 * std::sin(block * 0.07) + 3.3;
+        echoed += EchoFixture::count_values(fx.process_with(v));
+        store.set_value(1, std::round(store.get_value(1)));
+    }
+    echoed += EchoFixture::count_values(fx.process_with(std::nullopt));
+    CHECK(echoed == 0);
+    CHECK(fx.host.flush_requests == flushes_before);
+
+    // The same through params.flush, the host's other way to deliver values.
+    clap_event_param_value_t ev{};
+    ev.header.size = sizeof(ev);
+    ev.header.type = CLAP_EVENT_PARAM_VALUE;
+    ev.header.space_id = CLAP_CORE_EVENT_SPACE_ID;
+    ev.param_id = 1;
+    ev.value = -7.4;
+    EventList list{.events = {&ev.header}};
+    clap_input_events_t in{.ctx = &list, .size = events_size, .get = events_get};
+    CapturedOutputEvents flushed;
+    // Active plug-ins get params.flush on the audio thread.
+    std::thread([&] {
+        pulp::format::clap_adapter::clap_params_flush(&fx.plugin->plugin, &in, &flushed.api);
+    }).join();
+    store.set_value(1, std::round(store.get_value(1)));
+    CapturedOutputEvents after;
+    pulp::format::clap_adapter::clap_params_flush(&fx.plugin->plugin, nullptr, &after.api);
+    CHECK(flushed.events.empty());
+    CHECK(after.events.empty());
+    CHECK(fx.host.flush_requests == flushes_before);
+}
+
+TEST_CASE("CLAP still reports plug-in edits next to host automation",
+          "[clap][params][automation][echo]") {
+    EchoFixture fx;
+    auto& store = fx.plugin->store;
+    (void)fx.process_with(std::nullopt);
+
+    // Control: a main-thread write to a parameter the host never touched.
+    store.set_value(3, 25.0f);
+    CHECK(EchoFixture::count_values(fx.process_with(std::nullopt)) == 1);
+
+    // Control: a user gesture on a host-automated parameter still reports.
+    (void)fx.process_with(5.0);
+    store.begin_gesture(1);
+    store.set_value(1, -20.0f);
+    store.end_gesture(1);
+    const auto gesture_out = fx.process_with(std::nullopt);
+    CHECK(EchoFixture::count_values(gesture_out) >= 1);
+
+    // Control: once the echo window has passed, a plug-in write reports again.
+    (void)fx.process_with(6.0);
+    std::this_thread::sleep_for(
+        std::chrono::milliseconds(pulp::format::HostWriteEchoGuard::kWindowNs / 1'000'000 + 50));
+    store.set_value(1, -30.0f);
+    CHECK(EchoFixture::count_values(fx.process_with(std::nullopt)) == 1);
+}
+
+TEST_CASE("CLAP concurrent mirrors cannot leak through snapshot output",
+          "[clap][params][automation][echo][echo-concurrent]") {
+    EchoFixture fx;
+    auto& store = fx.plugin->store;
+    (void)fx.process_with(std::nullopt);
+    const int flushes_before = fx.host.flush_requests;
+    bool processor_before = false;
+    bool processor_after = false;
+    bool normalize = false;
+    SECTION("mirror alone") {}
+    SECTION("processor writes before mirror") {
+        processor_before = true;
+    }
+    SECTION("processor writes after mirror") {
+        processor_after = true;
+    }
+    SECTION("processor listener normalizes before mirror") {
+        processor_before = true;
+        normalize = true;
+        test_clap::g_last_processor->normalize_gain_writes = true;
+    }
+
+    std::binary_semaphore snapshot_reached{0};
+    std::binary_semaphore mirror_finished{0};
+    test_clap::g_last_processor->during_process = [&] {
+        if (processor_before)
+            store.set_value_rt(1, 8.0f);
+        snapshot_reached.release();
+        mirror_finished.acquire();
+        if (processor_after)
+            store.set_value_rt(1, 9.0f);
+    };
+    std::size_t values = 0;
+    double reported = 0.0;
+    std::thread audio([&] {
+        const auto out = fx.process_with(5.3);
+        values = EchoFixture::count_values(out);
+        for (std::size_t i = 0; i < out.events.size(); ++i) {
+            if (out.at(i)->type == CLAP_EVENT_PARAM_VALUE)
+                reported = reinterpret_cast<const clap_event_param_value_t*>(out.at(i))->value;
+        }
+    });
+    const bool reached = snapshot_reached.try_acquire_for(std::chrono::seconds(5));
+    if (reached) {
+        // Keep the timing policy deterministic even when this test is
+        // descheduled on a busy runner. The host write above armed the guard.
+        fx.plugin->host_write_echo_guard.note_host_write(1);
+        store.set_value(1, 5.0f);
+    }
+    mirror_finished.release();
+    audio.join();
+    test_clap::g_last_processor->during_process = {};
+    REQUIRE(reached);
+    CHECK(fx.host.flush_requests == flushes_before);
+    CHECK(values == (processor_before || processor_after ? 1 : 0));
+    if (processor_before)
+        CHECK(reported == (normalize ? 7.0 : 8.0));
+    if (processor_after)
+        CHECK(reported == 9.0);
+}
+
 // ── G1: CLAP resize-contract honoring (WS-1b) ────────────────────────────────
 // gui_can_resize already keys off min>0 (the shipped convention). G1 makes
 // gui_get_resize_hints.preserve_aspect_ratio and gui_adjust_size honor
@@ -1863,4 +2114,175 @@ TEST_CASE("CLAP instrument with declared inputs advertises its audio input ports
     REQUIRE(std::string(port.name) == "Side Chain");
     REQUIRE((port.flags & CLAP_AUDIO_PORT_IS_MAIN) == 0);
     REQUIRE(pulp::format::clap_generic::note_ports_count(&plugin, true) == 1);
+}
+
+// A host may call process with fewer input buffers than the plug-in declares
+// ports (simple hosts give an instrument none). The adapter treats each
+// missing port as silence of the declared width and still runs the Processor.
+namespace {
+struct MissingInputProbe : pulp::format::Processor {
+    static inline int process_calls = 0;
+    static inline std::size_t last_input_channels = 0;
+    static inline float last_input_peak = 0.0f;
+
+    pulp::format::PluginDescriptor descriptor() const override {
+        return {
+            .name = "MissingInputProbe",
+            .manufacturer = "PulpTest",
+            .bundle_id = "com.pulp.test.missing-input-probe",
+            .version = "1.0.0",
+            .category = pulp::format::PluginCategory::Instrument,
+            .input_buses = {{"Audio In", 2}},
+            .output_buses = {{"Audio Out", 2}},
+        };
+    }
+    void define_parameters(pulp::state::StateStore& store) override {
+        store.add_parameter(
+            {.id = 1, .name = "Level", .unit = "", .range = {0.0f, 1.0f, 0.0f, 0.01f}});
+    }
+    void prepare(const pulp::format::PrepareContext&) override {}
+    void process(pulp::audio::BufferView<float>& out,
+                 const pulp::audio::BufferView<const float>& in, pulp::midi::MidiBuffer&,
+                 pulp::midi::MidiBuffer&, const pulp::format::ProcessContext&) override {
+        ++process_calls;
+        last_input_channels = in.num_channels();
+        last_input_peak = 0.0f;
+        for (std::size_t ch = 0; ch < in.num_channels(); ++ch)
+            for (std::size_t i = 0; i < in.num_samples(); ++i)
+                last_input_peak = std::max(last_input_peak, std::abs(in.channel(ch)[i]));
+        for (std::size_t ch = 0; ch < out.num_channels(); ++ch)
+            for (std::size_t i = 0; i < out.num_samples(); ++i)
+                out.channel(ch)[i] = 0.25f;
+    }
+};
+
+struct MissingInputFixture {
+    static constexpr uint32_t kFrames = 64;
+    pulp::format::clap_adapter::PulpClapPlugin* plugin = nullptr;
+    std::array<float, kFrames> out_l{}, out_r{}, in_l{}, in_r{};
+    float* outs[2] = {out_l.data(), out_r.data()};
+    float* ins[2] = {in_l.data(), in_r.data()};
+    clap_audio_buffer_t audio_out{};
+    clap_audio_buffer_t audio_in{};
+
+    MissingInputFixture() {
+        MissingInputProbe::process_calls = 0;
+        plugin = new pulp::format::clap_adapter::PulpClapPlugin();
+        plugin->factory = [] {
+            return std::unique_ptr<pulp::format::Processor>(new MissingInputProbe);
+        };
+        plugin->plugin.plugin_data = plugin;
+        REQUIRE(pulp::format::clap_adapter::clap_init(&plugin->plugin));
+        REQUIRE(pulp::format::clap_adapter::clap_activate(&plugin->plugin, 48000.0, 32, kFrames));
+        audio_out.data32 = outs;
+        audio_out.channel_count = 2;
+        audio_in.data32 = ins;
+        audio_in.channel_count = 2;
+    }
+    ~MissingInputFixture() {
+        pulp::format::clap_adapter::clap_deactivate(&plugin->plugin);
+        pulp::format::clap_adapter::clap_destroy(&plugin->plugin);
+    }
+
+    clap_process_status run(clap_audio_buffer_t* inputs, uint32_t input_count,
+                            const clap_input_events_t* events = nullptr) {
+        out_l.fill(-1.0f);
+        out_r.fill(-1.0f);
+        clap_process_t proc{};
+        proc.frames_count = kFrames;
+        proc.audio_inputs = inputs;
+        proc.audio_inputs_count = input_count;
+        proc.audio_outputs = &audio_out;
+        proc.audio_outputs_count = 1;
+        proc.in_events = events;
+        return pulp::format::clap_adapter::clap_process(&plugin->plugin, &proc);
+    }
+    bool output_is_zero() const {
+        return std::all_of(out_l.begin(), out_l.end(), [](float v) { return v == 0.0f; });
+    }
+};
+} // namespace
+
+TEST_CASE("CLAP process with no input buffers still runs the processor", "[clap][entry][layout]") {
+    MissingInputFixture fx;
+
+    struct Events {
+        clap_event_param_value_t ev{};
+        static uint32_t size(const clap_input_events_t*) {
+            return 1;
+        }
+        static const clap_event_header_t* get(const clap_input_events_t* l, uint32_t) {
+            return &static_cast<Events*>(l->ctx)->ev.header;
+        }
+    } events;
+    events.ev.header.size = sizeof(events.ev);
+    events.ev.header.type = CLAP_EVENT_PARAM_VALUE;
+    events.ev.header.space_id = CLAP_CORE_EVENT_SPACE_ID;
+    events.ev.param_id = 1;
+    events.ev.note_id = events.ev.port_index = events.ev.channel = events.ev.key = -1;
+    events.ev.value = 0.75;
+    const clap_input_events_t in_events{&events, &Events::size, &Events::get};
+
+    REQUIRE(fx.plugin->store.get_value(1) == 0.0f);
+    REQUIRE(fx.run(nullptr, 0, &in_events) == CLAP_PROCESS_CONTINUE);
+    REQUIRE(MissingInputProbe::process_calls == 1);
+    REQUIRE(MissingInputProbe::last_input_channels == 2);
+    REQUIRE(MissingInputProbe::last_input_peak == 0.0f);
+    REQUIRE(fx.out_l[0] == 0.25f);
+    REQUIRE(fx.out_r[MissingInputFixture::kFrames - 1] == 0.25f);
+    REQUIRE(fx.plugin->store.get_value(1) == 0.75f);
+
+    // A fully supplied layout is untouched by the padding path.
+    REQUIRE(fx.run(&fx.audio_in, 1) == CLAP_PROCESS_CONTINUE);
+    REQUIRE(MissingInputProbe::process_calls == 2);
+}
+
+TEST_CASE("CLAP process logs the missing input ports once per instance", "[clap][entry][layout]") {
+    pulp::runtime::CaptureLogSink capture;
+    pulp::runtime::ScopedLogSink scoped(capture);
+    MissingInputFixture fx;
+
+    const auto count = [&] {
+        std::size_t n = 0;
+        for (const auto& r : capture.records())
+            if (r.message.find("fewer audio input ports") != std::string::npos)
+                ++n;
+        return n;
+    };
+    for (int i = 0; i < 3; ++i)
+        REQUIRE(fx.run(nullptr, 0) == CLAP_PROCESS_CONTINUE);
+    pulp::format::clap_adapter::clap_on_main_thread(&fx.plugin->plugin);
+    REQUIRE(count() == 1);
+    for (int i = 0; i < 3; ++i)
+        REQUIRE(fx.run(nullptr, 0) == CLAP_PROCESS_CONTINUE);
+    pulp::format::clap_adapter::clap_on_main_thread(&fx.plugin->plugin);
+    REQUIRE(count() == 1);
+}
+
+TEST_CASE("CLAP process still rejects malformed input layouts", "[clap][entry][layout]") {
+    MissingInputFixture fx;
+
+    SECTION("more input ports than declared") {
+        clap_audio_buffer_t two[2] = {fx.audio_in, fx.audio_in};
+        REQUIRE(fx.run(two, 2) == CLAP_PROCESS_CONTINUE);
+        REQUIRE(MissingInputProbe::process_calls == 0);
+        REQUIRE(fx.output_is_zero());
+    }
+    SECTION("null array with a non-zero count") {
+        REQUIRE(fx.run(nullptr, 1) == CLAP_PROCESS_CONTINUE);
+        REQUIRE(MissingInputProbe::process_calls == 0);
+        REQUIRE(fx.output_is_zero());
+    }
+    SECTION("wrong channel count") {
+        fx.audio_in.channel_count = 1;
+        REQUIRE(fx.run(&fx.audio_in, 1) == CLAP_PROCESS_CONTINUE);
+        REQUIRE(MissingInputProbe::process_calls == 0);
+        REQUIRE(fx.output_is_zero());
+    }
+    SECTION("null channel pointer") {
+        fx.ins[1] = nullptr;
+        REQUIRE(fx.run(&fx.audio_in, 1) == CLAP_PROCESS_CONTINUE);
+        REQUIRE(MissingInputProbe::process_calls == 0);
+        REQUIRE(fx.output_is_zero());
+    }
 }

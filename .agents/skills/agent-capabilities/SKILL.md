@@ -456,6 +456,12 @@ default-constructs it and invokes a const query, and add the new key to the
 `capability_keys` list of each support header the kernel actually includes
 (e.g. `utility_contract.hpp`), not to every MIDI support header.
 
+`pulp_add_plugin(UI_SCRIPT ... UI_ENGINE vellum)` selects the Vellum editor
+package for a script-only plug-in. Plain `UI_SCRIPT` uses the legacy builder
+and AutoUi stays on the legacy view path. The shared `editor_ui_source.hpp`
+belongs in the consumption census. Vellum audio widgets still need script
+factory registration and a data-channel adapter.
+
 For an existing capability change:
 
 - Update the reviewed header fingerprint for every public-header byte change,
@@ -1669,6 +1675,20 @@ the bypass trailer by reflex:
   `PULP_SDK_TARGETS` entry or release-matrix stem named the artifact; the
   provider was never one, so neither list moves.
 
+- **CMake modules a public command includes**: `PulpThirdPartyNotices.cmake`
+  (behind `pulp_add_plugin()` and `pulp_add_notice_manifest()`) and the
+  `PulpConsumerClosure.cmake` it uses to walk an installed consumer's closure
+  are non-header payload. No covered root changes. The one runtime dependency
+  is the `share/pulp/notices/` tree the configure generates: it is installed
+  `OPTIONAL`, and `PulpConfig.cmake` only registers it when the file exists, so
+  an SDK built without Python 3 still configures consumers.
+
+- **The source-install provenance stamp**: `PulpStampSourceInstall.cmake.in`
+  resolves the source commit and dirty state when the SDK is installed, not when
+  it was configured, so an incremental build and install after new commits
+  names the commit its binaries came from. It writes provenance JSON only; no
+  header or covered root changes.
+
 ## A platform header installed for per-binary recompilation is not capability surface
 
 `PulpInstallRules.cmake` installs more than public API. The macOS ObjC cluster
@@ -2180,3 +2200,9 @@ after any byte change, including a doc comment. `--accept-fingerprint` refuses i
 ("no capability binding names ..."). Replace the literal in the registry with the
 digest `--check` reports, then run `--write` and `--check`; the only generated
 change is that header's surface fragment.
+
+A small non-capability addition (a lifecycle helper such as `midi::warm_up()`)
+belongs in the existing reviewed header it extends, not in a new public header:
+a new `core/midi/include/pulp/midi/*.hpp` fails `--check` as an unclassified
+public header until it is registered. Keep test-only seams in a `core/*/src/`
+header that the test includes by relative path.

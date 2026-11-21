@@ -75,7 +75,8 @@ target_compile_definitions(pulp-test-cli-create-shellout PRIVATE
     PULP_BUILD_DIR="${CMAKE_BINARY_DIR}"
     PULP_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
     PULP_CMAKE_COMMAND="${CMAKE_COMMAND}"
-    PULP_EXPECTED_SDK_VERSION="${PROJECT_VERSION}")
+    PULP_EXPECTED_SDK_VERSION="${PROJECT_VERSION}"
+    PULP_CHOC_SOURCE_DIR="${choc_SOURCE_DIR}")
 if(catch2_SOURCE_DIR)
     target_compile_definitions(pulp-test-cli-create-shellout PRIVATE
         PULP_CATCH2_SOURCE_DIR="${catch2_SOURCE_DIR}")
@@ -205,7 +206,8 @@ function(pulp_bind_cli_shellout_target target)
 endfunction()
 
 add_executable(pulp-test-cli-shellout test_cli_shellout.cpp test_cli_fmt_shellout.cpp
-    test_cli_audio_heritage.cpp test_cli_timeline_render_shellout.cpp)
+    test_cli_audio_heritage.cpp test_cli_timeline_render_shellout.cpp
+    test_cli_licenses.cpp)
 target_link_libraries(pulp-test-cli-shellout PRIVATE pulp::platform pulp::audio Catch2::Catch2WithMain)
 target_compile_definitions(pulp-test-cli-shellout PRIVATE
     PULP_TEST_INSPECTOR_ENABLED=$<BOOL:${PULP_ENABLE_INSPECTOR}>)

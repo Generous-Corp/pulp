@@ -4,7 +4,9 @@
 
 #include <pulp/runtime/temporary_file.hpp>
 
+#include <cstddef>
 #include <cstdint>
+#include <filesystem>
 #include <fstream>
 #include <iterator>
 #include <optional>
@@ -26,6 +28,7 @@ namespace {
 
 using pulp::runtime::TemporaryFile;
 using pulp::runtime::detail::DurableFileCommitOutcome;
+using pulp::runtime::detail::DurableFileDurability;
 using pulp::runtime::detail::DurableFileReplacement;
 using pulp::runtime::detail::DurableFileReplacementTestAccess;
 
@@ -163,3 +166,39 @@ TEST_CASE("durable replacement preserves Windows file attributes", "[runtime][du
     REQUIRE(::SetFileAttributesW(destination.path().c_str(), FILE_ATTRIBUTE_NORMAL) != 0);
 }
 #endif
+
+TEST_CASE("relaxed durable commit replaces atomically without a drive-cache flush",
+          "[runtime][durability]") {
+    TemporaryFile destination;
+    {
+        std::ofstream original(destination.path(), std::ios::binary);
+        original << "original";
+    }
+    const auto before = DurableFileReplacementTestAccess::full_sync_count();
+    auto replacement = DurableFileReplacement::create(destination.path());
+    REQUIRE(replacement);
+    REQUIRE(replacement->write_all(bytes("relaxed")));
+    // The old bytes stay visible until the commit renames the new file in.
+    CHECK(read_file(destination.path()) == "original");
+
+    REQUIRE(replacement->commit(DurableFileDurability::relaxed) ==
+            DurableFileCommitOutcome::ReplacedDurably);
+    CHECK(read_file(destination.path()) == "relaxed");
+    CHECK(DurableFileReplacementTestAccess::full_sync_count() == before);
+    // No temporary sibling is left behind.
+    std::size_t siblings = 0;
+    for (const auto& entry : std::filesystem::directory_iterator(destination.path().parent_path()))
+        if (entry.path().filename().string().find(destination.path().filename().string()) == 0)
+            ++siblings;
+    CHECK(siblings == 1);
+}
+
+TEST_CASE("full durable commit flushes the drive cache exactly once", "[runtime][durability]") {
+    TemporaryFile destination;
+    const auto before = DurableFileReplacementTestAccess::full_sync_count();
+    auto replacement = DurableFileReplacement::create(destination.path());
+    REQUIRE(replacement);
+    REQUIRE(replacement->write_all(bytes("full")));
+    REQUIRE(replacement->commit() == DurableFileCommitOutcome::ReplacedDurably);
+    CHECK(DurableFileReplacementTestAccess::full_sync_count() == before + 1);
+}

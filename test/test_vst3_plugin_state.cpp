@@ -35,6 +35,7 @@
 #include <cstring>
 #include <iterator>
 #include <optional>
+#include <semaphore>
 #include <string>
 #include <thread>
 #include <utility>
@@ -243,6 +244,12 @@ class TestVst3Processor : public pulp::format::Processor {
     }
 
     void define_parameters(pulp::state::StateStore& store) override {
+        normalizer = store.add_listener(
+            [this, &store](pulp::state::ParamID id, float value) {
+                if (normalize_gain_writes && id == kGainParamId && value == -6.0f)
+                    store.set_value_rt(id, -7.0f);
+            },
+            pulp::state::ListenerThread::Audio);
         if (const auto automated = config_.automation_during_editor_edit) {
             automation_listener_ = store.add_listener(
                 [&store, automated = *automated](pulp::state::ParamID id, float) {
@@ -324,6 +331,9 @@ class TestVst3Processor : public pulp::format::Processor {
         return true;
     }
 
+    std::function<void()> during_process;
+    bool normalize_gain_writes = false;
+    pulp::state::ListenerToken normalizer;
     std::string plugin_state;
     int prepare_count = 0;
     int release_count = 0;
@@ -387,6 +397,8 @@ void TestVst3Processor::process(
     pulp::midi::MidiBuffer& midi_in,
     pulp::midi::MidiBuffer& midi_out,
     const pulp::format::ProcessContext& context) {
+    if (during_process)
+        during_process();
     ++process_count;
     last_context = context;
     last_input_channels = audio_input.num_channels();
@@ -1040,6 +1052,223 @@ TEST_CASE("VST3 does not echo host automation back during an open gesture",
 
     REQUIRE(view->removed() == Steinberg::kResultOk);
     view->release();
+    REQUIRE(processor.terminate() == Steinberg::kResultOk);
+}
+
+namespace {
+// Runs one process() block on a non-editor thread, as a host's audio thread
+// would, delivering one automation point for a parameter.
+void process_automation_block(pulp::format::vst3::PulpVst3Processor& processor,
+                              Steinberg::Vst::ParamID param_id,
+                              const pulp::state::ParamRange& range, float plain,
+                              std::function<void()> main_during_process = {},
+                              Steinberg::Vst::IParameterChanges* output = nullptr,
+                              bool automate = true) {
+    constexpr int kFrames = 64;
+    std::array<float, kFrames> in_l{}, in_r{}, out_l{}, out_r{};
+    float* inputs[2] = {in_l.data(), in_r.data()};
+    float* outputs[2] = {out_l.data(), out_r.data()};
+    Steinberg::Vst::AudioBusBuffers input_bus{};
+    input_bus.numChannels = 2;
+    input_bus.channelBuffers32 = inputs;
+    Steinberg::Vst::AudioBusBuffers output_bus{};
+    output_bus.numChannels = 2;
+    output_bus.channelBuffers32 = outputs;
+    Steinberg::Vst::ParameterChanges changes(1);
+    Steinberg::int32 queue_index = 0, point_index = 0;
+    auto* queue = changes.addParameterData(param_id, queue_index);
+    REQUIRE(queue != nullptr);
+    REQUIRE(queue->addPoint(0, range.normalize(plain), point_index) == Steinberg::kResultTrue);
+    Steinberg::Vst::ProcessData data{};
+    data.symbolicSampleSize = Steinberg::Vst::kSample32;
+    data.numSamples = kFrames;
+    data.numInputs = 1;
+    data.numOutputs = 1;
+    data.inputs = &input_bus;
+    data.outputs = &output_bus;
+    data.inputParameterChanges = automate ? &changes : nullptr;
+    data.outputParameterChanges = output;
+    Steinberg::tresult processed = Steinberg::kResultFalse;
+    std::thread audio([&] { processed = processor.process(data); });
+    if (main_during_process)
+        main_during_process();
+    audio.join();
+    REQUIRE(processed == Steinberg::kResultOk);
+}
+} // namespace
+
+TEST_CASE("VST3 reports the auto-reset of a host-raised trigger",
+          "[vst3][automation][trigger-reset]") {
+    TestVst3Config config;
+    config.add_reset_trigger_param = true;
+    reset_test_processor(config);
+    HostApp host_app;
+    pulp::format::vst3::PulpVst3Processor processor(create_test_processor);
+    REQUIRE(processor.initialize(&host_app) == Steinberg::kResultOk);
+    auto* plugin = TestVst3Processor::g_last_processor;
+    REQUIRE(plugin != nullptr);
+    auto& store = plugin->state();
+
+    Steinberg::Vst::ProcessSetup setup{};
+    setup.processMode = Steinberg::Vst::kRealtime;
+    setup.symbolicSampleSize = Steinberg::Vst::kSample32;
+    setup.maxSamplesPerBlock = 64;
+    setup.sampleRate = 48000.0;
+    REQUIRE(processor.setupProcessing(setup) == Steinberg::kResultOk);
+    REQUIRE(processor.setActive(true) == Steinberg::kResultOk);
+
+    float observed = 0.0f;
+    plugin->during_process = [&] { observed = store.get_value(kResetParamId); };
+    const auto& range = store.info(kResetParamId)->range;
+    Steinberg::Vst::ParameterChanges output(2);
+    process_automation_block(processor, kResetParamId, range, 1.0f, {}, &output);
+    CHECK(observed == 1.0f);
+    CHECK(store.get_value(kResetParamId) == 0.0f);
+    REQUIRE(output.getParameterCount() == 1);
+    auto* queue = output.getParameterData(0);
+    REQUIRE(queue->getParameterId() == kResetParamId);
+    REQUIRE(queue->getPointCount() == 1);
+    Steinberg::int32 offset = -1;
+    Steinberg::Vst::ParamValue value = -1.0;
+    REQUIRE(queue->getPoint(0, offset, value) == Steinberg::kResultTrue);
+    CHECK(value == 0.0);
+
+    Steinberg::Vst::ParameterChanges next_output(2);
+    process_automation_block(processor, kResetParamId, range, 0.0f, {}, &next_output, false);
+    CHECK(next_output.getParameterCount() == 0);
+    REQUIRE(processor.setActive(false) == Steinberg::kResultOk);
+    REQUIRE(processor.terminate() == Steinberg::kResultOk);
+}
+
+TEST_CASE("VST3 does not echo host automation that the plug-in mirrors back",
+          "[vst3][automation][echo]") {
+    // A plug-in that writes a host-automated value back into the store on the
+    // main thread (here quantised to a whole dB) must not be reported to the
+    // host as editing that parameter, or hosts treat it as touched and stop
+    // applying the envelope.
+    reset_test_processor();
+    HostApp host_app;
+    pulp::format::vst3::PulpVst3Processor processor(create_test_processor);
+    REQUIRE(processor.initialize(&host_app) == Steinberg::kResultOk);
+    GestureEditRecorder recorder;
+    REQUIRE(processor.setComponentHandler(&recorder) == Steinberg::kResultOk);
+    auto& store = TestVst3Processor::g_last_processor->state();
+    const pulp::state::ParamRange range{-60.0f, 24.0f, 0.0f, 0.1f};
+
+    Steinberg::Vst::ProcessSetup setup{};
+    setup.processMode = Steinberg::Vst::kRealtime;
+    setup.symbolicSampleSize = Steinberg::Vst::kSample32;
+    setup.maxSamplesPerBlock = 64;
+    setup.sampleRate = 48000.0;
+    REQUIRE(processor.setupProcessing(setup) == Steinberg::kResultOk);
+    REQUIRE(processor.setActive(true) == Steinberg::kResultOk);
+
+    for (int block = 0; block < 200; ++block) {
+        process_automation_block(processor, kGainParamId, range,
+                                 static_cast<float>(10.0 * std::sin(block * 0.07) + 3.3));
+        store.set_value(kGainParamId, std::round(store.get_value(kGainParamId)));
+    }
+    CHECK(recorder.edits.empty());
+    CHECK(recorder.begins.empty());
+
+    // Control: a user gesture on the automated parameter still reports.
+    process_automation_block(processor, kGainParamId, range, 5.0f);
+    store.begin_gesture(kGainParamId);
+    store.set_value(kGainParamId, -20.0f);
+    store.end_gesture(kGainParamId);
+    CHECK_FALSE(recorder.edits.empty());
+    CHECK(recorder.begins.size() == 1);
+
+    // Control: after the echo window a plug-in write reports again.
+    recorder.edits.clear();
+    std::this_thread::sleep_for(
+        std::chrono::milliseconds(pulp::format::HostWriteEchoGuard::kWindowNs / 1'000'000 + 50));
+    store.set_value(kGainParamId, -30.0f);
+    CHECK(recorder.edits.size() == 1);
+
+    REQUIRE(processor.setActive(false) == Steinberg::kResultOk);
+    REQUIRE(processor.terminate() == Steinberg::kResultOk);
+}
+
+TEST_CASE("VST3 concurrent mirrors do not become processor output",
+          "[vst3][automation][echo][echo-concurrent]") {
+    reset_test_processor();
+    HostApp host_app;
+    pulp::format::vst3::PulpVst3Processor processor(create_test_processor);
+    REQUIRE(processor.initialize(&host_app) == Steinberg::kResultOk);
+    GestureEditRecorder recorder;
+    REQUIRE(processor.setComponentHandler(&recorder) == Steinberg::kResultOk);
+    auto* plugin = TestVst3Processor::g_last_processor;
+    auto& store = plugin->state();
+    const pulp::state::ParamRange range{-60.0f, 24.0f, 0.0f, 0.1f};
+    Steinberg::Vst::ProcessSetup setup{};
+    setup.processMode = Steinberg::Vst::kRealtime;
+    setup.symbolicSampleSize = Steinberg::Vst::kSample32;
+    setup.maxSamplesPerBlock = 64;
+    setup.sampleRate = 48000.0;
+    REQUIRE(processor.setupProcessing(setup) == Steinberg::kResultOk);
+    REQUIRE(processor.setActive(true) == Steinberg::kResultOk);
+
+    bool processor_before = false;
+    bool processor_after = false;
+    bool automate = true;
+    bool normalize = false;
+    SECTION("mirror only") {}
+    SECTION("processor writes before mirror") {
+        processor_before = true;
+    }
+    SECTION("processor writes after mirror") {
+        processor_after = true;
+    }
+    SECTION("processor listener normalizes before mirror") {
+        processor_before = true;
+        normalize = true;
+        plugin->normalize_gain_writes = true;
+    }
+    SECTION("processor output does not suppress a subsequent editor write") {
+        processor_before = true;
+        automate = false;
+    }
+    std::binary_semaphore snapshot_reached{0};
+    std::binary_semaphore mirror_finished{0};
+    plugin->during_process = [&] {
+        if (processor_before)
+            store.set_value_rt(kGainParamId, -6.0f);
+        snapshot_reached.release();
+        mirror_finished.acquire();
+        if (processor_after)
+            store.set_value_rt(kGainParamId, -9.0f);
+    };
+    bool reached = false;
+    Steinberg::Vst::ParameterChanges output(4);
+    process_automation_block(
+        processor, kGainParamId, range, 5.3f,
+        [&] {
+            reached = snapshot_reached.try_acquire_for(std::chrono::seconds(5));
+            if (reached)
+                store.set_value(kGainParamId, 5.0f);
+            mirror_finished.release();
+        },
+        &output, automate);
+    plugin->during_process = {};
+    REQUIRE(reached);
+    CHECK(recorder.edits.size() == (automate ? 0 : 1));
+    CHECK(store.get_value(kGainParamId) == (processor_after ? -9.0f : 5.0f));
+    REQUIRE(output.getParameterCount() == (processor_before || processor_after ? 1 : 0));
+    if (output.getParameterCount() != 0) {
+        auto* queue = output.getParameterData(0);
+        REQUIRE(queue->getParameterId() == kGainParamId);
+        REQUIRE(queue->getPointCount() == 1);
+        Steinberg::int32 offset = -1;
+        Steinberg::Vst::ParamValue value = 0.0;
+        REQUIRE(queue->getPoint(0, offset, value) == Steinberg::kResultTrue);
+        CHECK(offset == 0);
+        CHECK_THAT(value, WithinAbs(range.normalize(processor_after ? -9.0f
+                                                    : normalize     ? -7.0f
+                                                                    : -6.0f),
+                                    1e-6));
+    }
+    REQUIRE(processor.setActive(false) == Steinberg::kResultOk);
     REQUIRE(processor.terminate() == Steinberg::kResultOk);
 }
 

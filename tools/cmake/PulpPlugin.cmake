@@ -95,7 +95,7 @@ function(pulp_add_plugin target)
     _pulp_resolve_consumer_targets()
     cmake_parse_arguments(PLUGIN
         "ACCEPTS_MIDI;NATIVE_UI;NO_EDITOR;LITE_EDITOR;GPU_UI;FULL_EDITOR;AAX_HEADLESS;SHIP_INSPECTOR;SHIP_INSPECTOR_RUNTIME_EVAL;ACKNOWLEDGE_UNSAFE_RUNTIME_EVAL"
-        "PLUGIN_NAME;BUNDLE_ID;VERSION;MANUFACTURER;CATEGORY;PLUGIN_CODE;MANUFACTURER_CODE;AAX_PRODUCT_CODE;AAX_NATIVE_CODE;PROCESSOR_FACTORY;UI;UI_SCRIPT;ICON;ICNS;DESIGN_WIDTH;DESIGN_HEIGHT;DESIGN_MIN_WIDTH;DESIGN_MIN_HEIGHT;DESIGN_MAX_WIDTH;DESIGN_MAX_HEIGHT;CONTROL_PROFILE;CONTROL_VENDOR_OPERATIONS;SOURCE_GIT_SHA;SOURCE_GIT_DIRTY"
+        "PLUGIN_NAME;BUNDLE_ID;VERSION;MANUFACTURER;CATEGORY;PLUGIN_CODE;MANUFACTURER_CODE;AAX_PRODUCT_CODE;AAX_NATIVE_CODE;PROCESSOR_FACTORY;UI;UI_SCRIPT;UI_ENGINE;ICON;ICNS;DESIGN_WIDTH;DESIGN_HEIGHT;DESIGN_MIN_WIDTH;DESIGN_MIN_HEIGHT;DESIGN_MAX_WIDTH;DESIGN_MAX_HEIGHT;CONTROL_PROFILE;CONTROL_VENDOR_OPERATIONS;SOURCE_GIT_SHA;SOURCE_GIT_DIRTY"
         "FORMATS;SOURCES;CONTENT_CAPABILITIES;CONTENT_KINDS;CONTENT_HOT_RELOAD_KINDS;CONTENT_MANUAL_RESCAN_KINDS;INSPECTOR_CAPABILITIES;CONTROL_CAPABILITIES;CONTROL_VENDOR_SOURCES"
         ${ARGN}
     )
@@ -111,6 +111,28 @@ function(pulp_add_plugin target)
     if("UI" IN_LIST PLUGIN_KEYWORDS_MISSING_VALUES)
         message(FATAL_ERROR
             "pulp_add_plugin(${target}): UI needs a UI package target, or none")
+    endif()
+
+    set(_pulp_vellum_scripted FALSE)
+    if(DEFINED PLUGIN_UI_ENGINE OR "UI_ENGINE" IN_LIST PLUGIN_KEYWORDS_MISSING_VALUES)
+        if(NOT PLUGIN_UI_ENGINE STREQUAL "vellum")
+            message(FATAL_ERROR "pulp_add_plugin(${target}): UI_ENGINE must be vellum")
+        endif()
+        if(NOT PLUGIN_UI_SCRIPT OR DEFINED PLUGIN_UI OR PLUGIN_NO_EDITOR)
+            message(FATAL_ERROR
+                "pulp_add_plugin(${target}): UI_ENGINE vellum requires UI_SCRIPT and cannot be combined with UI or NO_EDITOR")
+        endif()
+        _pulp_reject_unknown_formats("pulp_add_plugin(${target} UI_ENGINE vellum)"
+            "${PLUGIN_FORMATS}" VST3 CLAP AU Standalone)
+        if(NOT COMMAND _pulp_vellum_scripted_package)
+            include("${CMAKE_CURRENT_FUNCTION_LIST_DIR}/PulpVellumEditorPackage.cmake" OPTIONAL)
+        endif()
+        if(NOT COMMAND _pulp_vellum_scripted_package)
+            message(FATAL_ERROR
+                "pulp_add_plugin(${target}): UI_ENGINE vellum requires PULP_ENABLE_PULP_VELLUM=ON")
+        endif()
+        _pulp_vellum_scripted_package("pulp_add_plugin(${target})" PLUGIN_UI)
+        set(_pulp_vellum_scripted TRUE)
     endif()
 
     # Defaults
@@ -162,7 +184,7 @@ function(pulp_add_plugin target)
         set(PULP_${target}_UI_PACKAGE "${PLUGIN_UI}" CACHE INTERNAL "")
         set(_pulp_ui_conflicts "")
         foreach(_kw NATIVE_UI UI_SCRIPT GPU_UI FULL_EDITOR LITE_EDITOR)
-            if(PLUGIN_${_kw})
+            if(PLUGIN_${_kw} AND NOT (_pulp_vellum_scripted AND _kw STREQUAL "UI_SCRIPT"))
                 list(APPEND _pulp_ui_conflicts ${_kw})
             endif()
         endforeach()
@@ -179,7 +201,7 @@ function(pulp_add_plugin target)
         set(PLUGIN_NO_EDITOR TRUE)
     endif()
     if(PLUGIN_NO_EDITOR)
-        if(PLUGIN_NATIVE_UI OR PLUGIN_UI_SCRIPT)
+        if(PLUGIN_NATIVE_UI OR (PLUGIN_UI_SCRIPT AND NOT _pulp_vellum_scripted))
             message(FATAL_ERROR
                 "pulp_add_plugin(${target}): NO_EDITOR cannot be combined with NATIVE_UI or UI_SCRIPT")
         endif()
@@ -219,7 +241,7 @@ function(pulp_add_plugin target)
     # LITE_EDITOR is accepted and states the default explicitly.
     set(_pulp_full_reasons "")
     foreach(_kw UI_SCRIPT GPU_UI FULL_EDITOR)
-        if(PLUGIN_${_kw})
+        if(PLUGIN_${_kw} AND NOT _pulp_vellum_scripted)
             list(APPEND _pulp_full_reasons ${_kw})
         endif()
     endforeach()
@@ -374,6 +396,9 @@ function(pulp_add_plugin target)
         ${target} "${PLUGIN_BUNDLE_ID}" "${PLUGIN_PLUGIN_NAME}")
 
     if(_PULP_UI_SCRIPT AND NOT EXISTS "${_PULP_UI_SCRIPT}")
+        if(_pulp_vellum_scripted)
+            message(FATAL_ERROR "pulp_add_plugin(${target}): UI_SCRIPT points to a missing file: ${_PULP_UI_SCRIPT}")
+        endif()
         message(WARNING
             "pulp_add_plugin(${target}): UI_SCRIPT points to a missing file: ${_PULP_UI_SCRIPT}. "
             "The editor will fall back to AutoUi until the script exists.")
@@ -598,6 +623,10 @@ function(pulp_add_plugin target)
             "${PLUGIN_MANUFACTURER}")
     endforeach()
 
+    # ── Third-party notices ────────────────────────────────────────────
+    # ThirdPartyNotices.{json,txt} in every bundle, from its link closure.
+    _pulp_attach_third_party_notices(${target} "${PLUGIN_PLUGIN_NAME}")
+
     _pulp_add_plugin_install_target(${target} "${PLUGIN_PLUGIN_NAME}")
 
     set(_built_formats)
@@ -731,6 +760,9 @@ function(pulp_add_plugin_bundle target)
             "${BUNDLE_BUNDLE_NAME}" "${BUNDLE_BUNDLE_ID}" "${BUNDLE_VERSION}"
             "${BUNDLE_MANUFACTURER}")
     endforeach()
+    # Same ThirdPartyNotices.{json,txt} as pulp_add_plugin(), so a multi-plugin
+    # bundle does not ship third-party code without its notices.
+    _pulp_attach_third_party_notices(${target} "${BUNDLE_BUNDLE_NAME}")
     if(_built_formats)
         list(JOIN _built_formats ";" _built_formats_display)
     else()

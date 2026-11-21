@@ -245,6 +245,7 @@ function(_pulp_add_standalone target name bundle_id version processor_factory)
             CACHE INTERNAL "" FORCE)
     endif()
     _pulp_apply_ui_script_definition(${target}_Standalone "${PULP_${target}_UI_SCRIPT}")
+    _pulp_apply_macho_executable_exports(${target}_Standalone "${target}_Standalone")
     # The view layer's per-binary Objective-C classes; a view-free standalone
     # (UI <package>) has no view layer for them.
     if(NOT PULP_${target}_VIEW_FREE_STANDALONE)
@@ -269,6 +270,7 @@ function(_pulp_add_standalone target name bundle_id version processor_factory)
     # installed-SDK builds, and the old `if(COMMAND ...)` guard is what let
     # a missing definition silently skip staging entirely.
     pulp_stage_runtime_dependencies(${target}_Standalone)
+    _pulp_stage_ui_package_runtime(${target} ${target}_Standalone)
     pulp_assert_runtime_dependencies_staged(${target}_Standalone)
     # Portability guard (runs AFTER the WebGPU dylib is bundled, so a correctly
     # set-up standalone is clean): fail/warn if the binary bakes a build-tree
@@ -335,6 +337,8 @@ function(pulp_add_app target)
             PULP_BUNDLE_ID="${APP_BUNDLE_ID}"
         )
     endif()
+
+    _pulp_apply_macho_executable_exports(${target} "${target}")
 
     message(STATUS "Pulp app: ${target}")
 endfunction()

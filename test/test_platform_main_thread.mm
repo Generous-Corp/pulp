@@ -12,8 +12,10 @@
 
 #include <atomic>
 #include <chrono>
+#include <cmath>
 #include <memory>
 #include <thread>
+#include <vector>
 
 using pulp::platform::MainThreadScope;
 using pulp::platform::MainThreadTimer;
@@ -300,6 +302,250 @@ TEST_CASE("an idle scope causes no main-thread callouts", "[platform][main-threa
     CFRunLoopRunInMode(kCFRunLoopDefaultMode, 0.3, false);
     timer.cancel();
     REQUIRE(pulp::platform::detail::main_thread_callouts() - armed_before >= 3);
+}
+
+// A repeating timer is re-armed by the run loop itself. The instrument is the
+// layer's own SetNextFireDate counter; the control is the same counter moving
+// when timers are started (once each) and when one-shots fire.
+TEST_CASE("repeating timers are not repositioned on each fire", "[platform][main-thread][rearm]") {
+    ensure_app();
+    pump_for(20ms);
+    MainThreadScope scope;
+    constexpr int kTimers = 8;
+    std::atomic<int> fires{0};
+    std::vector<std::unique_ptr<MainThreadTimer>> timers;
+    for (int i = 0; i < kTimers; ++i) {
+        timers.push_back(std::make_unique<MainThreadTimer>(scope, [&] { ++fires; }));
+    }
+    const auto before_start = pulp::platform::detail::main_thread_timer_rearms();
+    for (auto& t : timers)
+        t->fire_every(10ms);
+    // Starting is the only reposition: one per timer (the control that the
+    // counter sees SetNextFireDate at all).
+    REQUIRE(pulp::platform::detail::main_thread_timer_rearms() - before_start == kTimers);
+
+    const auto armed = pulp::platform::detail::main_thread_timer_rearms();
+    REQUIRE(pump_until([&] { return fires.load() >= kTimers * 5; }, 5000ms));
+    REQUIRE(pulp::platform::detail::main_thread_timer_rearms() == armed);
+    for (auto& t : timers)
+        t->cancel();
+}
+
+TEST_CASE("a repeating timer keeps its rate after a period change and a stop",
+          "[platform][main-thread][rearm]") {
+    ensure_app();
+    pump_for(20ms);
+    MainThreadScope scope;
+    std::atomic<int> fires{0};
+    MainThreadTimer timer(scope, [&] { ++fires; });
+
+    timer.fire_every(500ms);
+    pump_for(60ms);
+    REQUIRE(fires == 0);    // the long period has not elapsed
+    timer.fire_every(10ms); // interval change takes effect now
+    REQUIRE(pump_until([&] { return fires.load() >= 3; }, 3000ms));
+
+    timer.cancel();
+    REQUIRE_FALSE(timer.pending());
+    pump_for(30ms);
+    const int stopped_at = fires.load();
+    pump_for(120ms);
+    REQUIRE(fires == stopped_at); // no fire after stop
+
+    timer.fire_every(10ms); // restart on the same period
+    REQUIRE(pump_until([&] { return fires.load() >= stopped_at + 3; }, 3000ms));
+    timer.cancel();
+}
+
+TEST_CASE("a one-shot fires once, also after a repeating run on the same timer",
+          "[platform][main-thread][rearm]") {
+    ensure_app();
+    pump_for(20ms);
+    MainThreadScope scope;
+    std::atomic<int> fires{0};
+    MainThreadTimer timer(scope, [&] { ++fires; });
+    timer.fire_every(10ms);
+    REQUIRE(pump_until([&] { return fires.load() >= 2; }, 3000ms));
+    timer.cancel();
+    pump_for(30ms);
+    fires = 0;
+
+    timer.fire_after(15ms);
+    REQUIRE(pump_until([&] { return fires.load() >= 1; }, 3000ms));
+    pump_for(150ms); // many native periods would have elapsed
+    REQUIRE(fires == 1);
+    REQUIRE_FALSE(timer.pending());
+}
+
+TEST_CASE("a repeating timer can stop or restart itself inside its callback",
+          "[platform][main-thread][rearm]") {
+    ensure_app();
+    pump_for(20ms);
+    MainThreadScope scope;
+    std::atomic<int> fires{0};
+    std::unique_ptr<MainThreadTimer> timer;
+    timer = std::make_unique<MainThreadTimer>(scope, [&] {
+        if (++fires == 2)
+            timer->cancel();
+    });
+    timer->fire_every(10ms);
+    REQUIRE(pump_until([&] { return fires.load() >= 2; }, 3000ms));
+    pump_for(120ms);
+    REQUIRE(fires == 2);
+
+    // Changing the period inside the callback replaces the underlying timer
+    // while it is firing.
+    std::atomic<int> slow{0};
+    std::unique_ptr<MainThreadTimer> changer;
+    changer = std::make_unique<MainThreadTimer>(scope, [&] {
+        if (++slow == 1)
+            changer->fire_every(7ms);
+    });
+    changer->fire_every(10ms);
+    REQUIRE(pump_until([&] { return slow.load() >= 4; }, 3000ms));
+    changer->cancel();
+}
+
+TEST_CASE("destroying a pending repeating timer stops it", "[platform][main-thread][rearm]") {
+    ensure_app();
+    pump_for(20ms);
+    MainThreadScope scope;
+    std::atomic<int> fires{0};
+    {
+        MainThreadTimer timer(scope, [&] { ++fires; });
+        timer.fire_every(10ms);
+        REQUIRE(pump_until([&] { return fires.load() >= 1; }, 3000ms));
+    }
+    const int at_destroy = fires.load();
+    pump_for(120ms);
+    REQUIRE(fires == at_destroy);
+}
+
+// Counts run-loop wake-ups from sleep over a span of the default mode.
+struct WakeCounter {
+    std::atomic<int> wakes{0};
+    CFRunLoopObserverRef obs;
+    WakeCounter() {
+        CFRunLoopObserverContext ctx{};
+        ctx.info = this;
+        obs = CFRunLoopObserverCreate(
+            kCFAllocatorDefault, kCFRunLoopAfterWaiting, true, 0,
+            [](CFRunLoopObserverRef, CFRunLoopActivity, void* info) {
+                ++static_cast<WakeCounter*>(info)->wakes;
+            },
+            &ctx);
+        CFRunLoopAddObserver(CFRunLoopGetMain(), obs, kCFRunLoopCommonModes);
+    }
+    ~WakeCounter() {
+        CFRunLoopRemoveObserver(CFRunLoopGetMain(), obs, kCFRunLoopCommonModes);
+        CFRelease(obs);
+    }
+};
+
+// Timers started at different moments keep different phases. Without
+// tolerance each wakes the main thread by itself (N per period); with it the
+// system merges nearby ones. The control is the same shape with zero
+// tolerance on raw run-loop timers, measured with the same observer.
+TEST_CASE("staggered repeating timers share main-thread wake-ups",
+          "[platform][main-thread][rearm][coalesce]") {
+    ensure_app();
+    pump_for(20ms);
+    constexpr int kTimers = 8;
+    constexpr auto kSpan = 4000ms;
+    constexpr auto kPeriod = 200ms;
+    constexpr auto kStagger = 25ms;
+    const double periods = std::chrono::duration<double>(kSpan) / kPeriod;
+
+    int control_wakes = 0;
+    {
+        static std::atomic<int> raw_fires;
+        raw_fires = 0;
+        std::vector<CFRunLoopTimerRef> raw;
+        WakeCounter counter;
+        for (int i = 0; i < kTimers; ++i) {
+            CFRunLoopTimerRef t = CFRunLoopTimerCreate(
+                kCFAllocatorDefault, CFAbsoluteTimeGetCurrent() + 0.2 + 0.025 * i, 0.2, 0, 0,
+                [](CFRunLoopTimerRef, void*) { ++raw_fires; }, nullptr);
+            CFRunLoopTimerSetTolerance(t, 0);
+            CFRunLoopAddTimer(CFRunLoopGetMain(), t, kCFRunLoopCommonModes);
+            raw.push_back(t);
+        }
+        // One blocking call: a pump loop's own slices would count as wakes.
+        CFRunLoopRunInMode(kCFRunLoopDefaultMode, std::chrono::duration<double>(kSpan).count(),
+                           false);
+        control_wakes = counter.wakes;
+        for (auto t : raw) {
+            CFRunLoopTimerInvalidate(t);
+            CFRelease(t);
+        }
+        // The instrument sees every timer wake: about one per timer per period.
+        REQUIRE(control_wakes >= static_cast<int>(kTimers * periods * 0.8));
+    }
+
+    MainThreadScope scope;
+    std::atomic<int> fires{0};
+    std::vector<std::unique_ptr<MainThreadTimer>> timers;
+    for (int i = 0; i < kTimers; ++i)
+        timers.push_back(std::make_unique<MainThreadTimer>(scope, [&] { ++fires; }));
+    int wakes = 0;
+    {
+        for (auto& t : timers) {
+            t->fire_every(kPeriod);
+            pump_for(kStagger);
+        }
+        fires = 0;
+        WakeCounter counter;
+        CFRunLoopRunInMode(kCFRunLoopDefaultMode, std::chrono::duration<double>(kSpan).count(),
+                           false);
+        wakes = counter.wakes;
+    }
+    for (auto& t : timers)
+        t->cancel();
+    // Every timer still fires at its nominal rate.
+    REQUIRE(fires >= static_cast<int>(kTimers * periods * 0.8));
+    REQUIRE(fires <= static_cast<int>(kTimers * periods * 1.2) + kTimers);
+    // Wake-ups are well below one per timer per period.
+    REQUIRE(wakes < control_wakes * 0.4);
+}
+
+TEST_CASE("repeating timers carry a tolerance and one-shots do not",
+          "[platform][main-thread][rearm][coalesce]") {
+    MainThreadScope scope;
+    MainThreadTimer timer(scope, [] {});
+    timer.fire_every(200ms);
+    REQUIRE(timer.tolerance() == 20ms);
+    timer.fire_every(10ms);
+    REQUIRE(timer.tolerance() == 5ms); // the floor
+    timer.fire_every(4ms);
+    REQUIRE(timer.tolerance() == 2ms); // capped at half the period
+    timer.fire_after(5ms);
+    REQUIRE(timer.tolerance() == 0ms);
+    timer.cancel();
+}
+
+TEST_CASE("a repeating timer's first fire stays one period away",
+          "[platform][main-thread][rearm][coalesce]") {
+    ensure_app();
+    MainThreadScope scope;
+    std::atomic<int> fires{0};
+    MainThreadTimer timer(scope, [&] { ++fires; });
+    // Start just after a 200 ms grid point, where rounding the first fire up
+    // to the grid would add almost a whole extra period.
+    for (;;) {
+        const double phase = std::fmod(CFAbsoluteTimeGetCurrent(), 0.2);
+        if (phase > 0.01 && phase < 0.03)
+            break;
+        pump_for(2ms);
+    }
+    const auto start = std::chrono::steady_clock::now();
+    timer.fire_every(200ms);
+    while (fires == 0 && std::chrono::steady_clock::now() - start < 600ms)
+        pump_for(2ms);
+    const auto first = std::chrono::steady_clock::now() - start;
+    timer.cancel();
+    REQUIRE(fires >= 1);
+    REQUIRE(first >= 195ms);
+    REQUIRE(first <= 200ms + 20ms + 60ms); // period + tolerance + scheduling slack
 }
 
 TEST_CASE("teardown hooks run once when the scope is destroyed",

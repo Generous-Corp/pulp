@@ -154,6 +154,28 @@ def installed_sdk_targets(text: str | None = None) -> set[str]:
     return targets
 
 
+def conditional_sdk_target_append(text: str, target: str) -> bool:
+    """Return true only when the target append is inside its matching if block."""
+    lines = text.splitlines()
+    opener = re.compile(rf"^\s*if\s*\(\s*TARGET\s+{re.escape(target)}\s*\)\s*$", re.IGNORECASE)
+    append = re.compile(rf"\blist\s*\(\s*APPEND\s+PULP_SDK_TARGETS\s+{re.escape(target)}\s*\)", re.IGNORECASE)
+    for index, line in enumerate(lines):
+        if not opener.match(line):
+            continue
+        depth = 1
+        body = []
+        for nested in lines[index + 1:]:
+            if re.match(r"^\s*if\s*\(", nested, re.IGNORECASE):
+                depth += 1
+            elif re.match(r"^\s*endif\s*\(", nested, re.IGNORECASE):
+                depth -= 1
+                if depth == 0:
+                    return any(append.search(item) for item in body)
+            body.append(nested)
+        raise AssertionError(f"unterminated conditional for {target}")
+    return False
+
+
 def interface_library_targets_from_text(text: str) -> set[str]:
     text = re.sub(
         r"#\[(=*)\[.*?\]\1\]",
@@ -807,7 +829,11 @@ class ReleaseArtifactContentsTests(unittest.TestCase):
                     )
 
     def test_installed_sdk_archives_match_release_matrix(self) -> None:
-        archive_targets = installed_sdk_targets() - interface_library_targets()
+        install_text = INSTALL_RULES.read_text(encoding="utf-8")
+        archive_targets = installed_sdk_targets(install_text) - interface_library_targets()
+        for optional in ("pulp-vellum", "pulp-vellum-audio", "pulp-vellum-scripted"):
+            if conditional_sdk_target_append(install_text, optional):
+                archive_targets.discard(optional)
         matrix_targets = set(rac.DEFAULT_MATRIX.pulp_library_stems)
         for platform_targets in rac.DEFAULT_MATRIX.platform_library_stems.values():
             matrix_targets.update(platform_targets)
@@ -816,6 +842,19 @@ class ReleaseArtifactContentsTests(unittest.TestCase):
             matrix_targets,
             "PULP_SDK_TARGETS archives and release_product_matrix.json drifted",
         )
+
+    def test_optional_vellum_archive_is_conditional_in_installed_sdk_contract(self) -> None:
+        text = INSTALL_RULES.read_text(encoding="utf-8")
+        for optional in ("pulp-vellum", "pulp-vellum-audio", "pulp-vellum-scripted"):
+            with self.subTest(target=optional):
+                self.assertTrue(conditional_sdk_target_append(text, optional))
+
+    def test_optional_vellum_unconditional_append_after_endif_is_rejected(self) -> None:
+        for optional in ("pulp-vellum", "pulp-vellum-audio", "pulp-vellum-scripted"):
+            with self.subTest(target=optional):
+                text = f"if(TARGET {optional})\nendif()\nlist(APPEND PULP_SDK_TARGETS {optional})\n"
+                self.assertFalse(conditional_sdk_target_append(text, optional))
+                self.assertNotIn(optional, rac.DEFAULT_MATRIX.pulp_library_stems)
 
     def test_native_surface_is_expected_on_every_sdk_platform(self) -> None:
         # PulpInstallRules.cmake installs pulp-native wherever the target
