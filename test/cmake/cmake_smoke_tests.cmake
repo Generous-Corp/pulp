@@ -1674,3 +1674,13 @@ add_test(NAME cmake-canvas-fontconfig-link
         -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/test_canvas_fontconfig_link.cmake)
 set_tests_properties(cmake-canvas-fontconfig-link PROPERTIES
     LABELS "cmake;format" TIMEOUT 60)
+
+if(UNIX)
+    add_test(NAME cmake-plugin-module-probe-exit-status
+        COMMAND ${CMAKE_COMMAND}
+            -DPULP_SOURCE_DIR=${CMAKE_SOURCE_DIR}
+            -DWORK_DIR=${CMAKE_CURRENT_BINARY_DIR}/plugin-module-probe-exit-status
+            -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/test_plugin_module_probe.cmake)
+    set_tests_properties(cmake-plugin-module-probe-exit-status PROPERTIES
+        LABELS "cmake;format" TIMEOUT 60)
+endif()
