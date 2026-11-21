@@ -591,6 +591,73 @@ if(PULP_HAS_CLAP)
     target_compile_definitions(pulp-test-clap-single-scan-without-processor PRIVATE PULP_CLAP_GUI=1)
     catch_discover_tests(pulp-test-clap-single-scan-without-processor)
 
+    # CLAP host-conformance checker, proven against one well-behaved Pulp-built
+    # module and one fixture per check that deliberately breaks it.
+    if(TARGET pulp-clap-conformance AND TARGET pulp::format-clap-core AND NOT WIN32)
+        set(_conf_dir ${CMAKE_SOURCE_DIR}/tools/audio/clap-conformance)
+        add_library(pulp-test-clap-conf-pulp MODULE ${_conf_dir}/pulp_conformance_fixture_clap.cpp)
+        target_link_libraries(pulp-test-clap-conf-pulp PRIVATE pulp::format-clap-core clap)
+        set_target_properties(pulp-test-clap-conf-pulp PROPERTIES
+            OUTPUT_NAME "ConfPulp" PREFIX "" SUFFIX ".clap")
+        set(_conf_modules pulp-test-clap-conf-pulp)
+        set(_conf_variants good HEAVY_MEMORY HEAVY_CPU ECHO NULL_INPUT STATE CRASH_TEARDOWN HANG_INIT HANG_PROCESS CONTROL_CHARS NULL_DESCRIPTOR)
+        if(APPLE)
+            list(APPEND _conf_variants ECHO_MAIN)
+        endif()
+        foreach(_v ${_conf_variants})
+            string(TOLOWER ${_v} _lv)
+            add_library(pulp-test-clap-conf-${_lv} MODULE ${_conf_dir}/conformance_fixture_clap.cpp)
+            target_link_libraries(pulp-test-clap-conf-${_lv} PRIVATE clap)
+            if(NOT _v STREQUAL "good")
+                target_compile_definitions(pulp-test-clap-conf-${_lv} PRIVATE BREAK_${_v}=1)
+            endif()
+            set_target_properties(pulp-test-clap-conf-${_lv} PROPERTIES
+                OUTPUT_NAME "Conf_${_lv}" PREFIX "" SUFFIX ".clap")
+            list(APPEND _conf_modules pulp-test-clap-conf-${_lv})
+        endforeach()
+        if(APPLE)
+            # A macOS bundle: Contents/MacOS/<exe>, handed to the checker by its
+            # bundle path.
+            add_custom_target(pulp-test-clap-conf-bundle ALL
+                COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_CURRENT_BINARY_DIR}/ConfBundle.clap/Contents/MacOS
+                COMMAND ${CMAKE_COMMAND} -E copy $<TARGET_FILE:pulp-test-clap-conf-good>
+                    ${CMAKE_CURRENT_BINARY_DIR}/ConfBundle.clap/Contents/MacOS/ConfBundle
+                DEPENDS pulp-test-clap-conf-good)
+        endif()
+        find_package(Python3 COMPONENTS Interpreter QUIET)
+        if(Python3_Interpreter_FOUND)
+            add_test(NAME clap-conformance-checker
+                COMMAND ${Python3_EXECUTABLE}
+                    "${CMAKE_SOURCE_DIR}/tools/audio/clap-conformance/test_clap_conformance.py"
+                    $<TARGET_FILE:pulp-clap-conformance>
+                    pulp=$<TARGET_FILE:pulp-test-clap-conf-pulp>
+                    good=$<TARGET_FILE:pulp-test-clap-conf-good>
+                    heavy_memory=$<TARGET_FILE:pulp-test-clap-conf-heavy_memory>
+                    heavy_cpu=$<TARGET_FILE:pulp-test-clap-conf-heavy_cpu>
+                    echo=$<TARGET_FILE:pulp-test-clap-conf-echo>
+                    $<$<BOOL:${APPLE}>:echo_main=$<TARGET_FILE:pulp-test-clap-conf-echo_main>>
+                    null_input=$<TARGET_FILE:pulp-test-clap-conf-null_input>
+                    crash_teardown=$<TARGET_FILE:pulp-test-clap-conf-crash_teardown>
+                    $<$<BOOL:${APPLE}>:bundle=${CMAKE_CURRENT_BINARY_DIR}/ConfBundle.clap>
+                    state=$<TARGET_FILE:pulp-test-clap-conf-state>)
+            # Each fixture module costs a few seconds of host-side warm-up, so
+            # the full matrix is a slow lane; the robustness test below is the
+            # fast per-PR proof of the checker's own deadline and JSON output.
+            set_tests_properties(clap-conformance-checker PROPERTIES
+                LABELS "format;clap;tools;slow" TIMEOUT 120)
+            add_test(NAME clap-conformance-checker-robustness
+                COMMAND ${Python3_EXECUTABLE}
+                    "${CMAKE_SOURCE_DIR}/tools/audio/clap-conformance/test_clap_conformance.py"
+                    $<TARGET_FILE:pulp-clap-conformance>
+                    hang_init=$<TARGET_FILE:pulp-test-clap-conf-hang_init>
+                    hang_process=$<TARGET_FILE:pulp-test-clap-conf-hang_process>
+                    control_chars=$<TARGET_FILE:pulp-test-clap-conf-control_chars>
+                    null_descriptor=$<TARGET_FILE:pulp-test-clap-conf-null_descriptor>)
+            set_tests_properties(clap-conformance-checker-robustness PROPERTIES
+                LABELS "format;clap;tools" TIMEOUT 120)
+        endif()
+    endif()
+
     # CLAP inbound/outbound MIDI event coverage + steady-state RT process guard.
     #
     # Unlike `pulp-test-clap-entry` above, this test DOES NOT re-compile

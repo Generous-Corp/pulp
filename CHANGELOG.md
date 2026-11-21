@@ -9,6 +9,28 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
      release's bullet block. See docs/guides/versioning.md § Release pipeline
      for the full end-to-end flow. -->
 
+<a id="v11881"></a>
+## [1.188.1] - 2026-11-21
+
+- release/version bump ([#12719](https://github.com/Generous-Corp/pulp/pull/12719))
+- fix/macos timer tolerance ([#12717](https://github.com/Generous-Corp/pulp/pull/12717))
+- fix/linux plugin fontconfig ([#12688](https://github.com/Generous-Corp/pulp/pull/12688))
+
+<a id="v11880"></a>
+## [1.188.0] - 2026-11-21
+
+- release/version bump ([#12716](https://github.com/Generous-Corp/pulp/pull/12716))
+- lane/pulp pin rule ([#12706](https://github.com/Generous-Corp/pulp/pull/12706))
+
+<a id="v11870"></a>
+## [1.187.0] - 2026-11-21
+
+- release/version bump ([#12715](https://github.com/Generous-Corp/pulp/pull/12715))
+- fix/windows arm64ec sdk provenance 20261121 ([#12711](https://github.com/Generous-Corp/pulp/pull/12711))
+- lane/w d3 controls ([#12700](https://github.com/Generous-Corp/pulp/pull/12700))
+- release/version bump ([#12712](https://github.com/Generous-Corp/pulp/pull/12712))
+- lane/w sdk stamp sha ([#12696](https://github.com/Generous-Corp/pulp/pull/12696))
+
 <a id="v11860"></a>
 ## [1.186.0] - 2026-11-21
 
@@ -13501,6 +13523,9 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/Generous-Corp/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/Generous-Corp/pulp/pull/2))
 
+[1.188.1]: https://github.com/Generous-Corp/pulp/releases/tag/v1.188.1
+[1.188.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.188.0
+[1.187.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.187.0
 [1.186.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.186.0
 [1.185.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.185.0
 [1.184.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.184.0

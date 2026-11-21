@@ -1093,6 +1093,7 @@ for the real guidance. If nothing here fits, say so — then hand-roll.
 - Look at a file's spectrum over time as a PNG an agent can read — never to measure or gate. → `pulp audio spectrogram`
 - Prove what a plugin actually emitted — summarize, diagnose, compare, or gate a WAV. → `pulp audio validate summarize`
 - Look at a file's envelope and where it clips, as a PNG — never to measure or gate. → `pulp audio waveform`
+- Check a built .clap against host-visible contracts without a DAW - scan cost, parameter echo, missing input ports, state round trip. → `tools/audio/clap-conformance/run.sh`
 - Validate complete matched GPU-audio trial captures and summarize their declared CPU, latency, transfer, and disposition evidence. → `tools/scripts/gpu_audio_p4_evidence.py`
   - ⚠ **Cannot see:** Validates recorded evidence only; does not run the product benchmark, authenticate provider/build attestations, or assign a physical program verdict.
 - Build and verify blinded capture packs for a sampler heritage profile without recording machine identity. → `tools/audio/heritage-calibration/heritage_calibration.py`

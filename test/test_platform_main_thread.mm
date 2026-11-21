@@ -12,6 +12,7 @@
 
 #include <atomic>
 #include <chrono>
+#include <cmath>
 #include <memory>
 #include <thread>
 #include <vector>
@@ -418,6 +419,133 @@ TEST_CASE("destroying a pending repeating timer stops it", "[platform][main-thre
     const int at_destroy = fires.load();
     pump_for(120ms);
     REQUIRE(fires == at_destroy);
+}
+
+// Counts run-loop wake-ups from sleep over a span of the default mode.
+struct WakeCounter {
+    std::atomic<int> wakes{0};
+    CFRunLoopObserverRef obs;
+    WakeCounter() {
+        CFRunLoopObserverContext ctx{};
+        ctx.info = this;
+        obs = CFRunLoopObserverCreate(
+            kCFAllocatorDefault, kCFRunLoopAfterWaiting, true, 0,
+            [](CFRunLoopObserverRef, CFRunLoopActivity, void* info) {
+                ++static_cast<WakeCounter*>(info)->wakes;
+            },
+            &ctx);
+        CFRunLoopAddObserver(CFRunLoopGetMain(), obs, kCFRunLoopCommonModes);
+    }
+    ~WakeCounter() {
+        CFRunLoopRemoveObserver(CFRunLoopGetMain(), obs, kCFRunLoopCommonModes);
+        CFRelease(obs);
+    }
+};
+
+// Timers started at different moments keep different phases. Without
+// tolerance each wakes the main thread by itself (N per period); with it the
+// system merges nearby ones. The control is the same shape with zero
+// tolerance on raw run-loop timers, measured with the same observer.
+TEST_CASE("staggered repeating timers share main-thread wake-ups",
+          "[platform][main-thread][rearm][coalesce]") {
+    ensure_app();
+    pump_for(20ms);
+    constexpr int kTimers = 8;
+    constexpr auto kSpan = 4000ms;
+    constexpr auto kPeriod = 200ms;
+    constexpr auto kStagger = 25ms;
+    const double periods = std::chrono::duration<double>(kSpan) / kPeriod;
+
+    int control_wakes = 0;
+    {
+        static std::atomic<int> raw_fires;
+        raw_fires = 0;
+        std::vector<CFRunLoopTimerRef> raw;
+        WakeCounter counter;
+        for (int i = 0; i < kTimers; ++i) {
+            CFRunLoopTimerRef t = CFRunLoopTimerCreate(
+                kCFAllocatorDefault, CFAbsoluteTimeGetCurrent() + 0.2 + 0.025 * i, 0.2, 0, 0,
+                [](CFRunLoopTimerRef, void*) { ++raw_fires; }, nullptr);
+            CFRunLoopTimerSetTolerance(t, 0);
+            CFRunLoopAddTimer(CFRunLoopGetMain(), t, kCFRunLoopCommonModes);
+            raw.push_back(t);
+        }
+        // One blocking call: a pump loop's own slices would count as wakes.
+        CFRunLoopRunInMode(kCFRunLoopDefaultMode, std::chrono::duration<double>(kSpan).count(),
+                           false);
+        control_wakes = counter.wakes;
+        for (auto t : raw) {
+            CFRunLoopTimerInvalidate(t);
+            CFRelease(t);
+        }
+        // The instrument sees every timer wake: about one per timer per period.
+        REQUIRE(control_wakes >= static_cast<int>(kTimers * periods * 0.8));
+    }
+
+    MainThreadScope scope;
+    std::atomic<int> fires{0};
+    std::vector<std::unique_ptr<MainThreadTimer>> timers;
+    for (int i = 0; i < kTimers; ++i)
+        timers.push_back(std::make_unique<MainThreadTimer>(scope, [&] { ++fires; }));
+    int wakes = 0;
+    {
+        for (auto& t : timers) {
+            t->fire_every(kPeriod);
+            pump_for(kStagger);
+        }
+        fires = 0;
+        WakeCounter counter;
+        CFRunLoopRunInMode(kCFRunLoopDefaultMode, std::chrono::duration<double>(kSpan).count(),
+                           false);
+        wakes = counter.wakes;
+    }
+    for (auto& t : timers)
+        t->cancel();
+    // Every timer still fires at its nominal rate.
+    REQUIRE(fires >= static_cast<int>(kTimers * periods * 0.8));
+    REQUIRE(fires <= static_cast<int>(kTimers * periods * 1.2) + kTimers);
+    // Wake-ups are well below one per timer per period.
+    REQUIRE(wakes < control_wakes * 0.4);
+}
+
+TEST_CASE("repeating timers carry a tolerance and one-shots do not",
+          "[platform][main-thread][rearm][coalesce]") {
+    MainThreadScope scope;
+    MainThreadTimer timer(scope, [] {});
+    timer.fire_every(200ms);
+    REQUIRE(timer.tolerance() == 20ms);
+    timer.fire_every(10ms);
+    REQUIRE(timer.tolerance() == 5ms); // the floor
+    timer.fire_every(4ms);
+    REQUIRE(timer.tolerance() == 2ms); // capped at half the period
+    timer.fire_after(5ms);
+    REQUIRE(timer.tolerance() == 0ms);
+    timer.cancel();
+}
+
+TEST_CASE("a repeating timer's first fire stays one period away",
+          "[platform][main-thread][rearm][coalesce]") {
+    ensure_app();
+    MainThreadScope scope;
+    std::atomic<int> fires{0};
+    MainThreadTimer timer(scope, [&] { ++fires; });
+    // Start just after a 200 ms grid point, where rounding the first fire up
+    // to the grid would add almost a whole extra period.
+    for (;;) {
+        const double phase = std::fmod(CFAbsoluteTimeGetCurrent(), 0.2);
+        if (phase > 0.01 && phase < 0.03)
+            break;
+        pump_for(2ms);
+    }
+    const auto start = std::chrono::steady_clock::now();
+    timer.fire_every(200ms);
+    while (fires == 0 && std::chrono::steady_clock::now() - start < 600ms)
+        pump_for(2ms);
+    const auto first = std::chrono::steady_clock::now() - start;
+    timer.cancel();
+    REQUIRE(fires >= 1);
+    REQUIRE(first >= 195ms);
+    REQUIRE(first <= 200ms + 20ms + 60ms); // period + tolerance + scheduling slack
 }
 
 TEST_CASE("teardown hooks run once when the scope is destroyed",
