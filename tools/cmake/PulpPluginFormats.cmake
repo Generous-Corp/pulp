@@ -49,6 +49,15 @@ function(_pulp_plugin_module_link_hygiene module_target)
             PULP_DEAD_STRIP "${PULP_DEAD_STRIP_PLUGINS}")
         target_link_options(${module_target} PRIVATE
             "$<$<AND:$<NOT:$<CONFIG:Debug>>,$<BOOL:$<TARGET_PROPERTY:${module_target},PULP_DEAD_STRIP>>>:LINKER:-dead_strip>")
+    elseif(UNIX AND NOT ANDROID)
+        # An editor's Skia leaves fontconfig symbols unresolved in a module;
+        # name the library so the loader brings it in (PulpLinkFontconfig.cmake).
+        # A plug-in built without an editor links no Skia and needs nothing.
+        string(REGEX REPLACE "_(VST3|CLAP|LV2|AAX|AU)$" "" _pulp_hygiene_base "${module_target}")
+        if(NOT PULP_${_pulp_hygiene_base}_NO_EDITOR)
+            include("${CMAKE_CURRENT_FUNCTION_LIST_DIR}/PulpLinkFontconfig.cmake")
+            pulp_link_fontconfig_needed(${module_target})
+        endif()
     endif()
 endfunction()
 

@@ -570,6 +570,22 @@ if(UNIX AND NOT APPLE AND NOT ANDROID)
 endif()
 ```
 
+### Plug-in modules
+
+The pass above covers executables and any shared or module library defined in
+the Pulp tree. A plug-in built from an installed SDK with `pulp_add_plugin()` is
+a MODULE library in the consumer's tree, which can leave symbols undefined, so
+the link succeeds with the `Fc*` references unresolved and no `libfontconfig`
+in `ldd`. Such a plug-in loads only in a host that already has fontconfig.
+`pulp_add_plugin()` therefore calls `pulp_link_fontconfig_needed()` (same file,
+shipped in the SDK's `lib/cmake/Pulp/`) on each Linux VST3, CLAP, LV2 and AAX
+module that has an editor, which records `libfontconfig` as a needed library
+under `--no-as-needed`. The `no-unresolved-symbols-*` tests in
+`examples/pulp-effect` run `ldd -r` on the built modules and fail on any
+undefined symbol; `no-unresolved-symbols-control` runs the same probe on a
+module with a deliberate undefined symbol and must report it. SDK consumers
+need `libfontconfig-dev` at build time and `libfontconfig1` at run time.
+
 ## When to update this doc
 
 Update this doc whenever you change any of these files:

@@ -47,3 +47,38 @@ function(pulp_link_fontconfig_after_skia target)
         target_link_libraries(${target} PRIVATE PkgConfig::${_var})
     endif()
 endfunction()
+
+# pulp_link_fontconfig_needed(<module-target>)
+#
+# For a Linux plug-in module (VST3 / CLAP / LV2 / AAX) whose editor links Skia.
+# `libskia.a` references the `Fc*` functions, and a MODULE library may leave
+# symbols undefined, so the link succeeds without naming libfontconfig. The
+# module then loads only in a host that already has fontconfig in its process
+# (REAPER and every GTK host do); any other host fails at dlopen under
+# RTLD_NOW, or at the first font lookup.
+#
+# This records libfontconfig as a DT_NEEDED entry. `--no-as-needed` keeps
+# Ubuntu's default `--as-needed` from dropping it: at the point the library
+# appears on the line nothing yet references it, so it would be discarded.
+# FreeType needs no entry of its own because libfontconfig depends on it, so it
+# is already in the module's dependency tree. If fontconfig is not installed
+# the module is left as it was and a warning names the missing package.
+#
+# No-op on non-Linux platforms.
+function(pulp_link_fontconfig_needed target)
+    if(NOT (UNIX AND NOT APPLE AND NOT ANDROID))
+        return()
+    endif()
+    find_library(PULP_FONTCONFIG_LIBRARY NAMES fontconfig)
+    if(NOT PULP_FONTCONFIG_LIBRARY)
+        message(WARNING
+            "${target}: libfontconfig was not found, so this plug-in will not "
+            "name it as a needed library and loads only in hosts that already "
+            "have it (install libfontconfig-dev).")
+        return()
+    endif()
+    target_link_libraries(${target} PRIVATE
+        "-Wl,--push-state,--no-as-needed"
+        "${PULP_FONTCONFIG_LIBRARY}"
+        "-Wl,--pop-state")
+endfunction()
