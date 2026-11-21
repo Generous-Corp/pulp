@@ -2,6 +2,32 @@
 set(_prefix "$ENV{DESTDIR}${CMAKE_INSTALL_PREFIX}")
 set(_sha "@PULP_SOURCE_INSTALL_SHA@")
 set(_dirty "@PULP_SOURCE_INSTALL_DIRTY@")
+set(_git "@GIT_EXECUTABLE@")
+set(_source_root "@PULP_ROOT_DIR@")
+# Resolve checkout identity at install time. An incremental build can install
+# after the source checkout advances beyond the configure-time snapshot.
+if(EXISTS "${_git}")
+    execute_process(
+        COMMAND "${_git}" -C "${_source_root}" rev-parse HEAD
+        OUTPUT_VARIABLE _sha
+        OUTPUT_STRIP_TRAILING_WHITESPACE
+        RESULT_VARIABLE _install_sha_result
+        ERROR_QUIET)
+    execute_process(
+        COMMAND "${_git}" -C "${_source_root}" status --porcelain --untracked-files=no
+        OUTPUT_VARIABLE _install_status
+        OUTPUT_STRIP_TRAILING_WHITESPACE
+        RESULT_VARIABLE _install_status_result
+        ERROR_QUIET)
+    if(NOT _install_sha_result STREQUAL "0" OR NOT _install_status_result STREQUAL "0")
+        message(FATAL_ERROR "Pulp source install provenance: unable to resolve checkout identity at install time")
+    endif()
+    if(_install_status STREQUAL "")
+        set(_dirty false)
+    else()
+        set(_dirty true)
+    endif()
+endif()
 # Whether pulp-view-script carries the shell exec/execAsync JS bridge
 # (PULP_DEV_BRIDGE_EXEC); a consumer reads it as `bridge_exec`.
 set(_bridge_exec "@PULP_SOURCE_INSTALL_BRIDGE_EXEC@")

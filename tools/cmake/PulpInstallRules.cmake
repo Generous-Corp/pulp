@@ -794,9 +794,8 @@ file(WRITE "${CMAKE_BINARY_DIR}/sdk_build_type.txt"
      "${CMAKE_BUILD_TYPE}\n")
 install(FILES "${CMAKE_BINARY_DIR}/sdk_build_type.txt" DESTINATION ".")
 
-# Preserve the exact source identity in ordinary cmake --install prefixes.
-# This is local provenance only; release eligibility still requires the
-# separately verified release marker.
+# Capture fallback provenance for installs where Git is unavailable.
+# The generated install script refreshes it from the checkout when Git is present.
 find_package(Git REQUIRED)
 execute_process(COMMAND "${GIT_EXECUTABLE}" -C "${PULP_ROOT_DIR}" rev-parse HEAD
     OUTPUT_VARIABLE PULP_SOURCE_INSTALL_SHA OUTPUT_STRIP_TRAILING_WHITESPACE
