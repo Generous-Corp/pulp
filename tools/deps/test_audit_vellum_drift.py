@@ -28,6 +28,8 @@ import audit  # noqa: E402
 PULP_SHA = "a" * 64
 OTHER_SHA = "b" * 64
 COMMIT = "c" * 40
+# Pinned so transition windows never depend on the wall clock.
+PINNED_NOW = datetime.datetime(2026, 11, 21, 12, 0, tzinfo=datetime.timezone.utc)
 
 
 def manifest(tag: str = "chrome/m158", sha: str = PULP_SHA, **spec_overrides) -> list[dict]:
@@ -142,7 +144,7 @@ class RendererLockTests(unittest.TestCase):
                                             reader(renderer_lock(sha=OTHER_SHA)), now=now)
 
     def test_working_tree_record_is_ignored(self) -> None:
-        now = datetime.datetime.now(datetime.timezone.utc)
+        now = PINNED_NOW
         with self.transition_repo(self.transition(now), commit_record=False) as repo:
             (repo / audit.PIN_TRANSITION_FILE).parent.mkdir(parents=True, exist_ok=True)
             (repo / audit.PIN_TRANSITION_FILE).write_text(
@@ -152,7 +154,7 @@ class RendererLockTests(unittest.TestCase):
         self.assertIn("required on the base", problems[0])
 
     def test_record_added_by_this_pr_fails_closed(self) -> None:
-        now = datetime.datetime.now(datetime.timezone.utc)
+        now = PINNED_NOW
         with self.transition_repo(None, commit_record=False) as repo:
             record = repo / audit.PIN_TRANSITION_FILE
             record.parent.mkdir(parents=True, exist_ok=True)
@@ -166,14 +168,14 @@ class RendererLockTests(unittest.TestCase):
         self.assertIn("lands first in its own owner-approved PR", problems[0])
 
     def test_valid_base_transition_covers_drift(self) -> None:
-        now = datetime.datetime.now(datetime.timezone.utc)
+        now = PINNED_NOW
         with self.transition_repo(self.transition(now), commit_record=True):
             status, problems = self.drift(now)
         self.assertEqual(status, "match")
         self.assertEqual(problems, [])
 
     def test_expired_transition_fails_closed(self) -> None:
-        now = datetime.datetime.now(datetime.timezone.utc)
+        now = PINNED_NOW
         transition = self.transition(
             now, expires_at=(now - datetime.timedelta(seconds=1)).isoformat().replace("+00:00", "Z"))
         with self.transition_repo(transition, commit_record=True):
@@ -182,7 +184,7 @@ class RendererLockTests(unittest.TestCase):
         self.assertIn("expired", problems[0])
 
     def test_overlong_transition_fails_closed(self) -> None:
-        now = datetime.datetime.now(datetime.timezone.utc)
+        now = PINNED_NOW
         transition = self.transition(
             now, expires_at=(now + datetime.timedelta(days=15)).isoformat().replace("+00:00", "Z"))
         with self.transition_repo(transition, commit_record=True):
@@ -191,7 +193,7 @@ class RendererLockTests(unittest.TestCase):
         self.assertIn("at most 14 days", problems[0])
 
     def test_future_issued_at_fails_closed(self) -> None:
-        now = datetime.datetime.now(datetime.timezone.utc)
+        now = PINNED_NOW
         transition = self.transition(
             now, issued_at=(now + datetime.timedelta(seconds=1)).isoformat().replace("+00:00", "Z"))
         with self.transition_repo(transition, commit_record=True):
@@ -202,7 +204,7 @@ class RendererLockTests(unittest.TestCase):
     def test_a_reversed_transition_fails_closed(self) -> None:
         # The digests name the same pair of values in reverse: the record would
         # authorize the opposite renderer change, so direction must be checked.
-        now = datetime.datetime.now(datetime.timezone.utc)
+        now = PINNED_NOW
         reversed_entry = {"artifact_id": "renderer/mac-universal", "old_sha256": OTHER_SHA,
                           "new_sha256": PULP_SHA, "owner": "danielraffel", "reason": "cycle"}
         with self.transition_repo(self.transition(now, entries=[reversed_entry]),
@@ -212,7 +214,7 @@ class RendererLockTests(unittest.TestCase):
         self.assertIn("does not name the observed old/new digests", problems[0])
 
     def test_malformed_transition_fails_closed(self) -> None:
-        now = datetime.datetime.now(datetime.timezone.utc)
+        now = PINNED_NOW
         with self.transition_repo({"schema": "wrong"}, commit_record=True):
             status, problems = self.drift(now)
         self.assertEqual(status, "mismatch")
