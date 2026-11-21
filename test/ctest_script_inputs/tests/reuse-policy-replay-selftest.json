@@ -25,6 +25,7 @@
    "test/cmake/check_plugin_module_dead_strip.cmake",
    "test/cmake/check_plugin_module_editor_stack.cmake",
    "test/cmake/check_plugin_module_no_script_runtime.cmake",
+   "test/cmake/check_plugin_module_no_unresolved.cmake",
    "test/cmake/plugin_lab_clap_roundtrip.cmake",
    "test/cmake/pulp_state_link_closure.cmake.in",
    "test/cmake/quality_tests.cmake",
