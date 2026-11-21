@@ -2912,6 +2912,12 @@ case so the degradation is visible rather than mysterious.
 
 ## The UI_SCRIPT editor is embedded; the on-disk path is a dev-build override
 
+With the Vellum bridge enabled, `pulp_add_plugin(UI_SCRIPT ... UI_ENGINE vellum)`
+routes a script-only plug-in to the Vellum editor package using the same asset
+registration. Plain `UI_SCRIPT` still installs the legacy scripted builder,
+and AutoUi stays on the legacy view path. Vellum audio widgets still need
+script factory registration and a `VisualPortFeed` data-channel adapter.
+
 `pulp_add_plugin(UI_SCRIPT)` no longer ships a plug-in that reads `ui.js` from
 the developer's absolute source path at every editor open. The script's bytes,
 the `theme.json` beside it, and the asset files beside it (images, fonts,
@@ -2926,7 +2932,8 @@ and a generated header returns them as the embedded half of a
 later `pulp_use_kit_ui` selection still lands) includes that header, so one static
 initializer registers the embedded editor and the on-disk paths together, and
 the data archive's members are referenced from a direct source and survive
-the link. `select_editor_ui_source()` in `editor_ui.hpp` is the pure decision;
+the link. `select_editor_ui_source_as()` in `editor_ui_source.hpp` makes the
+shared source decision, with a legacy wrapper in `editor_ui.hpp`;
 `test_headless.cpp` tests its matrix and `test_view_bridge.cpp` opens an
 embedded registration through a real ViewBridge.
 
