@@ -189,7 +189,30 @@ template <typename ViewType> class Editor final : public format::Editor {
         attached_ = true;
         if constexpr (requires(ViewType& view) { view.editor_opened(); })
             root_->editor_opened();
+        present_opening_frame();
         return attached_;
+    }
+
+    // The first frame a host composites: content-first presents the root once
+    // it reports ready (a root that mounts in editor_opened() is ready here);
+    // view-first presents the view at once, before its content, as the legacy
+    // host did. A root still loading is resumed later from idle().
+    void present_opening_frame() {
+        if (host_ == nullptr)
+            return;
+        if (!format::editor_content_first_open_enabled()) {
+            (void)host_->present_first_frame();
+            return;
+        }
+        if constexpr (requires(ViewType& view) {
+                          { view.editor_content_ready() } -> std::convertible_to<bool>;
+                      }) {
+            if (content_presentation_deferred_ && root_->editor_content_ready()) {
+                host_->resume_presentation();
+                content_presentation_deferred_ = false;
+                (void)host_->present_first_frame();
+            }
+        }
     }
 
     void detach() override {

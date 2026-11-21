@@ -140,6 +140,10 @@ class StubHost final : public ::vellum::view::PluginViewHost {
     void resume_presentation() override {
         ++resume_calls;
     }
+    bool present_first_frame() override {
+        ++present_calls;
+        return true;
+    }
     void set_size(uint32_t width, uint32_t height) override {
         size_ = {width, height};
     }
@@ -162,6 +166,7 @@ class StubHost final : public ::vellum::view::PluginViewHost {
     float design_height = 0;
     float aspect_ratio = 0;
     int resume_calls = 0;
+    int present_calls = 0;
 
   private:
     Size size_;
@@ -383,6 +388,7 @@ TEST_CASE("Vellum content-ready roots defer until their first ready idle",
     REQUIRE(root != nullptr);
     REQUIRE(host != nullptr);
     REQUIRE(editor->attach({.kind = pulp::format::NativeParentKind::cocoa_view, .handle = host}));
+    CHECK(host->present_calls == 0);
     editor->idle();
     CHECK(host->resume_calls == 0);
     root->ready = true;
@@ -443,8 +449,40 @@ TEST_CASE("Vellum content-ready roots open view-first when the host asks for it"
     REQUIRE(host != nullptr);
     CHECK_FALSE(deferred);
     REQUIRE(editor->attach({.kind = pulp::format::NativeParentKind::cocoa_view, .handle = host}));
+    // View-first shows the view at once, before its content.
+    CHECK(host->present_calls == 1);
     editor->idle();
     CHECK(host->resume_calls == 0);
+}
+
+TEST_CASE("Vellum content-ready roots that are ready at attach present their first frame then",
+          "[pulp-vellum][editor]") {
+    using PluginViewHost = ::vellum::view::PluginViewHost;
+    FactoryReset reset;
+    Fixture fixture;
+    Context context(*fixture.port);
+    Processor processor;
+    ContentReadyView* root = nullptr;
+    StubHost* host = nullptr;
+    PluginViewHost::set_factory(
+        [&](::vellum::view::View& view, const PluginViewHost::Options& options) {
+            root = &static_cast<ContentReadyView&>(view);
+            auto stub = std::make_unique<StubHost>(options.size);
+            host = stub.get();
+            return stub;
+        });
+
+    pulp::vellum::EditorFactory<ContentReadyView> factory;
+    auto editor = factory.create(processor, context, pulp::format::EditorRole::editor);
+    REQUIRE(editor);
+    REQUIRE(root != nullptr);
+    REQUIRE(host != nullptr);
+    root->ready = true;
+    REQUIRE(editor->attach({.kind = pulp::format::NativeParentKind::cocoa_view, .handle = host}));
+    CHECK(host->resume_calls == 1);
+    CHECK(host->present_calls == 1);
+    editor->idle();
+    CHECK(host->resume_calls == 1);
 }
 
 TEST_CASE("Vellum roots without content-ready hooks never defer", "[pulp-vellum][editor]") {
