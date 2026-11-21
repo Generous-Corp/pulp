@@ -467,6 +467,56 @@ TEST_CASE("browser discovery honors explicit, environment, managed, then system"
     }
 }
 
+TEST_CASE("browser discovery omits macOS app bundles in agent sandboxes",
+          "[import-design][browser-capture]") {
+#ifdef __APPLE__
+    capture::BrowserDiscoveryOptions options;
+    options.environment_override = "";
+    options.mode_override = "system";
+    options.include_default_system_candidates = true;
+
+    std::vector<capture::BrowserCandidate> without_sandbox;
+    {
+        ScopedEnv sandbox("CODEX_SANDBOX", "");
+        without_sandbox = capture::collect_browser_candidates(options);
+    }
+    std::vector<capture::BrowserCandidate> with_sandbox;
+    {
+        ScopedEnv sandbox("CODEX_SANDBOX", "seatbelt");
+        with_sandbox = capture::collect_browser_candidates(options);
+    }
+
+    REQUIRE(std::any_of(without_sandbox.begin(), without_sandbox.end(), [](const auto& candidate) {
+        return candidate.executable.string().find(".app/") != std::string::npos;
+    }));
+    without_sandbox.erase(std::remove_if(without_sandbox.begin(), without_sandbox.end(),
+                                         [](const auto& candidate) {
+                                             return candidate.executable.string().find(".app/") !=
+                                                    std::string::npos;
+                                         }),
+                          without_sandbox.end());
+    REQUIRE(with_sandbox.size() == without_sandbox.size());
+    for (std::size_t index = 0; index < with_sandbox.size(); ++index)
+        CHECK(with_sandbox[index].executable == without_sandbox[index].executable);
+#else
+    SUCCEED("macOS app bundle discovery is platform-specific");
+#endif
+}
+
+TEST_CASE("browser discovery explains sandbox browser prerequisite",
+          "[import-design][browser-capture]") {
+    capture::BrowserDiscoveryOptions options;
+    options.environment_override = "";
+    options.mode_override = "system";
+    options.include_default_system_candidates = false;
+    ScopedEnv sandbox("CODEX_SANDBOX", "seatbelt");
+    const auto result = capture::discover_browser(options);
+    REQUIRE_FALSE(result.ok());
+    CHECK(result.diagnostic.message.find("cannot start in a sandbox") != std::string::npos);
+    CHECK(result.diagnostic.message.find("managed browser or pass one explicitly") !=
+          std::string::npos);
+}
+
 TEST_CASE("browser modes constrain managed and system discovery",
           "[import-design][browser-capture]") {
     TempTree tree("modes");

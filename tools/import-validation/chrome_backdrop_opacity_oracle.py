@@ -50,12 +50,20 @@ EDGE_ROW = 210
 EDGE_COLUMNS = range(208, 232, 2)
 
 
+def refuse_installed_app_in_sandbox():
+    if (os.environ.get("CODEX_SANDBOX") and
+            any(part.endswith(".app") for part in CHROME.split(os.sep))):
+        sys.exit("SKIP: installed browser apps cannot start in a sandbox; "
+                 "install a managed browser or set PULP_CHROME explicitly")
+
+
 def sample_columns(left):
     line = next(x for x in range(left + 35, left + 80) if x % 10 == 5)
     return line, line - 5
 
 
 def render():
+    refuse_installed_app_in_sandbox()
     if not os.path.exists(CHROME):
         sys.exit(f"Chrome not found at {CHROME}; set PULP_CHROME")
     shot = os.path.join(tempfile.mkdtemp(prefix="pulp-backdrop-oracle-"), "case.png")

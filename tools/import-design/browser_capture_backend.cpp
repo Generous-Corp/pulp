@@ -438,10 +438,13 @@ Diagnostic discovery_diagnostic(
             "below for what the probe observed.",
             "browser-discovery"};
     }
-    return {
-        "browser-unavailable",
-        "No compatible Google Chrome or Chromium installation was found.",
-        "browser-discovery"};
+    const char* sandbox = std::getenv("CODEX_SANDBOX");
+    return {"browser-unavailable",
+            sandbox && *sandbox && probes.empty()
+                ? "The installed browser app cannot start in a sandbox. Install "
+                  "a managed browser or pass one explicitly."
+                : "No compatible Google Chrome or Chromium installation was found.",
+            "browser-discovery"};
 }
 
 bool path_is_within(const fs::path& root,
