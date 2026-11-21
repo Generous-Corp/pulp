@@ -18,7 +18,7 @@ EXPECT_FAIL = {
 
 
 def run(checker, module):
-    proc = subprocess.run([checker, module, "--json"], capture_output=True, text=True, timeout=100)
+    proc = subprocess.run([checker, module, "--json"], capture_output=True, text=True, encoding="utf-8", timeout=100)
     if proc.returncode not in (0, 1):
         raise SystemExit(f"{module}: checker exit {proc.returncode}: {proc.stderr}")
     return {c["name"]: c for c in json.loads(proc.stdout)["checks"]}
