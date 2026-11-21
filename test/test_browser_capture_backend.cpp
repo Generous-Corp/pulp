@@ -503,6 +503,41 @@ TEST_CASE("browser discovery omits macOS app bundles in agent sandboxes",
 #endif
 }
 
+TEST_CASE("browser discovery omits PATH symlinks into app bundles in agent sandboxes",
+          "[import-design][browser-capture]") {
+#ifdef __APPLE__
+    TempTree tree("sandbox-symlink");
+    const auto exec_perms = fs::perms::owner_read | fs::perms::owner_write | fs::perms::owner_exec;
+    const auto bundled =
+        tree.write("Fake Chrome.app/Contents/MacOS/Google Chrome", "#!/bin/sh\nexit 0\n");
+    fs::permissions(bundled, exec_perms);
+    const auto plain = tree.write("plain/chromium", "#!/bin/sh\nexit 0\n");
+    fs::permissions(plain, exec_perms);
+    fs::create_directories(tree.root() / "bin");
+    fs::create_symlink(bundled, tree.root() / "bin" / "google-chrome");
+    fs::create_symlink(plain, tree.root() / "bin" / "chromium");
+
+    capture::BrowserDiscoveryOptions options;
+    options.environment_override = "";
+    options.mode_override = "system";
+    options.include_default_system_candidates = true;
+    ScopedEnv path("PATH", (tree.root() / "bin").string() + ":/usr/bin:/bin");
+    ScopedEnv sandbox("CODEX_SANDBOX", "seatbelt");
+    const auto candidates = capture::collect_browser_candidates(options);
+
+    const auto listed = [&](const fs::path& name) {
+        return std::any_of(candidates.begin(), candidates.end(), [&](const auto& candidate) {
+            return candidate.executable.filename() == name &&
+                   candidate.executable.parent_path() == tree.root() / "bin";
+        });
+    };
+    CHECK_FALSE(listed("google-chrome"));
+    CHECK(listed("chromium"));
+#else
+    SUCCEED("macOS app bundle discovery is platform-specific");
+#endif
+}
+
 TEST_CASE("browser discovery explains sandbox browser prerequisite",
           "[import-design][browser-capture]") {
     capture::BrowserDiscoveryOptions options;

@@ -183,6 +183,23 @@ std::optional<fs::path> managed_current_browser(const fs::path& root) {
     return candidate;
 }
 
+#ifdef __APPLE__
+bool has_app_bundle_component(const fs::path& path) {
+    return std::any_of(path.begin(), path.end(),
+                       [](const fs::path& component) { return component.extension() == ".app"; });
+}
+
+// True when `path`, or the file it resolves to through symlinks, lives in a
+// macOS .app bundle.
+bool inside_app_bundle(const fs::path& path) {
+    if (has_app_bundle_component(path))
+        return true;
+    std::error_code ec;
+    const auto resolved = fs::canonical(path, ec);
+    return !ec && has_app_bundle_component(resolved);
+}
+#endif
+
 std::vector<fs::path> default_system_browser_paths() {
     std::vector<fs::path> paths;
 #ifdef __APPLE__
@@ -230,10 +247,9 @@ std::vector<fs::path> default_system_browser_paths() {
     for (const auto name : names) {
         if (auto found = platform::find_on_path(std::string(name))) {
 #ifdef __APPLE__
-            if (in_agent_sandbox &&
-                std::any_of(found->begin(), found->end(), [](const fs::path& component) {
-                    return component.extension() == ".app";
-                }))
+            // Resolve symlinks too: a PATH entry such as /usr/local/bin/google-chrome
+            // can point into /Applications/Google Chrome.app.
+            if (in_agent_sandbox && inside_app_bundle(*found))
                 continue;
 #endif
             paths.push_back(*found);

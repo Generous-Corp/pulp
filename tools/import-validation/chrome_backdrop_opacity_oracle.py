@@ -51,8 +51,10 @@ EDGE_COLUMNS = range(208, 232, 2)
 
 
 def refuse_installed_app_in_sandbox():
+    # Check the resolved path too: a symlink can point into an .app bundle.
+    paths = (CHROME, os.path.realpath(CHROME))
     if (os.environ.get("CODEX_SANDBOX") and
-            any(part.endswith(".app") for part in CHROME.split(os.sep))):
+            any(part.endswith(".app") for path in paths for part in path.split(os.sep))):
         # Exit 77 is the skip status; sys.exit(<str>) would exit 1 (a failure).
         print("SKIP: installed browser apps cannot start in a sandbox; "
               "install a managed browser or set PULP_CHROME explicitly",

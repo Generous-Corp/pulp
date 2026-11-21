@@ -115,6 +115,23 @@ class ScreenshotVerdictTest(unittest.TestCase):
         self.assertEqual(ctx.exception.code, 77)
         self.assertIn("cannot start in a sandbox", stderr.getvalue())
 
+    def test_symlink_into_installed_app_is_skipped_in_sandbox(self):
+        bundled = Path(self._tmp.name) / "Google Chrome.app" / "Contents" / "MacOS"
+        bundled.mkdir(parents=True)
+        (bundled / "Google Chrome").write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+        link = Path(self._tmp.name) / "google-chrome"
+        link.symlink_to(bundled / "Google Chrome")
+        stderr = io.StringIO()
+        for module in (oracle, backdrop_oracle):
+            old_chrome = module.CHROME
+            self.addCleanup(setattr, module, "CHROME", old_chrome)
+            module.CHROME = str(link)
+            with mock.patch.dict(os.environ, {"CODEX_SANDBOX": "seatbelt"}), \
+                    contextlib.redirect_stderr(stderr):
+                with self.assertRaises(SystemExit) as ctx:
+                    module.refuse_installed_app_in_sandbox()
+            self.assertEqual(ctx.exception.code, 77)
+
     def test_backdrop_oracle_skips_installed_app_in_sandbox(self):
         old_chrome = backdrop_oracle.CHROME
         self.addCleanup(setattr, backdrop_oracle, "CHROME", old_chrome)
