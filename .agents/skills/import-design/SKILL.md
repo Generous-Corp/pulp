@@ -91,6 +91,17 @@ matches in `ids.map.json` are rejected. Verify deterministic output with
 and keep the browser capture's Chromium validation receipt alongside the
 emitted source tree.
 
+### No installed browser inside an agent sandbox
+
+An installed macOS browser app (`/Applications/Google Chrome.app` and the
+other `.app` candidates) registers with the window server even with
+`--headless=new`. An agent sandbox (`CODEX_SANDBOX` set) denies that, so the
+browser aborts at launch and macOS files a crash report for the user's own
+Chrome. Browser discovery therefore drops `.app` candidates when
+`CODEX_SANDBOX` is set, and the Chrome oracles skip (exit 77) rather than
+launch one. In a sandbox, install a Pulp-managed browser or pass a headless
+shell explicitly; never point `PULP_CHROME` at the installed app.
+
 ### The capture browser runs at the capture's device scale
 
 `capture.mjs` emulates its DPR with `Emulation.setDeviceMetricsOverride`, and
