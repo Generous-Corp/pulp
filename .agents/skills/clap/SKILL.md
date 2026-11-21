@@ -1524,3 +1524,13 @@ output event. Host decode is explicitly scoped separately from processor writes.
 Register processor-output capture before exposing the store to the plug-in.
 Otherwise a reentrant normalizing listener can deliver the nested value first
 and let the outer notification overwrite it with an older value.
+
+## Host-conformance checker
+
+`pulp-clap-conformance <plugin.clap>` (`tools/audio/clap-conformance/`, registered
+in `docs/status/tools.yaml`) runs four host-visible checks with numbers: scan cost
+(dlopen + init + descriptor reads, no plug-in created), automation echo (host
+param events must not come back as out-events or gestures), missing input ports,
+and a save/load/save state round trip. Each check has a fixture that breaks it
+(`conformance_fixture_clap.cpp`, `BREAK_*`). Every check runs in a forked child with a deadline (a crash or hang fails that check by name). Plug-in stdout is moved to stderr so `--json` stays parseable. A macOS `.clap` bundle path is resolved to `Contents/MacOS/<exe>`. The scan-cost instruction budget is measured on macOS only; elsewhere the check reports "instructions n/a". Echo turns the main run loop between blocks after a 2 s warm-up, because main-thread publishes are invisible otherwise (`BREAK_ECHO_MAIN` fixture). `--expect-fail CHECK` turns the run
+into a negative control; `test_clap_conformance.py` is the ctest.

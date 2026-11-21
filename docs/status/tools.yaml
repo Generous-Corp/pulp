@@ -83,6 +83,17 @@ tools:
   availability: always
   skill: audio-harness
   docs: guides/audio-inspector.md
+- name: clap-conformance
+  path: tools/audio/clap-conformance/run.sh
+  category: audio
+  use_when: Check a built .clap against host-visible contracts without a DAW - scan cost, parameter echo, missing input ports, state round trip.
+  invocation: sh tools/audio/clap-conformance/run.sh <plugin.clap> [--json]
+  inputs: A .clap module (any CLAP, not only Pulp-built); optional --plugin-id and scan budgets.
+  outputs: Pass/fail per check with the numbers behind it (human text or --json); exit 0 all pass, 1 a check failed, 2 module unusable.
+  cannot_see: Four checks only. The scan budget is an absolute instruction/footprint ceiling, not a comparison against another build, and instruction counts exist on macOS only (footprint elsewhere). Echo drives at most four automatable parameters with synthetic sine events after a 2 s warm-up with the main run loop turning, and counts only out-events for the driven parameters, so a plug-in's own dependent-value publishes for those parameters still count and publishes for others are not seen; it is not a recorded host session. Input-ports passes any finite output, so a plug-in that rejects the block and outputs silence passes; it covers zero ports and zero-channel ports, not every host layout. State-round-trip compares bytes right after load with no processing or loop turn, so it cannot see values that reach the engine only later, and byte equality shows determinism, not that the restored sound is right. Each check runs in a forked child that loads the module itself, so a crash is reported against its check; it never exercises GUI, threading or real-time deadlines.
+  availability: always
+  skill: clap
+  docs: guides/formats.md
 - name: audio-render
   path: tools/cli/cmd_audio.cpp
   category: audio
