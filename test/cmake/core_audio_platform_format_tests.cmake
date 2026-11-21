@@ -600,7 +600,7 @@ if(PULP_HAS_CLAP)
         set_target_properties(pulp-test-clap-conf-pulp PROPERTIES
             OUTPUT_NAME "ConfPulp" PREFIX "" SUFFIX ".clap")
         set(_conf_modules pulp-test-clap-conf-pulp)
-        set(_conf_variants good HEAVY_MEMORY HEAVY_CPU ECHO NULL_INPUT STATE CRASH_TEARDOWN HANG_INIT HANG_PROCESS CONTROL_CHARS)
+        set(_conf_variants good HEAVY_MEMORY HEAVY_CPU ECHO NULL_INPUT STATE CRASH_TEARDOWN HANG_INIT HANG_PROCESS CONTROL_CHARS NULL_DESCRIPTOR)
         if(APPLE)
             list(APPEND _conf_variants ECHO_MAIN)
         endif()
@@ -651,7 +651,8 @@ if(PULP_HAS_CLAP)
                     $<TARGET_FILE:pulp-clap-conformance>
                     hang_init=$<TARGET_FILE:pulp-test-clap-conf-hang_init>
                     hang_process=$<TARGET_FILE:pulp-test-clap-conf-hang_process>
-                    control_chars=$<TARGET_FILE:pulp-test-clap-conf-control_chars>)
+                    control_chars=$<TARGET_FILE:pulp-test-clap-conf-control_chars>
+                    null_descriptor=$<TARGET_FILE:pulp-test-clap-conf-null_descriptor>)
             set_tests_properties(clap-conformance-checker-robustness PROPERTIES
                 LABELS "format;clap;tools" TIMEOUT 120)
         endif()

@@ -16,6 +16,7 @@
 //   BREAK_STATE         state.save embeds a per-save counter
 //   BREAK_HANG_INIT     entry init never returns
 //   BREAK_HANG_PROCESS  process never returns
+//   BREAK_NULL_DESCRIPTOR the factory returns no descriptor for its plug-in
 //   BREAK_CONTROL_CHARS the plug-in id contains a tab and a newline
 
 #include <clap/clap.h>
@@ -246,6 +247,9 @@ uint32_t f_count(const clap_plugin_factory_t*) {
     return 1;
 }
 const clap_plugin_descriptor_t* f_desc(const clap_plugin_factory_t*, uint32_t i) {
+#ifdef BREAK_NULL_DESCRIPTOR
+    return nullptr;
+#endif
     return i == 0 ? &kDesc : nullptr;
 }
 const clap_plugin_t* f_create(const clap_plugin_factory_t*, const clap_host_t* host,

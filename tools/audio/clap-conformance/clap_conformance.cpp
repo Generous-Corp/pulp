@@ -519,10 +519,18 @@ template <class Fn> Result run_check_forked(const char* name, Fn&& fn) {
     return r;
 }
 
-std::string first_plugin_id(const clap_plugin_factory_t* f) {
+// Empty when the factory lists no plug-in; `null_descriptor` is set when it lists
+// one but hands back no descriptor (or no id) for it.
+std::string first_plugin_id(const clap_plugin_factory_t* f, bool* null_descriptor = nullptr) {
     if (f->get_plugin_count(f) == 0)
         return {};
-    return f->get_plugin_descriptor(f, 0)->id;
+    const clap_plugin_descriptor_t* d = f->get_plugin_descriptor(f, 0);
+    if (!d || !d->id) {
+        if (null_descriptor)
+            *null_descriptor = true;
+        return {};
+    }
+    return d->id;
 }
 
 Result check_scan_cost(const Options& o) {
@@ -901,7 +909,12 @@ int main(int argc, char** argv) {
                                          out = m.error;
                                          return 2;
                                      }
-                                     out = first_plugin_id(m.factory);
+                                     bool null_desc = false;
+                                     out = first_plugin_id(m.factory, &null_desc);
+                                     if (null_desc) {
+                                         out = "factory returned a null plug-in descriptor";
+                                         return 2;
+                                     }
                                      return out.empty() ? 3 : 0;
                                  },
                                  &id_msg)

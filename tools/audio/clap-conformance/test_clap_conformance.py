@@ -58,6 +58,14 @@ def check_hang(checker, name, module, errors):
             errors.append(f"{name}: id lookup hang: exit {proc.returncode}, stderr {proc.stderr!r}")
 
 
+def check_null_descriptor(checker, module, errors):
+    proc = subprocess.run([checker, module, "--json"], capture_output=True, text=True,
+                          encoding="utf-8", timeout=100)
+    if proc.returncode != 2 or "null plug-in descriptor" not in proc.stderr:
+        errors.append(f"null_descriptor: exit {proc.returncode}, stderr {proc.stderr!r}")
+    print("null_descriptor exit", proc.returncode)
+
+
 def check_control_chars(checker, module, errors):
     proc = subprocess.run([checker, module, "--json"], capture_output=True, text=True,
                           encoding="utf-8", timeout=100)
@@ -74,6 +82,8 @@ def main():
     for name in list(modules):
         if name in HANG:
             check_hang(checker, name, modules.pop(name), errors)
+        elif name == "null_descriptor":
+            check_null_descriptor(checker, modules.pop(name), errors)
         elif name == "control_chars":
             check_control_chars(checker, modules.pop(name), errors)
     for name, module in modules.items():
@@ -81,6 +91,12 @@ def main():
         want = EXPECT_FAIL.get(name)
         for cname, c in checks.items():
             expected = "FAIL" if cname == want else None
+            if name == "heavy_cpu" and cname == "scan-cost" and sys.platform != "darwin":
+                # Instruction counting exists only on macOS; elsewhere the check
+                # must say so instead of silently passing as if it had measured.
+                if c["status"] == "FAIL" or "instructions n/a" not in c["detail"]:
+                    errors.append(f"{name}: expected 'instructions n/a' off macOS, got {c}")
+                continue
             if expected and c["status"] != "FAIL":
                 errors.append(f"{name}: {cname} should FAIL, got {c['status']} ({c['detail']})")
             if not expected and c["status"] == "FAIL":
