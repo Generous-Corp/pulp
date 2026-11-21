@@ -183,25 +183,41 @@ std::optional<fs::path> managed_current_browser(const fs::path& root) {
     return candidate;
 }
 
+#ifdef __APPLE__
+bool has_app_bundle_component(const fs::path& path) {
+    return std::any_of(path.begin(), path.end(),
+                       [](const fs::path& component) { return component.extension() == ".app"; });
+}
+
+// True when `path`, or the file it resolves to through symlinks, lives in a
+// macOS .app bundle.
+bool inside_app_bundle(const fs::path& path) {
+    if (has_app_bundle_component(path))
+        return true;
+    std::error_code ec;
+    const auto resolved = fs::canonical(path, ec);
+    return !ec && has_app_bundle_component(resolved);
+}
+
+bool in_agent_sandbox() {
+    const char* value = std::getenv("CODEX_SANDBOX");
+    return value && *value;
+}
+#endif
+
 std::vector<fs::path> default_system_browser_paths() {
     std::vector<fs::path> paths;
 #ifdef __APPLE__
-    paths.emplace_back(
-        "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome");
-    paths.emplace_back(
-        "/Applications/Google Chrome for Testing.app/Contents/MacOS/"
-        "Google Chrome for Testing");
-    paths.emplace_back(
-        "/Applications/Chromium.app/Contents/MacOS/Chromium");
+    paths.emplace_back("/Applications/Google Chrome.app/Contents/MacOS/Google Chrome");
+    paths.emplace_back("/Applications/Google Chrome for Testing.app/Contents/MacOS/"
+                       "Google Chrome for Testing");
+    paths.emplace_back("/Applications/Chromium.app/Contents/MacOS/Chromium");
     if (const char* home = std::getenv("HOME"); home && *home) {
         const fs::path applications = fs::path(home) / "Applications";
-        paths.push_back(
-            applications / "Google Chrome.app/Contents/MacOS/Google Chrome");
-        paths.push_back(
-            applications / "Google Chrome for Testing.app/Contents/MacOS/"
-            "Google Chrome for Testing");
-        paths.push_back(applications /
-                        "Chromium.app/Contents/MacOS/Chromium");
+        paths.push_back(applications / "Google Chrome.app/Contents/MacOS/Google Chrome");
+        paths.push_back(applications / "Google Chrome for Testing.app/Contents/MacOS/"
+                                       "Google Chrome for Testing");
+        paths.push_back(applications / "Chromium.app/Contents/MacOS/Chromium");
     }
 #elif defined(_WIN32)
     auto append_from = [&](const char* variable, const fs::path& suffix) {
@@ -272,6 +288,11 @@ BrowserModeSelection resolve_browser_mode(
 
 std::vector<BrowserCandidate>
 collect_browser_candidates(const BrowserDiscoveryOptions& options) {
+    return collect_browser_candidates(options, nullptr);
+}
+
+std::vector<BrowserCandidate> collect_browser_candidates(const BrowserDiscoveryOptions& options,
+                                                         std::vector<fs::path>* sandbox_omitted) {
     std::vector<BrowserCandidate> candidates;
     std::set<std::string> seen;
     if (options.explicit_path && !options.explicit_path->empty()) {
@@ -303,12 +324,27 @@ collect_browser_candidates(const BrowserDiscoveryOptions& options) {
         }
     }
     if (*selection.mode != BrowserMode::managed) {
-        for (const auto& path : options.system_candidates)
+        // An installed macOS app cannot start in an agent sandbox (the window
+        // server denies it and macOS files a crash report), so system
+        // candidates inside an .app bundle, directly or through a symlink, are
+        // dropped there. Explicit and environment overrides return above and
+        // are never filtered.
+        const auto append_system = [&](const fs::path& path) {
+#ifdef __APPLE__
+            if (in_agent_sandbox() && inside_app_bundle(path)) {
+                std::error_code ec;
+                if (sandbox_omitted && fs::exists(path, ec))
+                    sandbox_omitted->push_back(path);
+                return;
+            }
+#endif
             append_candidate(candidates, seen, path, BrowserOrigin::system);
+        };
+        for (const auto& path : options.system_candidates)
+            append_system(path);
         if (options.include_default_system_candidates) {
             for (const auto& path : default_system_browser_paths())
-                append_candidate(
-                    candidates, seen, path, BrowserOrigin::system);
+                append_system(path);
         }
     }
     return candidates;
