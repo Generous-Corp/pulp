@@ -1502,3 +1502,13 @@ at init, so a harness that sets `set_factory_presets_dir` afterwards must call
 `CLAP_PRESET_DISCOVERY_LOCATION_PLUGIN` loads a library key. The test harness
 `Harness` does not set `plugin.get_extension`; call
 `clap_adapter::clap_get_extension` instead of the vtable slot.
+
+## Host-conformance checker
+
+`pulp-clap-conformance <plugin.clap>` (`tools/audio/clap-conformance/`, registered
+in `docs/status/tools.yaml`) runs four host-visible checks with numbers: scan cost
+(dlopen + init + descriptor reads, no plug-in created), automation echo (host
+param events must not come back as out-events or gestures), missing input ports,
+and a save/load/save state round trip. Each check has a fixture that breaks it
+(`conformance_fixture_clap.cpp`, `BREAK_*`) and Every check runs in a forked child (a crash names its check), plug-in stdout is moved to stderr so `--json` stays parseable, and a macOS `.clap` bundle path is resolved to `Contents/MacOS/<exe>`. Echo turns the main run loop between blocks after a 2 s warm-up, because main-thread publishes are invisible otherwise (`BREAK_ECHO_MAIN` fixture). `--expect-fail CHECK` turns the run
+into a negative control; `test_clap_conformance.py` is the ctest.
