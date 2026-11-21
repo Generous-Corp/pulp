@@ -1628,8 +1628,8 @@ static void clap_phase_emit_output(
         }
         for (std::size_t i = 0; store_moved && i < all_params.size(); ++i) {
             if (self->output_param_has_event[i]) continue;
-            // Only values captured from this block's processor writes belong
-            // in the fallback. UI writes use the queue above (or were echoes).
+            // The fallback reports processor writes and adapter-owned resets.
+            // UI writes use the queue above if they pass echo suppression.
             const float current = self->processor_param_values[i];
             if (boundary::changed_since_snapshot(current,
                                                  self->param_snapshot[i])) {
@@ -2294,7 +2294,7 @@ clap_process_status clap_process(const clap_plugin_t* plugin, const clap_process
     // Return trigger / momentary params (panic, reset, tap) to their default
     // now that the Processor has observed this block. Done before the
     // output-event scan below so the host records the auto-reset as automation.
-    self->store.reset_triggers_rt();
+    self->store.reset_triggers_rt(self->processor_param_values);
 
     clap_phase_emit_output(self, process, all_params);
 

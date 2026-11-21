@@ -1327,9 +1327,9 @@ struct EchoFixture {
     clap_audio_buffer_t audio_in{};
     clap_audio_buffer_t audio_out{};
 
-    EchoFixture() {
+    explicit EchoFixture(pulp::format::ProcessorFactory factory = test_clap::create_test) {
         plugin = new pulp::format::clap_adapter::PulpClapPlugin();
-        plugin->factory = test_clap::create_test;
+        plugin->factory = factory;
         plugin->plugin.plugin_data = plugin;
         plugin->host = &host.host;
         REQUIRE(pulp::format::clap_adapter::clap_init(&plugin->plugin));
@@ -1344,13 +1344,12 @@ struct EchoFixture {
         pulp::format::clap_adapter::clap_destroy(&plugin->plugin);
     }
 
-    // One audio block carrying host automation (and nothing else) for param 1.
-    CapturedOutputEvents process_with(std::optional<double> automation) {
+    CapturedOutputEvents process_with(std::optional<double> automation, clap_id param_id = 1) {
         clap_event_param_value_t ev{};
         ev.header.size = sizeof(ev);
         ev.header.type = CLAP_EVENT_PARAM_VALUE;
         ev.header.space_id = CLAP_CORE_EVENT_SPACE_ID;
-        ev.param_id = 1;
+        ev.param_id = param_id;
         ev.note_id = -1;
         ev.port_index = -1;
         ev.channel = -1;
@@ -1383,6 +1382,37 @@ struct EchoFixture {
     }
 };
 } // namespace
+
+TEST_CASE("CLAP reports the auto-reset of a host-raised trigger",
+          "[clap][params][automation][trigger-reset]") {
+    constexpr clap_id trigger = 100;
+    class TriggerProcessor : public test_clap::TestProcessor {
+        void define_parameters(pulp::state::StateStore& store) override {
+            TestProcessor::define_parameters(store);
+            store.add_parameter({.id = trigger,
+                                 .name = "Reset",
+                                 .range = {0.0f, 1.0f, 0.0f, 1.0f},
+                                 .designation = pulp::state::ParamDesignation::Reset});
+        }
+    };
+    EchoFixture fx([]() -> std::unique_ptr<pulp::format::Processor> {
+        return std::make_unique<TriggerProcessor>();
+    });
+    float observed = 0.0f;
+    test_clap::g_last_processor->during_process = [&] {
+        observed = fx.plugin->store.get_value(trigger);
+    };
+
+    const auto out = fx.process_with(1.0, trigger);
+    CHECK(observed == 1.0f);
+    CHECK(fx.plugin->store.get_value(trigger) == 0.0f);
+    REQUIRE(out.events.size() == 1);
+    REQUIRE(out.at(0)->type == CLAP_EVENT_PARAM_VALUE);
+    const auto* reset = reinterpret_cast<const clap_event_param_value_t*>(out.at(0));
+    CHECK(reset->param_id == trigger);
+    CHECK(reset->value == 0.0);
+    CHECK(EchoFixture::count_values(fx.process_with(std::nullopt)) == 0);
+}
 
 TEST_CASE("CLAP does not echo host automation that the plug-in mirrors back",
           "[clap][params][automation][echo]") {

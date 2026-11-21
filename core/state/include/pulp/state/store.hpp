@@ -379,8 +379,10 @@ class StateStore {
     /// The set of trigger indices is cached at registration, so this is O(number
     /// of trigger params), and a store with no triggers does no work.
     ///
+    /// If supplied, captured_values uses all_params() order. Only entries for
+    /// successfully reset triggers are updated, using the value written here.
     /// @return true if any trigger parameter was reset this call.
-    bool reset_triggers_rt();
+    bool reset_triggers_rt(std::span<float> captured_values = {});
 
     /// True when at least one registered parameter is a trigger / momentary
     /// control. Adapters can skip calling `reset_triggers_rt()` when false.

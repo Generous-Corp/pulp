@@ -3152,8 +3152,8 @@ tresult PLUGIN_API PulpVst3Processor::process(ProcessData& data) {
     boundary::refresh_param_snapshot(store_, all_params, param_snapshot_, snapshot_state_,
                                      pre_process_generation_);
     processor_param_values_.assign(param_snapshot_.begin(), param_snapshot_.end());
-    // Covers f32/f64 processing and adapter-owned trigger resets. Host writes
-    // carry their own scope and are excluded by the inline capture listener.
+    // Covers f32/f64 processor writes. Host writes carry their own scope and
+    // are excluded by the inline capture listener.
     const ScopedProcessorParameterWrite processor_write;
     processor_->set_param_events(&param_events_);
     output_param_events_.clear();
@@ -3254,7 +3254,7 @@ tresult PLUGIN_API PulpVst3Processor::process(ProcessData& data) {
     // Return trigger / momentary params (panic, reset, tap) to their default
     // now that the Processor has observed this block. Done before the
     // output-change scan below so the host records the auto-reset as automation.
-    store_.reset_triggers_rt();
+    store_.reset_triggers_rt(processor_param_values_);
 
     // Phase (f): publish output parameter changes so the host can record
     // automation the plugin made during process().
