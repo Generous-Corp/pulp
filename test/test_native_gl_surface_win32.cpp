@@ -281,7 +281,8 @@ TEST_CASE("pointer messages reach the handler in logical points", "[native][gl-s
     SendMessageW(child, WM_MOUSEMOVE, 0, at(100, 50));
     SendMessageW(child, WM_MOUSEMOVE, MK_LBUTTON, at(110, 50));
 
-    REQUIRE(pointer.size() >= 10);
+    // Six button events, one enter, one move and one drag.
+    REQUIRE(pointer.size() == 9);
     REQUIRE(pointer[0].kind == PointerKind::down);
     REQUIRE(pointer[0].x == 20.0);
     REQUIRE(pointer[0].y == 30.0);
@@ -570,9 +571,9 @@ TEST_CASE("the cursor over the surface follows set_cursor", "[native][gl-surface
                      MAKELPARAM(HTCLIENT, WM_MOUSEMOVE));
         return GetCursor();
     };
-    const HCURSOR crosshair = LoadCursorW(nullptr, IDC_CROSS);
-    const HCURSOR ibeam = LoadCursorW(nullptr, IDC_IBEAM);
-    const HCURSOR hand = LoadCursorW(nullptr, IDC_HAND);
+    const HCURSOR crosshair = LoadCursorW(nullptr, reinterpret_cast<LPCWSTR>(IDC_CROSS));
+    const HCURSOR ibeam = LoadCursorW(nullptr, reinterpret_cast<LPCWSTR>(IDC_IBEAM));
+    const HCURSOR hand = LoadCursorW(nullptr, reinterpret_cast<LPCWSTR>(IDC_HAND));
     REQUIRE(shown_after_setcursor() == crosshair);
     surface->set_cursor(Cursor::ibeam);
     REQUIRE(shown_after_setcursor() == ibeam);
