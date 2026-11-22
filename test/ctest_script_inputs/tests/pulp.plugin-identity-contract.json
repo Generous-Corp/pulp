@@ -1,0 +1,13 @@
+{
+ "name": "pulp.plugin-identity-contract",
+ "record": {
+  "entry": "tools/cmake/test_pulp_plugin_identity.py",
+  "inputs": [
+   "core/format/include/pulp/format/vst3_entry.hpp",
+   "tools/cmake/PulpPlugin.cmake",
+   "tools/cmake/test_pulp_plugin_identity.py",
+   "tools/templates"
+  ],
+  "kind": "python"
+ }
+}
