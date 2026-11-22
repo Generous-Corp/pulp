@@ -14,6 +14,7 @@
 #include <algorithm>
 #include <array>
 #include <cctype>
+#include <cstdlib>
 #include <fstream>
 #include <iomanip>
 #include <iostream>
@@ -71,6 +72,12 @@ static std::string make_mfr_code(const std::string& mfr) {
     for (char c : mfr) if (std::isalpha(c)) clean += c;
     if (clean.size() >= 4) return clean.substr(0, 4);
     return (clean + "xxxx").substr(0, 4);
+}
+
+static std::string create_flag_hint(const std::string& flag) {
+    if (flag.find('=') != std::string::npos)
+        return "did you mean `--flag <value>`?";
+    return "did you mean `--type`, `--template`, or `--manufacturer`?";
 }
 
 static std::string make_vst3_uid() {
@@ -289,7 +296,8 @@ int cmd_create(const std::vector<std::string>& args) {
     }
 
     // Parse args
-    std::string name, type = "effect", manufacturer = "Pulp", output_path, tmpl, targets_arg, ui;
+    std::string name, type = "effect", output_path, tmpl, targets_arg, ui;
+    std::optional<std::string> manufacturer;
     bool no_build = false;
     bool ci_mode = false;
     bool in_tree_mode = false;
@@ -316,7 +324,11 @@ int cmd_create(const std::vector<std::string>& args) {
         if (args[i] == "--type") { if (!take_value(type, "--type")) return 2; continue; }
         if (args[i] == "--mpe") { mpe_mode = true; continue; }
         if (args[i] == "--template") { if (!take_value(tmpl, "--template")) return 2; continue; }
-        if (args[i] == "--manufacturer") { if (!take_value(manufacturer, "--manufacturer")) return 2; continue; }
+        if (args[i] == "--manufacturer") {
+            if (!take_value(manufacturer.emplace(), "--manufacturer"))
+                return 2;
+            continue;
+        }
         if (args[i] == "--output") { if (!take_value(output_path, "--output")) return 2; continue; }
         if (args[i] == "--ui") {
             if (!take_value(ui, "--ui"))
@@ -340,7 +352,8 @@ int cmd_create(const std::vector<std::string>& args) {
             std::cout << "  --mpe                                Opt into MPE (per-note expression) — only with --type instrument\n";
             std::cout << "  --template <name-or-kit-dir>         Use named template (e.g. gain, "
                          "agent-toolkit) or local template kit\n";
-            std::cout << "  --manufacturer <name>                Manufacturer (default: Pulp)\n";
+            std::cout << "  --manufacturer <name>                Manufacturer (default: CHANGE-ME; "
+                         "replace before shipping)\n";
             std::cout << "  --output <dir>                       Override output directory\n";
             std::cout << "  --ui <vellum|rmlui|none>              Select UI stack; none is "
                          "audio-only (default: template behavior)\n";
@@ -361,7 +374,8 @@ int cmd_create(const std::vector<std::string>& args) {
             return 0;
         }
         if (!args[i].empty() && args[i][0] == '-') {
-            std::cerr << "pulp create: unknown flag: " << args[i] << "\n";
+            std::cerr << "pulp create: unknown flag: " << args[i] << " ("
+                      << create_flag_hint(args[i]) << ")\n";
             std::cerr << "Usage: pulp create <name> [--type effect|instrument|app|bare] [options]\n";
             return 2;
         }
@@ -443,8 +457,9 @@ int cmd_create(const std::vector<std::string>& args) {
     std::string factory = ns;
     std::string plugin_code = make_plugin_code(class_name);
     std::string aax_product_code = make_aax_product_code(class_name);
-    std::string mfr_code = make_mfr_code(manufacturer);
-    std::string bundle_id = "com." + to_namespace_name(manufacturer) + "." + ns;
+    std::string mfr_code = make_mfr_code(manufacturer ? *manufacturer : class_name);
+    const std::string vendor = manufacturer ? to_namespace_name(*manufacturer) : "example";
+    std::string bundle_id = "com." + vendor + "." + ns;
     std::string header_name = replace_all_str(lower_name, "-", "_") + ".hpp";
     std::string source_name = replace_all_str(lower_name, "-", "_") + ".cpp";
 
@@ -581,13 +596,13 @@ int cmd_create(const std::vector<std::string>& args) {
         {"HEADER_NAME", header_name},
         {"SOURCE_NAME", source_name},
         {"TARGET_NAME", class_name},
-        {"MANUFACTURER", manufacturer},
+        {"MANUFACTURER", manufacturer.value_or("CHANGE-ME")},
         {"MANUFACTURER_CODE", mfr_code},
         {"BUNDLE_ID", bundle_id},
         {"VERSION", "1.0.0"},
         {"PLUGIN_CODE", plugin_code},
-        {"AAX_PRODUCT_CODE", aax_product_code},
-        {"AAX_NATIVE_CODE", plugin_code},
+        {"AAX_PRODUCT_CODE", formats.find("AAX") != std::string::npos ? aax_product_code : ""},
+        {"AAX_NATIVE_CODE", formats.find("AAX") != std::string::npos ? plugin_code : ""},
         {"FORMATS", formats},
         {"DESCRIPTION", type == "app"    ? "A standalone Pulp audio application"
                         : type == "bare" ? "A minimal Pulp project"
@@ -843,6 +858,9 @@ int cmd_create(const std::vector<std::string>& args) {
         } else {
             f << "sdk_version = \"latest\"\n";
         }
+        const char* sha = std::getenv("PULP_BUILD_INFO_GIT_SHA");
+        f << "generated_by = \"pulp " << PULP_SDK_VERSION << " (" << (sha && *sha ? sha : "unknown")
+          << ")\"\n";
         log("  Created pulp.toml\n");
         if (!pin_at_create) {
             log("  SDK mode: floating (tracks latest installed) — pin with `pulp project pin <version>`\n");
@@ -956,6 +974,9 @@ int cmd_create(const std::vector<std::string>& args) {
     }
 
     log("\n");
+
+    if (!manufacturer)
+        std::cout << "Note: Set --manufacturer before shipping.\n";
 
     if (no_build) {
         log("Scaffolding complete. Run `pulp build` to build.\n");

@@ -67,8 +67,8 @@ pub struct CreateArgs {
     pub name: String,
     /// `--type` (effect / instrument / app / bare).
     pub kind: String,
-    /// `--manufacturer`.
-    pub manufacturer: String,
+    /// Explicit `--manufacturer`.
+    pub manufacturer: Option<String>,
     /// `--template` override (defaults to `kind`).
     pub template: Option<String>,
     /// `--output <dir>`.
@@ -95,6 +95,8 @@ pub struct CreateArgs {
     pub ui: String,
     /// `--help` / `-h`.
     pub wants_help: bool,
+    /// Parse failure, surfaced before any files are written.
+    pub error: Option<String>,
 }
 
 impl Default for CreateArgs {
@@ -102,7 +104,7 @@ impl Default for CreateArgs {
         Self {
             name: String::new(),
             kind: "effect".to_owned(),
-            manufacturer: "Pulp".to_owned(),
+            manufacturer: None,
             template: None,
             output: None,
             targets: Vec::new(),
@@ -114,6 +116,7 @@ impl Default for CreateArgs {
             debug_build: false,
             ui: String::new(),
             wants_help: false,
+            error: None,
         }
     }
 }
@@ -125,6 +128,11 @@ pub fn parse_args(args: &[String]) -> CreateArgs {
     let mut i = 0;
     while i < args.len() {
         let a = &args[i];
+        if a.starts_with('-') && a.contains('=') {
+            let flag = a.split('=').next().unwrap_or(a);
+            out.error = Some(format!("unknown flag `{a}`; did you mean `{flag} <value>`?"));
+            break;
+        }
         match a.as_str() {
             "--help" | "-h" => {
                 out.wants_help = true;
@@ -141,7 +149,7 @@ pub fn parse_args(args: &[String]) -> CreateArgs {
             }
             "--manufacturer" if i + 1 < args.len() => {
                 i += 1;
-                out.manufacturer = args[i].clone();
+                out.manufacturer = Some(args[i].clone());
             }
             "--output" if i + 1 < args.len() => {
                 i += 1;
@@ -160,11 +168,36 @@ pub fn parse_args(args: &[String]) -> CreateArgs {
             _ if !a.starts_with('-') && out.name.is_empty() => {
                 out.name = a.clone();
             }
-            _ => {} // ignore unknown flags (matches C++ tolerance)
+            _ if a.starts_with('-') => {
+                let known = ["--type", "--mpe", "--template", "--manufacturer", "--output", "--targets", "--target", "--ui", "--in-tree", "--example", "--no-build", "--no-interactive", "--ci", "--pin", "--debug"];
+                let hint = known.iter().min_by_key(|candidate| edit_distance(a, candidate));
+                out.error = Some(match hint {
+                    Some(candidate) => format!("unknown flag `{a}`; did you mean `{candidate}`?"),
+                    None => format!("unknown flag `{a}`"),
+                });
+                break;
+            }
+            _ if out.name.is_empty() => {
+                out.error = Some(format!("unexpected positional argument `{a}`"));
+                break;
+            }
+            _ => {}
         }
         i += 1;
     }
     out
+}
+
+fn edit_distance(a: &str, b: &str) -> usize {
+    let mut row: Vec<usize> = (0..=b.len()).collect();
+    for (i, ca) in a.bytes().enumerate() {
+        let mut next = vec![i + 1; b.len() + 1];
+        for (j, cb) in b.bytes().enumerate() {
+            next[j + 1] = (row[j + 1] + 1).min(next[j] + 1).min(row[j] + usize::from(ca != cb));
+        }
+        row = next;
+    }
+    row[b.len()]
 }
 
 /// Return true when `--template` points at a local Pulp package manifest or
@@ -223,7 +256,7 @@ pub fn print_help(out: &mut impl Write) -> Result<()> {
         \x20 --type <effect|instrument|app|bare>  Plugin type (default: effect)\n\
         \x20 --mpe                                Opt into MPE (per-note expression) - instrument only\n\
         \x20 --template <name-or-kit-dir>         Use named template (e.g. gain, agent-toolkit) or local template kit\n\
-        \x20 --manufacturer <name>                Manufacturer (default: Pulp)\n\
+        \x20 --manufacturer <name>                Manufacturer (default: CHANGE-ME; replace before shipping)\n\
         \x20 --output <dir>                       Override output directory\n\
         \x20 --ui <vellum|rmlui|none>              Select UI stack; none is audio-only\n\
         \x20 --targets <list>                     Comma-separated extra targets (e.g. android)\n\
@@ -409,8 +442,10 @@ pub fn scaffold(
     let source_name = format!("{lower_underscored}.cpp");
     let plugin_code = make_plugin_code(&class_name);
     let aax_product_code = make_aax_product_code(&class_name);
-    let mfr_code = make_mfr_code(&args.manufacturer);
-    let bundle_id = format!("com.{}.{}", to_namespace_name(&args.manufacturer), ns);
+    let manufacturer = args.manufacturer.as_deref();
+    let mfr_code = make_mfr_code(manufacturer.unwrap_or(&class_name));
+    let vendor = manufacturer.map_or_else(|| "example".to_owned(), to_namespace_name);
+    let bundle_id = format!("com.{vendor}.{ns}");
     // The agent-toolkit template is a controlled instrument that builds as
     // Standalone only, whatever --type says.
     let agent_toolkit = args.template.as_deref() == Some("agent-toolkit");
@@ -504,13 +539,13 @@ pub fn scaffold(
         ("HEADER_NAME", &header_name),
         ("SOURCE_NAME", &source_name),
         ("TARGET_NAME", &class_name),
-        ("MANUFACTURER", &args.manufacturer),
+        ("MANUFACTURER", manufacturer.unwrap_or("CHANGE-ME")),
         ("MANUFACTURER_CODE", &mfr_code),
         ("BUNDLE_ID", &bundle_id),
         ("VERSION", "1.0.0"),
         ("PLUGIN_CODE", &plugin_code),
-        ("AAX_PRODUCT_CODE", &aax_product_code),
-        ("AAX_NATIVE_CODE", &plugin_code),
+        ("AAX_PRODUCT_CODE", if formats.split_whitespace().any(|f| f == "AAX") { &aax_product_code } else { "" }),
+        ("AAX_NATIVE_CODE", if formats.split_whitespace().any(|f| f == "AAX") { &plugin_code } else { "" }),
         ("FORMATS", &formats),
         ("DESCRIPTION", &description),
         ("VST3_UID", &vst3_uid),
@@ -671,7 +706,9 @@ pub fn scaffold(
 
     // Standalone pulp.toml.
     if standalone_mode {
-        let body = format!("[pulp]\nsdk_version = \"{sdk_version}\"\n");
+        let generated_by = format!("pulp {} ({})", crate::build_info::cli_version_string(),
+            std::env::var("PULP_BUILD_INFO_GIT_SHA").unwrap_or_else(|_| "unknown".to_owned()));
+        let body = format!("[pulp]\nsdk_version = \"{sdk_version}\"\ngenerated_by = \"{generated_by}\"\n");
         let toml_path = out_dir.join("pulp.toml");
         fs::write(&toml_path, body).map_err(|e| CliError::io(toml_path, e))?;
         writeln!(log, "  Created pulp.toml").map_err(io)?;
@@ -735,6 +772,9 @@ pub fn scaffold(
         }
     }
 
+    if manufacturer.is_none() {
+        writeln!(log, "Note: Set --manufacturer before shipping.").map_err(io)?;
+    }
     Ok(())
 }
 
@@ -783,6 +823,9 @@ fn copy_template_tree(
 ///
 /// Surfaces arg / scaffold failures.
 pub fn run(cwd: &Path, args: &CreateArgs, out: &mut impl Write) -> Result<i32> {
+    if let Some(error) = &args.error {
+        return Err(CliError::BadUsage(error.clone()));
+    }
     if args.wants_help {
         print_help(out)?;
         return Ok(0);
@@ -850,12 +893,9 @@ pub fn run(cwd: &Path, args: &CreateArgs, out: &mut impl Write) -> Result<i32> {
     // It is the baked value, never the PULP_RS_CLI_VERSION test override.
     let sdk_version = crate::build_info::baked_cli_version();
     if crate::build_info::baked_sdk_version().is_none() {
-        eprintln!(
-            "warning: this pulp was built by cargo alone, so it knows no Pulp SDK version; \
-             the project pins find_package(Pulp {sdk_version}) and sdk_version = \"{sdk_version}\", \
-             which is the CLI crate's version, not an SDK release. Rebuild the CLI with \
-             `pulp build` or fix both pins by hand."
-        );
+        return Err(CliError::BadUsage(
+            "pulp create requires a Pulp-built CLI because a cargo-only build has no SDK version".to_owned(),
+        ));
     }
     scaffold(
         args,
@@ -920,10 +960,44 @@ mod tests {
                 failures.push("missing src/entry/clap_entry.cpp".into());
             }
             let manifest = fs::read_to_string(out.join("pulp.toml")).unwrap();
-            if manifest != "[pulp]\nsdk_version = \"1.2.3\"\n" {
+            if !manifest.starts_with("[pulp]\nsdk_version = \"1.2.3\"\ngenerated_by = \"pulp ") {
                 failures.push(format!("unexpected SDK manifest: {manifest:?}"));
             }
             assert!(failures.is_empty(), "{kind}: {}", failures.join("; "));
+        }
+    }
+
+    #[test]
+    fn scaffold_uses_explicit_or_project_derived_manufacturer_identity() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let templates = root.join("tools/templates");
+        for (name, manufacturer, bundle_id, code) in [
+            ("Echo Gain", Some("Acme"), "com.acme.echo_gain", "Acme"),
+            ("Echo Gain", Some("CHANGE-ME"), "com.change_me.echo_gain", "CHAN"),
+            ("Echo Gain", None, "com.example.echo_gain", "Echo"),
+            ("Tape Delay", None, "com.example.tape_delay", "Tape"),
+        ] {
+            let mut cli_args = vec![name.to_owned(), "--ci".to_owned(), "--no-build".to_owned()];
+            if let Some(manufacturer) = manufacturer {
+                cli_args.extend(["--manufacturer".to_owned(), manufacturer.to_owned()]);
+            }
+            let args = parse_args(&cli_args);
+            let out = temp.path().join(bundle_id);
+            let mut log = Vec::new();
+            scaffold(&args, &out, &templates, Some(&root), "1.2.3", &mut log).unwrap();
+            let cmake = fs::read_to_string(out.join("CMakeLists.txt")).unwrap();
+            let display = manufacturer.unwrap_or("CHANGE-ME");
+            assert!(
+                cmake.contains(&format!("BUNDLE_ID       \"{bundle_id}\"")),
+                "{name} ({manufacturer:?}): {cmake}"
+            );
+            assert!(cmake.contains(&format!("MANUFACTURER    \"{display}\"")));
+            assert!(cmake.contains(&format!("MANUFACTURER_CODE \"{code}\"")));
+            assert_eq!(
+                String::from_utf8(log).unwrap().contains("Set --manufacturer before shipping"),
+                manufacturer.is_none()
+            );
         }
     }
 
@@ -1053,7 +1127,7 @@ mod tests {
         let args = CreateArgs {
             name: "My Gain".to_owned(),
             kind: "effect".to_owned(),
-            manufacturer: "Acme".to_owned(),
+            manufacturer: Some("Acme".to_owned()),
             template: None,
             output: None,
             targets: vec![],
@@ -1065,6 +1139,7 @@ mod tests {
             debug_build: false,
             ui: String::new(),
             wants_help: false,
+            error: None,
         };
 
         let out_dir = td.path().join("scaffold-out");
@@ -1152,7 +1227,7 @@ mod tests {
         let args = CreateArgs {
             name: "Bliss".to_owned(),
             kind: "instrument".to_owned(),
-            manufacturer: "Pulp".to_owned(),
+            manufacturer: Some("Pulp".to_owned()),
             mpe: true,
             in_tree: true,
             no_build: true,
@@ -1319,7 +1394,7 @@ mod tests {
         assert_eq!(p.name, "Foo");
         assert!(p.mpe);
         assert_eq!(p.template.as_deref(), Some("gain"));
-        assert_eq!(p.manufacturer, "Acme");
+        assert_eq!(p.manufacturer.as_deref(), Some("Acme"));
     }
 
     #[test]
@@ -1388,14 +1463,19 @@ mod tests {
     }
 
     #[test]
-    fn parse_args_ignores_unknown_flags_permissively() {
+    fn parse_args_rejects_unknown_flags_with_hint() {
         let p = parse_args(&[
             "Foo".to_owned(),
             "--unknown-flag".to_owned(),
             "--another-unknown".to_owned(),
         ]);
-        assert_eq!(p.name, "Foo");
-        // Unknowns silently dropped; no panic.
+        assert!(p.error.as_deref().unwrap().contains("did you mean"));
+    }
+
+    #[test]
+    fn parse_args_rejects_equals_form() {
+        let p = parse_args(&["Foo".to_owned(), "--ui=vellum".to_owned()]);
+        assert!(p.error.as_deref().unwrap().contains("did you mean `--ui <value>`"));
     }
 
     #[test]
@@ -1441,7 +1521,7 @@ mod tests {
     }
 
     #[test]
-    fn run_native_ci_warns_when_full_path_flags_are_ignored() {
+    fn run_native_ci_refuses_without_sdk_identity() {
         let td = tempfile::tempdir().unwrap();
         let root = td.path().join("repo");
         fs::create_dir_all(root.join("core")).unwrap();
@@ -1452,7 +1532,7 @@ mod tests {
         );
 
         let mut buf = Vec::new();
-        let rc = run(
+        let err = run(
             &root,
             &CreateArgs {
                 name: "Warn Me".to_owned(),
@@ -1465,10 +1545,7 @@ mod tests {
             },
             &mut buf,
         )
-        .unwrap();
-        assert_eq!(rc, 0);
-        let stdout = String::from_utf8(buf).unwrap();
-        assert!(stdout.contains("--pin/--debug only takes effect in the full create path"));
-        assert!(stdout.contains("ignored by the native --ci scaffold path"));
+        .unwrap_err();
+        assert!(err.to_string().contains("requires a Pulp-built CLI"));
     }
 }

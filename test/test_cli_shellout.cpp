@@ -2277,7 +2277,7 @@ TEST_CASE("pulp create scaffolds a no-build app project with Android files",
     REQUIRE(has_android_activity);
     REQUIRE(header.find("class NeonDrum") != std::string::npos);
     REQUIRE(header.find("namespace neon_drum") != std::string::npos);
-    REQUIRE(header.find("com.pulp.neon_drum") != std::string::npos);
+    REQUIRE(header.find("com.example.neon_drum") != std::string::npos);
     REQUIRE(main_cpp.find("neon_drum::create_neon_drum") != std::string::npos);
     REQUIRE(cmake.find("pulp_add_app(NeonDrum") != std::string::npos);
     REQUIRE(toml.find("sdk_path") == std::string::npos);
