@@ -13,6 +13,7 @@ import tempfile
 from pathlib import Path
 from argparse import Namespace
 from vellum_closure import (
+    is_host_absolute,
     ExternalResolver,
     cmd_gate,
     collect_headers,
@@ -2718,6 +2719,20 @@ class EmsdkIdentityTests(unittest.TestCase):
         from vellum_closure import SYSTEM_PROVIDERS
         self.assertIn("emsdk", SYSTEM_PROVIDERS)
 
+
+
+class HostAbsolutePathTests(unittest.TestCase):
+    """A path outside the checkout is an external input on every host."""
+
+    def test_posix_and_windows_absolute_paths_are_external(self):
+        self.assertTrue(is_host_absolute("/home/runner/.cache/pulp/fetchcontent-src/brotli/c/common/constants.c"))
+        self.assertTrue(is_host_absolute("C:/Users/runneradmin/AppData/Local/Pulp/fetchcontent-src/brotli-v1.2.1/c/common/constants.c"))
+        self.assertTrue(is_host_absolute("d:/a/pulp/pulp/build/x.h"))
+
+    def test_checkout_and_build_relative_paths_are_not(self):
+        for path in ("core/canvas/src/canvas.cpp", "@build/core/view/gen.hpp", "@external/brotli/abc/c/x.c", "C/relative.c", "C:relative.c"):
+            with self.subTest(path=path):
+                self.assertFalse(is_host_absolute(path))
 
 
 class ExportMetadataTests(unittest.TestCase):
