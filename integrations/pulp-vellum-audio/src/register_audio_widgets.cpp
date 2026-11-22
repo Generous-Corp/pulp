@@ -50,16 +50,15 @@ void detail::AudioWidgetSampler::mount() {
     }
 
     const auto mount_widget = [&]<typename Display>(Display& display, Shape shape,
-                                                   std::optional<std::size_t> fallback) {
+                                                    std::optional<std::size_t> fallback) {
         if (display.feed_ == nullptr) {
             const auto& id = display.id();
             const auto named = id.empty() ? std::nullopt : feed_->find(id, shape);
             if (const auto channel = named ? named : fallback)
                 display.set_feed(feed_, *channel);
         }
-        auto& widget = widgets_.emplace_back(Widget{{}, [](::vellum::view::View& view) noexcept {
-            static_cast<Display&>(view).sample();
-        }});
+        auto& widget = widgets_.emplace_back(Widget{
+            {}, [](::vellum::view::View& view) noexcept { static_cast<Display&>(view).sample(); }});
         widget.view.set(&display);
     };
 
