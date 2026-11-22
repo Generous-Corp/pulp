@@ -68,6 +68,37 @@ test('unzip bounds the cumulative decompressed size across entries', () => {
   assert.throws(() => unzip(zip, { remaining: 1000 }), RangeError);
 });
 
+test('unzip charges overlapping stored central-directory records', () => {
+  const payload = Buffer.from('stored payload');
+  const local = Buffer.alloc(30 + payload.length);
+  local.writeUInt32LE(0x04034b50, 0);
+  local.writeUInt16LE(8, 6); // data descriptor: force central-directory parsing
+  local.writeUInt32LE(payload.length, 18);
+  local.writeUInt32LE(payload.length, 22);
+  local.writeUInt16LE(1, 26);
+  const name = Buffer.from('x');
+  const localFile = Buffer.concat([local.subarray(0, 30), name, payload]);
+  const central = [];
+  for (let i = 0; i < 20; i++) {
+    const row = Buffer.alloc(46 + 1);
+    row.writeUInt32LE(0x02014b50, 0);
+    row.writeUInt32LE(payload.length, 20);
+    row.writeUInt32LE(payload.length, 24);
+    row.writeUInt16LE(1, 28);
+    row.writeUInt32LE(0, 42);
+    central.push(Buffer.concat([row, name]));
+  }
+  const centralBytes = Buffer.concat(central);
+  const eocd = Buffer.alloc(22);
+  eocd.writeUInt32LE(0x06054b50, 0);
+  eocd.writeUInt16LE(20, 8);
+  eocd.writeUInt16LE(20, 10);
+  eocd.writeUInt32LE(centralBytes.length, 12);
+  eocd.writeUInt32LE(localFile.length, 16);
+  const zip = Buffer.concat([localFile, centralBytes, eocd]);
+  assert.throws(() => unzip(zip, { remaining: payload.length * 10 }), RangeError);
+});
+
 test('schema decodes and exposes a root Message type', () => {
   const { schema, decoder } = loadFixtureScene();
   assert.ok(schema.length >= 5, 'schema should carry several definitions');
