@@ -488,9 +488,24 @@ bool register_envelope_migration(uint32_t from_version,
 
 std::vector<uint8_t> serialize(const state::StateStore& store,
                                const Processor& processor) {
-    auto store_blob = store.serialize();
+    return serialize(store, processor, StoreLayout::full);
+}
+
+std::vector<uint8_t> serialize(const state::StateStore& store, const Processor& processor,
+                               StoreLayout layout) {
     auto published = processor.published_plugin_state_snapshot();
     auto plugin_blob = published ? *published : safe_serialize_plugin_state(processor);
+    std::vector<uint8_t> store_blob;
+    if (layout == StoreLayout::processor_owned_when_declared && !plugin_blob.empty() &&
+        processor.plugin_state_carries_parameters()) {
+        // A store with no parameters but the same schema version: valid for any
+        // release's StateStore::deserialize(), which then changes nothing.
+        state::StateStore empty;
+        empty.set_state_version(store.state_version());
+        store_blob = empty.serialize();
+    } else {
+        store_blob = store.serialize();
+    }
     if (plugin_blob.empty()) {
         return store_blob;
     }

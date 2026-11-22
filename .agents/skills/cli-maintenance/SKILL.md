@@ -2697,7 +2697,7 @@ Gotchas:
 `pulp_add_plugin` writes into each bundle, through the same parser the
 runtime `pulp::format::third_party_notices()` uses, so the CLI and an About
 view can never disagree. `--check` exits non-zero when
-`sdks_without_manifest` or `unattributed_targets` is non-empty: a notice list
+`sdks_without_manifest` is non-empty (older bundles that still carry `unattributed_targets` also fail): a notice list
 with a gap must fail loudly, never print as complete. It takes a file path,
 so it is CLI-only in the MCP parity baseline.
 

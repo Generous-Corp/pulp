@@ -775,7 +775,7 @@ The `status` field uses the lowercased label set above
 `pulp licenses <bundle-path> [--json] [--check]` reads the bundle's
 `ThirdPartyNotices.json` and displays its companion `ThirdPartyNotices.txt`.
 `--json` prints the generated document unchanged. `--check` returns a non-zero
-status when `sdks_without_manifest` or `unattributed_targets` is non-empty.
+status when `sdks_without_manifest` is non-empty. Unattributed targets are a build diagnostic and live in the build directory (`pulp-notices/<format target>/ThirdPartyNotices.report.json`), not in the bundle.
 
 ### projects
 

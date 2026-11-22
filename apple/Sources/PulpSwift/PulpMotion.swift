@@ -1,5 +1,5 @@
-// PulpMotion.swift — SwiftUI / UIKit / AppKit facade over the Pulp
-// motion observability bridge (see core/view/include/pulp/view/motion.hpp).
+// PulpMotion.swift: SwiftUI / UIKit / AppKit facade over the Vellum
+// motion observability bridge.
 //
 // Mirrors the trace-builder DSL used by other modern observability
 // surfaces so a developer who has used those tools can pick this up
@@ -32,7 +32,7 @@ import SwiftUI
 // MARK: - Geometry properties (portable mirror)
 
 /// Geometry property selector for `Trace.geometry(...)`. Mirrors the
-/// names used by the C++ side (`pulp::view::motion::GeometryProperty`).
+/// names used by the C++ side (`vellum::view::motion::GeometryProperty`).
 public struct MotionGeometryProperty: Equatable, Hashable, Sendable {
     public let rawValue: String
     public init(rawValue: String) { self.rawValue = rawValue }

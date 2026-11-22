@@ -1047,7 +1047,7 @@ commands:
         description: Print the generated ThirdPartyNotices.json document.
       - name: --check
         kind: flag
-        description: Exit non-zero when the document reports an SDK without a manifest or an unattributed target.
+        description: Exit non-zero when the document reports an SDK without a manifest.
     docs: reference/cli.md#licenses
 
   - name: forge
