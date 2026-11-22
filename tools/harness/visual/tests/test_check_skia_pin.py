@@ -314,7 +314,7 @@ class CheckSkiaPinTests(unittest.TestCase):
         )
         self.assertEqual(
             pins.SKIA_BUILDER_REF,
-            "1b97010d2f025b4331a9c0db9481c440d1f33042",
+            "312f05e24a5d5a45d4a3e70ca70ff3ccff1b4d97",
         )
         self.assertIn("linux-x64", pins.RELEASE_ASSET_SHA256)
         # Bundled Dawn/HarfBuzz/ICU revisions remain Skia-internal; the exact

@@ -15,7 +15,7 @@ from __future__ import annotations
 
 SKIA_BRANCH = "chrome/m158"
 SKIA_COMMIT = "be7d7c3e996e567eda7dc9774274f7a0103cdb8c"
-SKIA_BUILDER_REF = "1b97010d2f025b4331a9c0db9481c440d1f33042"
+SKIA_BUILDER_REF = "312f05e24a5d5a45d4a3e70ca70ff3ccff1b4d97"
 SKIA_BUILDER_FORK = "https://github.com/danielraffel/skia-builder"
 SKIA_PYTHON_SMOKE_VERSION = "144.0.post2"
 
@@ -41,10 +41,10 @@ RELEASE_ASSET_SHA256 = {
     # The mac-arm64 key selects the verified universal archive: its arm64 Dawn
     # slice retains the verified 13.0 deployment target.
     "mac-arm64": (
-        "1779c7d1ba5c73a0d6a1f33b77fbf30774bbd9f7542c1c42cc5129f57e99fbd4"
+        "dca73c0eee5b0f6d129fe357d0754f7165c6b436051e0de947aeedd3e1bde250"
     ),
     "mac-universal": (
-        "1779c7d1ba5c73a0d6a1f33b77fbf30774bbd9f7542c1c42cc5129f57e99fbd4"
+        "dca73c0eee5b0f6d129fe357d0754f7165c6b436051e0de947aeedd3e1bde250"
     ),
 }
 

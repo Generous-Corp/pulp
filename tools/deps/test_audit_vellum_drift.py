@@ -133,8 +133,8 @@ class RendererLockTests(unittest.TestCase):
             "expires_at": (now + datetime.timedelta(days=1)).isoformat().replace("+00:00", "Z"),
             "owner": "danielraffel",
             "reason": "cycle",
-            "entries": [{"artifact_id": "renderer/mac-universal", "old_sha256": OTHER_SHA,
-                          "new_sha256": PULP_SHA, "owner": "danielraffel", "reason": "cycle"}],
+            "entries": [{"artifact_id": "renderer/mac-universal", "old_sha256": PULP_SHA,
+                          "new_sha256": OTHER_SHA, "owner": "danielraffel", "reason": "cycle"}],
         }
         value.update(overrides)
         return value
@@ -150,9 +150,10 @@ class RendererLockTests(unittest.TestCase):
             (repo / audit.PIN_TRANSITION_FILE).write_text(
                 json.dumps(self.transition(now)), encoding="utf-8")
             status, problems = self.drift(now)
-        self.assertEqual(status, "match", problems)
+        self.assertEqual(status, "mismatch")
+        self.assertIn("required on the base", problems[0])
 
-    def test_record_added_by_this_pr_is_applied(self) -> None:
+    def test_record_added_by_this_pr_fails_closed(self) -> None:
         now = PINNED_NOW
         with self.transition_repo(None, commit_record=False) as repo:
             record = repo / audit.PIN_TRANSITION_FILE
@@ -163,7 +164,8 @@ class RendererLockTests(unittest.TestCase):
             subprocess.run([*git, "add", audit.PIN_TRANSITION_FILE], check=True)
             subprocess.run([*git, "commit", "-q", "-m", "add record"], check=True)
             status, problems = self.drift(now)
-        self.assertEqual(status, "match", problems)
+        self.assertEqual(status, "mismatch")
+        self.assertIn("lands first in its own owner-approved PR", problems[0])
 
     def test_valid_base_transition_covers_drift(self) -> None:
         now = PINNED_NOW
@@ -171,13 +173,6 @@ class RendererLockTests(unittest.TestCase):
             status, problems = self.drift(now)
         self.assertEqual(status, "match")
         self.assertEqual(problems, [])
-
-    def test_missing_transition_fails_closed(self) -> None:
-        now = PINNED_NOW
-        with self.transition_repo(None, commit_record=False):
-            status, problems = self.drift(now)
-        self.assertEqual(status, "mismatch")
-        self.assertIn("cannot be read", problems[0])
 
     def test_expired_transition_fails_closed(self) -> None:
         now = PINNED_NOW
@@ -210,8 +205,8 @@ class RendererLockTests(unittest.TestCase):
         # The digests name the same pair of values in reverse: the record would
         # authorize the opposite renderer change, so direction must be checked.
         now = PINNED_NOW
-        reversed_entry = {"artifact_id": "renderer/mac-universal", "old_sha256": PULP_SHA,
-                          "new_sha256": OTHER_SHA, "owner": "danielraffel", "reason": "cycle"}
+        reversed_entry = {"artifact_id": "renderer/mac-universal", "old_sha256": OTHER_SHA,
+                          "new_sha256": PULP_SHA, "owner": "danielraffel", "reason": "cycle"}
         with self.transition_repo(self.transition(now, entries=[reversed_entry]),
                                   commit_record=True):
             status, problems = self.drift(now)

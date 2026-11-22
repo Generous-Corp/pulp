@@ -1109,7 +1109,7 @@ def validate_pin_transition(transition: object, artifact_id: str, old_digest: st
         return errors + ["pin transition entries must be a list"]
     matches = [entry for entry in entries
                if isinstance(entry, dict) and entry.get("artifact_id") == artifact_id]
-    if len(entries) != 1 or len(matches) != 1:
+    if len(matches) != 1:
         return errors + [f"pin transition must have exactly one entry for {artifact_id}"]
     entry = matches[0]
     old = entry.get("old_sha256")
@@ -1129,12 +1129,29 @@ def validate_pin_transition(transition: object, artifact_id: str, old_digest: st
 
 def renderer_transition(artifact_id: str, old_digest: str, new_digest: str, *,
                         now: datetime.datetime) -> list[str]:
-    """Read and validate the checked-in transition record, failing closed."""
-    path = ROOT / PIN_TRANSITION_FILE
+    path = PIN_TRANSITION_FILE
+    base = os.environ.get("GITHUB_BASE_REF") or "main"
+
+    def git(*args: str, check: bool = True) -> subprocess.CompletedProcess:
+        return subprocess.run(["git", "--no-replace-objects", "-C", str(ROOT), *args],
+                              capture_output=True, check=check, timeout=30)
+
     try:
-        transition = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, ValueError) as error:
-        return [f"{PIN_TRANSITION_FILE} cannot be read: {error}"]
+        anchor = git("merge-base", "HEAD", f"refs/remotes/origin/{base}").stdout.decode("ascii").strip()
+        changed = git("diff", "--quiet", "--no-ext-diff", "--no-textconv",
+                      anchor, "HEAD", "--", path, check=False)
+        if changed.returncode == 1:
+            return ["a pin transition record lands first in its own owner-approved PR; "
+                    "it can't authorize the PR that adds it"]
+        changed.check_returncode()
+        entry = git("ls-tree", anchor, "--", path).stdout
+        if not entry:
+            return [f"{path} is required on the base for a renderer pin transition"]
+        if not entry.startswith((b"100644 blob ", b"100755 blob ")):
+            return [f"{path} on the base must be a regular file"]
+        transition = json.loads(git("show", f"{anchor}:{path}").stdout.decode("utf-8"))
+    except (OSError, subprocess.SubprocessError, ValueError, RecursionError) as error:
+        return [f"{path} cannot be read from the trusted base: {error}"]
     return validate_pin_transition(transition, artifact_id, old_digest, new_digest, now=now)
 
 
@@ -1250,10 +1267,10 @@ def vellum_renderer_drift(manifest: list[dict], read_source=None, *,
                 f"at {pinned or 'nothing'}; they must be the same commit")
     transition_accepted = False
     if vellum_sha != pulp_sha.lower():
-        # Direction matters: the record moves from Vellum's old digest to Pulp's new digest,
-        # never the reverse.
+        # Direction matters: the record moves from Pulp's pinned digest (old) to
+        # the digest Vellum's pin now names (new), never the reverse.
         transition_errors = renderer_transition(
-            f"renderer/{asset_key}", vellum_sha, pulp_sha.lower(),
+            f"renderer/{asset_key}", pulp_sha.lower(), vellum_sha,
             now=now if now is not None else datetime.datetime.now(datetime.timezone.utc))
         transition_accepted = not transition_errors
         if transition_errors:
