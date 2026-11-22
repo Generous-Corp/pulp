@@ -2038,8 +2038,7 @@ void ForgeModularShell::on_poll() {
     //
     // So the host-side proof asks through a file instead. Inert unless the
     // environment names one -- nothing in a shipped plugin reads this.
-    if (const char* trigger = PULP_TEST_ENV("FORGE_MODULAR_TEST_PROMPT");
-        trigger && *trigger) {
+    if (const char* trigger = PULP_TEST_ENV("FORGE_MODULAR_TEST_PROMPT"); trigger && *trigger) {
         std::error_code ec;
         if (std::filesystem::exists(trigger, ec)) {
             std::string prompt;
