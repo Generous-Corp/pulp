@@ -51,7 +51,7 @@ export function unzip(buffer, budget = { remaining: MAX_TOTAL_DECOMPRESSED_BYTES
   const startBudget = budget.remaining;
   let cursor = 0;
   let needsCentral = false;
-  const streamed = {};
+  let streamed = {};
   while (cursor + 30 <= buffer.length) {
     if (buffer.readUInt32LE(cursor) !== ZIP_LOCAL_MAGIC) break;
     const flags = buffer.readUInt16LE(cursor + 6);
@@ -70,7 +70,8 @@ export function unzip(buffer, budget = { remaining: MAX_TOTAL_DECOMPRESSED_BYTES
     cursor = dataStart + compSize;
   }
   if (!needsCentral) return streamed;
-  budget.remaining = startBudget; // the central-directory pass re-inflates every entry
+  streamed = null; // release the first pass before central-directory re-inflation
+  budget.remaining = startBudget;
   return unzipViaCentralDirectory(buffer, budget);
 }
 

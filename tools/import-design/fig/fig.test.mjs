@@ -80,7 +80,7 @@ test('unzip charges overlapping stored central-directory records', () => {
   const localFile = Buffer.concat([local.subarray(0, 30), name, payload]);
   const central = [];
   for (let i = 0; i < 20; i++) {
-    const row = Buffer.alloc(46 + 1);
+    const row = Buffer.alloc(46);
     row.writeUInt32LE(0x02014b50, 0);
     row.writeUInt32LE(payload.length, 20);
     row.writeUInt32LE(payload.length, 24);
@@ -96,7 +96,8 @@ test('unzip charges overlapping stored central-directory records', () => {
   eocd.writeUInt32LE(centralBytes.length, 12);
   eocd.writeUInt32LE(localFile.length, 16);
   const zip = Buffer.concat([localFile, centralBytes, eocd]);
-  assert.throws(() => unzip(zip, { remaining: payload.length * 10 }), RangeError);
+  assert.throws(() => unzip(zip, { remaining: payload.length * 10 }),
+    /cumulative decompression budget/);
 });
 
 test('schema decodes and exposes a root Message type', () => {
