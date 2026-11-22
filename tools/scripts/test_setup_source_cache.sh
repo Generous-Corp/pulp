@@ -813,6 +813,28 @@ EOF
     exit $((FAIL > 0))
 ) || FAIL=$((FAIL + 1))
 
+echo "== a patched shared source updates FetchContent's cache path"
+(
+    tmp="$(mktemp -d)"; trap 'rm -rf "$tmp"' EXIT
+    mkdir -p "$tmp/cache/choc-v1" "$tmp/src"
+    cat > "$tmp/src/CMakeLists.txt" <<EOF
+cmake_minimum_required(VERSION 3.24)
+project(mutable_cache_path NONE)
+set(PULP_SHARED_FETCHCONTENT_SOURCE_DIR "$tmp/cache")
+set(PULP_USE_SHARED_FETCHCONTENT_SOURCES ON)
+include("$REPO_ROOT/tools/cmake/PulpFetchContent.cmake")
+pulp_register_fetchcontent_source(choc REF v1)
+pulp_materialize_mutable_fetchcontent_source(choc PATCH_KEY fixture)
+get_property(cache_source CACHE FETCHCONTENT_SOURCE_DIR_CHOC PROPERTY VALUE)
+file(WRITE "\${CMAKE_BINARY_DIR}/cache-source.txt" "\${cache_source}")
+EOF
+    cmake -S "$tmp/src" -B "$tmp/build" >/dev/null 2>&1
+    check "$(cat "$tmp/build/cache-source.txt" 2>/dev/null)" "$tmp/build/_deps/pulp-mutable-choc-src" \
+        "FetchContent cache consumers use the patched build-local source"
+
+    exit $((FAIL > 0))
+) || FAIL=$((FAIL + 1))
+
 echo "== a warm build follows shared cache pin changes without exposing the cache"
 (
     tmp="$(mktemp -d)"; trap 'rm -rf "$tmp"' EXIT
