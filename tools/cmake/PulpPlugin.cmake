@@ -57,11 +57,12 @@ function(_pulp_reject_unknown_formats context formats)
 endfunction()
 
 function(_pulp_check_vst3_factory_version target configured_version)
+    # Same resolution and precedence as _pulp_add_vst3: the bundle entry wins,
+    # and PULP_PLUGIN_ENTRY_DIR is honoured, so this inspects the compiled file.
     set(_entry "")
-    if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/vst3_entry.cpp")
-        set(_entry "${CMAKE_CURRENT_SOURCE_DIR}/vst3_entry.cpp")
-    elseif(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/vst3_bundle_entry.cpp")
-        set(_entry "${CMAKE_CURRENT_SOURCE_DIR}/vst3_bundle_entry.cpp")
+    _pulp_plugin_entry_path(_entry vst3_bundle_entry.cpp)
+    if(NOT _entry)
+        _pulp_plugin_entry_path(_entry vst3_entry.cpp)
     endif()
     if(NOT _entry)
         return()

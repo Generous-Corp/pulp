@@ -38,6 +38,15 @@ class PluginIdentityContractTests(unittest.TestCase):
             self.assertIn(f"TARGET ${{target}}_${{_pulp_identity_format}}", text)
             self.assertIn(format_name, text)
 
+    def test_factory_version_check_uses_the_builders_entry_resolution(self):
+        text = (ROOT / "tools/cmake/PulpPlugin.cmake").read_text(encoding="utf-8")
+        start = text.index("function(_pulp_check_vst3_factory_version")
+        body = text[start:text.index("endfunction()", start)]
+        # PULP_PLUGIN_ENTRY_DIR support, bundle entry before single-plugin entry.
+        self.assertIn("_pulp_plugin_entry_path(_entry vst3_bundle_entry.cpp)", body)
+        self.assertLess(body.index("vst3_bundle_entry.cpp"), body.index("vst3_entry.cpp)"))
+        self.assertNotIn("CMAKE_CURRENT_SOURCE_DIR}/vst3", body)
+
     def test_macos_plists_declare_minimum_system_version(self):
         for name in ("au", "vst3", "clap", "standalone"):
             text = (ROOT / f"tools/cmake/PulpInfoPlist.{name}.in").read_text(encoding="utf-8")
