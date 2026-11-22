@@ -401,6 +401,12 @@ the same `motion::Coordinator` as the JS-bridge and design-import
 paths, so fixtures, scrubber, cost attribution, reduced-motion gating,
 and provenance envelopes all work identically.
 
+The facade's C++ side is Vellum's motion bridge
+(`integrations/pulp-vellum/src/swift_motion_bridge.cpp`, over
+`vellum::view::motion`), not Pulp's `core/view`. The
+`swift-bridge-split-guard` test fails if `PulpBridge.cpp` or the motion
+shims reach back into `pulp/view` headers.
+
 ### Quick attach (SwiftUI)
 
 ```swift
