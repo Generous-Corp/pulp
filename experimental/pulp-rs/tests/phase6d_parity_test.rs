@@ -295,13 +295,11 @@ fn tool_doctor_unknown_tool_errors_without_health_header() {
 // ── cross-cutting: suggester ─────────────────────────────────────────
 
 #[test]
-fn unknown_create_flag_still_scaffolds_fall_through() {
-    // Sanity: misspelled flag doesn't crash the arg parser; we catch
-    // this by confirming `--ci` still errors with the name-required
-    // message rather than a panic.
+fn unknown_create_flag_is_rejected_before_scaffolding() {
+    // An unknown flag is a usage error (exit 2) that names the flag and
+    // suggests the nearest known one, before any files are written.
     let output = run_anywhere(&["create", "--ci", "--bogus"]);
-    // No name → exits 2 with Usage line.
     assert_eq!(output.status.code(), Some(2));
     let stderr = String::from_utf8(output.stderr).expect("utf8");
-    assert!(stderr.contains("Usage: pulp create"));
+    assert!(stderr.contains("unknown flag `--bogus`"), "stderr: {stderr}");
 }
