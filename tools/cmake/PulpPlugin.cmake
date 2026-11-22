@@ -68,18 +68,26 @@ function(_pulp_check_vst3_factory_version target configured_version)
         return()
     endif()
     file(READ "${_entry}" _source)
-    if(NOT _source MATCHES "PULP_VST3_PLUGIN")
+    # Comments and unrelated literals must not influence the verdict: only the
+    # version argument of the PULP_VST3_PLUGIN call is inspected. "//" inside a
+    # URL string literal (preceded by ':') is not a comment.
+    string(REGEX REPLACE "/\\*([^*]|\\*+[^*/])*\\*+/" "" _source "${_source}")
+    string(REGEX REPLACE "([^:\"])//[^\n]*" "\\1" _source "${_source}")
+    string(FIND "${_source}" "PULP_VST3_PLUGIN" _call_pos)
+    if(_call_pos EQUAL -1)
         return()
     endif()
-    if(_source MATCHES "PULP_PLUGIN_VERSION")
+    string(SUBSTRING "${_source}" ${_call_pos} -1 _call)
+    # The version is the argument before the URL and factory function, which
+    # close the call: <version>, "<url>", <factory_fn> )
+    set(_ws "[ \t\r\n]*")
+    string(REGEX MATCH
+        "(PULP_PLUGIN_VERSION|\"[0-9]+\\.[0-9]+\\.[0-9]+\")${_ws},${_ws}\"[^\"]*\"${_ws},${_ws}[A-Za-z0-9_:]+${_ws}\\)"
+        _tail "${_call}")
+    if(NOT _tail OR _tail MATCHES "^PULP_PLUGIN_VERSION")
         return()
     endif()
-    string(REGEX MATCHALL "\"[0-9]+\\.[0-9]+\\.[0-9]+\"" _versions "${_source}")
-    if(NOT _versions)
-        return()
-    endif()
-    list(GET _versions -1 _factory_version)
-    string(REPLACE "\"" "" _factory_version "${_factory_version}")
+    string(REGEX REPLACE "^\"([0-9.]+)\".*$" "\\1" _factory_version "${_tail}")
     if(NOT _factory_version STREQUAL "${configured_version}")
         if(PULP_STRICT_PLUGIN_IDENTITY)
             message(FATAL_ERROR
