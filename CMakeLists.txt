@@ -109,22 +109,6 @@ if(CMAKE_SYSTEM_NAME STREQUAL "iOS" OR ANDROID)
 else()
     option(PULP_BUILD_TESTS "Build unit tests" ON)
 endif()
-# Environment-backed test seams are opt-in and disabled for Release builds.
-# Product code should use PULP_TEST_ENV() so a shipping binary cannot be
-# influenced by an inherited test environment.
-if(CMAKE_BUILD_TYPE MATCHES "^[Rr]elease$")
-    set(_pulp_test_seams_default OFF)
-else()
-    set(_pulp_test_seams_default ${PULP_BUILD_TESTS})
-endif()
-option(PULP_ENABLE_TEST_SEAMS
-       "Compile product test-environment seams (disabled by default for Release)"
-       ${_pulp_test_seams_default})
-if(PULP_ENABLE_TEST_SEAMS)
-    add_compile_definitions(PULP_ENABLE_TEST_SEAMS=1)
-else()
-    add_compile_definitions(PULP_ENABLE_TEST_SEAMS=0)
-endif()
 # Deterministic RT operation counters (pulp/signal/rt_work_counter.hpp) back
 # the per-callback transition-cost gate. The definition is directory-wide so
 # every translation unit of one build agrees on the inline counter hooks; it

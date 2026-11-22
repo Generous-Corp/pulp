@@ -429,20 +429,17 @@ function(pulp_add_plugin target)
         target_include_directories(${target}_Core INTERFACE ${CMAKE_CURRENT_SOURCE_DIR})
         set(_PULP_CORE_OBJECTS "")
     endif()
-    # Public processor target for tests, graph nodes and adapters. Keep the
-    # historical _Core target so existing consumers continue to link unchanged.
-    add_library(${target}::Processor ALIAS ${target}_Core)
     # Store for format target functions (CMake doesn't propagate local vars to functions)
     set(_PULP_CORE_OBJECTS "${_PULP_CORE_OBJECTS}" PARENT_SCOPE)
     set(PULP_${target}_CORE_OBJECTS "${_PULP_CORE_OBJECTS}" CACHE INTERNAL "")
     if(PLUGIN_SOURCES)
-        target_compile_definitions(${target}_Core PUBLIC
+        target_compile_definitions(${target}_Core PRIVATE
             PULP_PLUGIN_NAME="${PLUGIN_PLUGIN_NAME}"
             PULP_BUNDLE_ID="${PLUGIN_BUNDLE_ID}"
             PULP_PLUGIN_VERSION="${PLUGIN_VERSION}"
         )
         if(PLUGIN_AAX_HEADLESS)
-            target_compile_definitions(${target}_Core PUBLIC PULP_AAX_HEADLESS=1)
+            target_compile_definitions(${target}_Core PRIVATE PULP_AAX_HEADLESS=1)
         endif()
     endif()
 
