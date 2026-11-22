@@ -11,18 +11,18 @@ ROOT = Path(__file__).resolve().parents[2]
 class PluginIdentityContractTests(unittest.TestCase):
     def test_vst3_templates_use_configured_identity_macros(self):
         for template in sorted((ROOT / "tools/templates").glob("*/vst3_entry.cpp.template")):
-            text = template.read_text()
+            text = template.read_text(encoding="utf-8")
             self.assertIn("PULP_PLUGIN_NAME", text, template)
             self.assertIn("PULP_PLUGIN_VENDOR", text, template)
             self.assertIn("PULP_PLUGIN_VERSION", text, template)
             self.assertNotIn('{{VERSION}}', text, template)
 
     def test_vst3_entry_does_not_ship_example_email(self):
-        text = (ROOT / "core/format/include/pulp/format/vst3_entry.hpp").read_text()
+        text = (ROOT / "core/format/include/pulp/format/vst3_entry.hpp").read_text(encoding="utf-8")
         self.assertNotIn("info@example.com", text)
 
     def test_plugin_api_propagates_identity_and_display_name(self):
-        text = (ROOT / "tools/cmake/PulpPlugin.cmake").read_text()
+        text = (ROOT / "tools/cmake/PulpPlugin.cmake").read_text(encoding="utf-8")
         for macro in (
             "PULP_PLUGIN_NAME",
             "PULP_PLUGIN_VENDOR",
@@ -40,7 +40,7 @@ class PluginIdentityContractTests(unittest.TestCase):
 
     def test_macos_plists_declare_minimum_system_version(self):
         for name in ("au", "vst3", "clap", "standalone"):
-            text = (ROOT / f"tools/cmake/PulpInfoPlist.{name}.in").read_text()
+            text = (ROOT / f"tools/cmake/PulpInfoPlist.{name}.in").read_text(encoding="utf-8")
             self.assertIn("LSMinimumSystemVersion", text, name)
 
 
