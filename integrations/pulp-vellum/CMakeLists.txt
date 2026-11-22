@@ -33,7 +33,10 @@ set_property(TARGET pulp-vellum PROPERTY PULP_VELLUM_HAS_SWIFT_MOTION TRUE)
 target_include_directories(pulp-vellum PRIVATE ${PULP_ROOT_DIR}/apple/Sources/PulpSwift)
 target_link_libraries(pulp-vellum PUBLIC Vellum::MirrorView_core)
 
-if(TARGET Vellum::MirrorView_script)
+option(PULP_ENABLE_PULP_VELLUM_SCRIPTED
+    "Build Pulp's optional scripted Vellum editor bridge" ON)
+
+if(PULP_ENABLE_PULP_VELLUM_SCRIPTED AND TARGET Vellum::MirrorView_script)
     add_library(pulp-vellum-scripted STATIC src/scripted_editor.cpp)
     add_library(pulp::vellum-scripted ALIAS pulp-vellum-scripted)
     target_link_libraries(pulp-vellum-scripted PUBLIC pulp::vellum

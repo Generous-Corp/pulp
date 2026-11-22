@@ -11,7 +11,9 @@
 /// lifetime while all edits still use Pulp's existing parameter bridge.
 
 #include <pulp/format/editor_host.hpp>
+#include <pulp/format/editor_package.hpp>
 #include <pulp/format/processor.hpp>
+#include <pulp/runtime/log.hpp>
 #include <pulp/vellum/editor_env.hpp>
 #include <pulp/vellum/param_port_model.hpp>
 #include <pulp/vellum/visual_port_feed.hpp>
@@ -21,6 +23,7 @@
 #include <vellum/view/view.hpp>
 
 #include <concepts>
+#include <cstddef>
 #include <cstdint>
 #include <memory>
 #include <mutex>
@@ -28,8 +31,8 @@
 #include <string>
 #include <string_view>
 #include <type_traits>
-#include <unordered_set>
 #include <utility>
+#include <vector>
 
 namespace pulp::vellum {
 
@@ -38,20 +41,29 @@ namespace pulp::vellum {
 /// its app-host bootstrap, which agrees across plug-ins built on the same Dawn
 /// revision. Pulp's own gpu-runtime copy must not be used here: linking it into
 /// a plug-in would carry a second Dawn beside the one in Vellum's provider.
-inline bool register_editor_dawn_bootstrap(std::string_view bundle_id,
-                                           std::string* error = nullptr) {
-    static std::mutex mutex;
-    static std::unordered_set<std::string> registered;
-    std::lock_guard lock(mutex);
-    if (registered.contains(std::string(bundle_id)))
-        return true;
-    if (!::vellum::app_host::register_native_dawn_bootstrap(error))
-        return false;
-    registered.emplace(bundle_id);
-    return true;
+PULP_FORMAT_IMAGE_LOCAL inline bool register_editor_dawn_bootstrap(std::string_view bundle_id,
+                                                                   std::string* error = nullptr) {
+    static std::once_flag once;
+    static std::string failure;
+    bool log_failure = false;
+    std::call_once(once, [&] {
+        if (::vellum::app_host::register_native_dawn_bootstrap(&failure)) {
+            failure.clear();
+        } else {
+            if (failure.empty())
+                failure = "Vellum did not report a Dawn bootstrap error";
+            log_failure = true;
+        }
+    });
+    if (log_failure)
+        runtime::log_error("Vellum editor '{}': Dawn bootstrap failed: {}", bundle_id, failure);
+    if (error != nullptr)
+        *error = failure;
+    return failure.empty();
 }
 
-template <typename ViewType> class Editor final : public format::Editor {
+template <typename ViewType>
+class Editor final : public format::Editor, public format::EditorAttachDiagnostics {
     static_assert(std::is_base_of_v<::vellum::view::View, ViewType>,
                   "a Pulp Vellum editor must derive from vellum::view::View");
 
@@ -79,6 +91,9 @@ template <typename ViewType> class Editor final : public format::Editor {
         if (auto* visuals = context.visuals()) {
             visual_feed_ = std::make_unique<VisualPortFeed>(*visuals);
             env_.visuals = visual_feed_.get();
+            visual_publish_counts_.resize(visual_feed_->channel_count());
+            for (std::size_t i = 0; i < visual_publish_counts_.size(); ++i)
+                visual_publish_counts_[i] = visual_feed_->publish_count(i);
         }
         root_ = make_root(env_);
         if constexpr (requires(ViewType& view) {
@@ -98,8 +113,7 @@ template <typename ViewType> class Editor final : public format::Editor {
                 size_ = preferred;
         }
         layout_root();
-        std::string bootstrap_error;
-        if (!register_editor_dawn_bootstrap(bundle_id, &bootstrap_error))
+        if (!register_editor_dawn_bootstrap(bundle_id, &bootstrap_error_))
             return;
         root_->set_requires_gpu_host(true);
         ::vellum::view::PluginViewHost::Options options;
@@ -138,7 +152,7 @@ template <typename ViewType> class Editor final : public format::Editor {
     }
 
     bool attach(const format::NativeParent& parent) override {
-        if (invalidated_)
+        if (invalidated_ || !bootstrap_error_.empty())
             return false;
         if (parent.kind == format::NativeParentKind::none)
             return true;
@@ -205,16 +219,21 @@ template <typename ViewType> class Editor final : public format::Editor {
         if (!env_.lifetime_)
             return;
         // ContractEditorSession pumps ParamPort listeners before this call.
-        // A view that owns per-frame work (a scripted session pushing bound
-        // parameter values into widgets) gets its tick here, then the host
-        // repaints once so meter/scope snapshots are visible even when the
-        // Vellum tree has no parameter-driven damage of its own.
         if constexpr (requires(ViewType& view) { view.editor_idle(); }) {
             if (root_ != nullptr)
                 root_->editor_idle();
         }
-        if (host_ != nullptr)
-            host_->repaint();
+        if (host_ == nullptr)
+            return;
+        // View damage already schedules a repaint through PluginViewHost.
+        bool published = false;
+        for (std::size_t i = 0; i < visual_publish_counts_.size(); ++i) {
+            const auto count = visual_feed_->publish_count(i);
+            if (std::exchange(visual_publish_counts_[i], count) != count)
+                published = true;
+        }
+        if (published)
+            host_->request_frame();
     }
 
     format::EditorAutomation* automation() override {
@@ -222,6 +241,10 @@ template <typename ViewType> class Editor final : public format::Editor {
     }
 
   private:
+    std::string_view attach_failure_reason() const noexcept override {
+        return bootstrap_error_;
+    }
+
     class Automation final : public format::EditorAutomation {
       public:
         explicit Automation(Editor& editor) : editor_(editor) {}
@@ -265,12 +288,14 @@ template <typename ViewType> class Editor final : public format::Editor {
 
     ParamPortModel model_;
     std::unique_ptr<VisualPortFeed> visual_feed_;
+    std::vector<std::uint32_t> visual_publish_counts_;
     EditorEnv env_;
     std::unique_ptr<ViewType> root_;
     std::unique_ptr<::vellum::view::PluginViewHost> host_;
     Automation automation_{*this};
     std::optional<format::ViewSize> view_size_;
     format::EditorSize size_{400, 300, 1.0};
+    std::string bootstrap_error_;
     bool attached_ = false;
     bool closing_ = false;
     bool invalidated_ = false;

@@ -149,6 +149,11 @@ struct WglWindow final : GlSurface::Impl, MessageSink {
     HWND previous_focus = nullptr;
     bool holding_focus = false;
     bool pointer_inside = false;
+    // Buttons pressed in this window and not yet released (bit n for X button
+    // number n), and where the pointer last was, so a drag that loses its
+    // capture can still be ended.
+    std::uint32_t pressed_buttons = 0;
+    LPARAM last_pointer_lparam = 0;
     struct KeyPress {
         bool client_first = false;
         bool forwarded_down = false; // the host saw the key-down, so it gets the key-up
@@ -307,12 +312,16 @@ struct WglWindow final : GlSurface::Impl, MessageSink {
             button = 2;
         else if (message == WM_XBUTTONDOWN || message == WM_XBUTTONUP)
             button = GET_XBUTTON_WPARAM(wparam) == XBUTTON1 ? 8 : 9;
+        last_pointer_lparam = lparam;
         if (down) {
             // Keep receiving the pointer after it leaves the window.
+            pressed_buttons |= 1u << button;
             SetCapture(hwnd);
-        } else if ((GET_KEYSTATE_WPARAM(wparam) &
-                    (MK_LBUTTON | MK_RBUTTON | MK_MBUTTON | MK_XBUTTON1 | MK_XBUTTON2)) == 0) {
-            ReleaseCapture();
+        } else {
+            pressed_buttons &= ~(1u << button); // before the capture-lost message
+            if ((GET_KEYSTATE_WPARAM(wparam) &
+                 (MK_LBUTTON | MK_RBUTTON | MK_MBUTTON | MK_XBUTTON1 | MK_XBUTTON2)) == 0)
+                ReleaseCapture();
         }
         if (!input.pointer)
             return;
@@ -338,7 +347,26 @@ struct WglWindow final : GlSurface::Impl, MessageSink {
         input.pointer(e);
     }
 
+    // Capture went to another window (or was taken away) mid-press: no release
+    // will arrive here, so end the press the way a release would.
+    void on_capture_lost() {
+        const std::uint32_t pressed = pressed_buttons;
+        pressed_buttons = 0;
+        if (pressed == 0 || !input.pointer)
+            return;
+        for (unsigned button = 0; button < 32; ++button) {
+            if (!(pressed & (1u << button)))
+                continue;
+            PointerEvent e = pointer_at(last_pointer_lparam, 0);
+            e.kind = PointerKind::up;
+            e.button = pointer_button_for_x11(button, e.button_number);
+            e.click_count = click_count;
+            input.pointer(e);
+        }
+    }
+
     void on_move(WPARAM wparam, LPARAM lparam) {
+        last_pointer_lparam = lparam;
         if (!pointer_inside) {
             pointer_inside = true;
             track_leave();
@@ -528,6 +556,10 @@ struct WglWindow final : GlSurface::Impl, MessageSink {
             return true;
         case WM_MOUSELEAVE:
             on_leave();
+            return true;
+        case WM_CAPTURECHANGED:
+            if (reinterpret_cast<HWND>(lparam) != hwnd)
+                on_capture_lost();
             return true;
         case WM_MOUSEWHEEL:
             on_wheel(wparam, lparam, false);
