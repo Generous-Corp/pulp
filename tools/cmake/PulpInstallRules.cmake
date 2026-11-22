@@ -249,16 +249,16 @@ foreach(_vellum_target IN LISTS PULP_VELLUM_TARGETS)
     string(REPLACE "pulp-" "" _vellum_export_name "${_vellum_target}")
     set_target_properties(${_vellum_target} PROPERTIES EXPORT_NAME "${_vellum_export_name}")
 endforeach()
-set(PULP_VELLUM_EXPORT_TARGETS)
-foreach(_vellum_target IN LISTS PULP_VELLUM_TARGETS)
-    get_target_property(_vellum_export_name "${_vellum_target}" EXPORT_NAME)
-    list(APPEND PULP_VELLUM_EXPORT_TARGETS "${_vellum_export_name}")
-endforeach()
 # Keep the public target spelling aligned with the header namespace. The source
 # target retains its historical hyphenated name for in-tree callers.
 if(TARGET pulp-vellum-audio)
     set_target_properties(pulp-vellum-audio PROPERTIES EXPORT_NAME vellum_audio)
 endif()
+set(PULP_VELLUM_EXPORT_TARGETS)
+foreach(_vellum_target IN LISTS PULP_VELLUM_TARGETS)
+    get_target_property(_vellum_export_name "${_vellum_target}" EXPORT_NAME)
+    list(APPEND PULP_VELLUM_EXPORT_TARGETS "${_vellum_export_name}")
+endforeach()
 
 install(TARGETS ${PULP_SDK_TARGETS}
     EXPORT PulpTargets

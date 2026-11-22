@@ -102,6 +102,10 @@ class VellumSdkCmakeContract(unittest.TestCase):
             'set_target_properties(pulp-vellum-audio PROPERTIES EXPORT_NAME vellum_audio)',
             install_text,
         )
+        self.assertLess(
+            install_text.index('set_target_properties(pulp-vellum-audio PROPERTIES EXPORT_NAME vellum_audio)'),
+            install_text.index('set(PULP_VELLUM_EXPORT_TARGETS)'),
+        )
         self.assertIn('"@PULP_VELLUM_VERSION@"', CONFIG_TEMPLATE.read_text(encoding="utf-8"))
 
 
