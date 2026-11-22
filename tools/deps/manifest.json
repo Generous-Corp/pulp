@@ -1375,6 +1375,13 @@
       "documented_in_notice_md": true,
       "link_targets": ["skia::skia"],
       "notes": "Prebuilt via skia-builder (danielraffel fork: https://github.com/danielraffel/skia-builder) for Pulp rendering. The fork tracks olilarkin/skia-builder's tag pattern and adds iOS device/simulator, visionOS, mac-x86_64, Windows ARM64, and Skia.xcframework slices the upstream does not ship. The chrome/m158 release ships all required platform slices including linux-arm64 and the native jsonreader/skresources archives. Its two Linux archives were re-cut from the same Skia revision with skia_use_partition_alloc = false (skia-builder run 41466672481); the release notes' replacement ledger records both digests. Visual harness determinism locks Skia plus its bundled HarfBuzz and ICU DEPS revisions; regenerate raster goldens only when any pinned Skia asset, bundled text dependency, font file, or sampler/render configuration changes.",
+      "vellum_mirror_renderer": {
+        "url": "https://github.com/danielraffel/skia-builder/releases/download/chrome/m158-attested.1/skia-build-mac-universal-gpu-release.zip",
+        "sha256": "1779c7d1ba5c73a0d6a1f33b77fbf30774bbd9f7542c1c42cc5129f57e99fbd4",
+        "libdawn_combined_sha256": "337d3beff192f51c0905ac0cc25fc268f9be94cfce58f868a2ede0ad4683c168",
+        "skia_builder_ref": "1b97010d2f025b4331a9c0db9481c440d1f33042",
+        "built_dawn": "1716e88cc9e58398fab5d4473f7f2e858667b677"
+      },
       "vellum_renderer_drift_check": {
         "note": "tools/deps/audit.py --strict reads gpu-runtime's renderer lock at this commit, which must equal vellum-gpu-runtime's upstream.commit, and fails unless its macos-arm64 sha256 equals release_assets.mac-universal.sha256, every other mac-* release asset carries that same digest (an x86_64-only or arm64-only macOS build forwards to gpu-runtime too, and its lock pins one macOS asset), and its milestone equals this entry's version. PULP_VELLUM_CHECKOUT=<vellum checkout> reads the same commit from a local clone instead of raw.githubusercontent.com.",
         "repository": "https://github.com/Generous-Corp/vellum",
