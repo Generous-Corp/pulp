@@ -5,10 +5,15 @@
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 
+#include <pulp/dataplane/value_channel_set.hpp>
+#include <pulp/dataplane/value_source.hpp>
 #include <pulp/format/editor_host.hpp>
 #include <pulp/format/processor.hpp>
+#include <pulp/format/value_channel_visual_port.hpp>
+#include <pulp/runtime/log_sink.hpp>
 #include <pulp/state/store.hpp>
 
+#include <vellum/graphics/dawn_bootstrap.hpp>
 #include <vellum/value/param_model.hpp>
 #include <vellum/view/plugin_view_host.hpp>
 #include <vellum/view/view.hpp>
@@ -143,7 +148,9 @@ class StubHost final : public ::vellum::view::PluginViewHost {
     void detach() override {
         attached_ = false;
     }
-    void repaint() override {}
+    void repaint() override {
+        ++repaint_calls;
+    }
     bool present_first_frame() override {
         ++present_first_frame_calls;
         return present_first_frame_result;
@@ -170,6 +177,7 @@ class StubHost final : public ::vellum::view::PluginViewHost {
 
     int design_viewport_calls = 0;
     int fixed_aspect_calls = 0;
+    int repaint_calls = 0;
     int present_first_frame_calls = 0;
     int capture_back_buffer_calls = 0;
     bool present_first_frame_result = true;
@@ -298,7 +306,8 @@ template <typename Root = HookView> struct HookFixture {
     StubHost* host = nullptr;
     std::unique_ptr<pulp::format::Editor> editor;
 
-    HookFixture() {
+    explicit HookFixture(pulp::format::VisualPort* visuals = nullptr)
+        : context(*fixture.port, visuals) {
         PluginViewHost::set_factory(
             [this](::vellum::view::View& view, const PluginViewHost::Options& options) {
                 root = &static_cast<Root&>(view);
@@ -318,6 +327,86 @@ template <typename Root = HookView> struct HookFixture {
 };
 
 } // namespace
+
+TEST_CASE("Vellum editor idle repaints for visual publishes and preserves view damage",
+          "[pulp-vellum][editor][idle-damage]") {
+    pulp::dataplane::ValueChannelSet channels;
+    REQUIRE(channels.declare_scalar("other"));
+    auto* meter = channels.declare_scalar("meter");
+    REQUIRE(meter);
+    pulp::format::ValueChannelVisualPort visual_port(&channels);
+    HookFixture fixture(&visual_port);
+    REQUIRE(fixture.editor->attach(fixture.parent()));
+    fixture.host->clear_pending_dirty();
+    fixture.host->repaint_calls = 0;
+
+    for (int i = 0; i < 60; ++i)
+        fixture.editor->idle();
+    CHECK(fixture.lifecycle.ticks == 60);
+    CHECK(fixture.host->repaint_calls == 0);
+
+    fixture.host->repaint_calls = 0;
+    meter->publish(0.5f);
+    fixture.editor->idle();
+    CHECK(fixture.host->repaint_calls == 1);
+    fixture.editor->idle();
+    CHECK(fixture.host->repaint_calls == 1);
+
+    fixture.host->repaint_calls = 0;
+    fixture.host->mark_dirty_region({1, 2, 3, 4});
+    REQUIRE(fixture.host->has_pending_dirty_bounds());
+    CHECK(fixture.host->repaint_calls == 1);
+    fixture.editor->idle();
+    CHECK(fixture.host->repaint_calls == 1);
+    CHECK(fixture.host->pending_dirty_bounds().width == 3.0f);
+}
+
+TEST_CASE("Vellum editor reports a Dawn bootstrap failure on attach",
+          "[pulp-vellum][.bootstrap-failure]") {
+    using namespace ::vellum::graphics;
+    const DawnBootstrap incompatible{
+        .abi_version = kDawnBootstrapAbiVersion,
+        .callback = +[](const DawnBootstrapRequest&, void*, std::string*) {
+            return DawnBootstrapResult::ready;
+        },
+    };
+    // This registration owns the process, so CTest runs this case on its own.
+    REQUIRE(register_dawn_bootstrap(incompatible, "test-incompatible-revision", nullptr));
+    std::string reason;
+    REQUIRE_FALSE(::vellum::app_host::register_native_dawn_bootstrap(&reason));
+    REQUIRE_FALSE(reason.empty());
+
+    pulp::runtime::CaptureLogSink capture;
+    pulp::runtime::ScopedLogSink log(capture.sink());
+    FactoryReset reset;
+    int hosts_created = 0;
+    ::vellum::view::PluginViewHost::set_factory(
+        [&](::vellum::view::View&, const ::vellum::view::PluginViewHost::Options&) {
+            ++hosts_created;
+            return std::make_unique<StubHost>();
+        });
+    Fixture fixture;
+    Context context(*fixture.port);
+    Processor processor;
+    pulp::vellum::EditorFactory<EmptyView> factory;
+    for (int i = 0; i < 2; ++i) {
+        auto editor = factory.create(processor, context, pulp::format::EditorRole::editor);
+        REQUIRE(editor);
+        CHECK_FALSE(editor->attach({.kind = pulp::format::NativeParentKind::none}));
+        CHECK_FALSE(editor->attach({.kind = pulp::format::NativeParentKind::cocoa_view,
+                                    .handle = &context}));
+        const auto attach_error = []<typename Editor>(const Editor& failed) -> std::string_view {
+            if constexpr (requires { failed.attach_error(); })
+                return failed.attach_error();
+            return {};
+        };
+        CHECK(attach_error(*editor) == reason);
+    }
+    CHECK(hosts_created == 0);
+    const auto errors = capture.records_at_least(pulp::runtime::LogLevel::Error);
+    REQUIRE(errors.size() == 1);
+    CHECK(errors.front().message.find(reason) != std::string::npos);
+}
 
 TEST_CASE("Vellum editor factory supports editor and inspector roles", "[pulp-vellum][editor]") {
     Fixture fixture;
