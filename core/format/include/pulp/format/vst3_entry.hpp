@@ -26,22 +26,15 @@
 
 // Generate a VST3 factory with a single plugin class.
 // The plugin uses SingleComponentEffect (combined processor + controller).
-#define PULP_VST3_PLUGIN(uid, name, category, vendor, version, url, factory_fn) \
-    static Steinberg::FUnknown* _pulp_vst3_create(void*) { \
-        return static_cast<Steinberg::Vst::IAudioProcessor*>( \
-            new pulp::format::vst3::PulpVst3Processor(factory_fn)); \
-    } \
-    \
-    BEGIN_FACTORY_DEF(vendor, url, PULP_PLUGIN_EMAIL) \
-        DEF_CLASS2(INLINE_UID_FROM_FUID(uid), \
-            PClassInfo::kManyInstances, \
-            kVstAudioEffectClass, \
-            name, \
-            0, \
-            category, \
-            version, \
-            kVstVersionString, \
-            _pulp_vst3_create) \
+#define PULP_VST3_PLUGIN(uid, name, category, vendor, version, url, factory_fn)                    \
+    static Steinberg::FUnknown* _pulp_vst3_create(void*) {                                         \
+        return static_cast<Steinberg::Vst::IAudioProcessor*>(                                      \
+            new pulp::format::vst3::PulpVst3Processor(factory_fn));                                \
+    }                                                                                              \
+                                                                                                   \
+    BEGIN_FACTORY_DEF(vendor, url, PULP_PLUGIN_EMAIL)                                              \
+    DEF_CLASS2(INLINE_UID_FROM_FUID(uid), PClassInfo::kManyInstances, kVstAudioEffectClass, name,  \
+               0, category, version, kVstVersionString, _pulp_vst3_create)                         \
     END_FACTORY
 
 // ── Multi-plugin bundle: one VST3 binary, many plugins ───────────────────
