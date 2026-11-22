@@ -1,4 +1,4 @@
-// PulpMotion.swift — SwiftUI / UIKit / AppKit facade over the Vellum
+// PulpMotion.swift: SwiftUI / UIKit / AppKit facade over the Vellum
 // motion observability bridge.
 //
 // Mirrors the trace-builder DSL used by other modern observability

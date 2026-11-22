@@ -3,9 +3,7 @@
  "record": {
   "entry": "tools/scripts/swift_bridge_split_guard.py",
   "inputs": [
-   "tools/scripts/swift_bridge_split_guard.py",
-   "integrations/pulp-vellum/src/swift_motion_bridge.cpp",
-   "apple/Sources/PulpSwift/PulpBridge.cpp"
+   "tools/scripts/swift_bridge_split_guard.py"
   ],
   "kind": "python"
  }
