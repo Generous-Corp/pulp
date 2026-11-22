@@ -116,6 +116,7 @@ function(pulp_register_fetchcontent_source name)
     set(fetchcontent_var "FETCHCONTENT_SOURCE_DIR_${upper_name}")
     set(shared_marker "PULP_FETCHCONTENT_SOURCE_IS_SHARED_${upper_name}")
     set(shared_path_marker "PULP_FETCHCONTENT_SHARED_SELECTED_PATH_${upper_name}")
+    set(mutable_path_marker "PULP_FETCHCONTENT_MUTABLE_SELECTED_PATH_${upper_name}")
     # The registered REF is the pin a materialized git checkout must sit on.
     set(PULP_FETCHCONTENT_REGISTERED_REF_${upper_name} "${PFC_REF}" PARENT_SCOPE)
 
@@ -141,6 +142,21 @@ function(pulp_register_fetchcontent_source name)
     if(DEFINED ${fetchcontent_var} AND NOT "${${fetchcontent_var}}" STREQUAL "")
         if(DEFINED ${shared_marker})
             set(source_is_shared "${${shared_marker}}")
+            if(source_is_shared
+               AND DEFINED ${mutable_path_marker}
+               AND "${${mutable_path_marker}}" STREQUAL "${${fetchcontent_var}}")
+                # The cache path was written by pulp_materialize... on the
+                # previous configure. Restore the immutable origin before
+                # deciding whether an operator changed the cache by hand.
+                if(DEFINED ${shared_path_marker}
+                   AND NOT "${${shared_path_marker}}" STREQUAL "")
+                    set(${fetchcontent_var} "${${shared_path_marker}}" CACHE PATH
+                        "Local source override for ${name}" FORCE)
+                    set(${fetchcontent_var} "${${shared_path_marker}}")
+                else()
+                    set(source_is_shared FALSE)
+                endif()
+            endif()
             if(source_is_shared
                AND DEFINED ${shared_path_marker}
                AND NOT "${${shared_path_marker}}" STREQUAL "${${fetchcontent_var}}")
@@ -182,6 +198,7 @@ function(pulp_register_fetchcontent_source name)
                 "Last automatic shared-cache path selected for ${name}" FORCE)
         else()
             unset(${shared_path_marker} CACHE)
+            unset(${mutable_path_marker} CACHE)
         endif()
         if(EXISTS "${${fetchcontent_var}}")
             if(source_is_shared)
@@ -222,6 +239,7 @@ function(pulp_register_fetchcontent_source name)
                 "Last automatic shared-cache path selected for ${name}" FORCE)
         else()
             unset(${shared_path_marker} CACHE)
+            unset(${mutable_path_marker} CACHE)
         endif()
         message(STATUS "Pulp: using ${source_label} for ${name}: ${candidate}")
     elseif(DEFINED source_label AND source_label MATCHES "^env:")
@@ -242,6 +260,7 @@ function(pulp_materialize_mutable_fetchcontent_source name)
     string(TOLOWER "${name}" lower_name)
     set(source_var "FETCHCONTENT_SOURCE_DIR_${upper_name}")
     set(shared_marker "PULP_FETCHCONTENT_SOURCE_IS_SHARED_${upper_name}")
+    set(mutable_path_marker "PULP_FETCHCONTENT_MUTABLE_SELECTED_PATH_${upper_name}")
     if(NOT DEFINED ${source_var} OR "${${source_var}}" STREQUAL "")
         return()
     endif()
@@ -319,6 +338,13 @@ function(pulp_materialize_mutable_fetchcontent_source name)
         file(WRITE "${stamp}" "${expected_stamp}")
     endif()
 
+    # Keep FetchContent's cache-visible source path aligned with the mutable
+    # copy. Consumers that read the cache directly must never rediscover the
+    # immutable shared checkout after this function returns.
+    set(${source_var} "${local_source}" CACHE PATH
+        "Local source override for ${name}" FORCE)
+    set(${mutable_path_marker} "${local_source}" CACHE INTERNAL
+        "Last build-local mutable source path selected for ${name}" FORCE)
     set(${source_var} "${local_source}" PARENT_SCOPE)
     message(STATUS "Pulp: using build-local mutable copy for ${name}: ${local_source}")
 endfunction()
