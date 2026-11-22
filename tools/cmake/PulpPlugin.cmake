@@ -100,6 +100,8 @@ endfunction()
 #       PLUGIN_NAME     "PulpGain"
 #       BUNDLE_ID       "com.pulp.gain"
 #       MANUFACTURER    "Pulp"
+#       VENDOR_EMAIL    "support@pulp.audio" # optional VST3 factory email
+#       AU_DISPLAY_NAME "Pulp: PulpGain"      # optional AU component name
 #       VERSION         "1.0.0"
 #       CATEGORY        Effect           # Effect | Instrument | MidiEffect
 #       PLUGIN_CODE     "PGan"           # 4-char code for AU
