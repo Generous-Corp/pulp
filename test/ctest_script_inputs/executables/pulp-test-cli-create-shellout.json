@@ -13,6 +13,7 @@
    "tools/templates/agent-toolkit",
    "tools/templates/effect",
    "tools/templates/gain",
+   "tools/templates/instrument",
    "tools/templates/standalone"
   ],
   "kind": "compiled",

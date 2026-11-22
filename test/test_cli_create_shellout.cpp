@@ -238,6 +238,7 @@ TEST_CASE("pulp create puts the processor body in its own source listed under SO
     }
     for (const std::string type : {"effect", "instrument"}) {
         TempDir tmp("pulp-create-split-" + type);
+        ScopedEnvVar pulp_home("PULP_HOME", native_path_string(tmp.path / "pulp-home").c_str());
         const auto out_dir = tmp.path / "Split Gain";
         auto r = run_create({"create", "Split Gain", "--type", type, "--output",
                              native_path_string(out_dir), "--no-build", "--ci"},
@@ -245,8 +246,8 @@ TEST_CASE("pulp create puts the processor body in its own source listed under SO
         INFO(type << "\n" << r.stdout_output << r.stderr_output);
         REQUIRE_FALSE(r.timed_out);
         REQUIRE(r.exit_code == 0);
-        const auto header = read_file(out_dir / "split_gain.hpp");
-        const auto source = read_file(out_dir / "split_gain.cpp");
+        const auto header = read_file(out_dir / "src" / "split_gain.hpp");
+        const auto source = read_file(out_dir / "src" / "split_gain.cpp");
         const auto cmake = read_file(out_dir / "CMakeLists.txt");
         // The header declares process(); the source defines it, once.
         CHECK(header.find(") override;") != std::string::npos);
@@ -254,8 +255,15 @@ TEST_CASE("pulp create puts the processor body in its own source listed under SO
         CHECK(source.find("#include \"split_gain.hpp\"") != std::string::npos);
         CHECK(source.find("::process(") != std::string::npos);
         CHECK(source.find("{{") == std::string::npos);
-        CHECK(cmake.find("SOURCES         split_gain.cpp") != std::string::npos);
+        CHECK(cmake.find("SOURCES         src/split_gain.cpp") != std::string::npos);
         CHECK(cmake.find("SplitGain_Core") != std::string::npos);
+        CHECK(fs::exists(out_dir / "src" / "split_gain.hpp"));
+        CHECK(fs::exists(out_dir / "src" / "entry" / "clap_entry.cpp"));
+        CHECK(fs::exists(out_dir / "tests" / "test_split_gain.cpp"));
+        CHECK(fs::exists(out_dir / ".github" / "workflows" / "ci.yml"));
+        const auto toml = read_file(out_dir / "pulp.toml");
+        CHECK(toml.find("sdk_path") == std::string::npos);
+        CHECK(toml.find("sdk_checkout") == std::string::npos);
     }
 }
 
@@ -739,14 +747,15 @@ TEST_CASE("pulp create --template agent-toolkit scaffolds a controlled Standalon
     REQUIRE(r.exit_code == 0);
 
     for (const char* file :
-         {"CMakeLists.txt", "agent_synth.hpp", "agent_synth.cpp", "agent_operations.cpp",
-          "test_agent_synth.cpp", "main.cpp", "pulp.toml"}) {
+         {"CMakeLists.txt", "src/agent_synth.hpp", "src/agent_synth.cpp",
+          "src/agent_operations.cpp", "tests/test_agent_synth.cpp", "src/main.cpp", "pulp.toml",
+          "README.md", ".github/workflows/ci.yml"}) {
         INFO(file);
         REQUIRE(fs::exists(out_dir / file));
     }
     // Only the Standalone format: no plugin entry points are written.
-    CHECK_FALSE(fs::exists(out_dir / "vst3_entry.cpp"));
-    CHECK_FALSE(fs::exists(out_dir / "clap_entry.cpp"));
+    CHECK_FALSE(fs::exists(out_dir / "src" / "entry" / "vst3_entry.cpp"));
+    CHECK_FALSE(fs::exists(out_dir / "src" / "entry" / "clap_entry.cpp"));
 
     const auto cmake = read_file(out_dir / "CMakeLists.txt");
     CHECK(cmake.find("pulp_control_agent_toolkit_declaration(_agent_toolkit_operations VENDOR "
@@ -755,17 +764,18 @@ TEST_CASE("pulp create --template agent-toolkit scaffolds a controlled Standalon
     CHECK(cmake.find("PROCESSOR_FACTORY create_agent_synth") != std::string::npos);
     CHECK(cmake.find("CONTROL_VENDOR_OPERATIONS \"${_agent_toolkit_operations}\"") !=
           std::string::npos);
-    CHECK(cmake.find("CONTROL_VENDOR_SOURCES agent_operations.cpp") != std::string::npos);
+    CHECK(cmake.find("CONTROL_VENDOR_SOURCES src/agent_operations.cpp") != std::string::npos);
     CHECK(cmake.find("dev.pulp.vendor/render@1") != std::string::npos);
 
-    const auto operations = read_file(out_dir / "agent_operations.cpp");
+    const auto operations = read_file(out_dir / "src" / "agent_operations.cpp");
     CHECK(operations.find("add_control_agent_toolkit") != std::string::npos);
     CHECK(operations.find(".vendor_id = \"com.pulp.agent_synth\"") != std::string::npos);
     CHECK(operations.find("render_factory = &create_agent_synth") != std::string::npos);
-    CHECK(read_file(out_dir / "main.cpp").find("config.input_channels = 0;") != std::string::npos);
+    CHECK(read_file(out_dir / "src" / "main.cpp").find("config.input_channels = 0;") !=
+          std::string::npos);
 
-    for (const char* file : {"CMakeLists.txt", "agent_synth.hpp", "agent_synth.cpp",
-                             "agent_operations.cpp", "test_agent_synth.cpp"}) {
+    for (const char* file : {"CMakeLists.txt", "src/agent_synth.hpp", "src/agent_synth.cpp",
+                             "src/agent_operations.cpp", "tests/test_agent_synth.cpp"}) {
         INFO(file);
         // Bus initializers legitimately contain `{{`; a placeholder does not.
         CHECK_FALSE(std::regex_search(read_file(out_dir / file),
@@ -820,6 +830,7 @@ TEST_CASE("pulp create --ci pins the CLI's SDK version and the project configure
                "  add_library(Pulp::format INTERFACE IMPORTED)\n"
                "endif()\n"
                "function(pulp_add_plugin target)\n"
+               "  add_library(${target}_Core INTERFACE)\n"
                "  set_property(GLOBAL APPEND PROPERTY PULP_STUB_PLUGINS \"${target}\")\n"
                "endfunction()\n");
 
@@ -848,7 +859,7 @@ TEST_CASE("pulp create --ci pins the CLI's SDK version and the project configure
     INFO(rust_vellum.stdout_output);
     INFO(rust_vellum.stderr_output);
     REQUIRE(rust_vellum.exit_code == 0);
-    CHECK(fs::exists(rust_vellum_dir / "civellum_view.hpp"));
+    CHECK(fs::exists(rust_vellum_dir / "src" / "civellum_view.hpp"));
     const auto rust_vellum_cmake = read_file(rust_vellum_dir / "CMakeLists.txt");
     CHECK(rust_vellum_cmake.find("pulp_add_vellum_editor_package(CiVellum_VellumEditor") !=
           std::string::npos);
@@ -921,6 +932,7 @@ TEST_CASE("pulp-cpp create --ui none scaffolds an audio-only project that config
                "  add_library(Pulp::format INTERFACE IMPORTED)\n"
                "endif()\n"
                "function(pulp_add_plugin target)\n"
+               "  add_library(${target}_Core INTERFACE)\n"
                "  set_property(GLOBAL APPEND PROPERTY PULP_STUB_PLUGINS \"${target}\")\n"
                "endfunction()\n");
 
@@ -1118,6 +1130,7 @@ template <typename W, typename M, typename H> ParameterBinding bind_parameter(W&
                    "add_library(Pulp::format-core INTERFACE IMPORTED)\n"
                    "add_library(Pulp::format-clap-core INTERFACE IMPORTED)\n"
                    "add_library(Pulp::clap INTERFACE IMPORTED)\n"
+                   "set(PULP_HAS_CLAP ON)\n"
                    "add_library(Pulp::standalone-contract INTERFACE IMPORTED)\n"
                    "add_library(pulp::vellum INTERFACE IMPORTED)\n"
                    "set(_pulp_test_includes \"" +
@@ -1131,7 +1144,10 @@ template <typename W, typename M, typename H> ParameterBinding bind_parameter(W&
                    native_path_string(vellum_include) +
                    "\")\n"
                    "include(\"" +
-                   source + "/tools/cmake/PulpUtils.cmake\")\n");
+                   source +
+                   "/tools/cmake/PulpUtils.cmake\")\n"
+                   "include(\"" +
+                   source + "/tools/cmake/PulpRuntimeStaging.cmake\")\n");
     write_file(vellum_cfg / "VellumConfig.cmake",
                "add_library(Vellum::MirrorView_core INTERFACE IMPORTED)\n"
                "set_target_properties(Vellum::MirrorView_core PROPERTIES "
@@ -1148,21 +1164,21 @@ template <typename W, typename M, typename H> ParameterBinding bind_parameter(W&
     INFO(created.stderr_output);
     REQUIRE_FALSE(created.timed_out);
     REQUIRE(created.exit_code == 0);
-    CHECK(fs::exists(out_dir / "vellumgain_view.hpp"));
-    CHECK(fs::exists(out_dir / "vellumgain_view.cpp"));
+    CHECK(fs::exists(out_dir / "src" / "vellumgain_view.hpp"));
+    CHECK(fs::exists(out_dir / "src" / "vellumgain_view.cpp"));
     const auto cmake_lists = read_file(out_dir / "CMakeLists.txt");
     CHECK(cmake_lists.find("pulp_add_vellum_editor_package(VellumGain_VellumEditor") !=
           std::string::npos);
     CHECK(cmake_lists.find("VIEW_HEADER \"vellumgain_view.hpp\"") != std::string::npos);
     CHECK(cmake_lists.find("VIEW_TYPE vellumgain::VellumGainView") != std::string::npos);
-    CHECK(cmake_lists.find("VIEW_INCLUDE_DIRS \"${CMAKE_CURRENT_SOURCE_DIR}\"") !=
+    CHECK(cmake_lists.find("VIEW_INCLUDE_DIRS \"${CMAKE_CURRENT_SOURCE_DIR}/src\"") !=
           std::string::npos);
     // The view compiles with the editor package, which carries Vellum's
     // include paths; the plug-in's audio core never includes Vellum.
-    CHECK(cmake_lists.find("SOURCES         vellumgain.cpp\n") != std::string::npos);
-    CHECK(cmake_lists.find("    SOURCES \"vellumgain_view.cpp\"") != std::string::npos);
+    CHECK(cmake_lists.find("SOURCES         src/vellumgain.cpp\n") != std::string::npos);
+    CHECK(cmake_lists.find("    SOURCES \"src/vellumgain_view.cpp\"") != std::string::npos);
     CHECK(cmake_lists.find("UI VellumGain_VellumEditor") != std::string::npos);
-    const auto view_header = read_file(out_dir / "vellumgain_view.hpp");
+    const auto view_header = read_file(out_dir / "src" / "vellumgain_view.hpp");
     CHECK(view_header.find("class VellumGainView") != std::string::npos);
     // The root view ships one real control bound to the template's parameter.
     CHECK(view_header.find("::vellum::view::Knob") != std::string::npos);
@@ -1185,15 +1201,21 @@ template <typename W, typename M, typename H> ParameterBinding bind_parameter(W&
         formats_eol = configured_cmake.size();
     configured_cmake.replace(formats_value_pos, formats_eol - formats_value_pos, "CLAP");
     write_file(out_dir / "CMakeLists.txt",
-               configured_cmake + "\nfile(WRITE \"${CMAKE_CURRENT_BINARY_DIR}/"
-                                  "factory_compile.cpp\" \"#include <pulp-vellum/"
-                                  "editor-packages/VellumGain_VellumEditor.hpp>\\n"
-                                  "int main() { return pulp::vellum::generated::"
-                                  "VellumGain_VellumEditor() == nullptr; }\\n\")\n"
-                                  "add_executable(vellum-factory-compile "
-                                  "\"${CMAKE_CURRENT_BINARY_DIR}/factory_compile.cpp\")\n"
-                                  "target_link_libraries(vellum-factory-compile "
-                                  "PRIVATE VellumGain_VellumEditor)\n");
+               configured_cmake +
+                   "\nget_target_property(clap_sources VellumGain_CLAP SOURCES)\n"
+                   "if(NOT \"${CMAKE_CURRENT_SOURCE_DIR}/src/entry/clap_entry.cpp\" IN_LIST "
+                   "clap_sources)\n"
+                   "    message(FATAL_ERROR \"CLAP entry source missing from target\")\n"
+                   "endif()\n"
+                   "file(WRITE \"${CMAKE_CURRENT_BINARY_DIR}/"
+                   "factory_compile.cpp\" \"#include <pulp-vellum/"
+                   "editor-packages/VellumGain_VellumEditor.hpp>\\n"
+                   "int main() { return pulp::vellum::generated::"
+                   "VellumGain_VellumEditor() == nullptr; }\\n\")\n"
+                   "add_executable(vellum-factory-compile "
+                   "\"${CMAKE_CURRENT_BINARY_DIR}/factory_compile.cpp\")\n"
+                   "target_link_libraries(vellum-factory-compile "
+                   "PRIVATE VellumGain_VellumEditor)\n");
 
     pulp::platform::ProcessOptions options;
     options.working_directory = native_path_string(tmp.path);
