@@ -525,12 +525,12 @@ def verify_vellum_sdk_contents(
     with Archive(path) as archive:
         for member in VELLUM_SDK_HEADERS:
             archive.read(member, limit=4 * 1024 * 1024)
-        targets = archive.read("pulp-sdk/lib/cmake/Pulp/PulpTargets.cmake")
+        targets = archive.read("pulp-sdk/lib/cmake/Pulp/PulpVellumTargets.cmake")
         text = targets.decode("utf-8", errors="strict")
         missing = [target for target in VELLUM_SDK_TARGETS if target not in text]
         if missing:
             raise ContentError(
-                f"{path.name}: PulpTargets.cmake is missing locked Vellum targets {missing}"
+                f"{path.name}: PulpVellumTargets.cmake is missing locked Vellum targets {missing}"
             )
 
 

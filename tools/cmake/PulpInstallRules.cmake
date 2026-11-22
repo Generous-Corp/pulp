@@ -196,20 +196,21 @@ if(TARGET pulp-native)
 endif()
 
 # The optional Vellum editor bridge is part of the installed SDK when it was
-# enabled for this build. Generated `pulp create --ui vellum` projects link
-# against this exported target and its public headers.
+# enabled for this build. Keep it in its own export set so core SDK consumers
+# do not need a Vellum SDK merely because this SDK was built with the bridge.
 set(PULP_SDK_HAS_VELLUM_BRIDGE OFF)
+set(PULP_VELLUM_TARGETS)
 if(TARGET pulp-vellum)
-    list(APPEND PULP_SDK_TARGETS pulp-vellum)
+    list(APPEND PULP_VELLUM_TARGETS pulp-vellum)
     set(PULP_SDK_HAS_VELLUM_BRIDGE ON)
 endif()
 if(TARGET pulp-vellum-scripted)
-    list(APPEND PULP_SDK_TARGETS pulp-vellum-scripted)
+    list(APPEND PULP_VELLUM_TARGETS pulp-vellum-scripted)
 endif()
 # The optional Vellum audio meters/scopes package links Vellum::Value and
 # Vellum::MirrorView_core PUBLIC, so PulpConfig must re-find Vellum for it too.
 if(TARGET pulp-vellum-audio)
-    list(APPEND PULP_SDK_TARGETS pulp-vellum-audio)
+    list(APPEND PULP_VELLUM_TARGETS pulp-vellum-audio)
     set(PULP_SDK_HAS_VELLUM_BRIDGE ON)
     install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/integrations/pulp-vellum-audio/include/pulp/"
         DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/pulp"
@@ -239,6 +240,10 @@ foreach(_sdk_target IN LISTS PULP_SDK_TARGETS)
     string(REPLACE "pulp-" "" _sdk_export_name "${_sdk_target}")
     set_target_properties(${_sdk_target} PROPERTIES EXPORT_NAME "${_sdk_export_name}")
 endforeach()
+foreach(_vellum_target IN LISTS PULP_VELLUM_TARGETS)
+    string(REPLACE "pulp-" "" _vellum_export_name "${_vellum_target}")
+    set_target_properties(${_vellum_target} PROPERTIES EXPORT_NAME "${_vellum_export_name}")
+endforeach()
 # Keep the public target spelling aligned with the header namespace. The source
 # target retains its historical hyphenated name for in-tree callers.
 if(TARGET pulp-vellum-audio)
@@ -251,6 +256,14 @@ install(TARGETS ${PULP_SDK_TARGETS}
     LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
     INCLUDES DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
 )
+if(PULP_VELLUM_TARGETS)
+    install(TARGETS ${PULP_VELLUM_TARGETS}
+        EXPORT PulpVellumTargets
+        ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
+        LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
+        INCLUDES DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
+    )
+endif()
 
 # Also install third-party targets that our exported targets depend on
 if(PULP_HAS_VST3)
@@ -911,6 +924,13 @@ install(EXPORT PulpTargets
     NAMESPACE Pulp::
     DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/Pulp
 )
+if(PULP_VELLUM_TARGETS)
+    install(EXPORT PulpVellumTargets
+        FILE PulpVellumTargets.cmake
+        NAMESPACE Pulp::
+        DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/Pulp
+    )
+endif()
 
 include(CMakePackageConfigHelpers)
 write_basic_package_version_file(

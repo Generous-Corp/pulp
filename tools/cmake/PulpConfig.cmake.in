@@ -103,19 +103,11 @@ endif()
 # pulp-gpu-audio joined the export set.)
 find_dependency(Threads)
 
-# pulp-vellum (exported only when PULP_ENABLE_PULP_VELLUM was on) links
-# Vellum::Value PUBLIC, so PulpTargets.cmake needs the Vellum package loaded
-# first. Consumers of an SDK without the bridge never look for Vellum.
+# pulp-vellum is an optional component. Its targets live in a separate export
+# file so core Pulp consumers do not need a Vellum SDK.
 set(PULP_SDK_HAS_VELLUM_BRIDGE "@PULP_SDK_HAS_VELLUM_BRIDGE@")
 if(PULP_SDK_HAS_VELLUM_BRIDGE)
     find_package(Vellum CONFIG QUIET)
-    if(NOT Vellum_FOUND)
-        set(Pulp_FOUND FALSE)
-        set(Pulp_NOT_FOUND_MESSAGE
-            "Pulp: this SDK exports Pulp::vellum and requires a Vellum SDK. "
-            "Add the Vellum SDK prefix to CMAKE_PREFIX_PATH or set Vellum_DIR.")
-        return()
-    endif()
 endif()
 
 # The Pulp SDK is built and installed in the Release configuration only.
@@ -215,6 +207,18 @@ endif()
 
 include("${CMAKE_CURRENT_LIST_DIR}/PulpTargets.cmake")
 
+set(Pulp_vellum_FOUND FALSE)
+if(PULP_SDK_HAS_VELLUM_BRIDGE AND Vellum_FOUND)
+    include("${CMAKE_CURRENT_LIST_DIR}/PulpVellumTargets.cmake")
+    set(Pulp_vellum_FOUND TRUE)
+endif()
+if("vellum" IN_LIST Pulp_FIND_COMPONENTS AND NOT Pulp_vellum_FOUND)
+    set(Pulp_FOUND FALSE)
+    set(Pulp_NOT_FOUND_MESSAGE
+        "Pulp: the vellum component needs a Vellum SDK; add it to CMAKE_PREFIX_PATH")
+    return()
+endif()
+
 # CMake cannot serialize the imported Skia targets into PulpTargets.cmake.
 # Consequently, a static Pulp::canvas export loses its PUBLIC Skia/Dawn
 # closure and downstream GUI plugins fail at link time with hundreds of Skia
@@ -260,6 +264,16 @@ endforeach()
 unset(_pulp_export_name)
 unset(_pulp_sdk_target)
 unset(_pulp_sdk_export_targets)
+
+set(_pulp_vellum_export_targets "@PULP_VELLUM_TARGETS@")
+foreach(_pulp_sdk_target IN LISTS _pulp_vellum_export_targets)
+    string(REPLACE "pulp-" "" _pulp_export_name "${_pulp_sdk_target}")
+    _pulp_require_cxx20("Pulp::${_pulp_export_name}")
+    _pulp_add_lowercase_alias("Pulp::${_pulp_export_name}" "pulp::${_pulp_export_name}")
+endforeach()
+unset(_pulp_export_name)
+unset(_pulp_sdk_target)
+unset(_pulp_vellum_export_targets)
 
 if(TARGET Pulp::yogacore)
     set_target_properties(Pulp::yogacore PROPERTIES

@@ -80,14 +80,14 @@ class VellumSdkReleaseContract(unittest.TestCase):
 
     def _archive(self, path: Path, *, targets: str = "Pulp::vellum Pulp::vellum_audio") -> None:
         members = set(rac.VELLUM_SDK_HEADERS) | {
-            "pulp-sdk/lib/cmake/Pulp/PulpTargets.cmake"
+            "pulp-sdk/lib/cmake/Pulp/PulpVellumTargets.cmake"
         }
         write_archive(
             path,
             members,
             as_zip=False,
             payload_overrides={
-                "pulp-sdk/lib/cmake/Pulp/PulpTargets.cmake": targets.encode()
+            "pulp-sdk/lib/cmake/Pulp/PulpVellumTargets.cmake": targets.encode()
             },
         )
 
@@ -216,7 +216,10 @@ def conditional_sdk_target_append(text: str, target: str) -> bool:
     """Return true only when the target append is inside its matching if block."""
     lines = text.splitlines()
     opener = re.compile(rf"^\s*if\s*\(\s*TARGET\s+{re.escape(target)}\s*\)\s*$", re.IGNORECASE)
-    append = re.compile(rf"\blist\s*\(\s*APPEND\s+PULP_SDK_TARGETS\s+{re.escape(target)}\s*\)", re.IGNORECASE)
+    append = re.compile(
+        rf"\blist\s*\(\s*APPEND\s+PULP_(?:SDK|VELLUM)_TARGETS\s+{re.escape(target)}\s*\)",
+        re.IGNORECASE,
+    )
     for index, line in enumerate(lines):
         if not opener.match(line):
             continue

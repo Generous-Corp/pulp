@@ -48,6 +48,11 @@ function(pulp_add_vellum_editor_package package)
     if(NOT _vellum_pkg_VIEW_HEADER OR NOT _vellum_pkg_VIEW_TYPE)
         message(FATAL_ERROR "${package}: VIEW_HEADER and VIEW_TYPE are required")
     endif()
+    if(NOT TARGET Pulp::vellum AND NOT TARGET pulp::vellum)
+        message(FATAL_ERROR
+            "${package}: this plug-in's Vellum editor needs a Vellum SDK; "
+            "add it to CMAKE_PREFIX_PATH")
+    endif()
     if(NOT TARGET Vellum::MirrorView_core)
         message(FATAL_ERROR "${package}: pulp_add_vellum_editor_package needs "
             "Vellum::MirrorView_core, which this Vellum SDK does not provide "
@@ -57,10 +62,6 @@ function(pulp_add_vellum_editor_package package)
         set(_pulp_vellum_target Pulp::vellum)
     elseif(TARGET pulp::vellum)
         set(_pulp_vellum_target pulp::vellum)
-    else()
-        message(FATAL_ERROR "${package}: pulp_add_vellum_editor_package needs "
-            "the Pulp SDK's optional pulp-vellum integration; configure Pulp with "
-            "PULP_ENABLE_PULP_VELLUM=ON and install that SDK")
     endif()
     if(package MATCHES "::")
         string(REPLACE "::" "-" _package_target "${package}")
@@ -112,8 +113,8 @@ function(_pulp_vellum_scripted_package context out_var)
         set(_scripted pulp::vellum-scripted)
     else()
         message(FATAL_ERROR
-            "${context}: UI_ENGINE vellum requires PULP_ENABLE_PULP_VELLUM=ON "
-            "and a Vellum SDK with Vellum::MirrorView_script")
+            "${context}: this plug-in's Vellum editor needs a Vellum SDK; "
+            "add it to CMAKE_PREFIX_PATH (and Vellum::MirrorView_script must be available)")
     endif()
     if(NOT TARGET pulp-vellum-scripted-package)
         add_library(pulp-vellum-scripted-package INTERFACE)
