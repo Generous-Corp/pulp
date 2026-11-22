@@ -6,9 +6,10 @@ import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { execFileSync } from 'node:child_process';
+import { deflateRawSync } from 'node:zlib';
 
 import { ByteReader, readSchema, makeDecoder } from './kiwi.mjs';
-import { unpackFig, isZip } from './container.mjs';
+import { unzip, unpackFig, isZip } from './container.mjs';
 import { buildScene, outline, findFrame, materializeFrame, countFramesByName, framesByName, nodesByName, DIAGNOSTIC_SEVERITY, emittedDiagnosticCodes } from './scene.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -45,6 +46,58 @@ test('fixture is a ZIP container with an inner canvas', () => {
   assert.equal(container.version, 106);
   assert.ok(container.images.size >= 1, 'should bundle at least one image');
   assert.equal(container.meta && container.meta.file_name, 'Synthetic Fixture');
+});
+
+function localZipEntry(name, data) {
+  const raw = deflateRawSync(data);
+  const header = Buffer.alloc(30);
+  header.writeUInt32LE(0x04034b50, 0);
+  header.writeUInt16LE(8, 8);
+  header.writeUInt32LE(raw.length, 18);
+  header.writeUInt32LE(data.length, 22);
+  header.writeUInt16LE(Buffer.byteLength(name), 26);
+  return Buffer.concat([header, Buffer.from(name), raw]);
+}
+
+test('unzip bounds the cumulative decompressed size across entries', () => {
+  const zip = Buffer.concat([
+    localZipEntry('a.bin', Buffer.alloc(600)),
+    localZipEntry('b.bin', Buffer.alloc(600)),
+  ]);
+  assert.equal(Object.keys(unzip(zip, { remaining: 1200 })).length, 2);
+  assert.throws(() => unzip(zip, { remaining: 1000 }), RangeError);
+});
+
+test('unzip charges overlapping stored central-directory records', () => {
+  const payload = Buffer.from('stored payload');
+  const local = Buffer.alloc(30 + payload.length);
+  local.writeUInt32LE(0x04034b50, 0);
+  local.writeUInt16LE(8, 6); // data descriptor: force central-directory parsing
+  local.writeUInt32LE(payload.length, 18);
+  local.writeUInt32LE(payload.length, 22);
+  local.writeUInt16LE(1, 26);
+  const name = Buffer.from('x');
+  const localFile = Buffer.concat([local.subarray(0, 30), name, payload]);
+  const central = [];
+  for (let i = 0; i < 20; i++) {
+    const row = Buffer.alloc(46);
+    row.writeUInt32LE(0x02014b50, 0);
+    row.writeUInt32LE(payload.length, 20);
+    row.writeUInt32LE(payload.length, 24);
+    row.writeUInt16LE(1, 28);
+    row.writeUInt32LE(0, 42);
+    central.push(Buffer.concat([row, name]));
+  }
+  const centralBytes = Buffer.concat(central);
+  const eocd = Buffer.alloc(22);
+  eocd.writeUInt32LE(0x06054b50, 0);
+  eocd.writeUInt16LE(20, 8);
+  eocd.writeUInt16LE(20, 10);
+  eocd.writeUInt32LE(centralBytes.length, 12);
+  eocd.writeUInt32LE(localFile.length, 16);
+  const zip = Buffer.concat([localFile, centralBytes, eocd]);
+  assert.throws(() => unzip(zip, { remaining: payload.length * 10 }),
+    /cumulative decompression budget/);
 });
 
 test('schema decodes and exposes a root Message type', () => {
