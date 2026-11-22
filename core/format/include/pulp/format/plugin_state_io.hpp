@@ -93,6 +93,23 @@ bool register_envelope_migration(uint32_t from_version,
 std::vector<uint8_t> serialize(const state::StateStore& store,
                                const Processor& processor);
 
+/// How much of the parameter store a host state blob carries.
+enum class StoreLayout : uint8_t {
+    /// Every parameter's id and value (the layout serialize() always writes).
+    full,
+    /// Leave the parameters to the processor when it declares
+    /// Processor::plugin_state_carries_parameters() and has a non-empty
+    /// payload: the envelope then holds a parameter-free store blob. Any other
+    /// processor gets the full store.
+    processor_owned_when_declared,
+};
+
+/// serialize() with an explicit store layout. serialize(store, processor) is
+/// StoreLayout::full. The result always loads through deserialize(), and a
+/// parameter-free store blob is also valid for releases that predate the layout.
+std::vector<uint8_t> serialize(const state::StateStore& store, const Processor& processor,
+                               StoreLayout layout);
+
 /// Restore a host-facing plugin state blob.
 ///
 /// Accepts both legacy raw StateStore blobs and the combined envelope emitted

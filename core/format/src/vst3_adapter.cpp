@@ -3354,7 +3354,8 @@ tresult PLUGIN_API PulpVst3Processor::getState(IBStream* stream) {
     // pending restart (alongside the paced poll and the latency/tail queries).
     schedule_host_notifications(InlineFallback::allowed);
     if (!processor_) return kResultFalse;
-    auto data = plugin_state_io::serialize(store_, *processor_);
+    auto data = plugin_state_io::serialize(
+        store_, *processor_, plugin_state_io::StoreLayout::processor_owned_when_declared);
     int32 written;
     return stream->write(data.data(), static_cast<int32>(data.size()), &written);
 }

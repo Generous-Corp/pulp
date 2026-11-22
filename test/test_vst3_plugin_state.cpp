@@ -1,5 +1,6 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/catch_approx.hpp>
+#include <pulp/format/plugin_state_io.hpp>
 #include <pulp/format/host_parameter_edit.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 #include <pulp/format/detail/vst3_bus_layout.hpp>
@@ -322,11 +323,30 @@ class TestVst3Processor : public pulp::format::Processor {
 
     int latency_samples() const override { return config_.latency_samples; }
 
+    // When set, the processor's own bytes also carry the gain value and
+    // restore it, so the host state may leave the parameter store out.
+    bool owns_parameters = false;
+    bool plugin_state_carries_parameters() const override {
+        return owns_parameters;
+    }
+
     std::vector<uint8_t> serialize_plugin_state() const override {
-        return std::vector<uint8_t>(plugin_state.begin(), plugin_state.end());
+        std::vector<uint8_t> bytes(plugin_state.begin(), plugin_state.end());
+        if (owns_parameters) {
+            const float gain = state().get_value(kGainParamId);
+            const auto* raw = reinterpret_cast<const uint8_t*>(&gain);
+            bytes.insert(bytes.end(), raw, raw + sizeof(gain));
+        }
+        return bytes;
     }
 
     bool deserialize_plugin_state(std::span<const uint8_t> data) override {
+        if (owns_parameters && data.size() >= sizeof(float)) {
+            float gain;
+            std::memcpy(&gain, data.data() + data.size() - sizeof(gain), sizeof(gain));
+            state().set_value(kGainParamId, gain);
+            data = data.first(data.size() - sizeof(gain));
+        }
         plugin_state.assign(data.begin(), data.end());
         return true;
     }
@@ -4045,6 +4065,59 @@ TEST_CASE("VST3 getState/setState round-trip includes plugin-owned payload",
 
     REQUIRE(loader.terminate() == Steinberg::kResultOk);
     REQUIRE(saver.terminate() == Steinberg::kResultOk);
+}
+
+TEST_CASE("VST3 state omits the parameter store for a processor that carries its parameters",
+          "[vst3][state][owned-state]") {
+    HostApp host_app;
+    auto save = [&](bool owns, float gain, std::vector<uint8_t>& out) {
+        reset_test_processor();
+        pulp::format::vst3::PulpVst3Processor saver(create_test_processor);
+        REQUIRE(saver.initialize(&host_app) == Steinberg::kResultOk);
+        auto* proc = TestVst3Processor::g_last_processor;
+        proc->owns_parameters = owns;
+        proc->state().set_value(kGainParamId, gain);
+        proc->plugin_state = "layout=64";
+        VectorStream stream;
+        REQUIRE(saver.getState(&stream) == Steinberg::kResultOk);
+        out = stream.take();
+        return proc->state().all_params().size();
+    };
+    std::vector<uint8_t> full, owned;
+    const auto params = save(false, -15.0f, full);
+    REQUIRE(save(true, -15.0f, owned) == params);
+    // Each parameter costs 8 bytes in the store; the owned save carries the
+    // processor's own 4 gain bytes instead.
+    REQUIRE(full.size() + sizeof(float) == owned.size() + 8 * params);
+
+    auto load = [&](const std::vector<uint8_t>& bytes, bool owns) {
+        reset_test_processor();
+        pulp::format::vst3::PulpVst3Processor loader(create_test_processor);
+        REQUIRE(loader.initialize(&host_app) == Steinberg::kResultOk);
+        auto* proc = TestVst3Processor::g_last_processor;
+        proc->owns_parameters = owns;
+        proc->state().set_value(kGainParamId, 9.0f);
+        proc->plugin_state = "stale";
+        VectorStream in(bytes);
+        REQUIRE(loader.setState(&in) == Steinberg::kResultOk);
+        REQUIRE_THAT(proc->state().get_value(kGainParamId), WithinAbs(-15.0, 0.01));
+        REQUIRE(proc->plugin_state == "layout=64");
+        REQUIRE(loader.terminate() == Steinberg::kResultOk);
+    };
+    load(full, false); // option off round trip
+    load(owned, true); // option on round trip
+    // A state written by the previous release: full store, plus the bytes.
+    reset_test_processor();
+    {
+        pulp::format::vst3::PulpVst3Processor src(create_test_processor);
+        REQUIRE(src.initialize(&host_app) == Steinberg::kResultOk);
+        auto* proc = TestVst3Processor::g_last_processor;
+        proc->owns_parameters = true;
+        proc->state().set_value(kGainParamId, -15.0f);
+        proc->plugin_state = "layout=64";
+        const auto old_state = pulp::format::plugin_state_io::serialize(proc->state(), *proc);
+        load(old_state, true);
+    }
 }
 
 TEST_CASE("VST3 setState rejects invalid plugin payload",
