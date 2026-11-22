@@ -725,8 +725,8 @@ class RendererLockDigestTests(unittest.TestCase):
 
 class PinTransitionTests(unittest.TestCase):
     def transition(self, **overrides):
-        value = {"schema": "pulp.pin-transition.v1", "expires_at": "2026-12-04T00:00:00Z",
-                 "entries": [{"artifact_id": "renderer/mac-universal", "old_sha256": "a" * 64,
+        value = {"schema": "pulp.pin-transition.v1", "issued_at": "2026-11-20T00:00:00Z", "expires_at": "2026-12-04T00:00:00Z",
+                 "owner": "danielraffel", "reason": "test transition", "entries": [{"artifact_id": "renderer/mac-universal", "old_sha256": "a" * 64,
                               "new_sha256": "b" * 64, "reason": "cycle", "owner": "danielraffel"}]}
         value.update(overrides)
         return value
@@ -737,14 +737,14 @@ class PinTransitionTests(unittest.TestCase):
     def test_accepts_old_digest(self):
         self.assertEqual(audit.validate_pin_transition(self.transition(), "renderer/mac-universal", "a" * 64, "b" * 64, now=self.now()), [])
 
-    def test_accepts_new_digest(self):
-        self.assertEqual(audit.validate_pin_transition(self.transition(), "renderer/mac-universal", "b" * 64, "a" * 64, now=self.now()), [])
+    def test_rejects_reverse_transition(self):
+        self.assertTrue(audit.validate_pin_transition(self.transition(), "renderer/mac-universal", "b" * 64, "a" * 64, now=self.now()))
 
     def test_rejects_third_digest(self):
         self.assertTrue(audit.validate_pin_transition(self.transition(), "renderer/mac-universal", "c" * 64, "b" * 64, now=self.now()))
 
     def test_rejects_expired(self):
-        self.assertTrue(any("expired" in e for e in audit.validate_pin_transition(self.transition(expires_at="2026-11-19T00:00:00Z"), "renderer/mac-universal", "a" * 64, "b" * 64, now=self.now())))
+        self.assertTrue(any("expired" in e for e in audit.validate_pin_transition(self.transition(issued_at="2026-11-01T00:00:00Z", expires_at="2026-11-19T00:00:00Z"), "renderer/mac-universal", "a" * 64, "b" * 64, now=self.now())))
 
     def test_rejects_unjustified_entry(self):
         self.assertTrue(audit.validate_pin_transition(self.transition(), "renderer/mac-universal", "a" * 64, "a" * 64, now=self.now()))
@@ -758,32 +758,34 @@ class RendererTransitionIntegrationTests(unittest.TestCase):
             manifest(sha=new_digest, path="gpu-runtime/renderer-lock.json", lock_platform="macos-arm64"), reader(renderer_lock(sha=old_digest)))
         self.assertEqual(status, "match", problems)
 
+    def test_other_digest_still_fails(self) -> None:
+        old_digest = "dca73c0eee5b0f6d129fe357d0754f7165c6b436051e0de947aeedd3e1bde250"
+        status, problems = audit.vellum_renderer_drift(
+            manifest(sha="e" * 64, path="gpu-runtime/renderer-lock.json", lock_platform="macos-arm64"),
+            reader(renderer_lock(sha=old_digest)))
+        self.assertEqual(status, "mismatch")
+        self.assertTrue(any("does not name" in problem for problem in problems), problems)
+
+    def test_expired_transition_fails_closed(self) -> None:
+        old_digest = "dca73c0eee5b0f6d129fe357d0754f7165c6b436051e0de947aeedd3e1bde250"
+        status, problems = audit.vellum_renderer_drift(
+            manifest(sha="1779c7d1ba5c73a0d6a1f33b77fbf30774bbd9f7542c1c42cc5129f57e99fbd4",
+                     path="gpu-runtime/renderer-lock.json", lock_platform="macos-arm64"),
+            reader(renderer_lock(sha=old_digest)),
+            now=datetime.datetime(2026, 12, 5, tzinfo=datetime.timezone.utc))
+        self.assertEqual(status, "mismatch")
+        self.assertTrue(any("expired" in problem for problem in problems), problems)
+
+    def test_missing_transition_keeps_the_normal_drift_failure(self) -> None:
+        old_digest = "dca73c0eee5b0f6d129fe357d0754f7165c6b436051e0de947aeedd3e1bde250"
+        with mock.patch.object(audit, "PIN_TRANSITION_FILE", Path("/missing/pin-transition.json")):
+            status, problems = audit.vellum_renderer_drift(
+                manifest(sha="1779c7d1ba5c73a0d6a1f33b77fbf30774bbd9f7542c1c42cc5129f57e99fbd4",
+                         path="gpu-runtime/renderer-lock.json", lock_platform="macos-arm64"),
+                reader(renderer_lock(sha=old_digest)))
+        self.assertEqual(status, "mismatch")
+        self.assertTrue(any("cannot be read" in problem for problem in problems), problems)
+
 
 if __name__ == "__main__":
     unittest.main(argv=[sys.argv[0], *(arg for arg in sys.argv[1:] if not arg.endswith(".lock"))])
-
-class PinTransitionTests(unittest.TestCase):
-    def transition(self, **overrides):
-        value = {
-            "schema": "pulp.pin-transition.v1",
-            "expires_at": "2026-12-04T00:00:00Z",
-            "entries": [{"artifact_id": "renderer/mac-universal", "old_sha256": "a" * 64,
-                         "new_sha256": "b" * 64, "reason": "cycle", "owner": "danielraffel"}],
-        }
-        value.update(overrides)
-        return value
-
-    def test_accepts_old_digest(self):
-        self.assertEqual(audit.validate_pin_transition(self.transition(), "renderer/mac-universal", "a" * 64, "b" * 64, now=datetime.datetime(2026, 11, 20, tzinfo=datetime.timezone.utc)), [])
-
-    def test_accepts_new_digest(self):
-        self.assertEqual(audit.validate_pin_transition(self.transition(), "renderer/mac-universal", "b" * 64, "a" * 64, now=datetime.datetime(2026, 11, 20, tzinfo=datetime.timezone.utc)), [])
-
-    def test_rejects_third_digest(self):
-        self.assertTrue(audit.validate_pin_transition(self.transition(), "renderer/mac-universal", "c" * 64, "b" * 64, now=datetime.datetime(2026, 11, 20, tzinfo=datetime.timezone.utc)))
-
-    def test_rejects_expired(self):
-        self.assertTrue(any("expired" in e for e in audit.validate_pin_transition(self.transition(expires_at="2026-11-19T00:00:00Z"), "renderer/mac-universal", "a" * 64, "b" * 64, now=datetime.datetime(2026, 11, 20, tzinfo=datetime.timezone.utc))))
-
-    def test_rejects_unjustified_entry(self):
-        self.assertTrue(audit.validate_pin_transition(self.transition(), "renderer/mac-universal", "a" * 64, "a" * 64, now=datetime.datetime(2026, 11, 20, tzinfo=datetime.timezone.utc)))
