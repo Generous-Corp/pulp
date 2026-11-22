@@ -106,8 +106,9 @@ find_dependency(Threads)
 # pulp-vellum is an optional component. Its targets live in a separate export
 # file so core Pulp consumers do not need a Vellum SDK.
 set(PULP_SDK_HAS_VELLUM_BRIDGE "@PULP_SDK_HAS_VELLUM_BRIDGE@")
+set(PULP_VELLUM_VERSION "@PULP_VELLUM_VERSION@")
 if(PULP_SDK_HAS_VELLUM_BRIDGE)
-    find_package(Vellum CONFIG QUIET)
+    find_package(Vellum ${PULP_VELLUM_VERSION} EXACT CONFIG QUIET)
 endif()
 
 # The Pulp SDK is built and installed in the Release configuration only.
@@ -215,7 +216,8 @@ endif()
 if("vellum" IN_LIST Pulp_FIND_COMPONENTS AND NOT Pulp_vellum_FOUND)
     set(Pulp_FOUND FALSE)
     set(Pulp_NOT_FOUND_MESSAGE
-        "Pulp: the vellum component needs a Vellum SDK; add it to CMAKE_PREFIX_PATH")
+        "Pulp: the vellum component needs Vellum ${PULP_VELLUM_VERSION} "
+        "EXACT; add the matching Vellum SDK to CMAKE_PREFIX_PATH")
     return()
 endif()
 
@@ -255,9 +257,9 @@ endfunction()
 # baseline from the root project. Preserve both pieces of public shape for
 # installed-SDK consumers so examples/templates can switch between
 # add_subdirectory(Pulp) and find_package(Pulp) without changing build files.
-set(_pulp_sdk_export_targets "@PULP_SDK_TARGETS@")
+set(_pulp_sdk_export_targets "@PULP_SDK_EXPORT_TARGETS@")
 foreach(_pulp_sdk_target IN LISTS _pulp_sdk_export_targets)
-    string(REPLACE "pulp-" "" _pulp_export_name "${_pulp_sdk_target}")
+    get_target_property(_pulp_export_name "Pulp::${_pulp_sdk_target}" EXPORT_NAME)
     _pulp_require_cxx20("Pulp::${_pulp_export_name}")
     _pulp_add_lowercase_alias("Pulp::${_pulp_export_name}" "pulp::${_pulp_export_name}")
 endforeach()
@@ -265,9 +267,9 @@ unset(_pulp_export_name)
 unset(_pulp_sdk_target)
 unset(_pulp_sdk_export_targets)
 
-set(_pulp_vellum_export_targets "@PULP_VELLUM_TARGETS@")
+set(_pulp_vellum_export_targets "@PULP_VELLUM_EXPORT_TARGETS@")
 foreach(_pulp_sdk_target IN LISTS _pulp_vellum_export_targets)
-    string(REPLACE "pulp-" "" _pulp_export_name "${_pulp_sdk_target}")
+    get_target_property(_pulp_export_name "Pulp::${_pulp_sdk_target}" EXPORT_NAME)
     _pulp_require_cxx20("Pulp::${_pulp_export_name}")
     _pulp_add_lowercase_alias("Pulp::${_pulp_export_name}" "pulp::${_pulp_export_name}")
 endforeach()

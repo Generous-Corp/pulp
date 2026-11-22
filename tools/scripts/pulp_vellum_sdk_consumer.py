@@ -15,7 +15,7 @@ find_package(Pulp CONFIG REQUIRED)
 if(NOT TARGET Pulp::format)
   message(FATAL_ERROR "core Pulp target Pulp::format is missing")
 endif()
-if(TARGET Pulp::vellum OR TARGET Pulp::vellum_audio)
+if(TARGET Pulp::vellum OR TARGET Pulp::vellum_audio OR TARGET pulp::vellum_audio)
   message(FATAL_ERROR "Vellum targets leaked into the core consumer")
 endif()
 """
@@ -28,8 +28,13 @@ foreach(target IN ITEMS Pulp::vellum Pulp::vellum_audio)
     message(FATAL_ERROR "${target} is missing from the Vellum component")
   endif()
 endforeach()
+foreach(target IN ITEMS pulp::vellum pulp::vellum_audio)
+  if(NOT TARGET ${target})
+    message(FATAL_ERROR "${target} is missing from the Vellum component")
+  endif()
+endforeach()
 add_library(vellum_probe OBJECT probe.cpp)
-target_link_libraries(vellum_probe PRIVATE Pulp::vellum Pulp::vellum_audio)
+target_link_libraries(vellum_probe PRIVATE pulp::vellum pulp::vellum_audio)
 """
 
 
@@ -38,6 +43,18 @@ def configure(source: Path, build: Path, prefix: str) -> None:
         ["cmake", "-S", str(source), "-B", str(build), "-DCMAKE_PREFIX_PATH=" + prefix],
         check=True,
     )
+
+
+def configure_rejected(source: Path, build: Path, prefix: str) -> None:
+    result = subprocess.run(
+        ["cmake", "-S", str(source), "-B", str(build), "-DCMAKE_PREFIX_PATH=" + prefix],
+        text=True,
+        capture_output=True,
+    )
+    if result.returncode == 0:
+        raise RuntimeError("a mismatched Vellum version was accepted")
+    if "needs Vellum" not in result.stderr:
+        raise RuntimeError(result.stderr)
 
 
 def main() -> int:
@@ -67,6 +84,21 @@ def main() -> int:
         subprocess.run(
             ["cmake", "--build", str(root / "vellum-build"), "--target", "vellum_probe"],
             check=True,
+        )
+
+        wrong = root / "wrong-vellum" / "lib" / "cmake" / "Vellum"
+        wrong.mkdir(parents=True)
+        (wrong / "VellumConfig.cmake").write_text(
+            "set(Vellum_FOUND TRUE)\n", encoding="utf-8"
+        )
+        (wrong / "VellumConfigVersion.cmake").write_text(
+            "set(PACKAGE_VERSION 99.99.99)\n",
+            encoding="utf-8",
+        )
+        configure_rejected(
+            vellum,
+            root / "wrong-vellum-build",
+            f"{root / 'wrong-vellum'};{args.pulp_prefix}",
         )
     return 0
 

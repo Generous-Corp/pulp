@@ -240,9 +240,19 @@ foreach(_sdk_target IN LISTS PULP_SDK_TARGETS)
     string(REPLACE "pulp-" "" _sdk_export_name "${_sdk_target}")
     set_target_properties(${_sdk_target} PROPERTIES EXPORT_NAME "${_sdk_export_name}")
 endforeach()
+set(PULP_SDK_EXPORT_TARGETS)
+foreach(_sdk_target IN LISTS PULP_SDK_TARGETS)
+    get_target_property(_sdk_export_name "${_sdk_target}" EXPORT_NAME)
+    list(APPEND PULP_SDK_EXPORT_TARGETS "${_sdk_export_name}")
+endforeach()
 foreach(_vellum_target IN LISTS PULP_VELLUM_TARGETS)
     string(REPLACE "pulp-" "" _vellum_export_name "${_vellum_target}")
     set_target_properties(${_vellum_target} PROPERTIES EXPORT_NAME "${_vellum_export_name}")
+endforeach()
+set(PULP_VELLUM_EXPORT_TARGETS)
+foreach(_vellum_target IN LISTS PULP_VELLUM_TARGETS)
+    get_target_property(_vellum_export_name "${_vellum_target}" EXPORT_NAME)
+    list(APPEND PULP_VELLUM_EXPORT_TARGETS "${_vellum_export_name}")
 endforeach()
 # Keep the public target spelling aligned with the header namespace. The source
 # target retains its historical hyphenated name for in-tree callers.
@@ -933,6 +943,9 @@ if(PULP_VELLUM_TARGETS)
 endif()
 
 include(CMakePackageConfigHelpers)
+include("${CMAKE_CURRENT_LIST_DIR}/PulpVellumLock.cmake")
+set(PULP_VELLUM_VERSION "${PULP_VELLUM_TAG}")
+string(REGEX REPLACE "^v" "" PULP_VELLUM_VERSION "${PULP_VELLUM_VERSION}")
 write_basic_package_version_file(
     "${CMAKE_BINARY_DIR}/PulpConfigVersion.cmake"
     VERSION ${PROJECT_VERSION}
