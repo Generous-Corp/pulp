@@ -1690,6 +1690,16 @@ if(UNIX)
                 "${CMAKE_SOURCE_DIR}/tools/cmake/test_pulp_plugin_identity.py")
         set_tests_properties(pulp.plugin-identity-contract PROPERTIES LABELS "pr")
     endif()
+    add_test(NAME cmake-plugin-module-fontconfig
+        COMMAND ${CMAKE_COMMAND}
+            -DPULP_SOURCE_DIR=${CMAKE_SOURCE_DIR}
+            -DWORK_DIR=${CMAKE_CURRENT_BINARY_DIR}/plugin-module-fontconfig
+            -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/test_plugin_module_fontconfig.cmake)
+    set_tests_properties(cmake-plugin-module-fontconfig PROPERTIES
+        LABELS "cmake;format"
+        TIMEOUT 120
+        SKIP_REGULAR_EXPRESSION "SKIP: configure-and-build probe is Linux-only")
+
     add_test(NAME cmake-plugin-module-probe-exit-status
         COMMAND ${CMAKE_COMMAND}
             -DPULP_SOURCE_DIR=${CMAKE_SOURCE_DIR}
