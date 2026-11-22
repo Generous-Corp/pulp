@@ -98,6 +98,23 @@ orientation cannot be assembled from different updates. The
 `examples/cv-control` application shows a fuller mapping and ingress example;
 its `ControlSample` and `SignalMapping` remain application-owned.
 
+### One observation, two musical outputs
+
+A recognition application can keep one provider-neutral observation and choose
+its musical destination at the application boundary. In a MIDI-effect mode, the
+validated gesture becomes bounded note-on and note-off messages for a host
+instrument. In a virtual-instrument mode, the same gesture is applied to the
+plugin's own voice state. The provider, camera permission, confidence checks,
+restart handling, and replay fixture are shared. The audio callback still sees
+only validated events or the safe fallback.
+
+This split keeps a camera or model out of the processor while supporting both a
+browser page and native plugin formats. A browser page can show the camera and
+run inference in the UI thread, then use WAM/WebCLAP MIDI ingress. A native
+plugin can receive the same observation from a companion process, OSC/IPC, or a
+replay source. A visible camera preview is an application diagnostic and does
+not grant the audio plugin direct device access.
+
 ```mermaid
 flowchart LR
     A[Camera, sensor, MIDI, OSC, or ML worker] --> B[Application-owned handoff]
