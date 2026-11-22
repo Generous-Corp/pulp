@@ -1109,7 +1109,7 @@ def validate_pin_transition(transition: object, artifact_id: str, old_digest: st
         return errors + ["pin transition entries must be a list"]
     matches = [entry for entry in entries
                if isinstance(entry, dict) and entry.get("artifact_id") == artifact_id]
-    if len(matches) != 1:
+    if len(entries) != 1 or len(matches) != 1:
         return errors + [f"pin transition must have exactly one entry for {artifact_id}"]
     entry = matches[0]
     old = entry.get("old_sha256")
