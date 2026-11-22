@@ -1,0 +1,13 @@
+{
+  "schema_version": 1,
+  "event_id": "20261122-timer-zero-tolerance",
+  "kind": "exported-path-change",
+  "created_at": "2026-11-22T11:49:32Z",
+  "receipt_export_id": "20261107-f0ac0a4ff392",
+  "paths": [
+    "core/platform/include/pulp/platform/main_thread.hpp",
+    "core/platform/src/main_thread.cpp"
+  ],
+  "vellum_inherits": true,
+  "rationale": "Repeating main-thread timers on macOS now use zero tolerance and keep the period grid; this lowers idle CPU and applies unchanged to any consumer of the timer."
+}
