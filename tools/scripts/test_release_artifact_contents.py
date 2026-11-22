@@ -90,6 +90,7 @@ class VellumSdkCmakeContract(unittest.TestCase):
             'string(REPLACE "pulp-" "" _pulp_export_name "${_pulp_sdk_target}")',
             config_text,
         )
+        self.assertEqual(config_text.count('MATCHES "-NOTFOUND$"'), 2)
         self.assertIn(
             "find_package(Vellum ${PULP_VELLUM_VERSION} EXACT CONFIG QUIET)",
             config_text,
