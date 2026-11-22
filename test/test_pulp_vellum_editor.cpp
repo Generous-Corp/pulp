@@ -5,11 +5,8 @@
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 
-#include <pulp/dataplane/value_channel_set.hpp>
-#include <pulp/dataplane/value_source.hpp>
 #include <pulp/format/editor_host.hpp>
 #include <pulp/format/processor.hpp>
-#include <pulp/format/value_channel_visual_port.hpp>
 #include <pulp/runtime/log_sink.hpp>
 #include <pulp/state/store.hpp>
 
@@ -31,10 +28,10 @@
 
 #if defined(PULP_TEST_VELLUM_SCRIPTED_AUDIO)
 #include <pulp/vellum_audio/audio_widgets.hpp>
-#include <algorithm>
-#include <array>
 #endif
 
+#include <algorithm>
+#include <array>
 #include <cstdint>
 #include <memory>
 #include <optional>
@@ -328,47 +325,13 @@ template <typename Root = HookView> struct HookFixture {
 
 } // namespace
 
-TEST_CASE("Vellum editor idle repaints for visual publishes and preserves view damage",
-          "[pulp-vellum][editor][idle-damage]") {
-    pulp::dataplane::ValueChannelSet channels;
-    REQUIRE(channels.declare_scalar("other"));
-    auto* meter = channels.declare_scalar("meter");
-    REQUIRE(meter);
-    pulp::format::ValueChannelVisualPort visual_port(&channels);
-    HookFixture fixture(&visual_port);
-    REQUIRE(fixture.editor->attach(fixture.parent()));
-    fixture.host->clear_pending_dirty();
-    fixture.host->repaint_calls = 0;
-
-    for (int i = 0; i < 60; ++i)
-        fixture.editor->idle();
-    CHECK(fixture.lifecycle.ticks == 60);
-    CHECK(fixture.host->repaint_calls == 0);
-
-    fixture.host->repaint_calls = 0;
-    meter->publish(0.5f);
-    fixture.editor->idle();
-    CHECK(fixture.host->repaint_calls == 1);
-    fixture.editor->idle();
-    CHECK(fixture.host->repaint_calls == 1);
-
-    fixture.host->repaint_calls = 0;
-    fixture.host->mark_dirty_region({1, 2, 3, 4});
-    REQUIRE(fixture.host->has_pending_dirty_bounds());
-    CHECK(fixture.host->repaint_calls == 1);
-    fixture.editor->idle();
-    CHECK(fixture.host->repaint_calls == 1);
-    CHECK(fixture.host->pending_dirty_bounds().width == 3.0f);
-}
-
 TEST_CASE("Vellum editor reports a Dawn bootstrap failure on attach",
           "[pulp-vellum][.bootstrap-failure]") {
     using namespace ::vellum::graphics;
     const DawnBootstrap incompatible{
         .abi_version = kDawnBootstrapAbiVersion,
-        .callback = +[](const DawnBootstrapRequest&, void*, std::string*) {
-            return DawnBootstrapResult::ready;
-        },
+        .callback = +[](const DawnBootstrapRequest&, void*,
+                        std::string*) { return DawnBootstrapResult::ready; },
     };
     // This registration owns the process, so CTest runs this case on its own.
     REQUIRE(register_dawn_bootstrap(incompatible, "test-incompatible-revision", nullptr));
@@ -393,8 +356,8 @@ TEST_CASE("Vellum editor reports a Dawn bootstrap failure on attach",
         auto editor = factory.create(processor, context, pulp::format::EditorRole::editor);
         REQUIRE(editor);
         CHECK_FALSE(editor->attach({.kind = pulp::format::NativeParentKind::none}));
-        CHECK_FALSE(editor->attach({.kind = pulp::format::NativeParentKind::cocoa_view,
-                                    .handle = &context}));
+        CHECK_FALSE(editor->attach(
+            {.kind = pulp::format::NativeParentKind::cocoa_view, .handle = &context}));
         const auto attach_error = []<typename Editor>(const Editor& failed) -> std::string_view {
             if constexpr (requires { failed.attach_error(); })
                 return failed.attach_error();
@@ -924,10 +887,9 @@ TEST_CASE("Vellum scripted editor mounts and exchanges parameters through the ho
 }
 #endif
 
-#if defined(PULP_TEST_VELLUM_SCRIPTED_AUDIO)
 namespace {
 
-class ScriptVisualPort final : public pulp::format::VisualPort {
+class TestVisualPort final : public pulp::format::VisualPort {
   public:
     std::size_t channel_count() const noexcept override {
         return 3;
@@ -978,6 +940,37 @@ class ScriptVisualPort final : public pulp::format::VisualPort {
 
 } // namespace
 
+TEST_CASE("Vellum editor idle repaints for visual publishes and preserves view damage",
+          "[pulp-vellum][editor][idle-damage]") {
+    TestVisualPort visual_port;
+    HookFixture fixture(&visual_port);
+    REQUIRE(fixture.editor->attach(fixture.parent()));
+    fixture.host->clear_pending_dirty();
+    fixture.host->repaint_calls = 0;
+
+    for (int i = 0; i < 60; ++i)
+        fixture.editor->idle();
+    CHECK(fixture.lifecycle.ticks == 60);
+    CHECK(fixture.host->repaint_calls == 0);
+
+    fixture.host->repaint_calls = 0;
+    visual_port.level = 0.5f;
+    ++visual_port.frame;
+    fixture.editor->idle();
+    CHECK(fixture.host->repaint_calls == 1);
+    fixture.editor->idle();
+    CHECK(fixture.host->repaint_calls == 1);
+
+    fixture.host->repaint_calls = 0;
+    fixture.host->mark_dirty_region({1, 2, 3, 4});
+    REQUIRE(fixture.host->has_pending_dirty_bounds());
+    CHECK(fixture.host->repaint_calls == 1);
+    fixture.editor->idle();
+    CHECK(fixture.host->repaint_calls == 1);
+    CHECK(fixture.host->pending_dirty_bounds().width == 3.0f);
+}
+
+#if defined(PULP_TEST_VELLUM_SCRIPTED_AUDIO)
 TEST_CASE("Vellum scripted editor samples its own visual feed on idle",
           "[pulp-vellum][editor][scripted-editor]") {
     using pulp::vellum_audio::AnalyzerScope;
@@ -992,7 +985,7 @@ TEST_CASE("Vellum scripted editor samples its own visual feed on idle",
         });
 
     Fixture first, second;
-    ScriptVisualPort first_port, second_port;
+    TestVisualPort first_port, second_port;
     Context first_context{*first.port, &first_port};
     Context second_context{*second.port, &second_port};
     Processor first_processor, second_processor;
