@@ -33,6 +33,7 @@
 #include <cstdint>
 #include <memory>
 #include <optional>
+#include <string_view>
 
 namespace {
 
@@ -750,11 +751,12 @@ TEST_CASE("Vellum native messages are scoped to the editor attachment that regis
 #if defined(PULP_TEST_VELLUM_SCRIPTED_EDITOR)
 namespace {
 
-template <typename Widget> Widget* find_widget(::vellum::view::View& view) {
-    if (auto* widget = dynamic_cast<Widget*>(&view))
+template <typename Widget>
+Widget* find_widget(::vellum::view::View& view, std::string_view id = {}) {
+    if (auto* widget = dynamic_cast<Widget*>(&view); widget && (id.empty() || view.id() == id))
         return widget;
     for (std::size_t i = 0; i < view.child_count(); ++i) {
-        if (auto* widget = find_widget<Widget>(*view.child_at(i)))
+        if (auto* widget = find_widget<Widget>(*view.child_at(i), id))
             return widget;
     }
     return nullptr;
@@ -841,15 +843,17 @@ namespace {
 class ScriptVisualPort final : public pulp::format::VisualPort {
   public:
     std::size_t channel_count() const noexcept override {
-        return 3;
+        return 5;
     }
 
     pulp::format::VisualChannelInfo channel(std::size_t index) const noexcept override {
         using Shape = pulp::format::VisualChannelShape;
         constexpr std::array channels{
-            pulp::format::VisualChannelInfo{"scope", {}, Shape::vector, 0.0f},
+            pulp::format::VisualChannelInfo{"input-spectrum", {}, Shape::vector, 0.0f},
             pulp::format::VisualChannelInfo{"aux", {}, Shape::scalar, 0.0f},
+            pulp::format::VisualChannelInfo{"input-meter", {}, Shape::meter, 0.0f},
             pulp::format::VisualChannelInfo{"meter", {}, Shape::meter, 0.0f},
+            pulp::format::VisualChannelInfo{"scope", {}, Shape::vector, 0.0f},
         };
         return channels[index];
     }
@@ -860,18 +864,18 @@ class ScriptVisualPort final : public pulp::format::VisualPort {
 
     std::size_t read_meter(std::size_t index, std::span<float> rms,
                            std::span<float> peak) noexcept override {
-        if (index != 2 || rms.empty() || peak.empty())
+        if ((index != 2 && index != 3) || rms.empty() || peak.empty())
             return 0;
-        rms.front() = level;
-        peak.front() = level + 0.2f;
+        rms.front() = index == 3 ? level : 0.125f;
+        peak.front() = rms.front() + 0.2f;
         return 1;
     }
 
     std::size_t read_vector(std::size_t index, std::span<float> values) noexcept override {
-        if (index != 0 || values.size() < bins.size())
+        if ((index != 0 && index != 4) || values.size() < bins.size())
             return 0;
         std::copy(bins.begin(), bins.end(), values.begin());
-        return bins.size();
+        return index == 4 ? bins.size() : 1;
     }
 
     std::size_t read_events(std::size_t, std::span<pulp::format::VisualEvent>) noexcept override {
@@ -879,7 +883,7 @@ class ScriptVisualPort final : public pulp::format::VisualPort {
     }
 
     std::uint32_t publish_count(std::size_t index) const noexcept override {
-        return index == 0 || index == 2 ? frame : 0;
+        return index < channel_count() && index != 1 ? frame : 0;
     }
 
     float level = 0.0f;
@@ -929,12 +933,15 @@ TEST_CASE("Vellum scripted editor samples its own visual feed on idle",
     second_editor->idle();
 
     const auto require_widgets = [](::vellum::view::View& view, float level) {
-        const auto* meter = find_widget<LevelMeter>(view);
+        const auto* meter = find_widget<LevelMeter>(view, "meter");
+        const auto* default_meter = find_widget<LevelMeter>(view, "default-meter");
         const auto* scope = find_widget<AnalyzerScope>(view);
         REQUIRE(meter);
+        REQUIRE(default_meter);
         REQUIRE(scope);
         CHECK(meter->rms() == Catch::Approx(level));
         CHECK(meter->peak() == Catch::Approx(level + 0.2f));
+        CHECK(default_meter->rms() == Catch::Approx(0.125f));
         CHECK(scope->column_count() == 3);
         CHECK_FALSE(meter->stale());
         CHECK_FALSE(scope->stale());
