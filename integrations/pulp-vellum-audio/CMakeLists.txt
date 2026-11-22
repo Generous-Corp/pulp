@@ -3,7 +3,7 @@
 find_package(Vellum CONFIG REQUIRED)
 
 add_library(pulp-vellum-audio STATIC src/audio_display_provider.cpp src/audio_widgets.cpp
-    src/register_audio_widgets.cpp)
+    src/register_audio_widgets.cpp src/waveform_editor.cpp src/waveform_editor_primitives.cpp)
 add_library(pulp::vellum-audio ALIAS pulp-vellum-audio)
 target_include_directories(pulp-vellum-audio PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>)
