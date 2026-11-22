@@ -568,6 +568,7 @@ int cmd_create(const std::vector<std::string>& args) {
     }
 
     std::string lower_name_underscored = replace_all_str(lower_name, "-", "_");
+    std::string test_name = "test_" + lower_name_underscored + ".cpp";
 
     // Template variables
     std::vector<std::pair<std::string, std::string>> vars = {
@@ -596,21 +597,6 @@ int cmd_create(const std::vector<std::string>& args) {
         {"UI_MODE_LINE", ui == "none" ? "NO_EDITOR" : ""},
         {"VIEW_HEADER", lower_name_underscored + "_view.hpp"},
         {"VIEW_TYPE", ns + "::" + class_name + "View"},
-        {"VELLUM_EDITOR_LINE", ui == "vellum"
-                                   ? "pulp_add_vellum_editor_package(" + class_name +
-                                         "_VellumEditor\n"
-                                         "    VIEW_HEADER \"" +
-                                         lower_name_underscored +
-                                         "_view.hpp\"\n"
-                                         "    VIEW_TYPE " +
-                                         ns + "::" + class_name +
-                                         "View\n"
-                                         "    VIEW_INCLUDE_DIRS \"${CMAKE_CURRENT_SOURCE_DIR}\"\n"
-                                         "    SOURCES \"" +
-                                         lower_name_underscored +
-                                         "_view.cpp\"\n"
-                                         ")"
-                                   : ""},
         {"VELLUM_FIND_LINE", ui == "vellum" ? "find_package(Vellum CONFIG REQUIRED)" : ""},
         {"VELLUM_HELPER_LINE",
          ui == "vellum"
@@ -693,18 +679,37 @@ int cmd_create(const std::vector<std::string>& args) {
         }
     }
 
+    const auto cmake_template = cmake_template_dir / "CMakeLists.txt.template";
+    const auto cmake_content = read_file_contents(cmake_template);
+    const bool organized_layout =
+        !template_kit && cmake_content.find("tests/test_{{LOWER_NAME}}.cpp") != std::string::npos;
+    const std::string source_prefix = organized_layout ? "src/" : "";
+    const std::string entry_prefix = organized_layout ? "src/entry/" : "";
+    const std::string test_prefix = organized_layout ? "tests/" : "";
+
     if (ui == "vellum") {
-        const auto cmake_template = cmake_template_dir / "CMakeLists.txt.template";
         const bool has_view_templates = fs::exists(source_template_dir / "view.hpp.template") &&
                                         fs::exists(source_template_dir / "view.cpp.template");
-        if (!fs::exists(cmake_template) ||
-            read_file_contents(cmake_template).find("{{UI_LINE}}") == std::string::npos ||
+        if (!fs::exists(cmake_template) || cmake_content.find("{{UI_LINE}}") == std::string::npos ||
             !has_view_templates) {
             std::cerr << "Error: --ui vellum is not available for the " << template_key
                       << " template yet; it uses a script UI\n";
             return 1;
         }
     }
+
+    std::string vellum_editor;
+    if (ui == "vellum") {
+        const auto view_include =
+            organized_layout ? "${CMAKE_CURRENT_SOURCE_DIR}/src" : "${CMAKE_CURRENT_SOURCE_DIR}";
+        vellum_editor = "pulp_add_vellum_editor_package(" + class_name + "_VellumEditor\n";
+        vellum_editor += "    VIEW_HEADER \"" + lower_name_underscored + "_view.hpp\"\n";
+        vellum_editor += "    VIEW_TYPE " + ns + "::" + class_name + "View\n";
+        vellum_editor += std::string("    VIEW_INCLUDE_DIRS \"") + view_include + "\"\n";
+        vellum_editor +=
+            "    SOURCES \"" + source_prefix + lower_name_underscored + "_view.cpp\"\n)";
+    }
+    vars.emplace_back("VELLUM_EDITOR_LINE", vellum_editor);
 
     fs::create_directories(out_dir);
     if (standalone_mode) {
@@ -723,20 +728,19 @@ int cmd_create(const std::vector<std::string>& args) {
     log("Creating " + name + " (" + type + ") at " + out_dir.string() + "\n\n");
 
     struct FileMapping { std::string tmpl; std::string output; };
-    std::string test_name = "test_" + replace_all_str(lower_name, "-", "_") + ".cpp";
     std::vector<FileMapping> file_map = {
-        {"processor.hpp.template", header_name},
-        {"processor.cpp.template", source_name},
-        {"view.hpp.template", lower_name_underscored + "_view.hpp"},
-        {"view.cpp.template", lower_name_underscored + "_view.cpp"},
-        {"agent_operations.cpp.template", "agent_operations.cpp"},
+        {"processor.hpp.template", source_prefix + header_name},
+        {"processor.cpp.template", source_prefix + source_name},
+        {"view.hpp.template", source_prefix + lower_name_underscored + "_view.hpp"},
+        {"view.cpp.template", source_prefix + lower_name_underscored + "_view.cpp"},
+        {"agent_operations.cpp.template", source_prefix + "agent_operations.cpp"},
         {"CMakeLists.txt.template", "CMakeLists.txt"},
-        {"clap_entry.cpp.template", "clap_entry.cpp"},
-        {"vst3_entry.cpp.template", "vst3_entry.cpp"},
-        {"lv2_entry.cpp.template", "lv2_entry.cpp"},
-        {"au_v2_entry.cpp.template", "au_v2_entry.cpp"},
-        {"aax_entry.cpp.template", "aax_entry.cpp"},
-        {"test.cpp.template", test_name},
+        {"clap_entry.cpp.template", entry_prefix + "clap_entry.cpp"},
+        {"vst3_entry.cpp.template", entry_prefix + "vst3_entry.cpp"},
+        {"lv2_entry.cpp.template", entry_prefix + "lv2_entry.cpp"},
+        {"au_v2_entry.cpp.template", entry_prefix + "au_v2_entry.cpp"},
+        {"aax_entry.cpp.template", entry_prefix + "aax_entry.cpp"},
+        {"test.cpp.template", test_prefix + test_name},
     };
 
     if (mpe_mode && type != "instrument") {
@@ -775,14 +779,18 @@ int cmd_create(const std::vector<std::string>& args) {
                     "\n#include <pulp/midi/mpe_buffer.hpp>");
             }
         }
+        fs::create_directories((out_dir / outfile).parent_path());
         std::ofstream f(out_dir / outfile);
         f << expanded;
-        log("  Created " + outfile + (mpe_mode && outfile == header_name ? " (MPE)" : "") + "\n");
+        log("  Created " + outfile +
+            (mpe_mode && tmpl_file == "processor.hpp.template" ? " (MPE)" : "") + "\n");
     }
 
     // Standalone main.cpp
     if (formats.find("Standalone") != std::string::npos) {
-        std::ofstream f(out_dir / "main.cpp");
+        const auto main_path = out_dir / (source_prefix + "main.cpp");
+        fs::create_directories(main_path.parent_path());
+        std::ofstream f(main_path);
         f << "#include \"" << header_name << "\"\n";
         f << "#include <pulp/format/standalone.hpp>\n\n";
         f << "int main() {\n";
@@ -797,7 +805,7 @@ int cmd_create(const std::vector<std::string>& args) {
         f << "    app.set_config(config);\n";
         f << "    return app.run_with_editor(false) ? 0 : 1;\n";
         f << "}\n";
-        log("  Created main.cpp\n");
+        log("  Created " + source_prefix + "main.cpp\n");
     }
 
     // Copy UI script directory if template includes one
@@ -835,14 +843,34 @@ int cmd_create(const std::vector<std::string>& args) {
         } else {
             f << "sdk_version = \"latest\"\n";
         }
-        if (!root.empty()) {
-            auto local_sdk_dir = local_sdk_cache_path(sdk_version);
-            f << "sdk_path = \"" << local_sdk_dir.generic_string() << "\"\n";
-            f << "sdk_checkout = \"" << root.generic_string() << "\"\n";
-        }
         log("  Created pulp.toml\n");
         if (!pin_at_create) {
             log("  SDK mode: floating (tracks latest installed) — pin with `pulp project pin <version>`\n");
+        }
+    }
+
+    if (standalone_mode && organized_layout) {
+        const auto common = templates_base / "standalone" / "common";
+        for (const auto& [input, output] : std::array<FileMapping, 4>{{
+                 {"README.md.template", "README.md"},
+                 {"ci.yml.template", ".github/workflows/ci.yml"},
+                 {"gitignore.template", ".gitignore"},
+                 {"Testing.cmake.template", "cmake/Testing.cmake"},
+             }}) {
+            const auto source = common / input;
+            const auto destination = out_dir / output;
+            if (!fs::is_regular_file(source)) {
+                std::cerr << "Error: missing template " << source.string() << "\n";
+                return 1;
+            }
+            fs::create_directories(destination.parent_path());
+            std::ofstream file(destination);
+            file << expand_template_str(read_file_contents(source), vars);
+            if (!file) {
+                std::cerr << "Error: could not write " << destination.string() << "\n";
+                return 1;
+            }
+            log("  Created " + output + "\n");
         }
     }
 

@@ -1,10 +1,10 @@
 # {{PLUGIN_NAME}} — Minimal Pulp Project
 
-add_executable({{TARGET_NAME}} main.cpp)
+add_executable({{TARGET_NAME}} src/main.cpp)
 target_link_libraries({{TARGET_NAME}} PRIVATE pulp::format)
-target_include_directories({{TARGET_NAME}} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_include_directories({{TARGET_NAME}} PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src")
 
-add_executable({{TARGET_NAME}}-test test_{{LOWER_NAME}}.cpp)
+add_executable({{TARGET_NAME}}-test tests/test_{{LOWER_NAME}}.cpp)
 target_link_libraries({{TARGET_NAME}}-test PRIVATE pulp::format Catch2::Catch2WithMain)
-target_include_directories({{TARGET_NAME}}-test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_include_directories({{TARGET_NAME}}-test PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src")
 catch_discover_tests({{TARGET_NAME}}-test)

@@ -438,12 +438,52 @@ pub fn scaffold(
         )));
     }
 
+    // Pick template_key (prefer --template if supplied).
+    let template_key = args.template.clone().unwrap_or_else(|| kind.to_owned());
+    let source_template_dir = templates_base.join(&template_key);
+    let standalone_mode = !args.in_tree;
+    let mut cmake_template_dir = if standalone_mode {
+        templates_base.join("standalone").join(&template_key)
+    } else {
+        source_template_dir.clone()
+    };
+    if standalone_mode && !cmake_template_dir.exists() {
+        cmake_template_dir = source_template_dir.clone();
+    }
+
+    if !source_template_dir.exists() {
+        return Err(CliError::Other(format!(
+            "Error: template directory not found at {}",
+            source_template_dir.display()
+        )));
+    }
+
+    let cmake_content =
+        fs::read_to_string(cmake_template_dir.join("CMakeLists.txt.template")).unwrap_or_default();
+    let organized_layout = cmake_content.contains("tests/test_{{LOWER_NAME}}.cpp");
+    let source_dir = if organized_layout { "src" } else { "" };
+    let entry_dir = if organized_layout { "src/entry" } else { "" };
+    let tests_dir = if organized_layout { "tests" } else { "" };
+
+    if args.ui == "vellum" {
+        let supports_ui = cmake_content.contains("{{UI_LINE}}");
+        let has_view_templates = source_template_dir.join("view.hpp.template").is_file()
+            && source_template_dir.join("view.cpp.template").is_file();
+        if !supports_ui || !has_view_templates {
+            return Err(CliError::BadUsage(format!(
+                "--ui vellum is not available for the {template_key} template yet; it uses a script UI"
+            )));
+        }
+    }
+
     let ui_mode_line = if args.ui == "none" { "NO_EDITOR".to_owned() } else { String::new() };
     let view_header = format!("{lower_underscored}_view.hpp");
     let view_source = format!("{lower_underscored}_view.cpp");
     let view_type = format!("{ns}::{class_name}View");
     let vellum_editor_line = if args.ui == "vellum" {
-        format!("pulp_add_vellum_editor_package({class_name}_VellumEditor\n    VIEW_HEADER \"{view_header}\"\n    VIEW_TYPE {view_type}\n    VIEW_INCLUDE_DIRS \"${{CMAKE_CURRENT_SOURCE_DIR}}\"\n    SOURCES \"{view_source}\"\n)")
+        let source_prefix = if organized_layout { "src/" } else { "" };
+        let include_suffix = if organized_layout { "/src" } else { "" };
+        format!("pulp_add_vellum_editor_package({class_name}_VellumEditor\n    VIEW_HEADER \"{view_header}\"\n    VIEW_TYPE {view_type}\n    VIEW_INCLUDE_DIRS \"${{CMAKE_CURRENT_SOURCE_DIR}}{include_suffix}\"\n    SOURCES \"{source_prefix}{view_source}\"\n)")
     } else { String::new() };
     let ui_line = if args.ui == "vellum" {
         format!("UI {class_name}_VellumEditor")
@@ -484,39 +524,6 @@ pub fn scaffold(
         ("VELLUM_HELPER_LINE", &vellum_helper_line),
     ];
 
-    // Pick template_key (prefer --template if supplied).
-    let template_key = args.template.clone().unwrap_or_else(|| kind.to_owned());
-    let source_template_dir = templates_base.join(&template_key);
-    let standalone_mode = !args.in_tree;
-    let mut cmake_template_dir = if standalone_mode {
-        templates_base.join("standalone").join(&template_key)
-    } else {
-        source_template_dir.clone()
-    };
-    if standalone_mode && !cmake_template_dir.exists() {
-        cmake_template_dir = source_template_dir.clone();
-    }
-
-    if !source_template_dir.exists() {
-        return Err(CliError::Other(format!(
-            "Error: template directory not found at {}",
-            source_template_dir.display()
-        )));
-    }
-
-    if args.ui == "vellum" {
-        let supports_ui = fs::read_to_string(cmake_template_dir.join("CMakeLists.txt.template"))
-            .map(|t| t.contains("{{UI_LINE}}"))
-            .unwrap_or(false);
-        let has_view_templates = source_template_dir.join("view.hpp.template").is_file()
-            && source_template_dir.join("view.cpp.template").is_file();
-        if !supports_ui || !has_view_templates {
-            return Err(CliError::BadUsage(format!(
-                "--ui vellum is not available for the {template_key} template yet; it uses a script UI"
-            )));
-        }
-    }
-
     fs::create_dir_all(out_dir).map_err(|e| CliError::io(out_dir.to_path_buf(), e))?;
     if standalone_mode {
         writeln!(log, "Mode: standalone product project (default)").map_err(io)?;
@@ -532,28 +539,20 @@ pub fn scaffold(
     )
     .map_err(io)?;
 
-    // File map — same source-to-output list as C++.
     let test_name = format!("test_{lower_underscored}.cpp");
-    let file_map: [(&str, &str); 12] = [
-        ("processor.hpp.template", "processor.hpp"), // overwritten below
-        ("processor.cpp.template", "processor.cpp"), // overwritten below
-        ("view.hpp.template", "view.hpp"),
-        ("view.cpp.template", "view.cpp"),
-        ("agent_operations.cpp.template", "agent_operations.cpp"),
-        ("CMakeLists.txt.template", "CMakeLists.txt"),
-        ("clap_entry.cpp.template", "clap_entry.cpp"),
-        ("vst3_entry.cpp.template", "vst3_entry.cpp"),
-        ("lv2_entry.cpp.template", "lv2_entry.cpp"),
-        ("au_v2_entry.cpp.template", "au_v2_entry.cpp"),
-        ("aax_entry.cpp.template", "aax_entry.cpp"),
-        ("test.cpp.template", "test.cpp"),
-    ];
-    // We overwrite the processor header to <header_name>, and the test
-    // to test_<lower>.cpp, via this table:
-    let rename: [(&str, &str); 3] = [
-        ("processor.hpp", header_name.as_str()),
-        ("processor.cpp", source_name.as_str()),
-        ("test.cpp", test_name.as_str()),
+    let file_map = [
+        ("processor.hpp.template", source_dir, header_name.as_str()),
+        ("processor.cpp.template", source_dir, source_name.as_str()),
+        ("view.hpp.template", source_dir, view_header.as_str()),
+        ("view.cpp.template", source_dir, view_source.as_str()),
+        ("agent_operations.cpp.template", source_dir, "agent_operations.cpp"),
+        ("CMakeLists.txt.template", "", "CMakeLists.txt"),
+        ("clap_entry.cpp.template", entry_dir, "clap_entry.cpp"),
+        ("vst3_entry.cpp.template", entry_dir, "vst3_entry.cpp"),
+        ("lv2_entry.cpp.template", entry_dir, "lv2_entry.cpp"),
+        ("au_v2_entry.cpp.template", entry_dir, "au_v2_entry.cpp"),
+        ("aax_entry.cpp.template", entry_dir, "aax_entry.cpp"),
+        ("test.cpp.template", tests_dir, test_name.as_str()),
     ];
 
     let mut mpe_mode = args.mpe;
@@ -566,7 +565,7 @@ pub fn scaffold(
         mpe_mode = false;
     }
 
-    for (tmpl_file, default_out) in file_map {
+    for (tmpl_file, directory, filename) in file_map {
         if (matches!(tmpl_file, "view.hpp.template" | "view.cpp.template") && args.ui != "vellum") {
             continue;
         }
@@ -608,17 +607,16 @@ pub fn scaffold(
                 expanded.insert_str(insert_at, "\n#include <pulp/midi/mpe_buffer.hpp>");
             }
         }
-        let final_name = match default_out {
-            "view.hpp" => view_header.as_str(),
-            "view.cpp" => view_source.as_str(),
-            _ => rename.iter().find(|(k, _)| *k == default_out).map_or(default_out, |(_, v)| *v),
-        };
-        let dest = out_dir.join(final_name);
+        let relative = Path::new(directory).join(filename);
+        let dest = out_dir.join(&relative);
+        let parent = dest.parent().expect("scaffold file has an output directory");
+        fs::create_dir_all(parent).map_err(|e| CliError::io(parent.to_path_buf(), e))?;
         fs::write(&dest, expanded).map_err(|e| CliError::io(dest.clone(), e))?;
         writeln!(
             log,
-            "  Created {final_name}{}",
-            if mpe_mode && final_name == header_name {
+            "  Created {}{}",
+            relative.display(),
+            if mpe_mode && tmpl_file == "processor.hpp.template" {
                 " (MPE)"
             } else {
                 ""
@@ -643,9 +641,12 @@ pub fn scaffold(
             ns = ns,
             in_ch = if kind == "instrument" { 0 } else { 2 },
         );
-        let main_path = out_dir.join("main.cpp");
+        let main_dir = out_dir.join(source_dir);
+        fs::create_dir_all(&main_dir).map_err(|e| CliError::io(main_dir.clone(), e))?;
+        let main_path = main_dir.join("main.cpp");
         fs::write(&main_path, main_body).map_err(|e| CliError::io(main_path, e))?;
-        writeln!(log, "  Created main.cpp").map_err(io)?;
+        writeln!(log, "  Created {}", Path::new(source_dir).join("main.cpp").display())
+            .map_err(io)?;
     }
 
     // UI directory copy.
@@ -670,20 +671,29 @@ pub fn scaffold(
 
     // Standalone pulp.toml.
     if standalone_mode {
-        use std::fmt::Write as _;
-        let mut body = String::new();
-        body.push_str("[pulp]\n");
-        let _ = writeln!(body, "sdk_version = \"{sdk_version}\"");
-        if let Some(r) = root {
-            let _ = writeln!(
-                body,
-                "sdk_checkout = \"{}\"",
-                r.display().to_string().replace('\\', "/")
-            );
-        }
+        let body = format!("[pulp]\nsdk_version = \"{sdk_version}\"\n");
         let toml_path = out_dir.join("pulp.toml");
         fs::write(&toml_path, body).map_err(|e| CliError::io(toml_path, e))?;
         writeln!(log, "  Created pulp.toml").map_err(io)?;
+    }
+
+    if standalone_mode && organized_layout {
+        let common = templates_base.join("standalone").join("common");
+        for (input, output) in [
+            ("README.md.template", "README.md"),
+            ("ci.yml.template", ".github/workflows/ci.yml"),
+            ("gitignore.template", ".gitignore"),
+            ("Testing.cmake.template", "cmake/Testing.cmake"),
+        ] {
+            let source = common.join(input);
+            let content = fs::read_to_string(&source).map_err(|e| CliError::io(source, e))?;
+            let destination = out_dir.join(output);
+            let parent = destination.parent().expect("scaffold file has an output directory");
+            fs::create_dir_all(parent).map_err(|e| CliError::io(parent.to_path_buf(), e))?;
+            fs::write(&destination, expand_template(&content, &vars))
+                .map_err(|e| CliError::io(destination, e))?;
+            writeln!(log, "  Created {output}").map_err(io)?;
+        }
     }
 
     // Android template tree copy (when --targets includes android).
@@ -881,6 +891,40 @@ mod tests {
         )
         .unwrap();
         fs::write(templates.join("test.cpp.template"), "t={{LOWER_NAME}}\n").unwrap();
+    }
+
+    #[test]
+    fn built_in_standalone_scaffolds_are_portable() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let templates = root.join("tools/templates");
+        for kind in ["effect", "instrument", "app", "bare", "gain", "agent-toolkit"] {
+            let plugin = matches!(kind, "effect" | "instrument" | "gain");
+            let args = CreateArgs {
+                name: "Demo".into(),
+                kind: if kind == "gain" { "effect".into() } else { kind.into() },
+                template: Some(kind.into()),
+                ..Default::default()
+            };
+            let out = temp.path().join(kind);
+            scaffold(&args, &out, &templates, Some(&root), "1.2.3", &mut Vec::new())
+                .unwrap();
+            let mut failures = Vec::new();
+            for file in ["src/demo.hpp", "src/main.cpp", "tests/test_demo.cpp",
+                         ".github/workflows/ci.yml", "README.md", "cmake/Testing.cmake"] {
+                if !out.join(file).is_file() {
+                    failures.push(format!("missing {file}"));
+                }
+            }
+            if plugin && !out.join("src/entry/clap_entry.cpp").is_file() {
+                failures.push("missing src/entry/clap_entry.cpp".into());
+            }
+            let manifest = fs::read_to_string(out.join("pulp.toml")).unwrap();
+            if manifest != "[pulp]\nsdk_version = \"1.2.3\"\n" {
+                failures.push(format!("unexpected SDK manifest: {manifest:?}"));
+            }
+            assert!(failures.is_empty(), "{kind}: {}", failures.join("; "));
+        }
     }
 
     #[test]
