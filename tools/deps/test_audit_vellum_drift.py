@@ -749,6 +749,16 @@ class PinTransitionTests(unittest.TestCase):
     def test_rejects_unjustified_entry(self):
         self.assertTrue(audit.validate_pin_transition(self.transition(), "renderer/mac-universal", "a" * 64, "a" * 64, now=self.now()))
 
+
+class RendererTransitionIntegrationTests(unittest.TestCase):
+    def test_recorded_transition_allows_the_current_renderer_drift(self) -> None:
+        old_digest = "dca73c0eee5b0f6d129fe357d0754f7165c6b436051e0de947aeedd3e1bde250"
+        new_digest = "1779c7d1ba5c73a0d6a1f33b77fbf30774bbd9f7542c1c42cc5129f57e99fbd4"
+        status, problems = audit.vellum_renderer_drift(
+            manifest(sha=new_digest, path="gpu-runtime/renderer-lock.json", lock_platform="macos-arm64"), reader(renderer_lock(sha=old_digest)))
+        self.assertEqual(status, "match", problems)
+
+
 if __name__ == "__main__":
     unittest.main(argv=[sys.argv[0], *(arg for arg in sys.argv[1:] if not arg.endswith(".lock"))])
 
