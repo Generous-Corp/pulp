@@ -8,6 +8,6 @@
     "core/platform/include/pulp/platform/main_thread.hpp",
     "core/platform/src/main_thread.cpp"
   ],
-  "vellum_inherits": true,
-  "rationale": "Repeating main-thread timers on macOS now use zero tolerance and keep the period grid; this lowers idle CPU and applies unchanged to any consumer of the timer."
+  "vellum_inherits": false,
+  "rationale": "Pulp-only edit to macOS repeating main-thread timer tolerance (now zero, grid kept); Vellum's framework copy is changed separately in Vellum's framework/."
 }
