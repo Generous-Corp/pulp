@@ -895,6 +895,7 @@ set(PULP_SHARED_FETCHCONTENT_SOURCE_DIR "$tmp/cache")
 set(PULP_USE_SHARED_FETCHCONTENT_SOURCES ON)
 include("$REPO_ROOT/tools/cmake/PulpFetchContent.cmake")
 pulp_register_fetchcontent_source(choc REF "\${TEST_REF}")
+file(WRITE "\${CMAKE_BINARY_DIR}/registered.txt" "\${FETCHCONTENT_SOURCE_DIR_CHOC}")
 pulp_materialize_mutable_fetchcontent_source(choc PATCH_KEY "\${TEST_REF}")
 file(WRITE "\${CMAKE_BINARY_DIR}/selected.txt" "\${FETCHCONTENT_SOURCE_DIR_CHOC}")
 EOF
@@ -905,8 +906,8 @@ EOF
         "a pin bump keeps the patched dependency build-local"
     check "$(cat "$selected/value.txt")" "v2" \
         "the build-local copy refreshes from the newly pinned cache"
-    check "$(grep '^FETCHCONTENT_SOURCE_DIR_CHOC:PATH=' "$tmp/build/CMakeCache.txt" | cut -d= -f2-)" \
-        "$tmp/cache/choc-v2" "the automatic cache selection advances to the new pin"
+    check "$(cat "$tmp/build/registered.txt")" "$tmp/cache/choc-v2" \
+        "the automatic shared selection advances to the new pin"
 
     exit $((FAIL > 0))
 ) || FAIL=$((FAIL + 1))
