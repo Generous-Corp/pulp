@@ -819,7 +819,12 @@ function(_pulp_add_au target name bundle_id version manufacturer category plugin
         set(PULP_BUNDLE_ID "${bundle_id}")
         set(PULP_VERSION "${version}")
         set(PULP_MANUFACTURER "${manufacturer}")
-        set(PULP_AU_DISPLAY_NAME "${display_name}")
+        # The display name lands inside an XML <string>; escape & first.
+        set(_pulp_au_display_xml "${display_name}")
+        string(REPLACE "&" "&amp;" _pulp_au_display_xml "${_pulp_au_display_xml}")
+        string(REPLACE "<" "&lt;" _pulp_au_display_xml "${_pulp_au_display_xml}")
+        string(REPLACE ">" "&gt;" _pulp_au_display_xml "${_pulp_au_display_xml}")
+        set(PULP_AU_DISPLAY_NAME "${_pulp_au_display_xml}")
         set(PULP_MACOS_DEPLOYMENT_TARGET "${CMAKE_OSX_DEPLOYMENT_TARGET}")
         set(PULP_MANUFACTURER_CODE "${manufacturer_code}")
         set(PULP_PLUGIN_CODE "${plugin_code}")

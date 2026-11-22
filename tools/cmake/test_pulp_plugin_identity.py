@@ -47,6 +47,13 @@ class PluginIdentityContractTests(unittest.TestCase):
         self.assertLess(body.index("vst3_bundle_entry.cpp"), body.index("vst3_entry.cpp)"))
         self.assertNotIn("CMAKE_CURRENT_SOURCE_DIR}/vst3", body)
 
+    def test_au_display_name_is_xml_escaped_before_plist_substitution(self):
+        text = (ROOT / "tools/cmake/PulpPluginFormats.cmake").read_text(encoding="utf-8")
+        self.assertNotIn('set(PULP_AU_DISPLAY_NAME "${display_name}")', text)
+        amp = text.index('string(REPLACE "&" "&amp;" _pulp_au_display_xml')
+        self.assertLess(amp, text.index('string(REPLACE "<" "&lt;" _pulp_au_display_xml'))
+        self.assertLess(amp, text.index('set(PULP_AU_DISPLAY_NAME "${_pulp_au_display_xml}")'))
+
     def test_macos_plists_declare_minimum_system_version(self):
         for name in ("au", "vst3", "clap", "standalone"):
             text = (ROOT / f"tools/cmake/PulpInfoPlist.{name}.in").read_text(encoding="utf-8")
