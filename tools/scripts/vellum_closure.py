@@ -2176,13 +2176,17 @@ def os_release_image_name(text: str) -> str:
 def export_metadata(environ: dict, platform: str, renderer_asset: str,
                     image_name_input: str = "", os_release: str = "") -> dict:
     """The export.json document, or SystemExit when the runner image is not fully named."""
-    sha = environ.get("GITHUB_SHA", "")
+    # Windows environment names are case-insensitive and Python upper-cases
+    # them in os.environ, so a hosted Windows runner's ImageVersion arrives as
+    # IMAGEVERSION. Look every name up without regard to case.
+    folded = {key.upper(): value for key, value in environ.items()}
+    sha = folded.get("GITHUB_SHA", "")
     if not FULL_SHA_RE.match(sha):
         raise SystemExit("GITHUB_SHA is not a full commit id")
     if not EXPORT_PLATFORM_RE.fullmatch(platform):
         raise SystemExit(f"{platform!r} is not a platform key")
-    version = environ.get("ImageVersion", "").strip()
-    image_os = environ.get("ImageOS", "").strip()
+    version = folded.get("IMAGEVERSION", "").strip()
+    image_os = folded.get("IMAGEOS", "").strip()
     name = image_name_input.strip() or os_release_image_name(os_release)
     if version.lower() in UNNAMED_IMAGE:
         raise SystemExit("the runner image declares no ImageVersion (a self-hosted runner or VM does not set it); "

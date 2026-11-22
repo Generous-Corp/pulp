@@ -2755,6 +2755,14 @@ class ExportMetadataTests(unittest.TestCase):
         # Control: an explicit name stands in for an os-release that gives none.
         self.assertEqual(self.meta(os_release="", image_name_input="macos-15")["runner_image"]["name"], "macos-15")
 
+    def test_a_windows_environment_with_upper_cased_names_is_read(self):
+        # Python on Windows upper-cases os.environ keys, so a hosted Windows
+        # runner's ImageVersion arrives as IMAGEVERSION.
+        env = {"GITHUB_SHA": self.SHA, "IMAGEVERSION": "20261116.1.0", "IMAGEOS": "win22"}
+        document = self.meta(env, os_release="", image_name_input="windows-2022")
+        self.assertEqual(document["runner_image"], {"name": "windows-2022", "version": "20261116.1.0"})
+        self.assertEqual(document["image_os"], "win22")
+
     def test_a_missing_os_is_not_required_but_is_not_invented(self):
         env = {k: v for k, v in self.ENV.items() if k != "ImageOS"}
         self.assertNotIn("image_os", self.meta(env))
