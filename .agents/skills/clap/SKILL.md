@@ -1534,3 +1534,20 @@ param events must not come back as out-events or gestures), missing input ports,
 and a save/load/save state round trip. Each check has a fixture that breaks it
 (`conformance_fixture_clap.cpp`, `BREAK_*`). Every check runs in a forked child with a deadline (a crash or hang fails that check by name). Plug-in stdout is moved to stderr so `--json` stays parseable. A macOS `.clap` bundle path is resolved to `Contents/MacOS/<exe>`. The scan-cost instruction budget is measured on macOS only; elsewhere the check reports "instructions n/a". Echo turns the main run loop between blocks after a 2 s warm-up, because main-thread publishes are invisible otherwise (`BREAK_ECHO_MAIN` fixture). `--expect-fail CHECK` turns the run
 into a negative control; `test_clap_conformance.py` is the ctest.
+
+## State: a processor that carries its own parameters can skip the store
+
+`Processor::plugin_state_carries_parameters()` (default false) tells the CLAP and
+VST3 adapters that `serialize_plugin_state()` / `deserialize_plugin_state()`
+restore every parameter. With it set and a non-empty payload, `state.save` /
+`getState` write the PLST envelope with a parameter-free store blob (16 bytes,
+same `state_version`) instead of 8 bytes per parameter. Load is unchanged: the
+store is applied first, then the processor's restore runs and wins, so states
+saved with the full store still load. An empty payload keeps the full store.
+
+* A state saved with the opt-in and loaded by a release that predates it
+  restores the processor's bytes and leaves parameters those bytes do not carry
+  at their current value. This downgrade loss is accepted and tested.
+* AUv3, headless, standalone, LV2 and WAM keep the full store; only
+  `plugin_state_io::serialize(..., StoreLayout::processor_owned_when_declared)`
+  callers opt in.

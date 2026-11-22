@@ -128,11 +128,30 @@ public:
         }
     }
 
+    // When set, the processor's own bytes also carry the gain value and
+    // restore it, so the host state may leave the parameter store out.
+    bool owns_parameters = false;
+    bool plugin_state_carries_parameters() const override {
+        return owns_parameters;
+    }
+
     std::vector<uint8_t> serialize_plugin_state() const override {
-        return std::vector<uint8_t>(plugin_state.begin(), plugin_state.end());
+        std::vector<uint8_t> bytes(plugin_state.begin(), plugin_state.end());
+        if (owns_parameters) {
+            const float gain = state().get_value(1);
+            const auto* raw = reinterpret_cast<const uint8_t*>(&gain);
+            bytes.insert(bytes.end(), raw, raw + sizeof(gain));
+        }
+        return bytes;
     }
 
     bool deserialize_plugin_state(std::span<const uint8_t> data) override {
+        if (owns_parameters && data.size() >= sizeof(float)) {
+            float gain;
+            std::memcpy(&gain, data.data() + data.size() - sizeof(gain), sizeof(gain));
+            state().set_value(1, gain);
+            data = data.first(data.size() - sizeof(gain));
+        }
         plugin_state.assign(data.begin(), data.end());
         return true;
     }
@@ -1150,6 +1169,72 @@ TEST_CASE("CLAP state extension round-trips plugin-owned payload", "[clap][entry
 
     plugin1->destroy(plugin1);
     plugin2->destroy(plugin2);
+    clap_entry.deinit();
+}
+
+TEST_CASE("CLAP state omits the parameter store for a processor that carries its parameters",
+          "[clap][entry][state][owned-state]") {
+    REQUIRE(clap_entry.init("test"));
+    auto* factory =
+        static_cast<const clap_plugin_factory_t*>(clap_entry.get_factory(CLAP_PLUGIN_FACTORY_ID));
+    auto* desc = factory->get_plugin_descriptor(factory, 0);
+
+    struct Session {
+        const clap_plugin_t* plugin = nullptr;
+        test_clap::TestProcessor* proc = nullptr;
+        const clap_plugin_state_t* state = nullptr;
+    };
+    auto open = [&](bool owns) {
+        Session s;
+        s.plugin = factory->create_plugin(factory, nullptr, desc->id);
+        REQUIRE(s.plugin != nullptr);
+        REQUIRE(s.plugin->init(s.plugin));
+        s.proc = test_clap::g_last_processor;
+        s.proc->owns_parameters = owns;
+        s.state = static_cast<const clap_plugin_state_t*>(
+            s.plugin->get_extension(s.plugin, CLAP_EXT_STATE));
+        REQUIRE(s.state != nullptr);
+        return s;
+    };
+    auto save = [&](bool owns, std::size_t& params) {
+        auto s = open(owns);
+        s.proc->state().set_value(1, -12.5f);
+        s.proc->plugin_state = "snapshots=A|B";
+        params = s.proc->state().all_params().size();
+        MemoryStream sink;
+        clap_ostream_t out{.ctx = &sink, .write = stream_write};
+        REQUIRE(s.state->save(s.plugin, &out));
+        s.plugin->destroy(s.plugin);
+        return sink.bytes;
+    };
+    auto load = [&](const std::vector<uint8_t>& bytes, bool owns) {
+        auto s = open(owns);
+        s.proc->state().set_value(1, 6.0f);
+        s.proc->plugin_state = "stale";
+        MemoryStream source{.bytes = bytes};
+        clap_istream_t in{.ctx = &source, .read = stream_read};
+        REQUIRE(s.state->load(s.plugin, &in));
+        REQUIRE_THAT(s.proc->state().get_value(1), WithinAbs(-12.5, 0.01));
+        REQUIRE(s.proc->plugin_state == "snapshots=A|B");
+        s.plugin->destroy(s.plugin);
+    };
+
+    std::size_t params = 0, params_owned = 0;
+    const auto full = save(false, params);
+    const auto owned = save(true, params_owned);
+    REQUIRE(params == params_owned);
+    REQUIRE(full.size() + sizeof(float) == owned.size() + 8 * params);
+
+    load(full, false);
+    load(owned, true);
+    {
+        auto s = open(true);
+        s.proc->state().set_value(1, -12.5f);
+        s.proc->plugin_state = "snapshots=A|B";
+        const auto old_state = pulp::format::plugin_state_io::serialize(s.proc->state(), *s.proc);
+        s.plugin->destroy(s.plugin);
+        load(old_state, true);
+    }
     clap_entry.deinit();
 }
 

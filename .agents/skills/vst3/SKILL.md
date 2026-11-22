@@ -1683,3 +1683,20 @@ through `outputParameterChanges` after the edit bridge suppresses them.
 Register processor-output capture before exposing the store to the plug-in.
 Otherwise a reentrant normalizing listener can deliver the nested value first
 and let the outer notification overwrite it with an older value.
+
+## State: a processor that carries its own parameters can skip the store
+
+`Processor::plugin_state_carries_parameters()` (default false) tells the CLAP and
+VST3 adapters that `serialize_plugin_state()` / `deserialize_plugin_state()`
+restore every parameter. With it set and a non-empty payload, `state.save` /
+`getState` write the PLST envelope with a parameter-free store blob (16 bytes,
+same `state_version`) instead of 8 bytes per parameter. Load is unchanged: the
+store is applied first, then the processor's restore runs and wins, so states
+saved with the full store still load. An empty payload keeps the full store.
+
+* A state saved with the opt-in and loaded by a release that predates it
+  restores the processor's bytes and leaves parameters those bytes do not carry
+  at their current value. This downgrade loss is accepted and tested.
+* AUv3, headless, standalone, LV2 and WAM keep the full store; only
+  `plugin_state_io::serialize(..., StoreLayout::processor_owned_when_declared)`
+  callers opt in.
