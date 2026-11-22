@@ -1294,6 +1294,25 @@ public:
     virtual bool class_info_owns_plugin_state() const {
         return false;
     }
+
+    /// True when serialize_plugin_state() / deserialize_plugin_state() already
+    /// restore every parameter, so the CLAP and VST3 state may leave out the
+    /// parameter store.
+    ///
+    /// Default false: those adapters write every parameter's id and value (about
+    /// 8 bytes per parameter) beside the processor's bytes. When true and the
+    /// processor produced a non-empty payload, they write a parameter-free store
+    /// instead and take every value from deserialize_plugin_state(); a processor
+    /// whose payload is empty keeps the full store. States saved before the
+    /// opt-in, with the full store, still load: the store is applied first, then
+    /// the processor's restore runs and wins. A state saved with the opt-in and
+    /// loaded by a release that predates it restores the processor's bytes and
+    /// leaves any parameter those bytes do not carry at its current value.
+    /// AUv3, headless and standalone state are not affected.
+    /// Appended to preserve additive-only vtable ordering (node_abi_gate).
+    virtual bool plugin_state_carries_parameters() const {
+        return false;
+    }
     /// Appended to preserve additive-only vtable ordering (node_abi_gate).
 
     /// Ask the plug-in to silence itself and, where the host has MIDI output,

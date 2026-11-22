@@ -313,7 +313,8 @@ inline const clap_plugin_audio_ports_config_t audio_ports_config_ext = {
 inline bool state_save(const clap_plugin_t* plugin, const clap_ostream_t* stream) {
     auto* self = static_cast<clap_adapter::PulpClapPlugin*>(plugin->plugin_data);
     if (!self || !self->processor) return false;
-    const auto data = plugin_state_io::serialize(self->store, *self->processor);
+    const auto data = plugin_state_io::serialize(
+        self->store, *self->processor, plugin_state_io::StoreLayout::processor_owned_when_declared);
     // CLAP's stream->write() is spec'd to return a short-write count on
     // success — callers MUST loop. Hosts (and clap-validator's
     // `state-reproducibility-flush` with a 23-byte write cap) exercise
