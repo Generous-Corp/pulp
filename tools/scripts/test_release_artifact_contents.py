@@ -54,6 +54,8 @@ def canonical_control_registry_digest() -> str:
     return match.group(1)
 
 INSTALL_RULES = SCRIPT.parents[1] / "cmake" / "PulpInstallRules.cmake"
+CONFIG_TEMPLATE = SCRIPT.parents[1] / "cmake" / "PulpConfig.cmake.in"
+ROOT_CMAKE = SCRIPT.parents[2] / "CMakeLists.txt"
 IMPORT_DESIGN_RUNTIME_MANIFEST = (
     SCRIPT.parents[1] / "import-design" / "browser_capture" / "runtime_manifest.txt"
 )
@@ -68,6 +70,38 @@ class SkiaSdkInstallBoundary(unittest.TestCase):
             "both resolved and checkout Skia install paths must exclude the "
             "large validation-only source archive",
         )
+
+
+class VellumSdkCmakeContract(unittest.TestCase):
+    def test_in_tree_and_installed_vellum_aliases_use_export_name(self) -> None:
+        root_text = ROOT_CMAKE.read_text(encoding="utf-8")
+        self.assertEqual(
+            root_text.count("foreach(_pulp_export_target IN LISTS PULP_SDK_TARGETS PULP_VELLUM_TARGETS)"),
+            1,
+        )
+        self.assertNotIn(
+            "foreach(_pulp_export_target IN LISTS PULP_VELLUM_TARGETS)",
+            root_text,
+        )
+
+        config_text = CONFIG_TEMPLATE.read_text(encoding="utf-8")
+        self.assertEqual(config_text.count("get_target_property(_pulp_export_name"), 2)
+        self.assertNotIn(
+            'string(REPLACE "pulp-" "" _pulp_export_name "${_pulp_sdk_target}")',
+            config_text,
+        )
+        self.assertIn(
+            "find_package(Vellum ${PULP_VELLUM_VERSION} EXACT CONFIG QUIET)",
+            config_text,
+        )
+
+    def test_vellum_audio_export_name_is_shared_by_source_and_install(self) -> None:
+        install_text = INSTALL_RULES.read_text(encoding="utf-8")
+        self.assertIn(
+            'set_target_properties(pulp-vellum-audio PROPERTIES EXPORT_NAME vellum_audio)',
+            install_text,
+        )
+        self.assertIn('"@PULP_VELLUM_VERSION@"', CONFIG_TEMPLATE.read_text(encoding="utf-8"))
 
 
 class VellumSdkReleaseContract(unittest.TestCase):
