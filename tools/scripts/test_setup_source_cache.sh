@@ -1301,6 +1301,27 @@ echo "== only the digest-verified dependency opts in to a verbatim checkout"
     exit $((FAIL > 0))
 ) || FAIL=$((FAIL + 1))
 
+echo "== Windows migration recognizes a shared source despite path case"
+(
+    tmp="$(mktemp -d)"; trap 'rm -rf "$tmp"' EXIT
+    mkdir -p "$tmp/src"
+    cat > "$tmp/src/CMakeLists.txt" <<EOF
+cmake_minimum_required(VERSION 3.24)
+project(windows_case_migration NONE)
+set(WIN32 TRUE)
+include("$REPO_ROOT/tools/cmake/PulpFetchContent.cmake")
+pulp_normalize_fetchcontent_path("C:/Users/RunnerAdmin/AppData/Local/Pulp/fetchcontent-src" root)
+pulp_normalize_fetchcontent_path("c:/users/runneradmin/appdata/local/pulp/fetchcontent-src/choc-v1" source)
+if(NOT "\${source}" MATCHES "^\${root}/choc-v1$")
+    message(FATAL_ERROR "case-folded Windows source path does not stay under its cache root")
+endif()
+EOF
+    cmake -S "$tmp/src" -B "$tmp/build" >/dev/null 2>&1; rc=$?
+    check "$rc" "0" \
+        "a Windows case-only path difference is treated as the same cache path"
+    exit $((FAIL > 0))
+) || FAIL=$((FAIL + 1))
+
 echo
 if [ "$FAIL" -gt 0 ]; then
     echo "FAILED ($FAIL failing group(s))"
