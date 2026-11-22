@@ -319,6 +319,11 @@ function(pulp_materialize_mutable_fetchcontent_source name)
         file(WRITE "${stamp}" "${expected_stamp}")
     endif()
 
+    # Keep FetchContent's cache-visible source path aligned with the mutable
+    # copy. Consumers that read the cache directly must never rediscover the
+    # immutable shared checkout after this function returns.
+    set(${source_var} "${local_source}" CACHE PATH
+        "Local source override for ${name}" FORCE)
     set(${source_var} "${local_source}" PARENT_SCOPE)
     message(STATUS "Pulp: using build-local mutable copy for ${name}: ${local_source}")
 endfunction()
