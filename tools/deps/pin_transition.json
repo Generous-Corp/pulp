@@ -1,15 +1,15 @@
 {
   "schema": "pulp.pin-transition.v1",
-  "issued_at": "2026-11-22T07:08:30Z",
-  "expires_at": "2026-12-06T07:08:29Z",
+  "issued_at": "2026-11-22T07:18:00Z",
+  "expires_at": "2026-12-06T07:17:59Z",
   "owner": "danielraffel",
-  "reason": "Daniel-approved expand/contract route for the Vellum Metal/Dawn chrome/m158-attested.1 renderer archive; record lands before the pin change.",
+  "reason": "Daniel-approved expand/contract route for the published Vellum Metal/Dawn chrome/m158-attested.1 release; record authorizes the subsequent pin transition.",
   "entries": [
     {
       "artifact_id": "renderer/mac-universal",
-      "old_sha256": "dca73c0eee5b0f6d129fe357d0754f7165c6b436051e0de947aeedd3e1bde250",
-      "new_sha256": "e9736bff576ab7a6c56b2f224266ba0fde2dcb5c13a88a4bf8f324d1cf93c9cc",
-      "reason": "Vellum Metal/Dawn archive chrome/m158-attested.1 transition",
+      "old_sha256": "1779c7d1ba5c73a0d6a1f33b77fbf30774bbd9f7542c1c42cc5129f57e99fbd4",
+      "new_sha256": "dca73c0eee5b0f6d129fe357d0754f7165c6b436051e0de947aeedd3e1bde250",
+      "reason": "Published skia-builder chrome/m158-attested.1 release transition to the Vellum lock target.",
       "owner": "danielraffel"
     }
   ]
