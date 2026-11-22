@@ -20,6 +20,10 @@
 
 #include <public.sdk/source/main/pluginfactory.h>
 
+#ifndef PULP_PLUGIN_EMAIL
+#define PULP_PLUGIN_EMAIL ""
+#endif
+
 // Generate a VST3 factory with a single plugin class.
 // The plugin uses SingleComponentEffect (combined processor + controller).
 #define PULP_VST3_PLUGIN(uid, name, category, vendor, version, url, factory_fn) \
@@ -28,7 +32,7 @@
             new pulp::format::vst3::PulpVst3Processor(factory_fn)); \
     } \
     \
-    BEGIN_FACTORY_DEF(vendor, url, "mailto:info@example.com") \
+    BEGIN_FACTORY_DEF(vendor, url, PULP_PLUGIN_EMAIL) \
         DEF_CLASS2(INLINE_UID_FROM_FUID(uid), \
             PClassInfo::kManyInstances, \
             kVstAudioEffectClass, \

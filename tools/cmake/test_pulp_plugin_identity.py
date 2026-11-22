@@ -32,6 +32,11 @@ class PluginIdentityContractTests(unittest.TestCase):
         ):
             self.assertIn(macro, text)
         self.assertIn("AU_DISPLAY_NAME", text)
+        self.assertIn("_pulp_check_vst3_factory_version", text)
+        self.assertIn("PULP_STRICT_PLUGIN_IDENTITY", text)
+        for format_name in ("VST3", "CLAP", "AU", "LV2", "AAX", "AUv3", "Standalone"):
+            self.assertIn(f"TARGET ${{target}}_${{_pulp_identity_format}}", text)
+            self.assertIn(format_name, text)
 
     def test_macos_plists_declare_minimum_system_version(self):
         for name in ("au", "vst3", "clap", "standalone"):

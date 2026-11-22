@@ -56,6 +56,41 @@ function(_pulp_reject_unknown_formats context formats)
     endif()
 endfunction()
 
+function(_pulp_check_vst3_factory_version target configured_version)
+    set(_entry "")
+    if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/vst3_entry.cpp")
+        set(_entry "${CMAKE_CURRENT_SOURCE_DIR}/vst3_entry.cpp")
+    elseif(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/vst3_bundle_entry.cpp")
+        set(_entry "${CMAKE_CURRENT_SOURCE_DIR}/vst3_bundle_entry.cpp")
+    endif()
+    if(NOT _entry)
+        return()
+    endif()
+    file(READ "${_entry}" _source)
+    if(NOT _source MATCHES "PULP_VST3_PLUGIN")
+        return()
+    endif()
+    if(_source MATCHES "PULP_PLUGIN_VERSION")
+        return()
+    endif()
+    string(REGEX MATCHALL "\"[0-9]+\\.[0-9]+\\.[0-9]+\"" _versions "${_source}")
+    if(NOT _versions)
+        return()
+    endif()
+    list(GET _versions -1 _factory_version)
+    string(REPLACE "\"" "" _factory_version "${_factory_version}")
+    if(NOT _factory_version STREQUAL "${configured_version}")
+        if(PULP_STRICT_PLUGIN_IDENTITY)
+            message(FATAL_ERROR
+                "pulp_add_plugin(${target}): VST3 factory version ${_factory_version} "
+                "does not match VERSION ${configured_version}")
+        endif()
+        message(WARNING
+            "pulp_add_plugin(${target}): VST3 factory version ${_factory_version} "
+            "does not match VERSION ${configured_version}; use PULP_PLUGIN_VERSION")
+    endif()
+endfunction()
+
 # ── pulp_add_plugin ─────────────────────────────────────────────────────────
 # Creates plugin targets for each requested format from a single declaration.
 #
@@ -93,9 +128,13 @@ endfunction()
 #
 function(pulp_add_plugin target)
     _pulp_resolve_consumer_targets()
+    if(NOT DEFINED PULP_STRICT_PLUGIN_IDENTITY)
+        set(PULP_STRICT_PLUGIN_IDENTITY OFF CACHE BOOL
+            "Fail configure when a literal VST3 factory version mismatches VERSION")
+    endif()
     cmake_parse_arguments(PLUGIN
         "ACCEPTS_MIDI;NATIVE_UI;NO_EDITOR;LITE_EDITOR;GPU_UI;FULL_EDITOR;AAX_HEADLESS;SHIP_INSPECTOR;SHIP_INSPECTOR_RUNTIME_EVAL;ACKNOWLEDGE_UNSAFE_RUNTIME_EVAL"
-        "PLUGIN_NAME;BUNDLE_ID;VERSION;MANUFACTURER;CATEGORY;PLUGIN_CODE;MANUFACTURER_CODE;AAX_PRODUCT_CODE;AAX_NATIVE_CODE;PROCESSOR_FACTORY;UI;UI_SCRIPT;UI_ENGINE;ICON;ICNS;DESIGN_WIDTH;DESIGN_HEIGHT;DESIGN_MIN_WIDTH;DESIGN_MIN_HEIGHT;DESIGN_MAX_WIDTH;DESIGN_MAX_HEIGHT;CONTROL_PROFILE;CONTROL_VENDOR_OPERATIONS;SOURCE_GIT_SHA;SOURCE_GIT_DIRTY"
+        "PLUGIN_NAME;BUNDLE_ID;VERSION;MANUFACTURER;VENDOR_EMAIL;AU_DISPLAY_NAME;CATEGORY;PLUGIN_CODE;MANUFACTURER_CODE;AAX_PRODUCT_CODE;AAX_NATIVE_CODE;PROCESSOR_FACTORY;UI;UI_SCRIPT;UI_ENGINE;ICON;ICNS;DESIGN_WIDTH;DESIGN_HEIGHT;DESIGN_MIN_WIDTH;DESIGN_MIN_HEIGHT;DESIGN_MAX_WIDTH;DESIGN_MAX_HEIGHT;CONTROL_PROFILE;CONTROL_VENDOR_OPERATIONS;SOURCE_GIT_SHA;SOURCE_GIT_DIRTY"
         "FORMATS;SOURCES;CONTENT_CAPABILITIES;CONTENT_KINDS;CONTENT_HOT_RELOAD_KINDS;CONTENT_MANUAL_RESCAN_KINDS;INSPECTOR_CAPABILITIES;CONTROL_CAPABILITIES;CONTROL_VENDOR_SOURCES"
         ${ARGN}
     )
@@ -144,6 +183,12 @@ function(pulp_add_plugin target)
     endif()
     if(NOT PLUGIN_MANUFACTURER)
         set(PLUGIN_MANUFACTURER "Unknown")
+    endif()
+    if(NOT DEFINED PLUGIN_VENDOR_EMAIL)
+        set(PLUGIN_VENDOR_EMAIL "")
+    endif()
+    if(NOT DEFINED PLUGIN_AU_DISPLAY_NAME)
+        set(PLUGIN_AU_DISPLAY_NAME "${PLUGIN_MANUFACTURER}: ${PLUGIN_PLUGIN_NAME}")
     endif()
     if(NOT PLUGIN_CATEGORY)
         set(PLUGIN_CATEGORY "Effect")
@@ -427,16 +472,26 @@ function(pulp_add_plugin target)
         add_library(${target}_Core INTERFACE)
         target_link_libraries(${target}_Core INTERFACE ${_pulp_core_format_target})
         target_include_directories(${target}_Core INTERFACE ${CMAKE_CURRENT_SOURCE_DIR})
+        target_compile_definitions(${target}_Core INTERFACE
+            PULP_PLUGIN_NAME="${PLUGIN_PLUGIN_NAME}"
+            PULP_PLUGIN_VENDOR="${PLUGIN_MANUFACTURER}"
+            PULP_PLUGIN_MANUFACTURER="${PLUGIN_MANUFACTURER}"
+            PULP_BUNDLE_ID="${PLUGIN_BUNDLE_ID}"
+            PULP_PLUGIN_VERSION="${PLUGIN_VERSION}"
+            PULP_PLUGIN_EMAIL="${PLUGIN_VENDOR_EMAIL}")
         set(_PULP_CORE_OBJECTS "")
     endif()
     # Store for format target functions (CMake doesn't propagate local vars to functions)
     set(_PULP_CORE_OBJECTS "${_PULP_CORE_OBJECTS}" PARENT_SCOPE)
     set(PULP_${target}_CORE_OBJECTS "${_PULP_CORE_OBJECTS}" CACHE INTERNAL "")
     if(PLUGIN_SOURCES)
-        target_compile_definitions(${target}_Core PRIVATE
+        target_compile_definitions(${target}_Core PUBLIC
             PULP_PLUGIN_NAME="${PLUGIN_PLUGIN_NAME}"
+            PULP_PLUGIN_VENDOR="${PLUGIN_MANUFACTURER}"
+            PULP_PLUGIN_MANUFACTURER="${PLUGIN_MANUFACTURER}"
             PULP_BUNDLE_ID="${PLUGIN_BUNDLE_ID}"
             PULP_PLUGIN_VERSION="${PLUGIN_VERSION}"
+            PULP_PLUGIN_EMAIL="${PLUGIN_VENDOR_EMAIL}"
         )
         if(PLUGIN_AAX_HEADLESS)
             target_compile_definitions(${target}_Core PRIVATE PULP_AAX_HEADLESS=1)
@@ -481,6 +536,7 @@ function(pulp_add_plugin target)
 
     # ── VST3 ─────────────────────────────────────────────────────────────
     if("VST3" IN_LIST PLUGIN_FORMATS AND PULP_HAS_VST3)
+        _pulp_check_vst3_factory_version(${target} "${PLUGIN_VERSION}")
         _pulp_add_vst3(${target} "${PLUGIN_PLUGIN_NAME}" "${PLUGIN_BUNDLE_ID}"
                         "${PLUGIN_VERSION}" "${PLUGIN_MANUFACTURER}" "${PLUGIN_CATEGORY}")
     endif()
@@ -499,7 +555,7 @@ function(pulp_add_plugin target)
             _pulp_add_au(${target} "${PLUGIN_PLUGIN_NAME}" "${PLUGIN_BUNDLE_ID}"
                           "${PLUGIN_VERSION}" "${PLUGIN_MANUFACTURER}"
                           "${PLUGIN_CATEGORY}" "${PLUGIN_PLUGIN_CODE}" "${PLUGIN_MANUFACTURER_CODE}"
-                          "${_plugin_accepts_midi}")
+                          "${_plugin_accepts_midi}" "${PLUGIN_AU_DISPLAY_NAME}")
         endif()
     endif()
 
@@ -546,6 +602,20 @@ function(pulp_add_plugin target)
     if("Standalone" IN_LIST PLUGIN_FORMATS)
         _pulp_add_standalone(${target} "${PLUGIN_PLUGIN_NAME}" "${PLUGIN_BUNDLE_ID}" "${PLUGIN_VERSION}" "${PLUGIN_PROCESSOR_FACTORY}")
     endif()
+
+    # Entry-point translation units are compiled into each format target, so
+    # identity must be present on those targets as well as on the shared core.
+    foreach(_pulp_identity_format VST3 CLAP AU LV2 AAX AUv3 Standalone)
+        if(TARGET ${target}_${_pulp_identity_format})
+            target_compile_definitions(${target}_${_pulp_identity_format} PRIVATE
+                PULP_PLUGIN_NAME="${PLUGIN_PLUGIN_NAME}"
+                PULP_PLUGIN_VENDOR="${PLUGIN_MANUFACTURER}"
+                PULP_PLUGIN_MANUFACTURER="${PLUGIN_MANUFACTURER}"
+                PULP_BUNDLE_ID="${PLUGIN_BUNDLE_ID}"
+                PULP_PLUGIN_VERSION="${PLUGIN_VERSION}"
+                PULP_PLUGIN_EMAIL="${PLUGIN_VENDOR_EMAIL}")
+        endif()
+    endforeach()
 
     # ── UI package ───────────────────────────────────────────────────────
     # Every target above that constructs the processor links the package and
