@@ -226,6 +226,51 @@ TEST_CASE("Vellum audio widgets register scripted display factories",
     CHECK_FALSE(analyzer->stale());
 }
 
+TEST_CASE("Vellum audio widget ticks preserve channel bindings", "[pulp-vellum-audio]") {
+    using namespace pulp::vellum_audio;
+    using Shape = vellum::value::ChannelShape;
+    AudioDisplayProvider provider({{.name = "input", .shape = Shape::meter},
+                                   {.name = "output", .shape = Shape::meter},
+                                   {.name = "input-spectrum", .shape = Shape::vector},
+                                   {.name = "output-spectrum", .shape = Shape::vector}});
+    const auto input = provider.find("input", Shape::meter);
+    const auto output = provider.find("output", Shape::meter);
+    const auto output_spectrum = provider.find("output-spectrum", Shape::vector);
+    REQUIRE(input);
+    REQUIRE(output);
+    REQUIRE(output_spectrum);
+
+    vellum::view::View root;
+    auto make_widget = [&]<typename Widget>() -> Widget& {
+        auto widget = std::make_unique<Widget>();
+        auto& added = *widget;
+        root.add_child(std::move(widget));
+        return added;
+    };
+    auto& input_meter = make_widget.operator()<LevelMeter>();
+    auto& output_meter = make_widget.operator()<LevelMeter>();
+    auto& default_meter = make_widget.operator()<LevelMeter>();
+    auto& output_scope = make_widget.operator()<AnalyzerScope>();
+    input_meter.set_feed(&provider, *input);
+    output_meter.set_feed(&provider, *output);
+    output_scope.set_feed(&provider, *output_spectrum);
+
+    for (int tick = 0; tick < 60; ++tick) {
+        const float input_level = tick % 2 == 0 ? 0.25f : 0.375f;
+        const float output_level = tick % 2 == 0 ? 0.75f : 0.875f;
+        provider.publish_meter(*input, std::array{input_level}, std::array{input_level});
+        provider.publish_meter(*output, std::array{output_level}, std::array{output_level});
+        provider.publish_scope(*output_spectrum, std::array{-60.0f, -24.0f});
+        sample_audio_widgets(root, &provider);
+
+        CAPTURE(tick);
+        CHECK(input_meter.rms() == input_level);
+        CHECK(default_meter.rms() == input_level);
+        REQUIRE(output_meter.rms() == output_level);
+        REQUIRE(output_scope.column_count() == 2);
+    }
+}
+
 TEST_CASE("Vellum AnalyzerScope keeps its mapping across stale periods and set_feed",
           "[pulp-vellum-audio]") {
     pulp::vellum_audio::AudioDisplayProvider provider({
