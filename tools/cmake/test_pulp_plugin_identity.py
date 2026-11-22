@@ -100,7 +100,7 @@ class FactoryVersionCheckBehaviourTests(unittest.TestCase):
                 + f'_pulp_check_vst3_factory_version(demo "{configured}")\n',
                 encoding="utf-8")
             return subprocess.run(["cmake", "-P", str(harness)], capture_output=True,
-                                  text=True, timeout=20)
+                                  text=True, encoding="utf-8", timeout=20)
 
     def assertMismatch(self, result, strict):
         if strict:
