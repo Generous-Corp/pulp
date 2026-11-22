@@ -98,6 +98,14 @@ def codemodel_source_root(build: Path) -> Path:
     return Path(model["paths"]["source"])
 
 
+WINDOWS_ABSOLUTE_RE = re.compile(r"^[A-Za-z]:/")
+
+
+def is_host_absolute(path: str) -> bool:
+    """True for a normalized absolute path outside the checkout, on POSIX or Windows."""
+    return path.startswith("/") or WINDOWS_ABSOLUTE_RE.match(path) is not None
+
+
 def norm_path(raw: str, source: Path, build: Path) -> str:
     p = Path(raw)
     if not p.is_absolute():
@@ -114,7 +122,9 @@ def norm_path(raw: str, source: Path, build: Path) -> str:
         try:
             return p.resolve().relative_to(source.resolve()).as_posix()
         except ValueError:
-            return str(p.resolve())
+            # Forward slashes on every host, so a Windows path is recognized
+            # as absolute and classified as an external input.
+            return p.resolve().as_posix()
 
 
 def resolve_include(name: str, origin: Path, include_dirs: list[Path], source: Path) -> Path | None:
@@ -1827,7 +1837,7 @@ def target_manifest(source: Path, build: Path, names: list[str], synthetic: dict
                 external_paths.add(rel)
                 continue
         generated.add(rel)
-    external_paths.update(p for p in normalized if p.startswith("/") and not p.startswith(str(source.resolve())))
+    external_paths.update(p for p in normalized if is_host_absolute(p) and not p.startswith(source.resolve().as_posix()))
     external = [resolver.identify(p) for p in sorted(external_paths)]
     # Keep the exact CMake/script producers of the generated inputs this
     # closure actually holds, so the receipt can prove which repository rules
@@ -1840,7 +1850,7 @@ def target_manifest(source: Path, build: Path, names: list[str], synthetic: dict
         if candidate.is_file():
             all_files.add(candidate.resolve())
             normalized.append(producer)
-    files = sorted({p for p in normalized if p not in external_paths and not p.startswith("/") and not p.startswith("@build/")})
+    files = sorted({p for p in normalized if p not in external_paths and not is_host_absolute(p) and not p.startswith("@build/")})
     generated_rows = []
     for rel in sorted(generated - external_paths):
         candidate = build / rel.removeprefix("@build/")
