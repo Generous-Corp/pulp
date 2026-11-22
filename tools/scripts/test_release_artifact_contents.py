@@ -108,6 +108,11 @@ class VellumSdkCmakeContract(unittest.TestCase):
         )
         self.assertIn('"@PULP_VELLUM_VERSION@"', CONFIG_TEMPLATE.read_text(encoding="utf-8"))
 
+    def test_vellum_export_name_is_captured_after_overrides(self) -> None:
+        text = INSTALL_RULES.read_text(encoding="utf-8")
+        override = 'set_target_properties(pulp-vellum-audio PROPERTIES EXPORT_NAME vellum_audio)'
+        self.assertLess(text.index(override), text.index('set(PULP_VELLUM_EXPORT_TARGETS)'))
+
 
 class VellumSdkReleaseContract(unittest.TestCase):
     def _source_root(self, root: Path, url: str) -> Path:
