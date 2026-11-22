@@ -442,10 +442,10 @@ struct WakeCounter {
     }
 };
 
-// Timers started at different moments keep different phases. Without
-// tolerance each wakes the main thread by itself (N per period); with it the
-// system merges nearby ones. The control is the same shape with zero
-// tolerance on raw run-loop timers, measured with the same observer.
+// Timers started at different moments keep different phases. Raw run-loop
+// timers each wake the main thread by themselves (N per period); repeating
+// timers aligned to a shared grid fire together. The control is the same
+// shape on raw run-loop timers, measured with the same observer.
 TEST_CASE("staggered repeating timers share main-thread wake-ups",
           "[platform][main-thread][rearm][coalesce]") {
     ensure_app();
@@ -508,16 +508,14 @@ TEST_CASE("staggered repeating timers share main-thread wake-ups",
     REQUIRE(wakes < control_wakes * 0.4);
 }
 
-TEST_CASE("repeating timers carry a tolerance and one-shots do not",
+TEST_CASE("repeating timers and one-shots have zero tolerance",
           "[platform][main-thread][rearm][coalesce]") {
     MainThreadScope scope;
     MainThreadTimer timer(scope, [] {});
-    timer.fire_every(200ms);
-    REQUIRE(timer.tolerance() == 20ms);
-    timer.fire_every(10ms);
-    REQUIRE(timer.tolerance() == 5ms); // the floor
-    timer.fire_every(4ms);
-    REQUIRE(timer.tolerance() == 2ms); // capped at half the period
+    for (auto period : {200ms, 10ms, 4ms, 1000ms}) {
+        timer.fire_every(period);
+        REQUIRE(timer.tolerance() == 0ms);
+    }
     timer.fire_after(5ms);
     REQUIRE(timer.tolerance() == 0ms);
     timer.cancel();
@@ -545,7 +543,7 @@ TEST_CASE("a repeating timer's first fire stays one period away",
     timer.cancel();
     REQUIRE(fires >= 1);
     REQUIRE(first >= 195ms);
-    REQUIRE(first <= 200ms + 20ms + 60ms); // period + tolerance + scheduling slack
+    REQUIRE(first <= 200ms + 60ms); // period + scheduling slack
 }
 
 TEST_CASE("teardown hooks run once when the scope is destroyed",
