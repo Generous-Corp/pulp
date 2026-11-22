@@ -645,8 +645,9 @@ target the code lands in: a vendored source compiled into `pulp-runtime` is
 claimed by `pulp-runtime`, not by a target name that never exists.
 `audit.py --strict` does not check `link_targets`; the
 `plugin-third-party-notices` ctest checks what the bundles name, and the
-`unattributed_targets` list in a bundle's JSON shows closure targets no entry
-claims.
+`unattributed_targets` list in the build-directory report
+(`<build>/pulp-notices/<format target>/ThirdPartyNotices.report.json`, never in the
+bundle) shows closure targets no entry claims.
 
 ## Prebuilt platform slices
 

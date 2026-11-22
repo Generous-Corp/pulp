@@ -228,6 +228,10 @@ pulp_add_test_suite(pulp-test-midi GROUP pulp-test-group-cap-midi
 pulp_add_test_suite(pulp-test-midi-file GROUP pulp-test-group-cap-midi
     LIBRARIES pulp::midi)
 
+# Background warm-up of the platform MIDI backend's slow first call.
+pulp_add_test_suite(pulp-test-midi-warm-up GROUP pulp-test-group-cap-midi
+    LIBRARIES pulp::midi)
+
 # MIDI panic message generation, held-note offs and classification
 pulp_add_test_suite(pulp-test-midi-panic GROUP pulp-test-group-cap-midi
     LIBRARIES pulp::midi)
@@ -366,6 +370,11 @@ pulp_add_test_suite(pulp-test-step-grid-view LIBRARIES pulp::view pulp::state)
 # Headless adapter tests
 pulp_add_test_suite(pulp-test-headless GROUP pulp-test-group-cap-format
     LIBRARIES pulp::format)
+if(APPLE AND NOT PULP_IOS)
+    pulp_add_test_suite(pulp-test-standalone-persistence-mac
+        SOURCES test_standalone_persistence_mac.mm
+        LIBRARIES pulp::standalone)
+endif()
 pulp_add_test_suite(pulp-test-format-hardening GROUP pulp-test-group-cap-format
     LIBRARIES pulp::format)
 # Processor-level MIDI panic: request, service, voice reset, MIDI-out emission
@@ -394,6 +403,14 @@ pulp_add_test_suite(pulp-test-main-thread-timer GROUP pulp-test-group-cap-format
 # driven by a fake loop, where the main thread is the host's.
 if(UNIX AND NOT APPLE)
     pulp_add_test_suite(pulp-test-platform-host-run-loop
+        LIBRARIES pulp::platform)
+endif()
+
+if(WIN32)
+    # MainThreadScope and MainThreadTimer with no host loop registered: the
+    # message-only window fallback, pumped by the test thread.
+    pulp_add_test_suite(pulp-test-platform-win32-main-thread
+        SOURCES test_platform_win32_main_thread.cpp
         LIBRARIES pulp::platform)
 endif()
 
@@ -484,6 +501,10 @@ pulp_add_test_suite(pulp-test-diagnostic GROUP pulp-test-group-cap-format
     SOURCES test_diagnostic_reporter.cpp
     LIBRARIES pulp::format)
 
+pulp_add_test_suite(pulp-test-third-party-notices GROUP pulp-test-group-cap-format
+    SOURCES test_third_party_notices.cpp
+    LIBRARIES pulp::format)
+
 # CLAP entry point macro test
 if(PULP_HAS_CLAP)
     pulp_add_test_suite(pulp-test-clap-param-flags GROUP pulp-test-group-cap-format
@@ -550,6 +571,92 @@ if(PULP_HAS_CLAP)
     target_link_libraries(pulp-test-clap-bundle-entry PRIVATE pulp::format clap Catch2::Catch2WithMain)
     target_compile_definitions(pulp-test-clap-bundle-entry PRIVATE PULP_CLAP_GUI=1)
     catch_discover_tests(pulp-test-clap-bundle-entry)
+
+    # Host scan without a Processor: a static descriptor answers module init and
+    # descriptor reads; the fallback path still builds one.
+    add_executable(pulp-test-clap-scan-without-processor test_clap_scan_without_processor.cpp
+        ${CMAKE_SOURCE_DIR}/core/format/src/clap_adapter.cpp
+        ${CMAKE_SOURCE_DIR}/core/format/src/clap_remote_controls.cpp
+    )
+    target_link_libraries(pulp-test-clap-scan-without-processor PRIVATE pulp::format clap Catch2::Catch2WithMain)
+    target_compile_definitions(pulp-test-clap-scan-without-processor PRIVATE PULP_CLAP_GUI=1)
+    catch_discover_tests(pulp-test-clap-scan-without-processor)
+
+    # The single-plugin macro emits clap_entry and needs a separate executable.
+    add_executable(pulp-test-clap-single-scan-without-processor test_clap_single_scan_without_processor.cpp
+        ${CMAKE_SOURCE_DIR}/core/format/src/clap_adapter.cpp
+        ${CMAKE_SOURCE_DIR}/core/format/src/clap_remote_controls.cpp
+    )
+    target_link_libraries(pulp-test-clap-single-scan-without-processor PRIVATE pulp::format clap Catch2::Catch2WithMain)
+    target_compile_definitions(pulp-test-clap-single-scan-without-processor PRIVATE PULP_CLAP_GUI=1)
+    catch_discover_tests(pulp-test-clap-single-scan-without-processor)
+
+    # CLAP host-conformance checker, proven against one well-behaved Pulp-built
+    # module and one fixture per check that deliberately breaks it.
+    if(TARGET pulp-clap-conformance AND TARGET pulp::format-clap-core AND NOT WIN32)
+        set(_conf_dir ${CMAKE_SOURCE_DIR}/tools/audio/clap-conformance)
+        add_library(pulp-test-clap-conf-pulp MODULE ${_conf_dir}/pulp_conformance_fixture_clap.cpp)
+        target_link_libraries(pulp-test-clap-conf-pulp PRIVATE pulp::format-clap-core clap)
+        set_target_properties(pulp-test-clap-conf-pulp PROPERTIES
+            OUTPUT_NAME "ConfPulp" PREFIX "" SUFFIX ".clap")
+        set(_conf_modules pulp-test-clap-conf-pulp)
+        set(_conf_variants good HEAVY_MEMORY HEAVY_CPU ECHO NULL_INPUT STATE CRASH_TEARDOWN HANG_INIT HANG_PROCESS CONTROL_CHARS NULL_DESCRIPTOR)
+        if(APPLE)
+            list(APPEND _conf_variants ECHO_MAIN)
+        endif()
+        foreach(_v ${_conf_variants})
+            string(TOLOWER ${_v} _lv)
+            add_library(pulp-test-clap-conf-${_lv} MODULE ${_conf_dir}/conformance_fixture_clap.cpp)
+            target_link_libraries(pulp-test-clap-conf-${_lv} PRIVATE clap)
+            if(NOT _v STREQUAL "good")
+                target_compile_definitions(pulp-test-clap-conf-${_lv} PRIVATE BREAK_${_v}=1)
+            endif()
+            set_target_properties(pulp-test-clap-conf-${_lv} PROPERTIES
+                OUTPUT_NAME "Conf_${_lv}" PREFIX "" SUFFIX ".clap")
+            list(APPEND _conf_modules pulp-test-clap-conf-${_lv})
+        endforeach()
+        if(APPLE)
+            # A macOS bundle: Contents/MacOS/<exe>, handed to the checker by its
+            # bundle path.
+            add_custom_target(pulp-test-clap-conf-bundle ALL
+                COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_CURRENT_BINARY_DIR}/ConfBundle.clap/Contents/MacOS
+                COMMAND ${CMAKE_COMMAND} -E copy $<TARGET_FILE:pulp-test-clap-conf-good>
+                    ${CMAKE_CURRENT_BINARY_DIR}/ConfBundle.clap/Contents/MacOS/ConfBundle
+                DEPENDS pulp-test-clap-conf-good)
+        endif()
+        find_package(Python3 COMPONENTS Interpreter QUIET)
+        if(Python3_Interpreter_FOUND)
+            add_test(NAME clap-conformance-checker
+                COMMAND ${Python3_EXECUTABLE}
+                    "${CMAKE_SOURCE_DIR}/tools/audio/clap-conformance/test_clap_conformance.py"
+                    $<TARGET_FILE:pulp-clap-conformance>
+                    pulp=$<TARGET_FILE:pulp-test-clap-conf-pulp>
+                    good=$<TARGET_FILE:pulp-test-clap-conf-good>
+                    heavy_memory=$<TARGET_FILE:pulp-test-clap-conf-heavy_memory>
+                    heavy_cpu=$<TARGET_FILE:pulp-test-clap-conf-heavy_cpu>
+                    echo=$<TARGET_FILE:pulp-test-clap-conf-echo>
+                    $<$<BOOL:${APPLE}>:echo_main=$<TARGET_FILE:pulp-test-clap-conf-echo_main>>
+                    null_input=$<TARGET_FILE:pulp-test-clap-conf-null_input>
+                    crash_teardown=$<TARGET_FILE:pulp-test-clap-conf-crash_teardown>
+                    $<$<BOOL:${APPLE}>:bundle=${CMAKE_CURRENT_BINARY_DIR}/ConfBundle.clap>
+                    state=$<TARGET_FILE:pulp-test-clap-conf-state>)
+            # Each fixture module costs a few seconds of host-side warm-up, so
+            # the full matrix is a slow lane; the robustness test below is the
+            # fast per-PR proof of the checker's own deadline and JSON output.
+            set_tests_properties(clap-conformance-checker PROPERTIES
+                LABELS "format;clap;tools;slow" TIMEOUT 120)
+            add_test(NAME clap-conformance-checker-robustness
+                COMMAND ${Python3_EXECUTABLE}
+                    "${CMAKE_SOURCE_DIR}/tools/audio/clap-conformance/test_clap_conformance.py"
+                    $<TARGET_FILE:pulp-clap-conformance>
+                    hang_init=$<TARGET_FILE:pulp-test-clap-conf-hang_init>
+                    hang_process=$<TARGET_FILE:pulp-test-clap-conf-hang_process>
+                    control_chars=$<TARGET_FILE:pulp-test-clap-conf-control_chars>
+                    null_descriptor=$<TARGET_FILE:pulp-test-clap-conf-null_descriptor>)
+            set_tests_properties(clap-conformance-checker-robustness PROPERTIES
+                LABELS "format;clap;tools" TIMEOUT 120)
+        endif()
+    endif()
 
     # CLAP inbound/outbound MIDI event coverage + steady-state RT process guard.
     #

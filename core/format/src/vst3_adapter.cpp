@@ -926,6 +926,17 @@ tresult PLUGIN_API PulpVst3Processor::initialize(FUnknown* context) {
 
     auto desc = processor_->descriptor();
     trace.mark("after_descriptor");
+    // Capture before plug-in listeners can recursively normalize a write.
+    // Registration order then preserves outer -> nested write order.
+    processor_param_listener_ = store_.add_listener(
+        [this](state::ParamID id, float value) {
+            if (!ScopedProcessorParameterWrite::active() || ScopedHostParameterWrite::active())
+                return;
+            const auto index = boundary::find_param_index(store_.all_params(), id);
+            if (index < processor_param_values_.size())
+                processor_param_values_[index] = value;
+        },
+        state::ListenerThread::Audio);
     processor_->set_state_store(&store_);
     processor_->define_parameters(store_);
     trace.mark("after_define_parameters");
@@ -1254,6 +1265,7 @@ tresult PLUGIN_API PulpVst3Processor::terminate() {
         pulp::events::unregister_plugin_backend(main_thread_token_);
         main_thread_token_ = 0;
     }
+    processor_param_listener_ = {};
     processor_.reset();
     return SingleComponentEffect::terminate();
 }
@@ -1667,6 +1679,7 @@ tresult PLUGIN_API PulpVst3Processor::setupProcessing(ProcessSetup& setup) {
     // one count per sample offset in the largest block.
     param_sort_scratch_.resize(state::ParameterEventQueue::kCapacity);
     param_writes_.clear();
+    processor_param_values_.reserve(store_.all_params().size());
     param_writes_.reserve(std::max<std::size_t>(store_.all_params().size(), 1));
     param_offset_counts_.resize(
         ctx.max_buffer_size > 0 ? static_cast<std::size_t>(ctx.max_buffer_size) : 1u);
@@ -1949,6 +1962,7 @@ void PulpVst3Processor::queue_param_write(state::ParamID id, float value) {
 }
 
 void PulpVst3Processor::process_decode_input_parameters(ProcessData& data) {
+    const ScopedHostParameterWrite host_write;
     param_events_.clear();
     // Each automated parameter's value is collected here and written to the
     // store as one batch after the queues are read.
@@ -2739,12 +2753,13 @@ void PulpVst3Processor::process_publish_output_params(
             if (output_param_has_event_[i]) {
                 // Keep the VST3 parameter system synced to the final value even
                 // though we reported the sample-accurate points above.
-                setParamNormalized(static_cast<ParamID>(all_params[i].id),
-                                   state::host_normalized_from_value(
-                                       all_params[i], store_.get_value(all_params[i].id)));
+                SingleComponentEffect::setParamNormalized(
+                    static_cast<ParamID>(all_params[i].id),
+                    state::host_normalized_from_value(all_params[i],
+                                                      store_.get_value(all_params[i].id)));
                 continue;
             }
-            float current = store_.get_value(all_params[i].id);
+            const float current = processor_param_values_[i];
             if (boundary::changed_since_snapshot(current, param_snapshot_[i])) {
                 int32 index = 0;
                 auto* queue = data.outputParameterChanges->addParameterData(
@@ -2754,9 +2769,12 @@ void PulpVst3Processor::process_publish_output_params(
                     queue->addPoint(0, state::host_normalized_from_value(all_params[i], current),
                                     pt_index);
                 }
-                // Sync to VST3 parameter system too
-                setParamNormalized(static_cast<ParamID>(all_params[i].id),
-                                   state::host_normalized_from_value(all_params[i], current));
+                // This is controller synchronization, not a new host write.
+                // Never write the captured output back over a newer UI value.
+                SingleComponentEffect::setParamNormalized(
+                    static_cast<ParamID>(all_params[i].id),
+                    state::host_normalized_from_value(all_params[i],
+                                                      store_.get_value(all_params[i].id)));
             }
         }
     }
@@ -3133,6 +3151,10 @@ tresult PLUGIN_API PulpVst3Processor::process(ProcessData& data) {
     pre_process_generation_ = store_.state_generation();
     boundary::refresh_param_snapshot(store_, all_params, param_snapshot_, snapshot_state_,
                                      pre_process_generation_);
+    processor_param_values_.assign(param_snapshot_.begin(), param_snapshot_.end());
+    // Covers f32/f64 processor writes. Host writes carry their own scope and
+    // are excluded by the inline capture listener.
+    const ScopedProcessorParameterWrite processor_write;
     processor_->set_param_events(&param_events_);
     output_param_events_.clear();
     processor_->set_output_param_events(&output_param_events_);
@@ -3232,7 +3254,7 @@ tresult PLUGIN_API PulpVst3Processor::process(ProcessData& data) {
     // Return trigger / momentary params (panic, reset, tap) to their default
     // now that the Processor has observed this block. Done before the
     // output-change scan below so the host records the auto-reset as automation.
-    store_.reset_triggers_rt();
+    store_.reset_triggers_rt(processor_param_values_);
 
     // Phase (f): publish output parameter changes so the host can record
     // automation the plugin made during process().
@@ -3332,7 +3354,8 @@ tresult PLUGIN_API PulpVst3Processor::getState(IBStream* stream) {
     // pending restart (alongside the paced poll and the latency/tail queries).
     schedule_host_notifications(InlineFallback::allowed);
     if (!processor_) return kResultFalse;
-    auto data = plugin_state_io::serialize(store_, *processor_);
+    auto data = plugin_state_io::serialize(
+        store_, *processor_, plugin_state_io::StoreLayout::processor_owned_when_declared);
     int32 written;
     return stream->write(data.data(), static_cast<int32>(data.size()), &written);
 }

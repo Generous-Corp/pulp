@@ -20,6 +20,7 @@
 #include <cmath>
 #include <cstddef>
 #include <AudioToolbox/AudioUnitProperties.h>
+#include <AudioToolbox/AudioUnitUtilities.h>
 
 #include <AudioUnit/AudioUnit.h>
 #include <CoreFoundation/CoreFoundation.h>
@@ -44,6 +45,8 @@
 #include <functional>
 #include <limits>
 #include <memory>
+#include <span>
+#include <vector>
 
 namespace pulp::format {
 class AudioWorkgroupClient;
@@ -711,6 +714,12 @@ void wire_host_parameter_bridge(state::StateStore& store,
                                 AudioUnit unit,
                                 state::ListenerToken& out_listener);
 
+/// Same listener wiring with an injectable host notification sink. An empty
+/// sink uses AUEventListenerNotify, as does the three-argument production API.
+using HostParameterNotify = std::function<void(AudioUnit, AudioUnitEventType, state::ParamID)>;
+void wire_host_parameter_bridge(state::StateStore& store, AudioUnit unit,
+                                state::ListenerToken& out_listener, HostParameterNotify notify);
+
 // ── Host-facing parameter-name publishing ────────────────────────────────
 
 /// Coalesces StateStore presentation-name changes and republishes only the
@@ -748,16 +757,96 @@ private:
 
 // ── State (preset) serialization ─────────────────────────────────────────
 
+/// Compact encoding of Pulp's own state, carried in the AU class-info
+/// dictionary under the key `pulp-state-v2`. Class infos saved before this
+/// format carry the PLST envelope under `pulp-state` instead; restore reads both.
+/// A new key (rather than new bytes under the old one) means an older build
+/// that meets a compact class info ignores it instead of failing the restore.
+///
+/// Layout, little-endian:
+///
+///     "PLCS"            magic
+///     u8                format version (1)
+///     u8                flags: bit 0 = payload omitted (length must be 0);
+///                       any other bit is rejected
+///     u32               StateStore state_version the values were saved under
+///     varint n          number of parameter entries
+///     n x (varint id, f32 value)
+///                       only parameters whose value differs from the declared
+///                       default, compared bit for bit
+///     varint len        processor payload length
+///     len bytes         Processor payload (serialize_plugin_state())
+///     u32               CRC-32 of every preceding byte
+///
+/// Varints are LEB128, at most 10 bytes. Parameters the blob does not list are
+/// restored to their declared default when `state_version` matches the store's,
+/// so a restore sets exactly the values the legacy format carried.
+namespace compact_state {
+
+inline constexpr std::uint8_t kFormatVersion = 1;
+
+enum class DecodeStatus : std::uint8_t {
+    ok,
+    truncated,
+    bad_magic,
+    unsupported_format_version,
+    unsupported_flags,
+    unsupported_state_version,
+    crc_mismatch,
+    malformed,
+};
+
+[[nodiscard]] const char* decode_status_name(DecodeStatus status) noexcept;
+
+/// What a compact blob expands to: a StateStore::serialize()-shaped parameter
+/// blob and a view of the processor payload inside the input bytes.
+struct Decoded {
+    bool payload_omitted = false;
+    std::vector<std::uint8_t> store_blob;
+    std::span<const std::uint8_t> plugin_payload;
+};
+
+/// CRC-32 (IEEE 802.3, the same checksum StateStore and the PLST envelope use),
+/// computed eight bytes at a time.
+[[nodiscard]] std::uint32_t crc32(std::span<const std::uint8_t> bytes) noexcept;
+
+/// Encode @p store's current values and @p plugin_payload. With
+/// @p omit_payload the payload is left out and flagged as omitted (see
+/// Processor::class_info_owns_plugin_state()). Returns an empty vector when the
+/// payload is larger than the format can describe (4 GiB).
+[[nodiscard]] std::vector<std::uint8_t> encode(const state::StateStore& store,
+                                               std::span<const std::uint8_t> plugin_payload,
+                                               bool omit_payload = false);
+
+/// Parse untrusted @p bytes against @p store's schema. Every length is checked
+/// against the bytes that remain before it is used, and nothing is written to
+/// the store; @p out.plugin_payload aliases @p bytes.
+[[nodiscard]] DecodeStatus decode(std::span<const std::uint8_t> bytes,
+                                  const state::StateStore& store, Decoded& out);
+
+} // namespace compact_state
+
+/// Restore order: `AUBase::RestoreState` runs first, then this function applies
+/// the compact blob. When the processor opted into
+/// `class_info_owns_plugin_state()` the blob holds parameters only and the owning
+/// AU class restores its own key; a subclass that does so after calling the
+/// Pulp `RestoreState` sees the parameters already applied, which is the order
+/// the tests pin.
+///
 /// Attach Pulp's serialized state to the AU class-info dictionary the base
 /// class produced. Takes ownership semantics identical to `AUBase::SaveState`:
-/// `*out_data` is replaced with a dictionary carrying the `pulp-state` blob.
+/// `*out_data` is replaced with a dictionary carrying the compact state blob
+/// under `pulp-state-v2`.
 OSStatus save_pulp_state(state::StateStore& store,
                          Processor& processor,
                          CFPropertyListRef* out_data);
 
-/// Read the `pulp-state` blob back out of an AU class-info dictionary. A
-/// dictionary without the key restores nothing and succeeds (an AU preset
-/// saved by a different plugin version is not an error).
+/// Read Pulp's state blob back out of an AU class-info dictionary: the compact
+/// blob when present, else the legacy `pulp-state` envelope written by earlier
+/// versions. A dictionary with neither key restores nothing and succeeds (an AU
+/// preset saved by a different plugin version is not an error); a blob that is
+/// present but malformed fails with `kAudioUnitErr_InvalidPropertyValue` and
+/// leaves the store and the processor as they were.
 ///
 /// @p gate is held across the restore so it cannot run while the audio thread
 /// is inside `Processor::process()`. Hosts set class info on the main thread

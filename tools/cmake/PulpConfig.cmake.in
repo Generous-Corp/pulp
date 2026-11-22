@@ -103,6 +103,14 @@ endif()
 # pulp-gpu-audio joined the export set.)
 find_dependency(Threads)
 
+# pulp-vellum (exported only when PULP_ENABLE_PULP_VELLUM was on) links
+# Vellum::Value PUBLIC, so PulpTargets.cmake needs the Vellum package loaded
+# first. Consumers of an SDK without the bridge never look for Vellum.
+set(PULP_SDK_HAS_VELLUM_BRIDGE "@PULP_SDK_HAS_VELLUM_BRIDGE@")
+if(PULP_SDK_HAS_VELLUM_BRIDGE)
+    find_dependency(Vellum CONFIG)
+endif()
+
 # The Pulp SDK is built and installed in the Release configuration only.
 # When a downstream plugin is built in Debug / MinSizeRel / RelWithDebInfo
 # (or the Visual Studio multi-config generator picks those configs), CMake
@@ -213,6 +221,10 @@ if(TARGET Pulp::canvas AND TARGET skia::skia)
         set_property(TARGET Pulp::canvas APPEND PROPERTY
             INTERFACE_LINK_LIBRARIES skia::dawn)
     endif()
+    # After the Skia archive, so a consumer that links the static view or canvas
+    # libraries into a plug-in module gets libfontconfig as a needed library
+    # (Linux; PulpLinkFontconfig.cmake explains why).
+    pulp_attach_fontconfig_to_canvas(Pulp::canvas)
 endif()
 
 function(_pulp_add_lowercase_alias imported_target alias_target)

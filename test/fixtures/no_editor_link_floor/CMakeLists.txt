@@ -66,7 +66,7 @@ foreach(_fmt IN LISTS _no_editor_formats)
     # The UI stacks a project chooses with `pulp create --ui`: an audio-only
     # (--ui none) plug-in reaches neither the Vellum bridge nor RmlUi, under
     # any of their Pulp or installed-SDK target names.
-    foreach(_forbidden pulp-vellum pulp-rmlui-native pulp-rmlui-native-metal
+    foreach(_forbidden pulp-vellum pulp-vellum-audio pulp-rmlui-native pulp-rmlui-native-metal
                        pulp-view-rmlui-importer-adapter)
         if(_forbidden IN_LIST _no_editor_closure)
             message(FATAL_ERROR
@@ -164,8 +164,11 @@ set_tests_properties(no-editor-link-floor-runtime-pattern PROPERTIES
 # and must be reported under sdks_without_manifest.
 add_library(NoticesProbe::probe INTERFACE IMPORTED)
 add_library(NoticesUnclaimed::probe INTERFACE IMPORTED)
+# A plain-named library no manifest claims: it must land in the build-directory
+# report as an unattributed target and never in the bundle's file.
+add_library(notices_unattributed_probe INTERFACE)
 target_link_libraries(PulpNoEditorLinkFloorControl_CLAP PRIVATE
-    NoticesProbe::probe NoticesUnclaimed::probe)
+    NoticesProbe::probe NoticesUnclaimed::probe notices_unattributed_probe)
 pulp_add_notice_manifest("${CMAKE_CURRENT_SOURCE_DIR}/notices_probe/notices.json")
 set(PULP_NOTICES_PROBE_DISABLED_FEATURE OFF CACHE INTERNAL "")
 set(_no_editor_notices "")
@@ -195,6 +198,9 @@ add_test(NAME plugin-third-party-notices
         "-DCONTROL_REQUIRES=${_control_notice_requires}"
         "-DCONTROL_FORBIDS=Notices Probe Disabled Feature"
         "-DCONTROL_MISSING_SDKS=NoticesUnclaimed"
+        "-DCONTROL_REPORT=${CMAKE_BINARY_DIR}/pulp-notices/PulpNoEditorLinkFloorControl_CLAP/ThirdPartyNotices.report.json"
+        "-DCONTROL_UNATTRIBUTED=notices_unattributed_probe"
+        "-DNO_EDITOR_REPORT_DIR=${CMAKE_BINARY_DIR}/pulp-notices"
         -P "${CMAKE_CURRENT_SOURCE_DIR}/check_third_party_notices.cmake")
 set_tests_properties(plugin-third-party-notices PROPERTIES
     LABELS "format;link-contract;artifact" TIMEOUT 60)

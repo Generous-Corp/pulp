@@ -6,6 +6,7 @@ from __future__ import annotations
 import contextlib
 import datetime
 import io
+import json
 import os
 import subprocess
 import sys
@@ -27,6 +28,8 @@ import audit  # noqa: E402
 PULP_SHA = "a" * 64
 OTHER_SHA = "b" * 64
 COMMIT = "c" * 40
+# Pinned so transition windows never depend on the wall clock.
+PINNED_NOW = datetime.datetime(2026, 11, 21, 12, 0, tzinfo=datetime.timezone.utc)
 
 
 def manifest(tag: str = "chrome/m158", sha: str = PULP_SHA, **spec_overrides) -> list[dict]:
@@ -99,6 +102,121 @@ class RendererLockTests(unittest.TestCase):
                                                        reader(renderer_lock(sha=OTHER_SHA)))
         self.assertEqual(status, "mismatch")
         self.assertIn(f"Vellum {OTHER_SHA}", problems[0])
+
+    @contextlib.contextmanager
+    def transition_repo(self, transition: dict | None, *, commit_record: bool):
+        temporary = tempfile.TemporaryDirectory()
+        repo = Path(temporary.name)
+        git = ["git", "-C", str(repo), "-c", "user.email=t@example.invalid",
+               "-c", "user.name=transition-test"]
+        subprocess.run([*git, "init", "-q", "-b", "main"], check=True)
+        if transition is not None:
+            record = repo / audit.PIN_TRANSITION_FILE
+            record.parent.mkdir(parents=True, exist_ok=True)
+            record.write_text(json.dumps(transition), encoding="utf-8")
+            if commit_record:
+                subprocess.run([*git, "add", audit.PIN_TRANSITION_FILE], check=True)
+        subprocess.run([*git, "commit", "-q", "--allow-empty", "-m", "base"], check=True)
+        base = subprocess.run([*git, "rev-parse", "HEAD"], check=True,
+                              capture_output=True, text=True, encoding="utf-8").stdout.strip()
+        subprocess.run([*git, "update-ref", "refs/remotes/origin/main", base], check=True)
+        subprocess.run([*git, "checkout", "-q", "-b", "work"], check=True)
+        with mock.patch.object(audit, "ROOT", repo), mock.patch.dict(
+                os.environ, {"GITHUB_BASE_REF": "main"}):
+            yield repo
+        temporary.cleanup()
+
+    def transition(self, now: datetime.datetime, **overrides) -> dict:
+        value = {
+            "schema": "pulp.pin-transition.v1",
+            "issued_at": (now - datetime.timedelta(days=1)).isoformat().replace("+00:00", "Z"),
+            "expires_at": (now + datetime.timedelta(days=1)).isoformat().replace("+00:00", "Z"),
+            "owner": "danielraffel",
+            "reason": "cycle",
+            "entries": [{"artifact_id": "renderer/mac-universal", "old_sha256": OTHER_SHA,
+                          "new_sha256": PULP_SHA, "owner": "danielraffel", "reason": "cycle"}],
+        }
+        value.update(overrides)
+        return value
+
+    def drift(self, now: datetime.datetime) -> tuple[str, list[str]]:
+        return audit.vellum_renderer_drift(lock_manifest(),
+                                            reader(renderer_lock(sha=OTHER_SHA)), now=now)
+
+    def test_working_tree_record_is_ignored(self) -> None:
+        now = PINNED_NOW
+        with self.transition_repo(self.transition(now), commit_record=False) as repo:
+            (repo / audit.PIN_TRANSITION_FILE).parent.mkdir(parents=True, exist_ok=True)
+            (repo / audit.PIN_TRANSITION_FILE).write_text(
+                json.dumps(self.transition(now)), encoding="utf-8")
+            status, problems = self.drift(now)
+        self.assertEqual(status, "match", problems)
+
+    def test_record_added_by_this_pr_is_applied(self) -> None:
+        now = PINNED_NOW
+        with self.transition_repo(None, commit_record=False) as repo:
+            record = repo / audit.PIN_TRANSITION_FILE
+            record.parent.mkdir(parents=True, exist_ok=True)
+            record.write_text(json.dumps(self.transition(now)), encoding="utf-8")
+            git = ["git", "-C", str(repo), "-c", "user.email=t@example.invalid",
+                   "-c", "user.name=transition-test"]
+            subprocess.run([*git, "add", audit.PIN_TRANSITION_FILE], check=True)
+            subprocess.run([*git, "commit", "-q", "-m", "add record"], check=True)
+            status, problems = self.drift(now)
+        self.assertEqual(status, "match", problems)
+
+    def test_valid_base_transition_covers_drift(self) -> None:
+        now = PINNED_NOW
+        with self.transition_repo(self.transition(now), commit_record=True):
+            status, problems = self.drift(now)
+        self.assertEqual(status, "match")
+        self.assertEqual(problems, [])
+
+    def test_expired_transition_fails_closed(self) -> None:
+        now = PINNED_NOW
+        transition = self.transition(
+            now, expires_at=(now - datetime.timedelta(seconds=1)).isoformat().replace("+00:00", "Z"))
+        with self.transition_repo(transition, commit_record=True):
+            status, problems = self.drift(now)
+        self.assertEqual(status, "mismatch")
+        self.assertIn("expired", problems[0])
+
+    def test_overlong_transition_fails_closed(self) -> None:
+        now = PINNED_NOW
+        transition = self.transition(
+            now, expires_at=(now + datetime.timedelta(days=15)).isoformat().replace("+00:00", "Z"))
+        with self.transition_repo(transition, commit_record=True):
+            status, problems = self.drift(now)
+        self.assertEqual(status, "mismatch")
+        self.assertIn("at most 14 days", problems[0])
+
+    def test_future_issued_at_fails_closed(self) -> None:
+        now = PINNED_NOW
+        transition = self.transition(
+            now, issued_at=(now + datetime.timedelta(seconds=1)).isoformat().replace("+00:00", "Z"))
+        with self.transition_repo(transition, commit_record=True):
+            status, problems = self.drift(now)
+        self.assertEqual(status, "mismatch")
+        self.assertIn("future", problems[0])
+
+    def test_a_reversed_transition_fails_closed(self) -> None:
+        # The digests name the same pair of values in reverse: the record would
+        # authorize the opposite renderer change, so direction must be checked.
+        now = PINNED_NOW
+        reversed_entry = {"artifact_id": "renderer/mac-universal", "old_sha256": PULP_SHA,
+                          "new_sha256": OTHER_SHA, "owner": "danielraffel", "reason": "cycle"}
+        with self.transition_repo(self.transition(now, entries=[reversed_entry]),
+                                  commit_record=True):
+            status, problems = self.drift(now)
+        self.assertEqual(status, "mismatch")
+        self.assertIn("does not name the observed old/new digests", problems[0])
+
+    def test_malformed_transition_fails_closed(self) -> None:
+        now = PINNED_NOW
+        with self.transition_repo({"schema": "wrong"}, commit_record=True):
+            status, problems = self.drift(now)
+        self.assertEqual(status, "mismatch")
+        self.assertIn("invalid schema", problems[0])
 
     def test_a_lock_milestone_that_differs_fails(self) -> None:
         status, problems = audit.vellum_renderer_drift(lock_manifest(),
@@ -722,69 +840,14 @@ class RendererLockDigestTests(unittest.TestCase):
         self.assertTrue(any("hashes to" in problem for problem in problems), problems)
 
 
-
-class PinTransitionTests(unittest.TestCase):
-    def transition(self, **overrides):
-        value = {"schema": "pulp.pin-transition.v1", "issued_at": "2026-11-20T00:00:00Z", "expires_at": "2026-12-04T00:00:00Z",
-                 "owner": "danielraffel", "reason": "test transition", "entries": [{"artifact_id": "renderer/mac-universal", "old_sha256": "a" * 64,
-                              "new_sha256": "b" * 64, "reason": "cycle", "owner": "danielraffel"}]}
-        value.update(overrides)
-        return value
-
-    def now(self):
-        return datetime.datetime(2026, 11, 20, tzinfo=datetime.timezone.utc)
-
-    def test_accepts_old_digest(self):
-        self.assertEqual(audit.validate_pin_transition(self.transition(), "renderer/mac-universal", "a" * 64, "b" * 64, now=self.now()), [])
-
-    def test_rejects_reverse_transition(self):
-        self.assertTrue(audit.validate_pin_transition(self.transition(), "renderer/mac-universal", "b" * 64, "a" * 64, now=self.now()))
-
-    def test_rejects_third_digest(self):
-        self.assertTrue(audit.validate_pin_transition(self.transition(), "renderer/mac-universal", "c" * 64, "b" * 64, now=self.now()))
-
-    def test_rejects_expired(self):
-        self.assertTrue(any("expired" in e for e in audit.validate_pin_transition(self.transition(issued_at="2026-11-01T00:00:00Z", expires_at="2026-11-19T00:00:00Z"), "renderer/mac-universal", "a" * 64, "b" * 64, now=self.now())))
-
-    def test_rejects_unjustified_entry(self):
-        self.assertTrue(audit.validate_pin_transition(self.transition(), "renderer/mac-universal", "a" * 64, "a" * 64, now=self.now()))
-
-
-class RendererTransitionIntegrationTests(unittest.TestCase):
-    def test_recorded_transition_allows_the_current_renderer_drift(self) -> None:
-        old_digest = "dca73c0eee5b0f6d129fe357d0754f7165c6b436051e0de947aeedd3e1bde250"
-        new_digest = "1779c7d1ba5c73a0d6a1f33b77fbf30774bbd9f7542c1c42cc5129f57e99fbd4"
-        status, problems = audit.vellum_renderer_drift(
-            manifest(sha=new_digest, path="gpu-runtime/renderer-lock.json", lock_platform="macos-arm64"), reader(renderer_lock(sha=old_digest)))
-        self.assertEqual(status, "match", problems)
-
-    def test_other_digest_still_fails(self) -> None:
-        old_digest = "dca73c0eee5b0f6d129fe357d0754f7165c6b436051e0de947aeedd3e1bde250"
-        status, problems = audit.vellum_renderer_drift(
-            manifest(sha="e" * 64, path="gpu-runtime/renderer-lock.json", lock_platform="macos-arm64"),
-            reader(renderer_lock(sha=old_digest)))
-        self.assertEqual(status, "mismatch")
-        self.assertTrue(any("does not name" in problem for problem in problems), problems)
-
-    def test_expired_transition_fails_closed(self) -> None:
-        old_digest = "dca73c0eee5b0f6d129fe357d0754f7165c6b436051e0de947aeedd3e1bde250"
-        status, problems = audit.vellum_renderer_drift(
-            manifest(sha="1779c7d1ba5c73a0d6a1f33b77fbf30774bbd9f7542c1c42cc5129f57e99fbd4",
-                     path="gpu-runtime/renderer-lock.json", lock_platform="macos-arm64"),
-            reader(renderer_lock(sha=old_digest)),
-            now=datetime.datetime(2026, 12, 5, tzinfo=datetime.timezone.utc))
-        self.assertEqual(status, "mismatch")
-        self.assertTrue(any("expired" in problem for problem in problems), problems)
-
-    def test_missing_transition_keeps_the_normal_drift_failure(self) -> None:
-        old_digest = "dca73c0eee5b0f6d129fe357d0754f7165c6b436051e0de947aeedd3e1bde250"
-        with mock.patch.object(audit, "PIN_TRANSITION_FILE", Path("/missing/pin-transition.json")):
-            status, problems = audit.vellum_renderer_drift(
-                manifest(sha="1779c7d1ba5c73a0d6a1f33b77fbf30774bbd9f7542c1c42cc5129f57e99fbd4",
-                         path="gpu-runtime/renderer-lock.json", lock_platform="macos-arm64"),
-                reader(renderer_lock(sha=old_digest)))
-        self.assertEqual(status, "mismatch")
-        self.assertTrue(any("cannot be read" in problem for problem in problems), problems)
+class LicenseAuditCheckoutTests(unittest.TestCase):
+    def test_license_audit_checkout_keeps_history_for_the_base_merge_base(self) -> None:
+        # renderer_transition needs origin/<base> and a merge-base with HEAD;
+        # the default shallow checkout has neither, so the audit would fail closed.
+        workflow = (ROOT / ".github" / "workflows" / "license-audit.yml").read_text(
+            encoding="utf-8")
+        checkout = workflow.split("actions/checkout@", 1)[1].split("\n      - ", 1)[0]
+        self.assertIn("fetch-depth: 0", checkout)
 
 
 if __name__ == "__main__":

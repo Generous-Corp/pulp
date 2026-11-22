@@ -53,6 +53,10 @@ namespace pulp::format::clap_generic {
 // load-bearing, not cosmetic.
 struct ClapPluginRecord {
     ProcessorFactory factory = nullptr;
+    // Optional: returns the plug-in's descriptor without building a Processor.
+    // When set, entry_init() answers descriptor queries from it and no
+    // Processor is constructed until create_plugin()/init.
+    PluginDescriptor (*static_descriptor)() = nullptr;
     PluginDescriptor desc{};
     clap_plugin_descriptor_t clap_desc{};
     const char* features[4] = {};
@@ -81,19 +85,27 @@ inline uint32_t g_clap_index_count = 0;
 
 // Static-init-safe: stores the factory only, never calls it. `publish_keyed`
 // records also register into the shared keyed registry at init time.
-inline void register_clap_record(ProcessorFactory factory, bool publish_keyed) {
+inline void register_clap_record(ProcessorFactory factory, bool publish_keyed,
+                                 PluginDescriptor (*static_descriptor)() = nullptr) {
     if (g_clap_record_count >= kMaxClapPlugins) return;
     auto& rec = g_clap_records[g_clap_record_count++];
     rec.factory = factory;
+    rec.static_descriptor = static_descriptor;
     rec.publish_keyed = publish_keyed;
 }
 
 // Deferred descriptor build (NOT at static init). Idempotent.
 inline void init_record(ClapPluginRecord& rec) {
     if (rec.initialized || !rec.factory) return;
-    auto proc = rec.factory();
-    if (!proc) return;
-    rec.desc = proc->descriptor();
+    if (rec.static_descriptor) {
+        // Scan path: no Processor is built just to describe the plug-in.
+        rec.desc = rec.static_descriptor();
+    } else {
+        auto proc = rec.factory();
+        if (!proc)
+            return;
+        rec.desc = proc->descriptor();
+    }
 
     switch (rec.desc.category) {
         case PluginCategory::Effect:
@@ -301,7 +313,8 @@ inline const clap_plugin_audio_ports_config_t audio_ports_config_ext = {
 inline bool state_save(const clap_plugin_t* plugin, const clap_ostream_t* stream) {
     auto* self = static_cast<clap_adapter::PulpClapPlugin*>(plugin->plugin_data);
     if (!self || !self->processor) return false;
-    const auto data = plugin_state_io::serialize(self->store, *self->processor);
+    const auto data = plugin_state_io::serialize(
+        self->store, *self->processor, plugin_state_io::StoreLayout::processor_owned_when_declared);
     // CLAP's stream->write() is spec'd to return a short-write count on
     // success — callers MUST loop. Hosts (and clap-validator's
     // `state-reproducibility-flush` with a 23-byte write cap) exercise
@@ -1047,6 +1060,7 @@ inline const clap_plugin_t* create_plugin(const clap_plugin_factory_t*,
     // Cache this plugin's descriptor so pre-init extension queries (audio/note
     // ports) resolve per-plugin metadata without a shared global.
     instance->descriptor_snapshot = rec->desc;
+    instance->descriptor_is_static = rec->static_descriptor != nullptr;
     // Keep the host pointer so clap_on_main_thread() can republish
     // latency / tail changes the processor flagged.
     instance->host = host;
@@ -1133,6 +1147,33 @@ inline const void* entry_get_factory(const char* factory_id) {
             } \
         } Ident##_clap_registrar_; \
     }
+
+// Same as PULP_CLAP_BUNDLE_PLUGIN, with `descriptor_fn` (a `PluginDescriptor()`
+// callable) answering descriptor queries so a host scan builds no Processor.
+// descriptor_fn must return exactly what the Processor's descriptor() returns.
+#define PULP_CLAP_BUNDLE_PLUGIN_WITH_DESCRIPTOR(Ident, factory_fn, descriptor_fn)                  \
+    namespace {                                                                                    \
+    struct Ident##_ClapRegistrar {                                                                 \
+        Ident##_ClapRegistrar() {                                                                  \
+            pulp::format::clap_generic::register_clap_record(factory_fn, /*publish_keyed=*/true,   \
+                                                             descriptor_fn);                       \
+        }                                                                                          \
+    } Ident##_clap_registrar_;                                                                     \
+    }
+
+// Single-plugin form of the above: the module's load and the host's descriptor
+// reads construct no Processor; construction waits for create_plugin().
+#define PULP_CLAP_PLUGIN_WITH_DESCRIPTOR(factory_fn, descriptor_fn)                                \
+    namespace {                                                                                    \
+    struct PulpClapInit {                                                                          \
+        PulpClapInit() {                                                                           \
+            pulp::format::clap_generic::register_clap_record(factory_fn, /*publish_keyed=*/false,  \
+                                                             descriptor_fn);                       \
+            pulp::format::register_plugin(factory_fn);                                             \
+        }                                                                                          \
+    } _pulp_clap_init;                                                                             \
+    }                                                                                              \
+    PULP_CLAP_BUNDLE_ENTRY()
 
 // Place in ONE .cpp file per single-plugin CLAP bundle. Registers the one
 // plugin, keeps the legacy global factory slot (single-plugin back-compat), and

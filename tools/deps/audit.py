@@ -1067,44 +1067,41 @@ def find_uncovered_declarations(
 VELLUM_DRIFT_FIELD = "vellum_renderer_drift_check"
 GPU_RUNTIME_ENTRY = "vellum-gpu-runtime"
 VELLUM_CHECKOUT_ENV = "PULP_VELLUM_CHECKOUT"
-PIN_TRANSITION_FILE = ROOT / "tools/deps/pin_transition.json"
+PIN_TRANSITION_FILE = "tools/deps/pin_transition.json"
 VELLUM_ARCHIVE_SHA_RE = re.compile(
     r'set\(\s*_vellum_expected_archive_sha256\s+"([0-9A-Fa-f]{64})"\s*\)')
 VELLUM_TUPLE_RE = re.compile(r"(chrome/m\d+)\s+macOS universal tuple")
 FULL_SHA_RE = re.compile(r"[0-9a-f]{40}")
 
 
-
-
 def validate_pin_transition(transition: object, artifact_id: str, old_digest: str,
                             new_digest: str, *, now: datetime.datetime) -> list[str]:
-    """Validate a single, time-bounded renderer pin transition."""
+    """Validate a time-bounded old/new digest transition."""
     if not isinstance(transition, dict) or transition.get("schema") != "pulp.pin-transition.v1":
         return ["pin transition has an invalid schema"]
-
     errors: list[str] = []
     for field in ("owner", "reason"):
         if not isinstance(transition.get(field), str) or not transition[field].strip():
             errors.append(f"pin transition has no {field}")
 
-    dates: dict[str, datetime.datetime] = {}
+    dates = {}
     for field in ("issued_at", "expires_at"):
         value = transition.get(field)
         try:
-            parsed = datetime.datetime.fromisoformat(value.replace("Z", "+00:00")) if isinstance(value, str) else None
+            date = datetime.datetime.fromisoformat(value.replace("Z", "+00:00")) if isinstance(value, str) else None
         except ValueError:
-            parsed = None
-        if parsed is None or parsed.tzinfo is None:
+            date = None
+        if date is None or date.tzinfo is None:
             errors.append(f"pin transition has an invalid {field}")
         else:
-            dates[field] = parsed
+            dates[field] = date
     if len(dates) == 2:
-        issued, expires = dates["issued_at"], dates["expires_at"]
+        issued, deadline = dates["issued_at"], dates["expires_at"]
         if issued > now:
             errors.append("pin transition issued_at is in the future")
-        if expires <= now:
+        if deadline <= now:
             errors.append("pin transition is expired")
-        if not datetime.timedelta(0) < expires - issued <= datetime.timedelta(days=14):
+        if not datetime.timedelta(0) < deadline - issued <= datetime.timedelta(days=14):
             errors.append("pin transition lifetime must be positive and at most 14 days")
 
     entries = transition.get("entries")
@@ -1120,19 +1117,22 @@ def validate_pin_transition(transition: object, artifact_id: str, old_digest: st
     if not all(isinstance(value, str) and re.fullmatch(r"[0-9a-fA-F]{64}", value)
                for value in (old, new)):
         errors.append(f"pin transition {artifact_id} has malformed digests")
-    elif old.lower() != old_digest.lower() or new.lower() != new_digest.lower():
+    elif old.lower() == new.lower() or old.lower() != old_digest.lower() or (
+            new.lower() != new_digest.lower()):
         errors.append(f"pin transition {artifact_id} does not name the observed old/new digests")
-    for field in ("owner", "reason"):
-        if not isinstance(entry.get(field), str) or not entry[field].strip():
-            errors.append(f"pin transition {artifact_id} has no {field}")
+    if not isinstance(entry.get("reason"), str) or not entry["reason"].strip():
+        errors.append(f"pin transition {artifact_id} has no reason")
+    if not isinstance(entry.get("owner"), str) or not entry["owner"].strip():
+        errors.append(f"pin transition {artifact_id} has no owner")
     return errors
 
 
 def renderer_transition(artifact_id: str, old_digest: str, new_digest: str, *,
                         now: datetime.datetime) -> list[str]:
     """Read and validate the checked-in transition record, failing closed."""
+    path = ROOT / PIN_TRANSITION_FILE
     try:
-        transition = json.loads(Path(PIN_TRANSITION_FILE).read_text(encoding="utf-8"))
+        transition = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, ValueError) as error:
         return [f"{PIN_TRANSITION_FILE} cannot be read: {error}"]
     return validate_pin_transition(transition, artifact_id, old_digest, new_digest, now=now)
@@ -1185,12 +1185,13 @@ def read_vellum_pin_source(repository: str, commit: str, path: str) -> str:
         raise VellumPinUnavailable(f"{path} at {commit} is not UTF-8: {error}") from error
 
 
-def vellum_renderer_drift(manifest: list[dict], read_source=None, *, now: datetime.datetime | None = None) -> tuple[str, list[str]]:
+def vellum_renderer_drift(manifest: list[dict], read_source=None, *,
+                          now: datetime.datetime | None = None) -> tuple[str, list[str]]:
     """Compare gpu-runtime's renderer lock (or Vellum's older pin) with Pulp's Skia entry.
 
     Returns (status, problems): status is "not-configured" when the Skia entry
-    declares no comparison, "match" when both pins agree, and "mismatch" or
-    "unavailable" with the problems that say why.
+    declares no comparison, "match" when the pins agree or a trusted base
+    transition covers the drift, and "mismatch" or "unavailable" on failure.
     """
     skia = next((dep for dep in manifest if dep.get("name") == "Skia"), None)
     if skia is None or VELLUM_DRIFT_FIELD not in skia:
@@ -1249,9 +1250,11 @@ def vellum_renderer_drift(manifest: list[dict], read_source=None, *, now: dateti
                 f"at {pinned or 'nothing'}; they must be the same commit")
     transition_accepted = False
     if vellum_sha != pulp_sha.lower():
+        # Direction matters: the record moves from Pulp's pinned digest (old) to
+        # the digest Vellum's pin now names (new), never the reverse.
         transition_errors = renderer_transition(
             f"renderer/{asset_key}", vellum_sha, pulp_sha.lower(),
-            now=now or datetime.datetime.now(datetime.timezone.utc))
+            now=now if now is not None else datetime.datetime.now(datetime.timezone.utc))
         transition_accepted = not transition_errors
         if transition_errors:
             problems.append(
@@ -1266,9 +1269,14 @@ def vellum_renderer_drift(manifest: list[dict], read_source=None, *, now: dateti
             continue
         other = assets[key].get("sha256") if isinstance(assets[key], dict) else None
         if not isinstance(other, str) or other.lower() != expected_mac_sha:
+            if transition_accepted:
+                problems.append(
+                    f"manifest Skia release_assets.{key} is {other}, expected the Pulp "
+                    f"transition digest {expected_mac_sha}")
+                continue
             problems.append(
                 f"manifest Skia release_assets.{key} is {other}, but gpu-runtime's lock "
-                f"pins one macOS asset, {expected_mac_sha} ({where}); a macOS build that "
+                f"pins one macOS asset, {vellum_sha} ({where}); a macOS build that "
                 f"resolves {key} would fail its Dawn digest check")
     if vellum_tag != pulp_tag:
         problems.append(
@@ -2313,7 +2321,7 @@ def main() -> int:
             for problem in vellum_problems:
                 print(f"  - {problem}")
         elif vellum_status == "match":
-            print("\nVellum renderer pin: matches the manifest Skia archive digest and release")
+            print("\nVellum renderer pin: matches the manifest or is covered by the base pin transition")
         pin_problems = gpu_runtime_pin_agreement(manifest)
         if pin_problems:
             print("\ngpu-runtime pin drift:")

@@ -6,6 +6,7 @@
 #include <pulp/state/state_migration.hpp>
 
 #include <array>
+#include <cstring>
 #include <cstdint>
 #include <span>
 #include <stdexcept>
@@ -565,6 +566,215 @@ TEST_CASE("plugin_state_io rejects corrupt envelopes without touching live state
     REQUIRE_THAT(restored.store.get_value(2), WithinAbs(77.0, 0.01));
     REQUIRE(restored.processor.plugin_state == "keep");
     REQUIRE(restored.processor.deserialize_calls == 0);
+}
+
+TEST_CASE("plugin_state_io restores already-split payloads and rolls both back on rejection",
+          "[format][plugin-state]") {
+    TestRig source;
+    source.store.set_value(1, -18.0f);
+    source.processor.plugin_state = "split-a";
+    const auto store_blob = source.store.serialize();
+    const auto payload = pulp::format::plugin_state_io::plugin_state_payload(source.processor);
+    REQUIRE(payload != nullptr);
+    REQUIRE(std::string(payload->begin(), payload->end()) == "split-a");
+
+    SECTION("applies both layers") {
+        TestRig restored;
+        restored.store.set_value(1, 3.0f);
+        REQUIRE(pulp::format::plugin_state_io::deserialize_parts(
+            store_blob, *payload, restored.store, restored.processor));
+        REQUIRE_THAT(restored.store.get_value(1), WithinAbs(-18.0, 0.01));
+        REQUIRE(restored.processor.plugin_state == "split-a");
+    }
+
+    SECTION("a rejected payload rolls the parameters back") {
+        TestRig restored;
+        restored.store.set_value(1, 3.0f);
+        restored.processor.plugin_state = "keep";
+        restored.processor.rejected_payload = "split-a";
+        REQUIRE_FALSE(pulp::format::plugin_state_io::deserialize_parts(
+            store_blob, *payload, restored.store, restored.processor));
+        REQUIRE_THAT(restored.store.get_value(1), WithinAbs(3.0, 0.01));
+        REQUIRE(restored.processor.plugin_state == "keep");
+    }
+
+    SECTION("a bad parameter blob never reaches the processor") {
+        TestRig restored;
+        restored.processor.plugin_state = "keep";
+        auto bad = store_blob;
+        bad.back() ^= 0xFF;
+        REQUIRE_FALSE(pulp::format::plugin_state_io::deserialize_parts(
+            bad, *payload, restored.store, restored.processor));
+        REQUIRE(restored.processor.deserialize_calls == 0);
+    }
+
+    SECTION("a published snapshot is shared, not serialized again") {
+        source.processor.publish_plugin_state_snapshot(std::vector<uint8_t>{1, 2, 3});
+        const int before = source.processor.serialize_calls;
+        const auto first = pulp::format::plugin_state_io::plugin_state_payload(source.processor);
+        const auto second = pulp::format::plugin_state_io::plugin_state_payload(source.processor);
+        REQUIRE(first == second);
+        REQUIRE(source.processor.serialize_calls == before);
+    }
+}
+
+// A processor whose own bytes restore every parameter.
+class OwnedParamsProcessor : public pulp::format::Processor {
+  public:
+    static constexpr std::size_t kParams = 500;
+    bool owns = true;
+    std::string tag;
+
+    pulp::format::PluginDescriptor descriptor() const override {
+        return {.name = "OwnedParams",
+                .manufacturer = "PulpTest",
+                .bundle_id = "com.pulp.test.owned-params",
+                .version = "1.0.0",
+                .category = pulp::format::PluginCategory::Effect,
+                .input_buses = {{"Audio In", 2}},
+                .output_buses = {{"Audio Out", 2}}};
+    }
+    void define_parameters(pulp::state::StateStore& store) override {
+        for (std::size_t i = 0; i < kParams; ++i)
+            store.add_parameter({.id = static_cast<pulp::state::ParamID>(i + 1),
+                                 .name = "P" + std::to_string(i),
+                                 .range = {0.0f, 1.0f, 0.0f, 0.001f}});
+    }
+    void prepare(const pulp::format::PrepareContext&) override {}
+    void process(pulp::audio::BufferView<float>&, const pulp::audio::BufferView<const float>&,
+                 pulp::midi::MidiBuffer&, pulp::midi::MidiBuffer&,
+                 const pulp::format::ProcessContext&) override {}
+
+    bool plugin_state_carries_parameters() const override {
+        return owns;
+    }
+    std::vector<uint8_t> serialize_plugin_state() const override {
+        std::vector<uint8_t> bytes(tag.begin(), tag.end());
+        for (std::size_t i = 0; i < kParams; ++i) {
+            const float v = state().get_value(static_cast<pulp::state::ParamID>(i + 1));
+            const auto* raw = reinterpret_cast<const uint8_t*>(&v);
+            bytes.insert(bytes.end(), raw, raw + sizeof(v));
+        }
+        return bytes;
+    }
+    bool deserialize_plugin_state(std::span<const uint8_t> data) override {
+        if (data.size() < kParams * sizeof(float))
+            return true;
+        const std::size_t tag_size = data.size() - kParams * sizeof(float);
+        tag.assign(data.begin(), data.begin() + static_cast<std::ptrdiff_t>(tag_size));
+        if (!interpret)
+            return true;
+        for (std::size_t i = 0; i < kParams; ++i) {
+            float v;
+            std::memcpy(&v, data.data() + tag_size + i * sizeof(v), sizeof(v));
+            state().set_value(static_cast<pulp::state::ParamID>(i + 1), v);
+        }
+        return true;
+    }
+    // False models a release that predates the opt-in: it keeps the bytes
+    // but does not read parameters out of them.
+    bool interpret = true;
+};
+
+struct OwnedRig {
+    pulp::state::StateStore store;
+    OwnedParamsProcessor processor;
+    OwnedRig() {
+        processor.set_state_store(&store);
+        processor.define_parameters(store);
+    }
+    void fill() {
+        for (std::size_t i = 0; i < OwnedParamsProcessor::kParams; ++i)
+            store.set_value(static_cast<pulp::state::ParamID>(i + 1),
+                            0.25f + 0.001f * static_cast<float>(i % 400));
+    }
+    std::size_t differing(const OwnedRig& other) const {
+        std::size_t n = 0;
+        for (std::size_t i = 0; i < OwnedParamsProcessor::kParams; ++i) {
+            const auto id = static_cast<pulp::state::ParamID>(i + 1);
+            if (store.get_value(id) != other.store.get_value(id))
+                ++n;
+        }
+        return n;
+    }
+};
+
+TEST_CASE("plugin_state_io leaves the parameter store to a processor that carries its parameters",
+          "[format][plugin-state][owned-state]") {
+    using pulp::format::plugin_state_io::StoreLayout;
+    OwnedRig source;
+    source.fill();
+    source.processor.tag = "own-state";
+    const auto full = pulp::format::plugin_state_io::serialize(source.store, source.processor);
+    const auto owned = pulp::format::plugin_state_io::serialize(
+        source.store, source.processor, StoreLayout::processor_owned_when_declared);
+
+    SECTION("the owned save is smaller by 8 bytes per parameter") {
+        REQUIRE(full.size() - owned.size() == 8 * OwnedParamsProcessor::kParams);
+        REQUIRE(pulp::format::plugin_state_io::serialize(source.store, source.processor,
+                                                         StoreLayout::full) == full);
+    }
+
+    SECTION("round trip with the option on and off restores every parameter") {
+        for (const auto* blob : {&full, &owned}) {
+            OwnedRig loaded;
+            loaded.processor.tag = "stale";
+            REQUIRE(
+                pulp::format::plugin_state_io::deserialize(*blob, loaded.store, loaded.processor));
+            REQUIRE(loaded.differing(source) == 0);
+            REQUIRE(loaded.processor.tag == "own-state");
+        }
+    }
+
+    SECTION("a state saved by the previous layout loads with no differing parameter") {
+        // One loader restores parameters from its bytes, the other only from the
+        // stored parameters, so the store half of the old layout is exercised.
+        for (const bool interpret : {true, false}) {
+            OwnedRig loaded;
+            loaded.processor.interpret = interpret;
+            loaded.processor.tag = "stale";
+            REQUIRE(
+                pulp::format::plugin_state_io::deserialize(full, loaded.store, loaded.processor));
+            REQUIRE(loaded.differing(source) == 0);
+            REQUIRE(loaded.processor.tag == "own-state");
+        }
+    }
+
+    SECTION("a processor that does not declare keeps the full store") {
+        source.processor.owns = false;
+        REQUIRE(pulp::format::plugin_state_io::serialize(
+                    source.store, source.processor, StoreLayout::processor_owned_when_declared) ==
+                full);
+    }
+
+    SECTION("an empty payload keeps the full store even when declared") {
+        class Empty : public OwnedParamsProcessor {
+            std::vector<uint8_t> serialize_plugin_state() const override {
+                return {};
+            }
+        };
+        pulp::state::StateStore store;
+        Empty processor;
+        processor.set_state_store(&store);
+        processor.define_parameters(store);
+        store.set_value(7, 0.5f);
+        const auto blob = pulp::format::plugin_state_io::serialize(
+            store, processor, StoreLayout::processor_owned_when_declared);
+        REQUIRE(blob == store.serialize());
+    }
+
+    SECTION("downgrade: a release that predates the layout restores only what its bytes carry") {
+        OwnedRig old_release;
+        old_release.processor.interpret = false;
+        old_release.processor.tag = "stale";
+        old_release.store.set_value(3, 0.9f); // a value the owned state cannot overwrite
+        REQUIRE(pulp::format::plugin_state_io::deserialize(owned, old_release.store,
+                                                           old_release.processor));
+        // The empty store changed nothing, and the old release did not read
+        // the parameters out of the bytes: the live value stays.
+        REQUIRE(old_release.store.get_value(3) == 0.9f);
+        REQUIRE(old_release.processor.tag == "own-state");
+    }
 }
 
 TEST_CASE("plugin_state_io rejects malformed blobs without touching live state",

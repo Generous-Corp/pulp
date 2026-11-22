@@ -297,6 +297,10 @@ pub const PACKAGE_EXTRAS: &[Entry] = &[
         summary: "Manage third-party developer tools",
     },
     Entry {
+        name: "licenses",
+        summary: "Show a plug-in bundle's third-party notices",
+    },
+    Entry {
         name: "help",
         summary: "Show this help",
     },

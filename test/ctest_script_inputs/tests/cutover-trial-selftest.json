@@ -3,7 +3,11 @@
  "record": {
   "entry": "tools/scripts/test_cutover_trial.py",
   "inputs": [
+   "core/view/cmake",
+   "core/view/cmake/PulpViewJsPreludes.cmake",
    "core/view/include/pulp/view/motion.hpp",
+   "core/view/js",
+   "core/view/js/css-colors.js",
    "core/view/src/js_jsc_engine.mm",
    "tools/ci/governed-build.sh",
    "tools/cmake",

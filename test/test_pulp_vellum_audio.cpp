@@ -1,14 +1,74 @@
 #include <pulp/vellum_audio/audio_display_provider.hpp>
+#include <pulp/vellum_audio/audio_widgets.hpp>
+#include <vellum/view/data_display.hpp>
 
+#include <vellum/view/screenshot.hpp>
+
+#include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 
 #include "support/thread_progress.hpp"
 
 #include <array>
+#include <algorithm>
 #include <atomic>
 #include <chrono>
+#include <cstdint>
+#include <memory>
+#include <optional>
+#include <string>
 #include <thread>
 #include <vector>
+
+namespace {
+
+struct RenderedFrame {
+    std::vector<std::uint8_t> pixels;
+    std::uint32_t width = 0;
+    std::uint32_t height = 0;
+};
+
+RenderedFrame render(::vellum::view::View& root) {
+    RenderedFrame frame;
+    frame.pixels = ::vellum::view::render_to_rgba(root, 128, 96, 1.0f, &frame.width, &frame.height);
+    return frame;
+}
+
+void require_feed_render_contract(const RenderedFrame& first, const RenderedFrame& second,
+                                  const RenderedFrame& repeat, std::uint32_t widget_x,
+                                  std::uint32_t widget_y, std::uint32_t widget_width,
+                                  std::uint32_t widget_height) {
+    REQUIRE(first.width == second.width);
+    REQUIRE(first.height == second.height);
+    REQUIRE(first.pixels.size() == second.pixels.size());
+    REQUIRE(first.pixels.size() == repeat.pixels.size());
+    CHECK(first.pixels != second.pixels);
+    CHECK(second.pixels == repeat.pixels);
+
+    bool changed = false;
+    for (std::uint32_t y = 0; y < first.height; ++y) {
+        for (std::uint32_t x = 0; x < first.width; ++x) {
+            const auto offset = static_cast<std::size_t>(y) * first.width * 4 + x * 4;
+            const bool pixel_changed =
+                !std::equal(first.pixels.begin() + offset, first.pixels.begin() + offset + 4,
+                            second.pixels.begin() + offset);
+            if (pixel_changed)
+                changed = true;
+            if (pixel_changed && (x < widget_x || x >= widget_x + widget_width || y < widget_y ||
+                                  y >= widget_y + widget_height))
+                FAIL_CHECK("feed changed a pixel outside the widget bounds");
+        }
+    }
+    CHECK(changed);
+}
+
+// Repaint requests Vellum has recorded process-wide; a paint-input setter that
+// forgets request_repaint() leaves this unchanged.
+std::uint64_t repaint_requests() {
+    return ::vellum::view::View::damage_request_count();
+}
+
+} // namespace
 
 TEST_CASE("Vellum audio provider publishes complete meter and scope frames",
           "[pulp-vellum-audio]") {
@@ -69,6 +129,457 @@ TEST_CASE("Vellum audio provider refuses wrong channel shapes", "[pulp-vellum-au
     CHECK(provider.publish_count(99) == 0);
 }
 
+TEST_CASE("Vellum audio feed reports stale and dropped-frame metadata", "[pulp-vellum-audio]") {
+    using Provider = pulp::vellum_audio::AudioDisplayProvider;
+    Provider provider({{.name = "scope", .shape = ::vellum::value::ChannelShape::vector}});
+    const auto scope = provider.find("scope", ::vellum::value::ChannelShape::vector);
+    REQUIRE(scope);
+    pulp::vellum_audio::AudioFrameInfo info;
+    CHECK_FALSE(provider.read_info(*scope, info));
+
+    const std::array first{-90.0f, -80.0f, -70.0f};
+    info.viewport_min_hz = 30.0f;
+    info.viewport_max_hz = 18000.0f;
+    info.floor_db = -96.0f;
+    info.sample_rate = 44100.0;
+    info.epoch = 7;
+    info.sequence = 12;
+    info.dropped_frames = 3;
+    provider.publish_scope(*scope, first, info);
+
+    pulp::vellum_audio::AudioFrameInfo observed;
+    REQUIRE(provider.read_info(*scope, observed));
+    CHECK(observed.viewport_min_hz == 30.0f);
+    CHECK(observed.viewport_max_hz == 18000.0f);
+    CHECK(observed.floor_db == -96.0f);
+    CHECK(observed.sample_rate == 44100.0);
+    CHECK(observed.epoch == 7);
+    CHECK(observed.sequence == 12);
+    CHECK(observed.dropped_frames == 3);
+}
+
+TEST_CASE("Vellum audio widgets snapshot feed values", "[pulp-vellum-audio]") {
+    pulp::vellum_audio::AudioDisplayProvider provider({
+        {.name = "level", .shape = ::vellum::value::ChannelShape::meter},
+        {.name = "spectrum", .shape = ::vellum::value::ChannelShape::vector},
+    });
+    const auto level = provider.find("level", ::vellum::value::ChannelShape::meter);
+    const auto spectrum = provider.find("spectrum", ::vellum::value::ChannelShape::vector);
+    REQUIRE(level);
+    REQUIRE(spectrum);
+
+    pulp::vellum_audio::LevelMeter meter(&provider);
+    meter.set_channel(*level);
+    meter.sample();
+    CHECK(meter.stale());
+    provider.publish_meter(*level, std::array{0.25f}, std::array{0.75f});
+    meter.sample();
+    CHECK_FALSE(meter.stale());
+    CHECK(meter.rms() == 0.25f);
+    CHECK(meter.peak() == 0.75f);
+
+    pulp::vellum_audio::AnalyzerScope scope(&provider);
+    scope.set_channel(*spectrum);
+    pulp::signal::SpectrumBinMappingConfig mapping;
+    mapping.fft_size = 4;
+    mapping.columns = 3;
+    mapping.min_hz = 20.0;
+    mapping.max_hz = 18000.0;
+    mapping.floor_db = -96.0f;
+    scope.configure_mapping(mapping);
+    provider.publish_scope(*spectrum, std::array{-90.0f, -60.0f, -30.0f},
+                           {.floor_db = -96.0f, .sequence = 2});
+    scope.sample();
+    CHECK_FALSE(scope.stale());
+    CHECK(scope.column_count() == 3);
+}
+
+TEST_CASE("Vellum audio widgets register scripted display factories",
+          "[pulp-vellum-audio][scripted-editor]") {
+    using Provider = pulp::vellum_audio::AudioDisplayProvider;
+    Provider provider({{"meter", "", vellum::value::ChannelShape::meter},
+                       {"scope", "", vellum::value::ChannelShape::vector}});
+    pulp::vellum_audio::register_audio_widgets();
+
+    auto meter = vellum::view::make_data_display("pulp.level");
+    auto scope = vellum::view::make_data_display("pulp.bins");
+    REQUIRE(meter);
+    REQUIRE(scope);
+    auto* level = dynamic_cast<pulp::vellum_audio::LevelMeter*>(meter.get());
+    auto* analyzer = dynamic_cast<pulp::vellum_audio::AnalyzerScope*>(scope.get());
+    REQUIRE(level);
+    REQUIRE(analyzer);
+
+    const std::array<float, 1> rms{0.6f};
+    const std::array<float, 1> peak{0.8f};
+    provider.publish_meter(0, rms, peak);
+    const std::array<float, 3> bins{-60.0f, -30.0f, -6.0f};
+    provider.publish_scope(1, bins);
+    level->set_feed(&provider, 0);
+    analyzer->set_feed(&provider, 1);
+    level->sample();
+    analyzer->sample();
+    CHECK(level->rms() == Catch::Approx(0.6f));
+    CHECK(level->peak() == Catch::Approx(0.8f));
+    CHECK(analyzer->column_count() == bins.size());
+    CHECK_FALSE(level->stale());
+    CHECK_FALSE(analyzer->stale());
+}
+
+TEST_CASE("Vellum audio widget ticks preserve channel bindings", "[pulp-vellum-audio]") {
+    using namespace pulp::vellum_audio;
+    using Shape = vellum::value::ChannelShape;
+    AudioDisplayProvider provider({{.name = "input", .shape = Shape::meter},
+                                   {.name = "output", .shape = Shape::meter},
+                                   {.name = "input-spectrum", .shape = Shape::vector},
+                                   {.name = "output-spectrum", .shape = Shape::vector}});
+    const auto input = provider.find("input", Shape::meter);
+    const auto output = provider.find("output", Shape::meter);
+    const auto output_spectrum = provider.find("output-spectrum", Shape::vector);
+    REQUIRE(input);
+    REQUIRE(output);
+    REQUIRE(output_spectrum);
+
+    vellum::view::View root;
+    auto make_widget = [&]<typename Widget>() -> Widget& {
+        auto widget = std::make_unique<Widget>();
+        auto& added = *widget;
+        root.add_child(std::move(widget));
+        return added;
+    };
+    auto& input_meter = make_widget.operator()<LevelMeter>();
+    auto& output_meter = make_widget.operator()<LevelMeter>();
+    auto& default_meter = make_widget.operator()<LevelMeter>();
+    auto& output_scope = make_widget.operator()<AnalyzerScope>();
+    input_meter.set_feed(&provider, *input);
+    output_meter.set_feed(&provider, *output);
+    output_scope.set_feed(&provider, *output_spectrum);
+
+    for (int tick = 0; tick < 60; ++tick) {
+        const float input_level = tick % 2 == 0 ? 0.25f : 0.375f;
+        const float output_level = tick % 2 == 0 ? 0.75f : 0.875f;
+        provider.publish_meter(*input, std::array{input_level}, std::array{input_level});
+        provider.publish_meter(*output, std::array{output_level}, std::array{output_level});
+        provider.publish_scope(*output_spectrum, std::array{-60.0f, -24.0f});
+        sample_audio_widgets(root, &provider);
+
+        CAPTURE(tick);
+        CHECK(input_meter.rms() == input_level);
+        CHECK(default_meter.rms() == input_level);
+        REQUIRE(output_meter.rms() == output_level);
+        REQUIRE(output_scope.column_count() == 2);
+    }
+}
+
+TEST_CASE("Vellum AnalyzerScope keeps its mapping across stale periods and set_feed",
+          "[pulp-vellum-audio]") {
+    pulp::vellum_audio::AudioDisplayProvider provider({
+        {.name = "spectrum", .shape = ::vellum::value::ChannelShape::vector},
+    });
+    const auto spectrum = provider.find("spectrum", ::vellum::value::ChannelShape::vector);
+    REQUIRE(spectrum);
+    pulp::vellum_audio::AnalyzerScope scope(&provider);
+    scope.set_channel(*spectrum);
+    pulp::signal::SpectrumBinMappingConfig mapping;
+    mapping.fft_size = 4;
+    mapping.columns = 3;
+    mapping.min_hz = 20.0;
+    mapping.max_hz = 18000.0;
+    mapping.floor_db = -96.0f;
+    scope.configure_mapping(mapping);
+    provider.publish_scope(*spectrum, std::array{-90.0f, -60.0f, -30.0f},
+                           {.floor_db = -96.0f, .sequence = 1});
+    scope.sample();
+    REQUIRE(scope.column_count() == 3);
+
+    for (int i = 0; i < 8; ++i)
+        scope.sample(); // quiet feed goes stale
+    CHECK(scope.stale());
+
+    provider.publish_scope(*spectrum, std::array{-80.0f, -50.0f, -20.0f},
+                           {.floor_db = -96.0f, .sequence = 2});
+    scope.sample();
+    CHECK_FALSE(scope.stale());
+    CHECK(scope.column_count() == 3);
+
+    scope.set_feed(&provider, *spectrum);
+    provider.publish_scope(*spectrum, std::array{-70.0f, -40.0f, -10.0f},
+                           {.floor_db = -96.0f, .sequence = 3});
+    scope.sample();
+    CHECK_FALSE(scope.stale());
+    CHECK(scope.column_count() == 3);
+}
+
+TEST_CASE("Vellum audio widgets resample after set_channel", "[pulp-vellum-audio]") {
+    pulp::vellum_audio::AudioDisplayProvider provider({
+        {.name = "level_a", .shape = ::vellum::value::ChannelShape::meter},
+        {.name = "level_b", .shape = ::vellum::value::ChannelShape::meter},
+        {.name = "spectrum_a", .shape = ::vellum::value::ChannelShape::vector},
+        {.name = "spectrum_b", .shape = ::vellum::value::ChannelShape::vector},
+    });
+    const auto level_a = provider.find("level_a", ::vellum::value::ChannelShape::meter);
+    const auto level_b = provider.find("level_b", ::vellum::value::ChannelShape::meter);
+    const auto spectrum_a = provider.find("spectrum_a", ::vellum::value::ChannelShape::vector);
+    const auto spectrum_b = provider.find("spectrum_b", ::vellum::value::ChannelShape::vector);
+    REQUIRE(level_a);
+    REQUIRE(level_b);
+    REQUIRE(spectrum_a);
+    REQUIRE(spectrum_b);
+
+    // Both channels publish once, so their publish counts are equal: a stale
+    // sampling cursor would treat the new channel as unchanged.
+    provider.publish_meter(*level_a, std::array{0.25f}, std::array{0.5f});
+    provider.publish_meter(*level_b, std::array{0.75f}, std::array{0.9f});
+    REQUIRE(provider.publish_count(*level_a) == provider.publish_count(*level_b));
+
+    pulp::vellum_audio::LevelMeter meter(&provider);
+    meter.set_channel(*level_a);
+    meter.sample();
+    REQUIRE(meter.rms() == 0.25f);
+    meter.set_channel(*level_b);
+    meter.sample();
+    CHECK_FALSE(meter.stale());
+    CHECK(meter.rms() == 0.75f);
+    CHECK(meter.peak() == 0.9f);
+
+    provider.publish_scope(*spectrum_a, std::array{-90.0f, -60.0f, -30.0f},
+                           {.floor_db = -96.0f, .sequence = 1});
+    provider.publish_scope(*spectrum_b, std::array{-80.0f, -50.0f, -20.0f},
+                           {.floor_db = -96.0f, .sequence = 7});
+    REQUIRE(provider.publish_count(*spectrum_a) == provider.publish_count(*spectrum_b));
+
+    pulp::vellum_audio::AnalyzerScope scope(&provider);
+    scope.set_channel(*spectrum_a);
+    scope.sample();
+    REQUIRE(scope.frame_info().sequence == 1);
+    scope.set_channel(*spectrum_b);
+    scope.sample();
+    CHECK_FALSE(scope.stale());
+    CHECK(scope.frame_info().sequence == 7);
+}
+
+TEST_CASE("Vellum LevelMeter matches legacy thresholds, ballistics, hold, and accessibility",
+          "[pulp-vellum-audio][level-meter]") {
+    pulp::vellum_audio::LevelMeter meter;
+    const auto green = meter.level_color(0.5f);
+    const auto yellow = meter.level_color(0.8f);
+    const auto red = meter.level_color(0.95f);
+    CHECK(green.r < yellow.r);
+    CHECK(green.g > yellow.g);
+    CHECK(red.g < yellow.g);
+    meter.set_levels(0.2f, 0.95f);
+    CHECK(meter.displayed_peak() > 0.0f);
+    CHECK(meter.held_peak() == 0.95f);
+    CHECK(meter.get_current_value() == meter.displayed_peak());
+    const auto held = meter.held_peak();
+    for (int i = 0; i < 120; ++i)
+        meter.set_levels(0.0f, 0.0f);
+    CHECK(meter.displayed_peak() < 0.01f);
+    CHECK(meter.held_peak() < held);
+}
+
+TEST_CASE("Vellum LevelMeter honours an explicit level fill over threshold colours",
+          "[pulp-vellum-audio][level-meter]") {
+    pulp::vellum_audio::LevelMeter meter;
+    const ::vellum::canvas::Color blue{0.0f, 0.0f, 1.0f, 1.0f};
+    CHECK(meter.bar_color(0.5f) == meter.level_color(0.5f));
+    meter.set_level_fill(std::nullopt, {blue});
+    CHECK(meter.bar_color(0.5f) == blue);
+    CHECK(meter.bar_color(0.95f) == blue);
+    meter.clear_level_fill();
+    CHECK(meter.bar_color(0.5f) == meter.level_color(0.5f));
+    CHECK(meter.bar_color(0.95f) == meter.level_color(0.95f));
+}
+
+TEST_CASE("Vellum LevelMeter renders its explicit level fill colour",
+          "[pulp-vellum-audio][level-meter][render]") {
+    if (!::vellum::view::raw_rgba_render_available())
+        SKIP("Vellum CPU raster backend unavailable");
+    pulp::vellum_audio::LevelMeter meter;
+    meter.set_bounds({0, 0, 128, 96});
+    meter.set_level_fill(::vellum::canvas::Color{0.0f, 0.0f, 0.0f, 1.0f},
+                         {::vellum::canvas::Color{0.0f, 0.0f, 1.0f, 1.0f}});
+    meter.set_levels(1.0f, 0.0f); // full-height bar after one ballistics tick
+    for (int i = 0; i < 120; ++i)
+        meter.set_levels(1.0f, 0.0f);
+    const auto frame = render(meter);
+    REQUIRE(frame.width == 128);
+    // Sample near the bottom centre, inside the bar and away from peak lines.
+    const auto offset = static_cast<std::size_t>(90) * frame.width * 4 + 64 * 4;
+    CHECK(frame.pixels[offset + 0] < 32);
+    CHECK(frame.pixels[offset + 1] < 32);
+    CHECK(frame.pixels[offset + 2] > 220);
+}
+
+TEST_CASE("Vellum LevelMeter requests repaint while decaying without new publications",
+          "[pulp-vellum-audio][level-meter]") {
+    pulp::vellum_audio::AudioDisplayProvider provider({
+        {.name = "level", .shape = ::vellum::value::ChannelShape::meter},
+    });
+    const auto level = provider.find("level", ::vellum::value::ChannelShape::meter);
+    REQUIRE(level);
+    pulp::vellum_audio::LevelMeter meter(&provider);
+    meter.set_channel(*level);
+    meter.set_bounds({0, 0, 16, 96});
+    provider.publish_meter(*level, std::array{0.8f}, std::array{0.9f});
+    meter.sample();
+    const auto before = repaint_requests();
+    meter.sample(); // same publication: ballistics decay, so paint inputs changed
+    CHECK(repaint_requests() > before);
+    for (int i = 0; i < 600; ++i) // let decay and peak hold settle completely
+        meter.sample();
+    const auto settled = repaint_requests();
+    for (int i = 0; i < 10; ++i)
+        meter.sample();
+    CHECK(repaint_requests() == settled); // an idle meter does not repaint every tick
+}
+
+TEST_CASE("Vellum MidiKeyboard gives a lone accidental range usable geometry",
+          "[pulp-vellum-audio][midi-keyboard]") {
+    for (const auto orientation : {pulp::vellum_audio::MidiKeyboard::Orientation::horizontal,
+                                   pulp::vellum_audio::MidiKeyboard::Orientation::vertical}) {
+        pulp::vellum_audio::MidiKeyboard keyboard;
+        keyboard.set_range(61, 61);
+        keyboard.set_orientation(orientation);
+        keyboard.set_bounds({0, 0, 200, 80});
+        std::vector<int> ons;
+        keyboard.on_note_on = [&](int note, float) { ons.push_back(note); };
+        keyboard.on_mouse_down({100.0f, 40.0f});
+        REQUIRE(ons.size() == 1);
+        CHECK(ons.front() == 61);
+        keyboard.on_mouse_up({100.0f, 40.0f});
+    }
+}
+
+TEST_CASE("Vellum MidiKeyboard keeps boundary accidentals fully inside the keyboard",
+          "[pulp-vellum-audio][midi-keyboard]") {
+    using Orientation = pulp::vellum_audio::MidiKeyboard::Orientation;
+    struct Case {
+        int first, last, accidental;
+        float probe; // inside the shifted key, outside one centred off the edge
+    };
+    // 61-62 starts on C#, 60-61 ends on C#: the accidental sits at an edge.
+    for (const auto c : {Case{61, 62, 61, 100.0f}, Case{60, 61, 61, 100.0f}}) {
+        for (const auto orientation : {Orientation::horizontal, Orientation::vertical}) {
+            pulp::vellum_audio::MidiKeyboard keyboard;
+            keyboard.set_range(c.first, c.last);
+            keyboard.set_orientation(orientation);
+            keyboard.set_bounds({0, 0, 200, 200});
+            std::vector<int> ons;
+            keyboard.on_note_on = [&](int note, float) { ons.push_back(note); };
+            const ::vellum::view::Point edge = orientation == Orientation::horizontal
+                                                   ? ::vellum::view::Point{c.probe, 10.0f}
+                                                   : ::vellum::view::Point{10.0f, c.probe};
+            keyboard.on_mouse_down(edge);
+            REQUIRE(ons.size() == 1);
+            CHECK(ons.front() == c.accidental);
+            keyboard.on_mouse_up(edge);
+        }
+    }
+}
+
+TEST_CASE("Vellum MidiKeyboard appearance setters request repaint",
+          "[pulp-vellum-audio][midi-keyboard]") {
+    pulp::vellum_audio::MidiKeyboard keyboard;
+    auto before = repaint_requests();
+    keyboard.set_show_note_names(true);
+    CHECK(repaint_requests() > before);
+    before = repaint_requests();
+    keyboard.set_highlight_color({1.0f, 0.0f, 0.0f, 1.0f});
+    CHECK(repaint_requests() > before);
+}
+
+TEST_CASE("Vellum MidiKeyboard hit-tests black keys and emits editor MIDI callbacks",
+          "[pulp-vellum-audio][midi-keyboard]") {
+    pulp::vellum_audio::MidiKeyboard keyboard;
+    keyboard.set_range(60, 64);
+    keyboard.set_bounds({0, 0, 500, 100});
+    std::vector<std::pair<int, float>> ons;
+    std::vector<int> offs;
+    keyboard.on_note_on = [&](int note, float velocity) { ons.emplace_back(note, velocity); };
+    keyboard.on_note_off = [&](int note) { offs.push_back(note); };
+
+    keyboard.on_mouse_down({175.0f, 10.0f}); // C# overlaps the C/D naturals
+    REQUIRE(ons.size() == 1);
+    CHECK(ons.front().first == 61);
+    CHECK(ons.front().second == 0.8f);
+    keyboard.on_mouse_drag({450.0f, 80.0f});
+    REQUIRE(offs.size() == 1);
+    CHECK(offs.front() == 61);
+    REQUIRE(ons.size() == 2);
+    CHECK(ons.back().first == 64);
+    keyboard.on_mouse_up({450.0f, 80.0f});
+    REQUIRE(offs.size() == 2);
+    CHECK(offs.back() == 64);
+}
+
+TEST_CASE("Vellum LevelMeter feed changes are rendered inside its bounds",
+          "[pulp-vellum-audio][render]") {
+    if (!::vellum::view::raw_rgba_render_available())
+        SKIP("Vellum CPU raster backend unavailable");
+
+    pulp::vellum_audio::AudioDisplayProvider provider({
+        {.name = "level", .shape = ::vellum::value::ChannelShape::meter},
+    });
+    const auto level = provider.find("level", ::vellum::value::ChannelShape::meter);
+    REQUIRE(level);
+
+    pulp::vellum_audio::LevelMeter meter(&provider);
+    meter.set_channel(*level);
+    meter.set_bounds({0, 0, 128, 96});
+
+    provider.publish_meter(*level, std::array{0.15f}, std::array{0.25f});
+    meter.sample();
+    REQUIRE(meter.rms() == 0.15f);
+    const auto first = render(meter);
+    provider.publish_meter(*level, std::array{0.75f}, std::array{0.9f});
+    meter.sample();
+    REQUIRE(meter.rms() == 0.75f);
+    const auto second = render(meter);
+    const auto repeat = render(meter);
+
+    require_feed_render_contract(first, second, repeat, 0, 0, 128, 96);
+}
+
+TEST_CASE("Vellum AnalyzerScope feed changes are rendered inside its bounds",
+          "[pulp-vellum-audio][render]") {
+    if (!::vellum::view::raw_rgba_render_available())
+        SKIP("Vellum CPU raster backend unavailable");
+
+    pulp::vellum_audio::AudioDisplayProvider provider({
+        {.name = "spectrum", .shape = ::vellum::value::ChannelShape::vector},
+    });
+    const auto spectrum = provider.find("spectrum", ::vellum::value::ChannelShape::vector);
+    REQUIRE(spectrum);
+
+    pulp::vellum_audio::AnalyzerScope scope(&provider);
+    scope.set_channel(*spectrum);
+    scope.set_bounds({0, 0, 128, 96});
+    pulp::signal::SpectrumBinMappingConfig mapping;
+    // bin_count() is fft_size / 2 + 1, so fft_size 6 matches the 4-bin frames
+    // below; a mismatched frame is dropped and the scope would stay stale.
+    mapping.fft_size = 6;
+    mapping.columns = 4;
+    mapping.min_hz = 20.0;
+    mapping.max_hz = 18000.0;
+    mapping.floor_db = -96.0f;
+    scope.configure_mapping(mapping);
+
+    provider.publish_scope(*spectrum, std::array{-90.0f, -70.0f, -50.0f, -30.0f},
+                           {.floor_db = -96.0f, .sequence = 1});
+    scope.sample();
+    REQUIRE_FALSE(scope.stale());
+    const auto first = render(scope);
+    provider.publish_scope(*spectrum, std::array{-80.0f, -45.0f, -20.0f, -5.0f},
+                           {.floor_db = -96.0f, .sequence = 2});
+    scope.sample();
+    REQUIRE_FALSE(scope.stale());
+    const auto second = render(scope);
+    const auto repeat = render(scope);
+
+    require_feed_render_contract(first, second, repeat, 0, 0, 128, 96);
+}
+
 TEST_CASE("Vellum audio provider never exposes a torn frame", "[pulp-vellum-audio][threading]") {
     using Provider = pulp::vellum_audio::AudioDisplayProvider;
     Provider provider({
@@ -119,4 +630,57 @@ TEST_CASE("Vellum audio provider never exposes a torn frame", "[pulp-vellum-audi
     CHECK(rms[0] == static_cast<float>(kIterations));
     CHECK(peak[0] == static_cast<float>(kIterations) + 0.25f);
     CHECK(samples[0] == static_cast<float>(kIterations) + 0.5f);
+}
+
+TEST_CASE("Vellum audio provider reads values and frame info from one frame",
+          "[pulp-vellum-audio][threading]") {
+    using Provider = pulp::vellum_audio::AudioDisplayProvider;
+    Provider provider({
+        {.name = "meter", .shape = ::vellum::value::ChannelShape::meter},
+        {.name = "scope", .shape = ::vellum::value::ChannelShape::vector},
+    });
+    const auto meter = provider.find("meter", ::vellum::value::ChannelShape::meter);
+    const auto scope = provider.find("scope", ::vellum::value::ChannelShape::vector);
+    REQUIRE(meter);
+    REQUIRE(scope);
+    constexpr std::uint32_t kIterations = 100'000;
+    std::atomic<bool> done = false;
+    std::atomic<bool> mismatched = false;
+
+    // Each frame's values equal its sequence, so a value paired with another
+    // frame's metadata shows up as values != info.sequence.
+    std::thread audio([&] {
+        for (std::uint32_t sequence = 1; sequence <= kIterations; ++sequence) {
+            const float marker = static_cast<float>(sequence);
+            const std::array values{marker, marker};
+            provider.publish_meter(*meter, values, values, {.sequence = sequence});
+            provider.publish_scope(*scope, values, {.sequence = sequence});
+        }
+        done.store(true, std::memory_order_release);
+    });
+    std::thread editor([&] {
+        std::array<float, 2> rms{}, peak{}, samples{};
+        const auto deadline = std::chrono::steady_clock::now() + pulp::test::kProgressDeadline;
+        while (!done.load(std::memory_order_acquire) &&
+               std::chrono::steady_clock::now() < deadline) {
+            pulp::vellum_audio::AudioFrameInfo meter_info;
+            if (provider.read_meter(*meter, rms, peak, meter_info) != 0 &&
+                rms[0] != static_cast<float>(meter_info.sequence))
+                mismatched.store(true, std::memory_order_relaxed);
+            pulp::vellum_audio::AudioFrameInfo scope_info;
+            if (provider.read_vector(*scope, samples, scope_info) != 0 &&
+                samples[0] != static_cast<float>(scope_info.sequence))
+                mismatched.store(true, std::memory_order_relaxed);
+        }
+    });
+    audio.join();
+    editor.join();
+    REQUIRE(done.load(std::memory_order_acquire));
+    CHECK_FALSE(mismatched.load(std::memory_order_relaxed));
+
+    std::array<float, 2> rms{}, peak{};
+    pulp::vellum_audio::AudioFrameInfo info;
+    REQUIRE(provider.read_meter(*meter, rms, peak, info) == 2);
+    CHECK(info.sequence == kIterations);
+    CHECK(rms[0] == static_cast<float>(kIterations));
 }

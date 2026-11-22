@@ -6,6 +6,7 @@
    "core/audio/src/finite_time_stretch.cpp",
    "core/audio/src/realtime_time_stretch.cpp",
    "core/audio/src/rolling_audio_capture_buffer.cpp",
+   "core/format/src/host_parameter_edit.cpp",
    "core/playback/PulpPlaybackSources.cmake",
    "core/runtime/src/sha256.cpp",
    "core/timeline/PulpTimelineSources.cmake",

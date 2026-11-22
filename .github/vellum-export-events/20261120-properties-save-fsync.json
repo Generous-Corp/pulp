@@ -1,0 +1,16 @@
+{
+  "schema_version": 1,
+  "event_id": "20261120-properties-save-fsync",
+  "kind": "exported-path-change",
+  "created_at": "2026-11-20T12:30:42Z",
+  "receipt_export_id": "20261107-f0ac0a4ff392",
+  "paths": [
+    "core/runtime/include/pulp/runtime/detail/durable_file_replacement.hpp",
+    "core/runtime/src/durable_file_replacement.cpp",
+    "core/runtime/src/durable_file_replacement_test_access.hpp",
+    "core/state/include/pulp/state/xml_properties_file.hpp",
+    "core/state/src/xml_properties_file.cpp"
+  ],
+  "vellum_inherits": false,
+  "rationale": "Pulp-only edit: XmlPropertiesFile::save no longer flushes the drive cache by default, and DurableFileReplacement::commit gains an opt-in relaxed durability. Vellum's framework copy is transferred, so any change Vellum wants is made in its own framework tree."
+}

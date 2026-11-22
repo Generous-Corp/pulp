@@ -221,6 +221,11 @@
     "cli-maintenance": {
       "paths": [
         "tools/cli/**",
+        "core/format/include/pulp/format/third_party_notices.hpp",
+        "core/format/src/third_party_notices.cpp",
+        "test/test_cli_licenses.cpp",
+        "test/test_third_party_notices.cpp",
+        "docs/reference/cli.md",
         "experimental/pulp-rs/src/cmd/trace*.rs",
         "experimental/pulp-rs/tests/trace*.rs",
         "tools/mcp/pulp_mcp.cpp",
@@ -497,7 +502,8 @@
         "apple/Sources/PulpSwift/PulpMotion.swift",
         "apple/Sources/PulpSwift/PulpMotionProbe.swift",
         "apple/Tests/PulpSwiftTests/PulpMotionTests.swift",
-        "test/test_motion_swift_bridge.cpp",
+        "integrations/pulp-vellum/src/swift_motion_bridge.cpp",
+        "integrations/pulp-vellum/tests/test_motion_swift_bridge.cpp",
         "core/platform/include/pulp/platform/android/motion_bridge.h",
         "core/view/platform/android/jni_motion.cpp",
         "android/app/src/main/kotlin/com/pulp/motion/**",

@@ -9,6 +9,161 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
      release's bullet block. See docs/guides/versioning.md § Release pipeline
      for the full end-to-end flow. -->
 
+<a id="v11920"></a>
+## [1.192.0] - 2026-11-22
+
+- release/version bump ([#12737](https://github.com/Generous-Corp/pulp/pull/12737))
+
+<a id="v11910"></a>
+## [1.191.0] - 2026-11-22
+
+- release/version bump ([#12734](https://github.com/Generous-Corp/pulp/pull/12734))
+- lane/w waveform audio ([#12731](https://github.com/Generous-Corp/pulp/pull/12731))
+- fix/notices unattributed report ([#12730](https://github.com/Generous-Corp/pulp/pull/12730))
+- feature/state generation gate ([#12729](https://github.com/Generous-Corp/pulp/pull/12729))
+- feature/clap vst3 owned state ([#12728](https://github.com/Generous-Corp/pulp/pull/12728))
+
+<a id="v11900"></a>
+## [1.190.0] - 2026-11-22
+
+- release/version bump ([#12727](https://github.com/Generous-Corp/pulp/pull/12727))
+- feature/glsurface cursor pr ([#12627](https://github.com/Generous-Corp/pulp/pull/12627))
+
+<a id="v11891"></a>
+## [1.189.1] - 2026-11-21
+
+- release/version bump ([#12726](https://github.com/Generous-Corp/pulp/pull/12726))
+
+<a id="v11890"></a>
+## [1.189.0] - 2026-11-21
+
+- release/version bump ([#12723](https://github.com/Generous-Corp/pulp/pull/12723))
+- lane/w pulp sandbox browser ([#12713](https://github.com/Generous-Corp/pulp/pull/12713))
+- fix/no host automation echo ([#12676](https://github.com/Generous-Corp/pulp/pull/12676))
+
+<a id="v11882"></a>
+## [1.188.2] - 2026-11-21
+
+- release/version bump ([#12721](https://github.com/Generous-Corp/pulp/pull/12721))
+- feature/clap conformance checker ([#12710](https://github.com/Generous-Corp/pulp/pull/12710))
+
+<a id="v11881"></a>
+## [1.188.1] - 2026-11-21
+
+- release/version bump ([#12719](https://github.com/Generous-Corp/pulp/pull/12719))
+- fix/macos timer tolerance ([#12717](https://github.com/Generous-Corp/pulp/pull/12717))
+- fix/linux plugin fontconfig ([#12688](https://github.com/Generous-Corp/pulp/pull/12688))
+
+<a id="v11880"></a>
+## [1.188.0] - 2026-11-21
+
+- release/version bump ([#12716](https://github.com/Generous-Corp/pulp/pull/12716))
+- lane/pulp pin rule ([#12706](https://github.com/Generous-Corp/pulp/pull/12706))
+
+<a id="v11870"></a>
+## [1.187.0] - 2026-11-21
+
+- release/version bump ([#12715](https://github.com/Generous-Corp/pulp/pull/12715))
+- fix/windows arm64ec sdk provenance 20261121 ([#12711](https://github.com/Generous-Corp/pulp/pull/12711))
+- lane/w d3 controls ([#12700](https://github.com/Generous-Corp/pulp/pull/12700))
+- release/version bump ([#12712](https://github.com/Generous-Corp/pulp/pull/12712))
+- lane/w sdk stamp sha ([#12696](https://github.com/Generous-Corp/pulp/pull/12696))
+
+<a id="v11860"></a>
+## [1.186.0] - 2026-11-21
+
+- release/version bump ([#12709](https://github.com/Generous-Corp/pulp/pull/12709))
+- fix/windows reaper clap scan 20261121 ([#12707](https://github.com/Generous-Corp/pulp/pull/12707))
+- lane/w audio widgets ([#12698](https://github.com/Generous-Corp/pulp/pull/12698))
+- lane/w headless restore ([#12704](https://github.com/Generous-Corp/pulp/pull/12704))
+
+<a id="v11850"></a>
+## [1.185.0] - 2026-11-21
+
+- release/version bump ([#12702](https://github.com/Generous-Corp/pulp/pull/12702))
+- lane/w standalone capture ([#12699](https://github.com/Generous-Corp/pulp/pull/12699))
+- docs/create ui vellum ([#12697](https://github.com/Generous-Corp/pulp/pull/12697))
+- lane/w pulp exe exports ([#12695](https://github.com/Generous-Corp/pulp/pull/12695))
+- feature/pulp vellum scripted editor ([#12690](https://github.com/Generous-Corp/pulp/pull/12690))
+
+<a id="v11840"></a>
+## [1.184.0] - 2026-11-21
+
+- release/version bump ([#12694](https://github.com/Generous-Corp/pulp/pull/12694))
+
+<a id="v11830"></a>
+## [1.183.0] - 2026-11-21
+
+- release/version bump ([#12687](https://github.com/Generous-Corp/pulp/pull/12687))
+- fix/macos repeating timer no rearm ([#12691](https://github.com/Generous-Corp/pulp/pull/12691))
+- fix/clap scan without processor ([#12680](https://github.com/Generous-Corp/pulp/pull/12680))
+- feature/pulp vellum editor size hints ([#12689](https://github.com/Generous-Corp/pulp/pull/12689))
+- release/version bump ([#12685](https://github.com/Generous-Corp/pulp/pull/12685))
+- feature/pulp vellum editor compat ([#12684](https://github.com/Generous-Corp/pulp/pull/12684))
+
+<a id="v11820"></a>
+## [1.182.0] - 2026-11-21
+
+- release/version bump ([#12681](https://github.com/Generous-Corp/pulp/pull/12681))
+- feature/vellum gpu host pulp side ([#12647](https://github.com/Generous-Corp/pulp/pull/12647))
+- fix/clock guard b2 20261120 ([#12660](https://github.com/Generous-Corp/pulp/pull/12660))
+- lane/a3 motion ([#12679](https://github.com/Generous-Corp/pulp/pull/12679))
+
+<a id="v11810"></a>
+## [1.181.0] - 2026-11-20
+
+- release/version bump ([#12678](https://github.com/Generous-Corp/pulp/pull/12678))
+- feature/vellum about notices ([#12672](https://github.com/Generous-Corp/pulp/pull/12672))
+- fix/release optional vellum sdk ([#12671](https://github.com/Generous-Corp/pulp/pull/12671))
+
+<a id="v11800"></a>
+## [1.180.0] - 2026-11-20
+
+- release/version bump ([#12674](https://github.com/Generous-Corp/pulp/pull/12674))
+- feature/split swift bridge motion ([#12675](https://github.com/Generous-Corp/pulp/pull/12675))
+- lane/d3 vellum audio ([#12654](https://github.com/Generous-Corp/pulp/pull/12654))
+- lane/b7b cutover keepgoing ([#12652](https://github.com/Generous-Corp/pulp/pull/12652))
+
+<a id="v11790"></a>
+## [1.179.0] - 2026-11-20
+
+- release/version bump ([#12669](https://github.com/Generous-Corp/pulp/pull/12669))
+- fix/au compact param state ([#12661](https://github.com/Generous-Corp/pulp/pull/12661))
+
+<a id="v11780"></a>
+## [1.178.0] - 2026-11-20
+
+- release/version bump ([#12666](https://github.com/Generous-Corp/pulp/pull/12666))
+- feature/create ui vellum ([#12626](https://github.com/Generous-Corp/pulp/pull/12626))
+- lane/b2q bytecode ([#12663](https://github.com/Generous-Corp/pulp/pull/12663))
+- fix/midi enumeration warmup ([#12658](https://github.com/Generous-Corp/pulp/pull/12658))
+- fix/properties save fsync ([#12657](https://github.com/Generous-Corp/pulp/pull/12657))
+- feature/plugin license display 2 ([#12643](https://github.com/Generous-Corp/pulp/pull/12643))
+
+<a id="v11770"></a>
+## [1.177.0] - 2026-11-20
+
+- release/version bump ([#12659](https://github.com/Generous-Corp/pulp/pull/12659))
+- lane/b7 cutover trial ([#12649](https://github.com/Generous-Corp/pulp/pull/12649))
+
+<a id="v11760"></a>
+## [1.176.0] - 2026-11-20
+
+- release/version bump ([#12653](https://github.com/Generous-Corp/pulp/pull/12653))
+- fix/clock guard b1 20261120 ([#12648](https://github.com/Generous-Corp/pulp/pull/12648))
+- fix/clap missing input ports ([#12646](https://github.com/Generous-Corp/pulp/pull/12646))
+- fix/win32 main thread fallback ([#12650](https://github.com/Generous-Corp/pulp/pull/12650))
+- tools/claim check own owner ([#12645](https://github.com/Generous-Corp/pulp/pull/12645))
+- feature/setup vellum default ([#12640](https://github.com/Generous-Corp/pulp/pull/12640))
+
+<a id="v11750"></a>
+## [1.175.0] - 2026-11-20
+
+- release/version bump ([#12642](https://github.com/Generous-Corp/pulp/pull/12642))
+- feature/plugin license display ([#12632](https://github.com/Generous-Corp/pulp/pull/12632))
+- data/clock guard 20261120 ([#12629](https://github.com/Generous-Corp/pulp/pull/12629))
+- feature/vellum sdk bundling ([#12639](https://github.com/Generous-Corp/pulp/pull/12639))
+
 <a id="v11740"></a>
 ## [1.174.0] - 2026-11-20
 
@@ -13406,6 +13561,27 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/Generous-Corp/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/Generous-Corp/pulp/pull/2))
 
+[1.192.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.192.0
+[1.191.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.191.0
+[1.190.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.190.0
+[1.189.1]: https://github.com/Generous-Corp/pulp/releases/tag/v1.189.1
+[1.189.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.189.0
+[1.188.2]: https://github.com/Generous-Corp/pulp/releases/tag/v1.188.2
+[1.188.1]: https://github.com/Generous-Corp/pulp/releases/tag/v1.188.1
+[1.188.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.188.0
+[1.187.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.187.0
+[1.186.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.186.0
+[1.185.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.185.0
+[1.184.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.184.0
+[1.183.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.183.0
+[1.182.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.182.0
+[1.181.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.181.0
+[1.180.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.180.0
+[1.179.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.179.0
+[1.178.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.178.0
+[1.177.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.177.0
+[1.176.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.176.0
+[1.175.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.175.0
 [1.174.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.174.0
 [1.173.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.173.0
 [1.172.1]: https://github.com/Generous-Corp/pulp/releases/tag/v1.172.1

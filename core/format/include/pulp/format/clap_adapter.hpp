@@ -9,6 +9,7 @@
 #include <pulp/format/state_restore_gate.hpp>
 #include <pulp/format/adapter_boundary.hpp>
 #include <pulp/format/ara.hpp>
+#include <pulp/format/host_parameter_edit.hpp>
 #include <pulp/format/host_quirks.hpp>
 #include <pulp/format/detail/playhead_diff.hpp>
 #include <pulp/events/plugin_main_thread.hpp>
@@ -115,6 +116,9 @@ struct PulpClapPlugin {
     // instead of a shared global. Once `processor` exists, callbacks prefer its
     // live descriptor.
     PluginDescriptor descriptor_snapshot{};
+    // True when descriptor_snapshot came from a plug-in's static descriptor
+    // rather than a built Processor; clap_init() then verifies they agree.
+    bool descriptor_is_static = false;
 
     // Host accommodations, resolved once in clap_init() via the runtime
     // policy. Adapters consult these instead of hardcoding workarounds.
@@ -178,6 +182,20 @@ struct PulpClapPlugin {
     std::array<int, kMaxInputBuses> declared_input_channels{};
     std::array<int, kMaxOutputBuses> declared_output_channels{};
 
+    // A host may hand fewer input buffers than the plug-in declares ports (a
+    // simple host gives an instrument none). clap_process() then fills each
+    // missing port from this silent block, sized to the activated maximum, so
+    // the Processor still runs. `padded_*` is the per-block copy that carries
+    // the host's own ports followed by the silent ones.
+    std::vector<float> silent_input;
+    std::array<float*, kMaxChannels> silent_input_ptrs{};
+    std::array<clap_audio_buffer_t, kMaxInputBuses> padded_inputs{};
+    clap_process_t padded_process{};
+    // Set once on the audio thread when a block needed padding; the log line
+    // is written from clap_on_main_thread() so process() never formats text.
+    std::atomic<bool> missing_inputs_seen{false};
+    std::atomic<bool> missing_inputs_log_pending{false};
+
     // Pre-allocated buffers — no heap allocation on audio thread
     float* output_ptrs[kMaxChannels] = {};
     const float* input_ptrs[kMaxChannels] = {};
@@ -212,6 +230,10 @@ struct PulpClapPlugin {
     // Refreshed only when the store generation moved since it was taken; the
     // post-process diff only runs when the generation moved across process().
     std::vector<float> param_snapshot;
+    // Audio-thread-only copy: starts at the snapshot, then records inline
+    // processor writes, so concurrent suppressed UI writes cannot leak out.
+    std::vector<float> processor_param_values;
+    state::ListenerToken processor_param_listener;
     // Processor::wants_sample_accurate_parameters(), asked in clap_init().
     bool sample_accurate_params = false;
     // Records an opted-out processor reading param_events(); see processor.hpp.
@@ -253,6 +275,9 @@ struct PulpClapPlugin {
         outbound_param_events;
     std::optional<OutboundParamEvent> pending_outbound_param_event;
     state::ListenerToken outbound_param_listener;
+    /// Parameters the host wrote recently; a plug-in write-back of one is not
+    /// reported to the host as an edit. See HostWriteEchoGuard.
+    HostWriteEchoGuard host_write_echo_guard;
     std::thread::id main_thread_id;
 
     // Reused per-block MIDI buffers. Reserved and capacity-limited during

@@ -36,6 +36,24 @@ The plugin descriptor (id, name, vendor, version, features) is derived automatic
 | `Instrument` | `CLAP_PLUGIN_FEATURE_INSTRUMENT` |
 | `MidiEffect` | `CLAP_PLUGIN_FEATURE_NOTE_EFFECT` |
 
+#### Cheap host scans: declare the descriptor statically
+
+By default `entry_init()` builds one `Processor` and reads its `descriptor()`, so a host scan (load the module, read the descriptors, unload) pays for one construction. If your constructor loads data or builds DSP, give the entry a descriptor function and the scan constructs nothing; the Processor is built on `create_plugin()`/`init`:
+
+```cpp
+pulp::format::PluginDescriptor my_descriptor() { return { /* same fields as below */ }; }
+
+class MyProcessor : public pulp::format::Processor {
+    pulp::format::PluginDescriptor descriptor() const override { return my_descriptor(); }
+    // ...
+};
+
+PULP_CLAP_PLUGIN_WITH_DESCRIPTOR(create_my_processor, my_descriptor)
+// bundles: PULP_CLAP_BUNDLE_PLUGIN_WITH_DESCRIPTOR(Ident, create_fn, my_descriptor)
+```
+
+Have `descriptor()` return the same function so the two answers cannot drift. `PULP_CLAP_PLUGIN` alone keeps the old behaviour. VST3 and AU entries do not build a Processor to describe the plug-in.
+
 ### Parameter Sync
 
 **Host to plugin:** During `clap_process()`, the adapter iterates `in_events`,
@@ -466,14 +484,27 @@ offset (`inStartFrame`) is preserved.
 The AU adapter stores Pulp state alongside the standard AU state dictionary:
 
 - **Save:** Calls `AUEffectBase::SaveState()` (or `MusicDeviceBase::SaveState()`),
-  then appends a `CFData` blob under the key `"pulp-state"`. That blob contains
-  the parameter-only `StateStore` payload plus any non-empty
-  `Processor::serialize_plugin_state()` bytes.
-- **Load:** Calls the base `RestoreState()`, then looks for the `"pulp-state"`
-  key. If found, restores both layers and syncs all parameter values back to
-  the AU parameter system via `Globals()->SetParameter()`. Older blobs with only
-  raw `StateStore` data still load and call `deserialize_plugin_state()` with
-  empty bytes.
+  then adds a `CFData` entry under the key `"pulp-state-v2"`. It lists only the
+  parameters that differ from their declared defaults, followed by any non-empty
+  `Processor::serialize_plugin_state()` bytes, and ends in a CRC-32.
+- **Load:** Calls the base `RestoreState()`, then reads `"pulp-state-v2"`; when
+  that is absent it reads the `"pulp-state"` envelope earlier versions wrote
+  (parameter store plus plugin payload), so older sessions still load. Either
+  way the parameters are applied before `SetProperty` returns and synced back to
+  the AU parameter system via `Globals()->SetParameter()`. A malformed entry
+  fails the restore and leaves the plug-in's state unchanged. A session saved by
+  this version and opened by an older build loses its Pulp state, because the
+  older build only looks for `"pulp-state"`.
+- A processor whose AU class already stores its own bytes in the class info can
+  override `Processor::class_info_owns_plugin_state()`; the entry then holds
+  parameters only and restoring it does not call `deserialize_plugin_state()`.
+- AUv3 `fullState` still carries the `PLST` envelope with the full parameter store.
+- CLAP and VST3 state: a processor whose own bytes restore every parameter can
+  override `Processor::plugin_state_carries_parameters()`; the envelope then holds
+  a parameter-free store (about 8 bytes per parameter smaller). States saved with
+  the full store still load. A state saved with the opt-in and opened by an older
+  release restores the processor's bytes only, so parameters those bytes do not
+  carry keep their current value.
 
 ### Tail and Latency
 

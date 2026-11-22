@@ -7,6 +7,7 @@
 #include <pulp/runtime/trace.hpp>
 #include <pulp/format/detail/host_sample_position.hpp>
 #include <pulp/format/clap_adapter.hpp>
+#include <pulp/format/descriptor_agreement.hpp>
 #include <pulp/format/editor_prewarm.hpp>
 #include <pulp/format/adapter_boundary.hpp>
 #include <pulp/format/max_block_contract.hpp>
@@ -269,10 +270,24 @@ bool clap_init(const clap_plugin_t* plugin) {
     self->owner_alive.reset();
     self->processor = self->factory();
     if (!self->processor) return false;
+    if (self->descriptor_is_static)
+        check_descriptor_agreement(self->descriptor_snapshot, self->processor->descriptor());
     self->panic_state = self->processor->panic_state();
     self->panic_state->attach(self->processor->descriptor().produces_midi);
     self->sample_accurate_params = self->processor->wants_sample_accurate_parameters();
     self->param_events_monitor.arm(!self->sample_accurate_params, &self->param_events);
+    // Register before giving the store to the plug-in: a listener may rewrite
+    // a value recursively, and capture must observe the outer write BEFORE
+    // the nested write so that the final processor value wins.
+    self->processor_param_listener = self->store.add_listener(
+        [self](state::ParamID id, float value) {
+            if (!g_clap_process_running || g_clap_host_writing_param)
+                return;
+            const auto index = boundary::find_param_index(self->store.all_params(), id);
+            if (index < self->processor_param_values.size())
+                self->processor_param_values[index] = value;
+        },
+        state::ListenerThread::Audio);
     self->processor->set_state_store(&self->store);
     self->processor->define_parameters(self->store);
     self->editor_factory = self->processor->editor_factory();
@@ -303,8 +318,21 @@ bool clap_init(const clap_plugin_t* plugin) {
         });
     self->outbound_param_listener = self->store.add_listener(
         [self](state::ParamID id, float value) {
-            if (g_clap_host_writing_param || g_clap_process_running ||
-                std::this_thread::get_id() != self->main_thread_id) return;
+            // A write the host made off the main thread (process() applying
+            // automation, or params.flush on the audio thread) is remembered
+            // so the plug-in mirroring it back on the main thread is not
+            // reported as an edit.
+            const bool on_main = std::this_thread::get_id() == self->main_thread_id;
+            if (g_clap_host_writing_param && (g_clap_process_running || !on_main)) {
+                self->host_write_echo_guard.note_host_write(id);
+                return;
+            }
+            if (g_clap_process_running)
+                return;
+            if (g_clap_host_writing_param || !on_main)
+                return;
+            if (self->host_write_echo_guard.is_echo(self->store, id))
+                return;
             queue_outbound_param_event(
                 self, {OutboundParamEventKind::Value, id, value});
         },
@@ -479,6 +507,7 @@ bool clap_activate(const clap_plugin_t* plugin, double sr, uint32_t, uint32_t ma
     self->ump_buffer.reserve(kRealtimeMidiEventCapacity);
     self->ump_buffer.set_realtime_capacity_limit(true);
     self->param_snapshot.reserve(self->store.all_params().size());
+    self->processor_param_values.reserve(self->store.all_params().size());
     self->latest_param_value.assign(self->store.all_params().size(), 0.0f);
     self->latest_param_pending.assign(self->store.all_params().size(), 0);
     self->latest_param_touched.clear();
@@ -539,6 +568,10 @@ bool clap_activate(const clap_plugin_t* plugin, double sr, uint32_t, uint32_t ma
     self->native_f64_enabled = desc.effective_capabilities().supports_f64_audio;
 
     const auto scratch_frames = static_cast<std::size_t>(max_frames);
+    self->silent_input.assign(scratch_frames, 0.0f);
+    self->silent_input_ptrs.fill(self->silent_input.data());
+    self->missing_inputs_seen.store(false, std::memory_order_relaxed);
+    self->missing_inputs_log_pending.store(false, std::memory_order_relaxed);
     resize_f64_boundary_scratch(self->f64_input_scratch, scratch_frames);
     resize_f64_boundary_scratch(self->f64_output_scratch, scratch_frames);
     resize_f64_boundary_scratch(self->f64_sidechain_scratch, scratch_frames);
@@ -737,6 +770,7 @@ static bool clap_phase_validate_layout(PulpClapPlugin* self,
 
 static void clap_phase_decode_param_events(PulpClapPlugin* self,
                                            const clap_process_t* process) {
+    ScopedClapHostParamWrite host_write;
     // Reset per-buffer modulation offsets before applying new events
     self->store.reset_all_mod();
     self->param_events.clear();
@@ -1172,6 +1206,7 @@ static void clap_phase_snapshot_params(
     self->pre_process_generation = self->store.state_generation();
     boundary::refresh_param_snapshot(self->store, all_params, self->param_snapshot,
                                      self->snapshot_state, self->pre_process_generation);
+    self->processor_param_values.assign(self->param_snapshot.begin(), self->param_snapshot.end());
     self->output_param_has_event.assign(all_params.size(), 0);
 }
 
@@ -1593,7 +1628,9 @@ static void clap_phase_emit_output(
         }
         for (std::size_t i = 0; store_moved && i < all_params.size(); ++i) {
             if (self->output_param_has_event[i]) continue;
-            float current = self->store.get_value(all_params[i].id);
+            // The fallback reports processor writes and adapter-owned resets.
+            // UI writes use the queue above if they pass echo suppression.
+            const float current = self->processor_param_values[i];
             if (boundary::changed_since_snapshot(current,
                                                  self->param_snapshot[i])) {
                 clap_event_param_value_t ev{};
@@ -1778,6 +1815,46 @@ clap_process_status clap_process(const clap_plugin_t* plugin, const clap_process
     const auto original_num_samples = num_samples;
     num_samples = static_cast<uint32_t>(clamp_block_to_prepared_max(
         static_cast<int>(num_samples), self->max_buffer_size));
+
+    // A host that supplies fewer input ports than declared gets the missing
+    // ones as silence of the declared width, so the Processor still runs. A
+    // count above the declared one, a null array, or a bad channel count in a
+    // supplied port is still malformed and is rejected below.
+    if (process->audio_inputs_count < self->declared_input_bus_count &&
+        self->declared_input_bus_count <= self->padded_inputs.size() &&
+        (process->audio_inputs_count == 0 || process->audio_inputs) &&
+        self->silent_input.size() >= num_samples) {
+        bool paddable = true;
+        for (uint32_t b = process->audio_inputs_count; b < self->declared_input_bus_count; ++b) {
+            const int width = self->declared_input_channels[b];
+            if (width < 0 || width > kMaxChannels) {
+                paddable = false;
+                break;
+            }
+        }
+        if (paddable) {
+            for (uint32_t b = 0; b < process->audio_inputs_count; ++b)
+                self->padded_inputs[b] = process->audio_inputs[b];
+            for (uint32_t b = process->audio_inputs_count; b < self->declared_input_bus_count;
+                 ++b) {
+                clap_audio_buffer_t silent{};
+                silent.channel_count = static_cast<uint32_t>(self->declared_input_channels[b]);
+                silent.data32 = silent.channel_count > 0 ? self->silent_input_ptrs.data() : nullptr;
+                silent.constant_mask = ~uint64_t{0};
+                self->padded_inputs[b] = silent;
+            }
+            self->padded_process = *process;
+            self->padded_process.audio_inputs = self->padded_inputs.data();
+            self->padded_process.audio_inputs_count = self->declared_input_bus_count;
+            process = &self->padded_process;
+            if (!self->warming_render_path &&
+                !self->missing_inputs_seen.exchange(true, std::memory_order_relaxed)) {
+                self->missing_inputs_log_pending.store(true, std::memory_order_release);
+                if (self->host && self->host->request_callback)
+                    self->host->request_callback(self->host);
+            }
+        }
+    }
 
     // Reject a host block that differs from the topology selected during
     // activation before publishing any host storage to the Processor.
@@ -2217,7 +2294,7 @@ clap_process_status clap_process(const clap_plugin_t* plugin, const clap_process
     // Return trigger / momentary params (panic, reset, tap) to their default
     // now that the Processor has observed this block. Done before the
     // output-event scan below so the host records the auto-reset as automation.
-    self->store.reset_triggers_rt();
+    self->store.reset_triggers_rt(self->processor_param_values);
 
     clap_phase_emit_output(self, process, all_params);
 
@@ -2365,7 +2442,16 @@ void clap_on_main_thread(const clap_plugin_t* plugin) {
     // request_callback() in response to the process_status flag we set when a
     // flag becomes pending, and this entrypoint runs on the main thread.
     auto* self = get_self(plugin);
-    if (!self || !self->processor || !self->host) return;
+    if (!self || !self->processor)
+        return;
+
+    if (self->missing_inputs_log_pending.exchange(false, std::memory_order_acq_rel)) {
+        runtime::log_warn("CLAP: host supplied fewer audio input ports than the {} declared; "
+                          "missing ports are processed as silence",
+                          self->declared_input_bus_count);
+    }
+    if (!self->host)
+        return;
 
     // A Program Change latched on the audio thread: resolve and load it here.
 #if PULP_CLAP_PRESET_LIBRARY

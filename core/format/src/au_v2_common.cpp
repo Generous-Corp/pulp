@@ -4,20 +4,26 @@
 #include <AudioToolbox/AudioUnitUtilities.h>
 
 #include <pulp/format/au_v2_common.hpp>
+#include <pulp/format/host_parameter_edit.hpp>
+#include <memory>
+#include <pthread.h>
 #include <pulp/format/audio_workgroup_client.hpp>
 #include <pulp/format/parameter_text.hpp>
 #include <pulp/format/plugin_state_io.hpp>
 #include <pulp/format/param_group_projection.hpp>
 #include <pulp/events/main_thread_dispatcher.hpp>
 #include <pulp/events/plugin_main_thread.hpp>
+#include <choc/memory/choc_Endianness.h>
 
 #include <Block.h>
 
 #include <algorithm>
 #include <condition_variable>
 #include <cstring>
+#include <limits>
 #include <mutex>
 #include <string>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -426,14 +432,19 @@ void wire_host_parameter_bridge(state::StateStore& store,
                                 AudioUnit unit,
                                 state::ListenerToken& out_listener)
 {
+    wire_host_parameter_bridge(store, unit, out_listener, {});
+}
+
+void wire_host_parameter_bridge(state::StateStore& store, AudioUnit unit,
+                                state::ListenerToken& out_listener, HostParameterNotify notify) {
+    if (!notify)
+        notify = notify_host_parameter_event;
     store.set_gesture_callbacks(
-        [unit](state::ParamID id) {
-            notify_host_parameter_event(
-                unit, kAudioUnitEvent_BeginParameterChangeGesture, id);
+        [unit, notify](state::ParamID id) {
+            notify(unit, kAudioUnitEvent_BeginParameterChangeGesture, id);
         },
-        [unit](state::ParamID id) {
-            notify_host_parameter_event(
-                unit, kAudioUnitEvent_EndParameterChangeGesture, id);
+        [unit, notify](state::ParamID id) {
+            notify(unit, kAudioUnitEvent_EndParameterChangeGesture, id);
         });
 
     // Registered as an Audio listener so it runs INLINE, synchronously, on
@@ -441,11 +452,24 @@ void wire_host_parameter_bridge(state::StateStore& store,
     // thread (correct); a host write fires it inside ScopedHostParamWrite, so
     // the echo is suppressed. The render thread never writes the store, so
     // this never notifies from the render thread.
+    //
+    // The guard remembers what the host wrote, so a plug-in that mirrors a
+    // host-written value back on the main thread (e.g. after quantising it) is
+    // not reported as editing that parameter.
+    auto guard = std::make_shared<HostWriteEchoGuard>();
     out_listener = store.add_listener(
-        [unit](state::ParamID id, float /*value*/) {
-            if (host_is_writing_param()) return;
-            notify_host_parameter_event(
-                unit, kAudioUnitEvent_ParameterValueChange, id);
+        [unit, guard, &store, notify](state::ParamID id, float /*value*/) {
+            const bool on_main = pthread_main_np() != 0;
+            if (host_is_writing_param()) {
+                // Only a host write off the main thread (automation) is
+                // remembered; the open-gesture set below is main-thread state.
+                if (!on_main)
+                    guard->note_host_write(id);
+                return;
+            }
+            if (on_main && guard->is_echo(store, id))
+                return;
+            notify(unit, kAudioUnitEvent_ParameterValueChange, id);
         },
         state::ListenerThread::Audio);
 }
@@ -661,13 +685,267 @@ void ParameterDisplayNamePublisher::poll_main_thread()
     Impl::drain(shared);
 }
 
+namespace compact_state {
+namespace {
+
+constexpr std::uint8_t kMagic[4] = {'P', 'L', 'C', 'S'};
+constexpr std::size_t kMagicSize = sizeof(kMagic);
+// magic + format version + flags + state_version
+constexpr std::size_t kFixedHeaderSize = kMagicSize + 1 + 1 + 4;
+constexpr std::size_t kCrcSize = 4;
+constexpr std::uint8_t kFlagPayloadOmitted = 1;
+// Smallest legal blob: header, zero entries (1), zero-length payload (1), CRC.
+constexpr std::size_t kMinBlobSize = kFixedHeaderSize + 1 + 1 + kCrcSize;
+constexpr std::size_t kMaxVarintBytes = 10;
+// One entry is at least a 1-byte id and a 4-byte value.
+constexpr std::size_t kMinEntrySize = 1 + 4;
+
+std::uint32_t load_u32(const std::uint8_t* p) noexcept {
+    std::uint32_t v;
+    std::memcpy(&v, p, sizeof(v));
+    return choc::memory::readLittleEndian<std::uint32_t>(&v);
+}
+
+void put_u32(std::vector<std::uint8_t>& out, std::uint32_t v) {
+    std::uint8_t buf[4];
+    choc::memory::writeLittleEndian(buf, v);
+    out.insert(out.end(), buf, buf + 4);
+}
+
+void put_varint(std::vector<std::uint8_t>& out, std::uint64_t v) {
+    while (v >= 0x80) {
+        out.push_back(static_cast<std::uint8_t>(v | 0x80));
+        v >>= 7;
+    }
+    out.push_back(static_cast<std::uint8_t>(v));
+}
+
+std::uint32_t float_bits(float v) noexcept {
+    std::uint32_t bits;
+    std::memcpy(&bits, &v, sizeof(bits));
+    return bits;
+}
+
+/// Bounds-checked cursor over untrusted bytes.
+class Reader {
+  public:
+    explicit Reader(std::span<const std::uint8_t> bytes) noexcept : bytes_(bytes) {}
+
+    [[nodiscard]] std::size_t remaining() const noexcept {
+        return bytes_.size() - pos_;
+    }
+
+    bool read_u32(std::uint32_t& out) noexcept {
+        if (remaining() < 4)
+            return false;
+        out = load_u32(bytes_.data() + pos_);
+        pos_ += 4;
+        return true;
+    }
+
+    bool read_varint(std::uint64_t& out) noexcept {
+        std::uint64_t value = 0;
+        for (std::size_t i = 0; i < kMaxVarintBytes; ++i) {
+            if (remaining() == 0)
+                return false;
+            const std::uint8_t byte = bytes_[pos_++];
+            const unsigned shift = static_cast<unsigned>(7 * i);
+            // The tenth byte may only contribute the top bit of a 64-bit value.
+            if (i == kMaxVarintBytes - 1 && byte > 1)
+                return false;
+            value |= static_cast<std::uint64_t>(byte & 0x7F) << shift;
+            if ((byte & 0x80) == 0) {
+                out = value;
+                return true;
+            }
+        }
+        return false;
+    }
+
+    bool skip(std::size_t n) noexcept {
+        if (remaining() < n)
+            return false;
+        pos_ += n;
+        return true;
+    }
+
+    [[nodiscard]] std::size_t position() const noexcept {
+        return pos_;
+    }
+
+  private:
+    std::span<const std::uint8_t> bytes_;
+    std::size_t pos_ = 0;
+};
+
+std::vector<std::uint8_t>
+build_store_blob(std::uint32_t state_version,
+                 const std::vector<std::pair<state::ParamID, float>>& entries) {
+    std::vector<std::uint8_t> blob;
+    blob.reserve(16 + entries.size() * 8);
+    blob.insert(blob.end(), {'P', 'U', 'L', 'P'});
+    put_u32(blob, state_version);
+    put_u32(blob, static_cast<std::uint32_t>(entries.size()));
+    for (const auto& [id, value] : entries) {
+        put_u32(blob, id);
+        put_u32(blob, float_bits(value));
+    }
+    put_u32(blob, crc32(blob));
+    return blob;
+}
+
+} // namespace
+
+const char* decode_status_name(DecodeStatus status) noexcept {
+    switch (status) {
+    case DecodeStatus::ok:
+        return "ok";
+    case DecodeStatus::truncated:
+        return "truncated";
+    case DecodeStatus::bad_magic:
+        return "bad_magic";
+    case DecodeStatus::unsupported_format_version:
+        return "unsupported_format_version";
+    case DecodeStatus::unsupported_flags:
+        return "unsupported_flags";
+    case DecodeStatus::unsupported_state_version:
+        return "unsupported_state_version";
+    case DecodeStatus::crc_mismatch:
+        return "crc_mismatch";
+    case DecodeStatus::malformed:
+        return "malformed";
+    }
+    return "unknown";
+}
+
+std::uint32_t crc32(std::span<const std::uint8_t> bytes) noexcept {
+    return plugin_state_io::crc32(bytes);
+}
+
+std::vector<std::uint8_t> encode(const state::StateStore& store,
+                                 std::span<const std::uint8_t> plugin_payload, bool omit_payload) {
+    if (omit_payload)
+        plugin_payload = {};
+    if (plugin_payload.size() > std::numeric_limits<std::uint32_t>::max())
+        return {};
+
+    const auto params = store.all_params();
+    std::vector<std::pair<state::ParamID, float>> changed;
+    for (const auto& info : params) {
+        const float value = store.get_value(info.id);
+        if (float_bits(value) != float_bits(info.range.default_value))
+            changed.emplace_back(info.id, value);
+    }
+
+    std::vector<std::uint8_t> out;
+    out.reserve(kMinBlobSize + changed.size() * 9 + kMaxVarintBytes + plugin_payload.size());
+    out.insert(out.end(), kMagic, kMagic + kMagicSize);
+    out.push_back(kFormatVersion);
+    out.push_back(omit_payload ? kFlagPayloadOmitted : 0);
+    put_u32(out, store.state_version());
+    put_varint(out, changed.size());
+    for (const auto& [id, value] : changed) {
+        put_varint(out, id);
+        put_u32(out, float_bits(value));
+    }
+    put_varint(out, plugin_payload.size());
+    out.insert(out.end(), plugin_payload.begin(), plugin_payload.end());
+    put_u32(out, crc32(out));
+    return out;
+}
+
+DecodeStatus decode(std::span<const std::uint8_t> bytes, const state::StateStore& store,
+                    Decoded& out) {
+    if (bytes.size() < kMagicSize)
+        return DecodeStatus::truncated;
+    if (std::memcmp(bytes.data(), kMagic, kMagicSize) != 0)
+        return DecodeStatus::bad_magic;
+    if (bytes.size() < kMinBlobSize)
+        return DecodeStatus::truncated;
+    if (bytes[kMagicSize] != kFormatVersion)
+        return DecodeStatus::unsupported_format_version;
+    const std::uint8_t flags = bytes[kMagicSize + 1];
+    if ((flags & ~kFlagPayloadOmitted) != 0)
+        return DecodeStatus::unsupported_flags;
+    const bool omitted = (flags & kFlagPayloadOmitted) != 0;
+
+    const std::size_t body_size = bytes.size() - kCrcSize;
+    if (load_u32(bytes.data() + body_size) != crc32(bytes.first(body_size)))
+        return DecodeStatus::crc_mismatch;
+
+    const std::uint32_t saved_version = load_u32(bytes.data() + kMagicSize + 2);
+    if (saved_version > store.state_version())
+        return DecodeStatus::unsupported_state_version;
+
+    Reader reader(bytes.first(body_size));
+    if (!reader.skip(kFixedHeaderSize))
+        return DecodeStatus::truncated;
+
+    std::uint64_t count = 0;
+    if (!reader.read_varint(count))
+        return DecodeStatus::malformed;
+    // Bound the count by the bytes that could hold it before reserving.
+    if (count > reader.remaining() / kMinEntrySize)
+        return DecodeStatus::malformed;
+
+    std::unordered_map<state::ParamID, float> saved;
+    saved.reserve(static_cast<std::size_t>(count));
+    for (std::uint64_t i = 0; i < count; ++i) {
+        std::uint64_t id = 0;
+        std::uint32_t value_bits = 0;
+        if (!reader.read_varint(id) || id > std::numeric_limits<state::ParamID>::max() ||
+            !reader.read_u32(value_bits))
+            return DecodeStatus::malformed;
+        float value;
+        std::memcpy(&value, &value_bits, sizeof(value));
+        if (!saved.emplace(static_cast<state::ParamID>(id), value).second)
+            return DecodeStatus::malformed; // the writer never repeats an id
+    }
+
+    std::uint64_t payload_size = 0;
+    if (!reader.read_varint(payload_size) || payload_size != reader.remaining() ||
+        (omitted && payload_size != 0))
+        return DecodeStatus::malformed;
+    const std::size_t payload_offset = reader.position();
+
+    std::vector<std::pair<state::ParamID, float>> entries;
+    if (saved_version == store.state_version()) {
+        // Same schema: an unlisted parameter was at its default when saved.
+        const auto params = store.all_params();
+        entries.reserve(params.size());
+        for (const auto& info : params) {
+            const auto it = saved.find(info.id);
+            entries.emplace_back(info.id,
+                                 it != saved.end() ? it->second : info.range.default_value);
+        }
+    } else {
+        // Older schema: hand only what was saved to the store's migrations. An
+        // unlisted parameter keeps its current value, as an unlisted id always
+        // did in the legacy format.
+        entries.assign(saved.begin(), saved.end());
+    }
+
+    out.payload_omitted = omitted;
+    out.store_blob = build_store_blob(saved_version, entries);
+    out.plugin_payload = bytes.subspan(payload_offset, static_cast<std::size_t>(payload_size));
+    return DecodeStatus::ok;
+}
+
+} // namespace compact_state
+
 OSStatus save_pulp_state(state::StateStore& store,
                          Processor& processor,
                          CFPropertyListRef* out_data)
 {
     if (!out_data) return kAudioUnitErr_InvalidPropertyValue;
 
-    auto data = plugin_state_io::serialize(store, processor);
+    const bool owns = processor.class_info_owns_plugin_state();
+    std::shared_ptr<const std::vector<std::uint8_t>> payload;
+    if (!owns)
+        payload = plugin_state_io::plugin_state_payload(processor);
+    auto data = compact_state::encode(
+        store, payload ? std::span<const std::uint8_t>(*payload) : std::span<const std::uint8_t>{},
+        owns);
     CFDataRef cf_data = CFDataCreate(kCFAllocatorDefault, data.data(),
                                      static_cast<CFIndex>(data.size()));
     if (!cf_data) return noErr;
@@ -683,7 +961,7 @@ OSStatus save_pulp_state(state::StateStore& store,
     }
     if (*out_data) CFRelease(*out_data);
 
-    CFDictionarySetValue(dict, CFSTR("pulp-state"), cf_data);
+    CFDictionarySetValue(dict, CFSTR("pulp-state-v2"), cf_data);
     *out_data = dict;
     CFRelease(cf_data);
     return noErr;
@@ -697,6 +975,28 @@ OSStatus restore_pulp_state(state::StateStore& store,
     if (!plist || CFGetTypeID(plist) != CFDictionaryGetTypeID()) return noErr;
 
     auto dict = static_cast<CFDictionaryRef>(plist);
+
+    if (const void* compact = CFDictionaryGetValue(dict, CFSTR("pulp-state-v2"))) {
+        if (CFGetTypeID(compact) != CFDataGetTypeID())
+            return kAudioUnitErr_InvalidPropertyValue;
+        const auto cf_data = static_cast<CFDataRef>(compact);
+        const std::span<const std::uint8_t> bytes(
+            CFDataGetBytePtr(cf_data), static_cast<std::size_t>(CFDataGetLength(cf_data)));
+
+        compact_state::Decoded decoded;
+        if (compact_state::decode(bytes, store, decoded) != compact_state::DecodeStatus::ok)
+            return kAudioUnitErr_InvalidPropertyValue;
+
+        auto restore_lock = gate.lock_for_restore();
+        if (decoded.payload_omitted)
+            return store.deserialize(decoded.store_blob) ? noErr
+                                                         : kAudioUnitErr_InvalidPropertyValue;
+        if (!plugin_state_io::deserialize_parts(decoded.store_blob, decoded.plugin_payload, store,
+                                                processor))
+            return kAudioUnitErr_InvalidPropertyValue;
+        return noErr;
+    }
+
     auto cf_data = static_cast<CFDataRef>(
         CFDictionaryGetValue(dict, CFSTR("pulp-state")));
     if (!cf_data || CFGetTypeID(cf_data) != CFDataGetTypeID()) return noErr;

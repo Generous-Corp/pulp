@@ -40,6 +40,7 @@ pulp_add_plugin(<target>
     PROCESSOR_FACTORY <function-name>
     UI              <ui-package-target|none>
     UI_SCRIPT       <path>
+    UI_ENGINE       vellum
     ICON            <1024x1024 png>
     ICNS            <path>
     CONTENT_CAPABILITIES <capability-list>
@@ -77,6 +78,7 @@ An argument `pulp_add_plugin()` does not recognise (a misspelled keyword, a keyw
 | `PROCESSOR_FACTORY` | No | -- | Factory function name (for generated entry points) |
 | `UI` | No | -- | A UI package target that supplies the plug-in's default editor through the editor-host contract (`pulp/format/editor_host.hpp`). Every created format and standalone target links the package and compiles a generated source that installs the package's factory as that binary's default, so `Processor::editor_factory()` returns it unless the processor overrides it. A package implies `NO_EDITOR`: the VST3, CLAP, AU v2 and LV2 modules link no Pulp view, canvas or render code, and combining it with `NATIVE_UI`, `UI_SCRIPT`, `GPU_UI`, `FULL_EDITOR` or `LITE_EDITOR` is a configure error. `none`, or no `UI` argument, generates and links nothing, and `editor_factory()` returns null. See [UI Packages](#ui-packages). |
 | `UI_SCRIPT` | No | -- | Path to a JavaScript UI entry file. Its bytes, the `theme.json` beside it, and the image, font, data and shader files beside it (`png jpg jpeg gif webp bmp ico svg ttf otf woff woff2 json wgsl glsl sksl frag vert`, skipping dot-directories, `node_modules` and nested build trees; the script must sit in its own directory, and one holding a `CMakeLists.txt` is refused at configure) are compiled into every created format target and registered with `pulp::format` at load, so the shipped image carries its editor and the files it loads relative to itself, and never reads the developer's source tree. A dev build (`PULP_DEV_BUILD`: defaults to `PULP_BUILD_TESTS` in the Pulp checkout and OFF for an installed-SDK consumer, where the `pulp` CLI's configure passes `-DPULP_DEV_BUILD=ON`) also records the absolute path; a hot-reloading editor (the Standalone host, or a DAW launched with `PULP_DEV_HOT_RELOAD=1`) then reads that file while it exists, which is what keeps the edit-and-see loop live. Every other open evaluates the embedded bytes, and `pulp ship` builds a `build-ship/` that carries the dev build's whole configuration with the option off rather than shipping a dev build. A file added beside the script after configure re-runs CMake on the next build; an edit to an embedded file re-encodes it at build time. |
+| `UI_ENGINE` | No | Legacy editor | Set `UI_ENGINE vellum` alongside `UI_SCRIPT` to open the same script and embedded assets through the Vellum editor factory. Requires Pulp built with `PULP_ENABLE_PULP_VELLUM=ON` and an SDK that exports `Vellum::MirrorView_script`. Applies to VST3, CLAP, AU v2 and Standalone on hosts supported by the Vellum editor. The script must exist at configure time. |
 | `ICON` | No | -- | A 1024x1024 PNG, converted to an `.icns` and bundled into every macOS bundle the call creates (Standalone, VST3, AU, CLAP, AAX). Mutually exclusive with `ICNS`. |
 | `ICNS` | No | -- | A finished `.icns`, bundled as-is into the same set. Prefer this when the asset is laid out per size; the `ICON` path downscales with `sips`, whose kernel rings small tiles. **Scope:** this fills `CFBundleIconFile` and ships the asset. macOS does not render that key for a non-`.app` bundle, so no icon appears in Finder for the plug-in formats; see the product-icon comment in `PulpUtils.cmake`. |
 | `CONTENT_CAPABILITIES` | No | -- | Runtime content capabilities the plugin actually consumes, such as `content.presets.v1`. Use this when the plugin can load installed content packs. Must be paired with `CONTENT_KINDS`. |
@@ -141,12 +143,14 @@ and does not run package code.
 
 ### UI Packages
 
-A UI package is any CMake target that declares two target properties:
+A UI package is any CMake target that declares two target properties, and
+optionally a third:
 
 | Property | Value |
 |---|---|
 | `PULP_EDITOR_FACTORY_FUNCTION` | Fully qualified name of a function `::pulp::format::EditorFactory* name()` that returns the package's editor factory. The factory must outlive every editor it creates; a function-local static is the usual shape. It is called on the host's main thread, the first time a host asks for the editor, never at load. |
 | `PULP_EDITOR_FACTORY_HEADER` | The header, on the package's include path, that declares that function. |
+| `PULP_EDITOR_RUNTIME_LIBRARIES` | Optional. Shared-library targets the editor loads at run time. Each format and Standalone module copies them beside its binary and finds them through an `@loader_path` (`$ORIGIN`) rpath only, so the bundle does not depend on where the package's SDK is installed. |
 
 ```cmake
 add_library(my-ui STATIC my_ui_editor.cpp)
@@ -176,7 +180,12 @@ pulp_add_plugin(MyPlugin FORMATS CLAP UI pulp::vellum-editor ...)
 ```
 
 The helper generates the ordinary factory function and links the Vellum view
-target only into this package; the parameter bridge remains view-free.
+target only into this package; the parameter bridge remains view-free. The
+package links Vellum's `Vellum::MirrorView_core`, which exports the
+GPU-backed `PluginViewHost::create()` and factory registry. Pulp registers the
+Dawn bootstrap once per plug-in bundle before creating the editor and lists the
+Vellum dylibs in its link closure as `PULP_EDITOR_RUNTIME_LIBRARIES`, so each
+plug-in bundle carries them. Configure fails closed when the SDK is too old.
 
 A plug-in that declares a package gets `NO_EDITOR`'s view-free link without
 saying so: its VST3, CLAP, AU v2 and LV2 modules link `Pulp::format-core`

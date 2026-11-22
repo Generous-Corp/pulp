@@ -949,6 +949,14 @@ add_test(NAME cmake-sdk-provenance-contract
 set_tests_properties(cmake-sdk-provenance-contract PROPERTIES
     LABELS "cmake;sdk;provenance"
     TIMEOUT 30)
+add_test(NAME cmake-source-install-sha-at-install
+    COMMAND ${CMAKE_COMMAND}
+        -DPULP_SOURCE_DIR=${CMAKE_SOURCE_DIR}
+        -DFIXTURE_DIR=${CMAKE_BINARY_DIR}/test-source-install-sha-at-install
+        -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/test_pulp_source_install_sha.cmake)
+set_tests_properties(cmake-source-install-sha-at-install PROPERTIES
+    LABELS "cmake;sdk;provenance"
+    TIMEOUT 60)
 # PULP_PROFILE contract: release seeds the enforced options OFF, refuses a
 # contradicting -D, stale cache or cached PULP_DEV_BUILD=ON, and only
 # PULP_PROFILE_ALLOW_OVERRIDE (with a warning) lets one through. Eight fixture
@@ -1665,3 +1673,32 @@ endif()
 # scanner tests above because it is the same family of `cmake -P` artifact
 # scans and the control scanner reads the same list.
 include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/release_artifact_tests.cmake")
+
+# The installed package config puts libfontconfig after Skia on Pulp::canvas.
+add_test(NAME cmake-canvas-fontconfig-link
+    COMMAND ${CMAKE_COMMAND}
+        -DPULP_SOURCE_DIR=${CMAKE_SOURCE_DIR}
+        -DFIXTURE_DIR=${CMAKE_CURRENT_BINARY_DIR}/canvas-fontconfig-link
+        -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/test_canvas_fontconfig_link.cmake)
+set_tests_properties(cmake-canvas-fontconfig-link PROPERTIES
+    LABELS "cmake;format" TIMEOUT 60)
+
+if(UNIX)
+    add_test(NAME cmake-plugin-module-fontconfig
+        COMMAND ${CMAKE_COMMAND}
+            -DPULP_SOURCE_DIR=${CMAKE_SOURCE_DIR}
+            -DWORK_DIR=${CMAKE_CURRENT_BINARY_DIR}/plugin-module-fontconfig
+            -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/test_plugin_module_fontconfig.cmake)
+    set_tests_properties(cmake-plugin-module-fontconfig PROPERTIES
+        LABELS "cmake;format"
+        TIMEOUT 120
+        SKIP_REGULAR_EXPRESSION "SKIP: configure-and-build probe is Linux-only")
+
+    add_test(NAME cmake-plugin-module-probe-exit-status
+        COMMAND ${CMAKE_COMMAND}
+            -DPULP_SOURCE_DIR=${CMAKE_SOURCE_DIR}
+            -DWORK_DIR=${CMAKE_CURRENT_BINARY_DIR}/plugin-module-probe-exit-status
+            -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/test_plugin_module_probe.cmake)
+    set_tests_properties(cmake-plugin-module-probe-exit-status PROPERTIES
+        LABELS "cmake;format" TIMEOUT 60)
+endif()

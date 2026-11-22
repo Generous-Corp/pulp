@@ -13,10 +13,14 @@
 
 #include <GL/gl.h>
 
+#include <windowsx.h>
+
 #include <cstdint>
 #include <cstdio>
+#include <cstdlib>
 #include <mutex>
 #include <string>
+#include <unordered_map>
 
 namespace pulp::native {
 
@@ -60,7 +64,21 @@ HINSTANCE this_module() {
     return module;
 }
 
+// What the window procedure hands messages to: the surface that owns the
+// window, found through the window's user data.
+struct MessageSink {
+    virtual ~MessageSink() = default;
+    // True when the message was handled; `result` is then the procedure's
+    // return value.
+    virtual bool on_message(UINT message, WPARAM wparam, LPARAM lparam, LRESULT& result) = 0;
+};
+
 LRESULT CALLBACK child_proc(HWND hwnd, UINT message, WPARAM wparam, LPARAM lparam) {
+    if (auto* sink = reinterpret_cast<MessageSink*>(GetWindowLongPtrW(hwnd, GWLP_USERDATA))) {
+        LRESULT result = 0;
+        if (sink->on_message(message, wparam, lparam, result))
+            return result;
+    }
     switch (message) {
     case WM_ERASEBKGND:
         return 1; // the client paints every pixel
@@ -118,7 +136,7 @@ double window_scale(HWND hwnd) {
     return dpi > 0 ? dpi / 96.0 : 1.0;
 }
 
-struct WglWindow final : GlSurface::Impl {
+struct WglWindow final : GlSurface::Impl, MessageSink {
     HWND hwnd = nullptr;
     HDC hdc = nullptr;
     HGLRC context = nullptr;
@@ -127,6 +145,23 @@ struct WglWindow final : GlSurface::Impl {
     // offers single-sampled formats, so this stays 0 and a request that asks
     // for multisampling is refused rather than silently given none.
     int window_samples = 0;
+    // Input state, UI thread.
+    HWND previous_focus = nullptr;
+    bool holding_focus = false;
+    bool pointer_inside = false;
+    struct KeyPress {
+        bool client_first = false;
+        bool forwarded_down = false; // the host saw the key-down, so it gets the key-up
+    };
+    // Keyed by virtual key and scan identity: Windows reports both Shift, Ctrl
+    // or Alt keys as the same generic virtual key, so the side needs the scan.
+    std::unordered_map<std::uint64_t, KeyPress> keys_down;
+    Win32TakenKeys taken_keys; // taken key-downs whose characters are dropped
+    DWORD last_press_time = 0;
+    unsigned last_press_button = 0;
+    int last_press_x = 0;
+    int last_press_y = 0;
+    int click_count = 0;
 
     ~WglWindow() override {
         destroy_window();
@@ -144,10 +179,37 @@ struct WglWindow final : GlSurface::Impl {
         return hwnd != nullptr;
     }
 
+    double current_scale() const {
+        if (scale_override > 0.0)
+            return scale_override;
+        if (options.scale > 0.0)
+            return options.scale;
+        return window_scale(hwnd);
+    }
+
+    void emit(SurfaceEventKind kind) {
+        if (!listener)
+            return;
+        SurfaceEvent event;
+        event.kind = kind;
+        {
+            std::lock_guard<std::mutex> lock(geometry_mutex);
+            event.geometry = geometry;
+        }
+        listener(event);
+    }
+
+    void apply_scale() override {
+        if (hwnd == nullptr)
+            return;
+        update_geometry();
+        emit(SurfaceEventKind::geometry_changed);
+    }
+
     void update_geometry() {
         RECT rect{};
         GetClientRect(hwnd, &rect);
-        const double scale = window_scale(hwnd);
+        const double scale = current_scale();
         const auto px_w = static_cast<std::uint32_t>(rect.right - rect.left);
         const auto px_h = static_cast<std::uint32_t>(rect.bottom - rect.top);
         std::lock_guard<std::mutex> lock(geometry_mutex);
@@ -177,6 +239,12 @@ struct WglWindow final : GlSurface::Impl {
                                this_module(), nullptr);
         if (hwnd == nullptr)
             return false;
+        SetWindowLongPtrW(hwnd, GWLP_USERDATA,
+                          reinterpret_cast<LONG_PTR>(static_cast<MessageSink*>(this)));
+        keys_down.clear();
+        taken_keys.clear();
+        click_count = 0;
+        pointer_inside = false;
         hdc = GetDC(hwnd);
         PIXELFORMATDESCRIPTOR pfd{};
         pfd.nSize = sizeof pfd;
@@ -194,7 +262,351 @@ struct WglWindow final : GlSurface::Impl {
             return false;
         }
         update_geometry();
+        apply_keyboard_focus();
         return true;
+    }
+
+    // ── input ───────────────────────────────────────────────────────────────
+
+    static bool key_state(int vk) {
+        return (GetKeyState(vk) & 0x8000) != 0;
+    }
+
+    static std::uint32_t current_modifiers() {
+        return modifiers_from_win32_keys(
+            key_state(VK_SHIFT), key_state(VK_CONTROL), key_state(VK_MENU),
+            key_state(VK_LWIN) || key_state(VK_RWIN), (GetKeyState(VK_CAPITAL) & 1) != 0);
+    }
+
+    PointerEvent pointer_at(LPARAM lparam, unsigned mk) const {
+        PointerEvent e;
+        const double scale = current_scale();
+        e.x = GET_X_LPARAM(lparam) / scale;
+        e.y = GET_Y_LPARAM(lparam) / scale;
+        e.buttons_held = buttons_held_from_win32_mk(mk);
+        e.modifiers = current_modifiers();
+        e.timestamp = GetMessageTime() / 1000.0;
+        return e;
+    }
+
+    void track_leave() {
+        TRACKMOUSEEVENT track{};
+        track.cbSize = sizeof track;
+        track.dwFlags = TME_LEAVE;
+        track.hwndTrack = hwnd;
+        TrackMouseEvent(&track);
+    }
+
+    void on_button(UINT message, WPARAM wparam, LPARAM lparam) {
+        const bool down = message == WM_LBUTTONDOWN || message == WM_RBUTTONDOWN ||
+                          message == WM_MBUTTONDOWN || message == WM_XBUTTONDOWN;
+        unsigned button = 1;
+        if (message == WM_RBUTTONDOWN || message == WM_RBUTTONUP)
+            button = 3; // X numbering: 1 left, 2 middle, 3 right, 8 and up extra
+        else if (message == WM_MBUTTONDOWN || message == WM_MBUTTONUP)
+            button = 2;
+        else if (message == WM_XBUTTONDOWN || message == WM_XBUTTONUP)
+            button = GET_XBUTTON_WPARAM(wparam) == XBUTTON1 ? 8 : 9;
+        if (down) {
+            // Keep receiving the pointer after it leaves the window.
+            SetCapture(hwnd);
+        } else if ((GET_KEYSTATE_WPARAM(wparam) &
+                    (MK_LBUTTON | MK_RBUTTON | MK_MBUTTON | MK_XBUTTON1 | MK_XBUTTON2)) == 0) {
+            ReleaseCapture();
+        }
+        if (!input.pointer)
+            return;
+        PointerEvent e = pointer_at(lparam, GET_KEYSTATE_WPARAM(wparam));
+        e.kind = down ? PointerKind::down : PointerKind::up;
+        // The button numbering is X's (1 left, 2 middle, 3 right, 8 and up extra).
+        e.button = pointer_button_for_x11(button, e.button_number);
+        if (down) {
+            const int x = GET_X_LPARAM(lparam);
+            const int y = GET_Y_LPARAM(lparam);
+            const DWORD now = GetMessageTime();
+            const bool repeat =
+                button == last_press_button && now - last_press_time <= GetDoubleClickTime() &&
+                std::abs(x - last_press_x) <= GetSystemMetrics(SM_CXDOUBLECLK) / 2 &&
+                std::abs(y - last_press_y) <= GetSystemMetrics(SM_CYDOUBLECLK) / 2;
+            click_count = repeat ? click_count + 1 : 1;
+            last_press_time = now;
+            last_press_button = button;
+            last_press_x = x;
+            last_press_y = y;
+        }
+        e.click_count = click_count;
+        input.pointer(e);
+    }
+
+    void on_move(WPARAM wparam, LPARAM lparam) {
+        if (!pointer_inside) {
+            pointer_inside = true;
+            track_leave();
+            if (input.pointer) {
+                PointerEvent enter = pointer_at(lparam, static_cast<unsigned>(wparam));
+                enter.kind = PointerKind::enter;
+                input.pointer(enter);
+            }
+        }
+        if (!input.pointer)
+            return;
+        PointerEvent e = pointer_at(lparam, static_cast<unsigned>(wparam));
+        if (e.buttons_held == 0) {
+            e.kind = PointerKind::move;
+        } else {
+            e.kind = PointerKind::drag;
+            for (int n = 0; n < 32; ++n)
+                if (e.buttons_held & (1u << n)) {
+                    e.button_number = n;
+                    e.button = n == 0   ? PointerButton::left
+                               : n == 1 ? PointerButton::right
+                               : n == 2 ? PointerButton::middle
+                                        : PointerButton::other;
+                    break;
+                }
+        }
+        input.pointer(e);
+    }
+
+    void on_leave() {
+        pointer_inside = false;
+        if (!input.pointer)
+            return;
+        PointerEvent e;
+        e.kind = PointerKind::leave;
+        e.timestamp = GetMessageTime() / 1000.0;
+        input.pointer(e);
+    }
+
+    void on_wheel(WPARAM wparam, LPARAM lparam, bool horizontal) {
+        if (!input.wheel) {
+            // No wheel handler: the host's scroll view keeps working.
+            HWND parent = GetParent(hwnd);
+            if (parent != nullptr)
+                PostMessageW(parent, horizontal ? WM_MOUSEHWHEEL : WM_MOUSEWHEEL, wparam, lparam);
+            return;
+        }
+        POINT p{GET_X_LPARAM(lparam), GET_Y_LPARAM(lparam)};
+        ScreenToClient(hwnd, &p); // wheel messages carry screen coordinates
+        const double scale = current_scale();
+        WheelEvent e;
+        e.x = p.x / scale;
+        e.y = p.y / scale;
+        const double lines = win32_wheel_lines(GET_WHEEL_DELTA_WPARAM(wparam), horizontal);
+        (horizontal ? e.dx : e.dy) = lines;
+        e.raw_dx = e.dx;
+        e.raw_dy = e.dy;
+        e.precise = false;
+        e.modifiers = current_modifiers();
+        e.timestamp = GetMessageTime() / 1000.0;
+        input.wheel(e);
+    }
+
+    void on_key(UINT message, WPARAM wparam, LPARAM lparam) {
+        const bool down = message == WM_KEYDOWN || message == WM_SYSKEYDOWN;
+        const unsigned vk = static_cast<unsigned>(wparam);
+        KeyEvent key;
+        key.kind = down ? KeyKind::down : KeyKind::up;
+        key.key = key_for_win32_vk(vk, (lparam & (1 << 24)) != 0,
+                                   static_cast<std::uint32_t>((lparam >> 16) & 0xff));
+        key.native_code = static_cast<std::uint16_t>(vk);
+        key.modifiers = current_modifiers();
+        key.timestamp = GetMessageTime() / 1000.0;
+        const std::uint64_t press_id = (static_cast<std::uint64_t>(Win32TakenKeys::id_from_lparam(
+                                            static_cast<std::uint64_t>(lparam)))
+                                        << 32) |
+                                       vk;
+        const auto known = keys_down.find(press_id);
+        key.repeat = down && known != keys_down.end();
+        // Whether the client goes first is decided at the first press and kept
+        // for its repeats and its release.
+        bool client_first;
+        bool was_forwarded = false;
+        if (known != keys_down.end()) {
+            client_first = known->second.client_first;
+            was_forwarded = known->second.forwarded_down;
+        } else {
+            client_first = down && route_key(key, keyboard_focus) == KeyRoute::client_first;
+        }
+        bool taken = false;
+        if (client_first) {
+            taken = input.key && input.key(key);
+            // A key the client took is not also typed. The characters it makes
+            // are matched by scan code, so a taken key that makes none leaves
+            // the next typed character alone.
+            if (taken && down)
+                taken_keys.taken(
+                    Win32TakenKeys::id_from_lparam(static_cast<std::uint64_t>(lparam)));
+        }
+        if (!down)
+            taken_keys.released(Win32TakenKeys::id_from_lparam(static_cast<std::uint64_t>(lparam)));
+        // Whether the host sees a key is decided with its first press and kept
+        // for its repeats and its release, so it never gets an unmatched repeat
+        // or key-up. A client-first key in a text field is typed, not sent.
+        bool forward;
+        if (known != keys_down.end())
+            forward = was_forwarded;
+        else if (down)
+            forward = !taken && !(client_first && keyboard_focus == KeyboardFocus::text);
+        else
+            forward = true; // a release whose press this window never saw
+        if (down) {
+            if (known == keys_down.end()) {
+                KeyPress& press = keys_down[press_id];
+                press.client_first = client_first;
+                press.forwarded_down = forward;
+            }
+        } else if (known != keys_down.end()) {
+            keys_down.erase(press_id);
+        }
+        if (forward) {
+            HWND parent = GetParent(hwnd);
+            if (parent != nullptr)
+                PostMessageW(parent, message, wparam, lparam);
+        }
+    }
+
+    void on_char(WPARAM wparam, LPARAM lparam) {
+        if (taken_keys.suppresses_char(
+                Win32TakenKeys::id_from_lparam(static_cast<std::uint64_t>(lparam))))
+            return;
+        if (keyboard_focus != KeyboardFocus::text || !input.text)
+            return;
+        // UTF-16 to UTF-8; a surrogate pair arrives as two WM_CHAR messages.
+        const unsigned unit = static_cast<unsigned>(wparam);
+        if (unit < 0x20 || unit == 0x7f)
+            return;
+        std::uint32_t code_point = unit;
+        if (unit >= 0xd800 && unit <= 0xdbff) {
+            high_surrogate = unit;
+            return;
+        }
+        if (unit >= 0xdc00 && unit <= 0xdfff) {
+            if (high_surrogate == 0)
+                return;
+            code_point = 0x10000 + ((high_surrogate - 0xd800) << 10) + (unit - 0xdc00);
+        }
+        high_surrogate = 0;
+        std::string out;
+        if (code_point < 0x80) {
+            out.push_back(static_cast<char>(code_point));
+        } else if (code_point < 0x800) {
+            out.push_back(static_cast<char>(0xc0 | (code_point >> 6)));
+            out.push_back(static_cast<char>(0x80 | (code_point & 0x3f)));
+        } else if (code_point < 0x10000) {
+            out.push_back(static_cast<char>(0xe0 | (code_point >> 12)));
+            out.push_back(static_cast<char>(0x80 | ((code_point >> 6) & 0x3f)));
+            out.push_back(static_cast<char>(0x80 | (code_point & 0x3f)));
+        } else {
+            out.push_back(static_cast<char>(0xf0 | (code_point >> 18)));
+            out.push_back(static_cast<char>(0x80 | ((code_point >> 12) & 0x3f)));
+            out.push_back(static_cast<char>(0x80 | ((code_point >> 6) & 0x3f)));
+            out.push_back(static_cast<char>(0x80 | (code_point & 0x3f)));
+        }
+        input.text(out);
+    }
+    unsigned high_surrogate = 0;
+
+    bool on_message(UINT message, WPARAM wparam, LPARAM lparam, LRESULT& result) override {
+        result = 0;
+        switch (message) {
+        case WM_LBUTTONDOWN:
+        case WM_LBUTTONUP:
+        case WM_RBUTTONDOWN:
+        case WM_RBUTTONUP:
+        case WM_MBUTTONDOWN:
+        case WM_MBUTTONUP:
+            on_button(message, wparam, lparam);
+            return true;
+        case WM_XBUTTONDOWN:
+        case WM_XBUTTONUP:
+            on_button(message, wparam, lparam);
+            result = TRUE;
+            return true;
+        case WM_MOUSEMOVE:
+            on_move(wparam, lparam);
+            return true;
+        case WM_MOUSELEAVE:
+            on_leave();
+            return true;
+        case WM_MOUSEWHEEL:
+            on_wheel(wparam, lparam, false);
+            return true;
+        case WM_MOUSEHWHEEL:
+            on_wheel(wparam, lparam, true);
+            return true;
+        case WM_KEYDOWN:
+        case WM_KEYUP:
+        case WM_SYSKEYDOWN:
+        case WM_SYSKEYUP:
+            on_key(message, wparam, lparam);
+            return true;
+        case WM_CHAR:
+            on_char(wparam, lparam);
+            return true;
+        case WM_SETFOCUS:
+        case WM_KILLFOCUS:
+            // A release can go to another window: forget the taken keys.
+            taken_keys.clear();
+            if (input.focus) {
+                FocusEvent focus;
+                focus.focused = message == WM_SETFOCUS;
+                focus.reason = FocusReason::responder;
+                input.focus(focus);
+            }
+            return false; // the default procedure still runs
+        case WM_SETCURSOR:
+            if (LOWORD(lparam) == HTCLIENT) {
+                SetCursor(cursor_handle());
+                result = TRUE;
+                return true;
+            }
+            return false;
+        default:
+            return false;
+        }
+    }
+
+    // ── keyboard focus and cursor ───────────────────────────────────────────
+
+    HCURSOR cursor_handle() const {
+        return LoadCursorW(nullptr, MAKEINTRESOURCEW(win32_cursor_resource(cursor)));
+    }
+
+    void apply_cursor() override {
+        if (hwnd == nullptr)
+            return;
+        POINT p{};
+        if (GetCursorPos(&p) && WindowFromPoint(p) == hwnd)
+            SetCursor(cursor_handle());
+    }
+
+    void apply_keyboard_focus() override {
+        if (hwnd == nullptr)
+            return;
+        if (keyboard_focus != KeyboardFocus::none) {
+            if (!holding_focus) {
+                previous_focus = GetFocus();
+                holding_focus = true;
+            }
+            SetFocus(hwnd);
+        } else {
+            release_keyboard();
+        }
+    }
+
+    // Give the keyboard back to whoever had it.
+    void release_keyboard() {
+        if (!holding_focus)
+            return;
+        holding_focus = false;
+        if (hwnd != nullptr && GetFocus() == hwnd) {
+            HWND back =
+                previous_focus != nullptr && IsWindow(previous_focus) && previous_focus != hwnd
+                    ? previous_focus
+                    : GetParent(hwnd);
+            SetFocus(back);
+        }
     }
 
     // Read the version, renderer and limits of the context current on this
@@ -328,7 +740,13 @@ struct WglWindow final : GlSurface::Impl {
     }
 
     void detach_window() override {
+        taken_keys.clear();
         if (hwnd != nullptr) {
+            release_keyboard();
+            // No message reaches this object once the window starts to go.
+            SetWindowLongPtrW(hwnd, GWLP_USERDATA, 0);
+            if (GetCapture() == hwnd)
+                ReleaseCapture();
             if (hdc != nullptr)
                 ReleaseDC(hwnd, hdc);
             DestroyWindow(hwnd);
@@ -343,6 +761,8 @@ struct WglWindow final : GlSurface::Impl {
     void forget_window() override {
         // The parent, and with it the child window and its DC, are already
         // gone or going: drop the handles without touching them.
+        holding_focus = false;
+        taken_keys.clear();
         hwnd = nullptr;
         hdc = nullptr;
     }

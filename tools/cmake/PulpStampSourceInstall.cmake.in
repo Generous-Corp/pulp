@@ -2,6 +2,32 @@
 set(_prefix "$ENV{DESTDIR}${CMAKE_INSTALL_PREFIX}")
 set(_sha "@PULP_SOURCE_INSTALL_SHA@")
 set(_dirty "@PULP_SOURCE_INSTALL_DIRTY@")
+set(_git "@GIT_EXECUTABLE@")
+set(_source_root "@PULP_ROOT_DIR@")
+# Resolve checkout identity at install time. An incremental build can install
+# after the source checkout advances beyond the configure-time snapshot.
+if(EXISTS "${_git}")
+    execute_process(
+        COMMAND "${_git}" -C "${_source_root}" rev-parse HEAD
+        OUTPUT_VARIABLE _sha
+        OUTPUT_STRIP_TRAILING_WHITESPACE
+        RESULT_VARIABLE _install_sha_result
+        ERROR_QUIET)
+    execute_process(
+        COMMAND "${_git}" -C "${_source_root}" status --porcelain --untracked-files=no
+        OUTPUT_VARIABLE _install_status
+        OUTPUT_STRIP_TRAILING_WHITESPACE
+        RESULT_VARIABLE _install_status_result
+        ERROR_QUIET)
+    if(NOT _install_sha_result STREQUAL "0" OR NOT _install_status_result STREQUAL "0")
+        message(FATAL_ERROR "Pulp source install provenance: unable to resolve checkout identity at install time")
+    endif()
+    if(_install_status STREQUAL "")
+        set(_dirty false)
+    else()
+        set(_dirty true)
+    endif()
+endif()
 # Whether pulp-view-script carries the shell exec/execAsync JS bridge
 # (PULP_DEV_BRIDGE_EXEC); a consumer reads it as `bridge_exec`.
 set(_bridge_exec "@PULP_SOURCE_INSTALL_BRIDGE_EXEC@")
@@ -56,9 +82,29 @@ set(_marker "${_prefix}/sdk-provenance.json")
 set(_content "{\n  \"schema\": \"pulp.sdk-provenance.v1\",\n  \"kind\": \"source-install\",\n  \"distribution_eligible\": false,\n  \"source_git_sha\": \"${_sha}\",\n  \"source_git_dirty\": ${_dirty},\n  \"bridge_exec\": ${_bridge_exec},\n  \"platform\": \"${_platform}\",\n  \"build_profile\": \"${_build_profile}\"\n}\n")
 if(EXISTS "${_marker}")
     file(READ "${_marker}" _existing)
-    if(NOT _existing STREQUAL _content)
-        message(FATAL_ERROR "Pulp source install provenance: refusing to replace ${_marker}")
+    if(_existing STREQUAL _content)
+        return()
     endif()
-else()
-    file(WRITE "${_marker}" "${_content}")
+    string(JSON _existing_kind ERROR_VARIABLE _existing_kind_error
+        GET "${_existing}" kind)
+    string(JSON _existing_distribution_eligible ERROR_VARIABLE _existing_eligible_error
+        GET "${_existing}" distribution_eligible)
+    if(_existing_kind_error OR _existing_eligible_error OR
+       NOT _existing_kind STREQUAL "source-install" OR
+       _existing_distribution_eligible)
+        message(FATAL_ERROR
+            "Pulp source install provenance: refusing to replace incompatible ${_marker}")
+    endif()
+endif()
+
+# A source-install marker describes the files copied by this install and may
+# advance when an incremental build follows the checkout. Replace it only
+# after all install rules have succeeded, and rename the completed temporary
+# file into place so readers never observe a partially written marker.
+set(_temporary_marker "${_marker}.tmp")
+file(WRITE "${_temporary_marker}" "${_content}")
+file(RENAME "${_temporary_marker}" "${_marker}" RESULT _rename_result)
+if(NOT _rename_result STREQUAL "0")
+    message(FATAL_ERROR
+        "Pulp source install provenance: unable to replace ${_marker}: ${_rename_result}")
 endif()

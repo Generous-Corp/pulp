@@ -104,6 +104,7 @@ add_executable(pulp-cli
     gpu_artifact_publication.cpp
     cmd_docs.cpp
     cmd_authority.cpp
+    cmd_licenses.cpp
     authority_navigation.cpp
     cmd_misc.cpp
     cmd_run.cpp

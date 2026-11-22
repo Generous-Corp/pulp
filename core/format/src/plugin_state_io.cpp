@@ -9,6 +9,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <limits>
+#include <memory>
 #include <mutex>
 #include <optional>
 #include <span>
@@ -24,16 +25,32 @@ constexpr uint32_t kEnvelopeVersion = 1;
 constexpr std::size_t kEnvelopeHeaderSize = 16;
 constexpr std::size_t kEnvelopeFooterSize = 4;
 
-uint32_t crc32_simple(const uint8_t* data, std::size_t len) {
-    uint32_t crc = 0xFFFFFFFFu;
-    for (std::size_t i = 0; i < len; ++i) {
-        crc ^= data[i];
-        for (int j = 0; j < 8; ++j) {
-            const uint32_t mask = (crc & 1u) ? 0xFFFFFFFFu : 0u;
-            crc = (crc >> 1) ^ (0xEDB88320u & mask);
+struct Crc32Tables {
+    uint32_t t[8][256];
+};
+
+constexpr Crc32Tables make_crc32_tables() {
+    Crc32Tables tables{};
+    for (uint32_t i = 0; i < 256; ++i) {
+        uint32_t c = i;
+        for (int j = 0; j < 8; ++j)
+            c = (c & 1u) ? (c >> 1) ^ 0xEDB88320u : (c >> 1);
+        tables.t[0][i] = c;
+    }
+    for (uint32_t i = 0; i < 256; ++i) {
+        uint32_t c = tables.t[0][i];
+        for (int k = 1; k < 8; ++k) {
+            c = tables.t[0][c & 0xFFu] ^ (c >> 8);
+            tables.t[k][i] = c;
         }
     }
-    return ~crc;
+    return tables;
+}
+
+constexpr Crc32Tables kCrc32Tables = make_crc32_tables();
+
+uint32_t crc32_simple(const uint8_t* data, std::size_t len) {
+    return crc32({data, len});
 }
 
 void append_u32(std::vector<uint8_t>& out, uint32_t value) {
@@ -316,6 +333,25 @@ bool restore_previous_state(const std::vector<uint8_t>& store_blob,
 
 } // namespace
 
+uint32_t crc32(std::span<const uint8_t> bytes) noexcept {
+    const auto& t = kCrc32Tables.t;
+    auto load = [](const uint8_t* p) { return choc::memory::readLittleEndian<uint32_t>(p); };
+    uint32_t crc = 0xFFFFFFFFu;
+    const uint8_t* p = bytes.data();
+    std::size_t len = bytes.size();
+    while (len >= 8) {
+        const uint32_t a = load(p) ^ crc;
+        const uint32_t b = load(p + 4);
+        crc = t[7][a & 0xFFu] ^ t[6][(a >> 8) & 0xFFu] ^ t[5][(a >> 16) & 0xFFu] ^ t[4][a >> 24] ^
+              t[3][b & 0xFFu] ^ t[2][(b >> 8) & 0xFFu] ^ t[1][(b >> 16) & 0xFFu] ^ t[0][b >> 24];
+        p += 8;
+        len -= 8;
+    }
+    while (len-- > 0)
+        crc = t[0][(crc ^ *p++) & 0xFFu] ^ (crc >> 8);
+    return ~crc;
+}
+
 uint32_t current_envelope_version() {
     return kEnvelopeVersion;
 }
@@ -452,9 +488,24 @@ bool register_envelope_migration(uint32_t from_version,
 
 std::vector<uint8_t> serialize(const state::StateStore& store,
                                const Processor& processor) {
-    auto store_blob = store.serialize();
+    return serialize(store, processor, StoreLayout::full);
+}
+
+std::vector<uint8_t> serialize(const state::StateStore& store, const Processor& processor,
+                               StoreLayout layout) {
     auto published = processor.published_plugin_state_snapshot();
     auto plugin_blob = published ? *published : safe_serialize_plugin_state(processor);
+    std::vector<uint8_t> store_blob;
+    if (layout == StoreLayout::processor_owned_when_declared && !plugin_blob.empty() &&
+        processor.plugin_state_carries_parameters()) {
+        // A store with no parameters but the same schema version: valid for any
+        // release's StateStore::deserialize(), which then changes nothing.
+        state::StateStore empty;
+        empty.set_state_version(store.state_version());
+        store_blob = empty.serialize();
+    } else {
+        store_blob = store.serialize();
+    }
     if (plugin_blob.empty()) {
         return store_blob;
     }
@@ -478,37 +529,46 @@ std::vector<uint8_t> serialize(const state::StateStore& store,
     return out;
 }
 
-bool deserialize(std::span<const uint8_t> bytes,
-                 state::StateStore& store,
-                 Processor& processor) {
-    ParsedBlob parsed{};
-    std::vector<uint8_t> migrated_storage;
-    if (!parse_blob(bytes, parsed, migrated_storage)) {
-        return false;
+std::shared_ptr<const std::vector<uint8_t>> plugin_state_payload(const Processor& processor) {
+    if (auto published = processor.published_plugin_state_snapshot()) {
+        return published;
     }
+    return std::make_shared<const std::vector<uint8_t>>(safe_serialize_plugin_state(processor));
+}
 
+bool deserialize_parts(std::span<const uint8_t> store_blob, std::span<const uint8_t> plugin_blob,
+                       state::StateStore& store, Processor& processor) {
     state::StateStore probe;
     clone_schema(store, probe);
-    if (!probe.deserialize(parsed.store_blob)) {
+    if (!probe.deserialize(store_blob)) {
         return false;
     }
 
     const auto previous_store_blob = store.serialize();
     const auto previous_plugin_blob = safe_serialize_plugin_state(processor);
 
-    if (!store.deserialize(parsed.store_blob)) {
+    if (!store.deserialize(store_blob)) {
         restore_previous_state(previous_store_blob, previous_plugin_blob,
                                store, processor);
         return false;
     }
 
-    if (safe_deserialize_plugin_state(processor, parsed.plugin_blob)) {
+    if (safe_deserialize_plugin_state(processor, plugin_blob)) {
         return true;
     }
 
     restore_previous_state(previous_store_blob, previous_plugin_blob,
                            store, processor);
     return false;
+}
+
+bool deserialize(std::span<const uint8_t> bytes, state::StateStore& store, Processor& processor) {
+    ParsedBlob parsed{};
+    std::vector<uint8_t> migrated_storage;
+    if (!parse_blob(bytes, parsed, migrated_storage)) {
+        return false;
+    }
+    return deserialize_parts(parsed.store_blob, parsed.plugin_blob, store, processor);
 }
 
 } // namespace pulp::format::plugin_state_io

@@ -380,8 +380,8 @@ bool parse_browser_version(std::string_view output,
     return !product.empty() && major > 0;
 }
 
-Diagnostic discovery_diagnostic(
-    const std::vector<BrowserProbeResult>& probes) {
+Diagnostic discovery_diagnostic(const std::vector<BrowserProbeResult>& probes,
+                                bool sandbox_omitted_app) {
     const auto has_failure = [&](BrowserProbeFailure kind) {
         return std::any_of(
             probes.begin(), probes.end(),
@@ -438,10 +438,12 @@ Diagnostic discovery_diagnostic(
             "below for what the probe observed.",
             "browser-discovery"};
     }
-    return {
-        "browser-unavailable",
-        "No compatible Google Chrome or Chromium installation was found.",
-        "browser-discovery"};
+    return {"browser-unavailable",
+            sandbox_omitted_app && probes.empty()
+                ? "The installed browser app cannot start in a sandbox. Install "
+                  "a managed browser or pass one explicitly."
+                : "No compatible Google Chrome or Chromium installation was found.",
+            "browser-discovery"};
 }
 
 bool path_is_within(const fs::path& root,
@@ -857,7 +859,8 @@ BrowserDiscoveryResult discover_browser(
             "browser-mode-invalid", mode.error, "browser-discovery"};
         return result;
     }
-    auto candidates = collect_browser_candidates(options);
+    std::vector<fs::path> sandbox_omitted;
+    auto candidates = collect_browser_candidates(options, &sandbox_omitted);
     if (candidates.empty() && !has_explicit && !has_path_environment &&
         mode.mode == BrowserMode::managed) {
         result.diagnostic = {
@@ -889,7 +892,7 @@ BrowserDiscoveryResult discover_browser(
         return result;
     }
 
-    result.diagnostic = discovery_diagnostic(result.probes);
+    result.diagnostic = discovery_diagnostic(result.probes, !sandbox_omitted.empty());
     return result;
 }
 

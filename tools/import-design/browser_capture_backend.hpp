@@ -173,6 +173,13 @@ struct BrowserDiscoveryResult {
 std::vector<BrowserCandidate>
 collect_browser_candidates(const BrowserDiscoveryOptions& options = {});
 
+// As above, and records in `sandbox_omitted` each existing system candidate
+// that was dropped because it lives in a macOS .app bundle while CODEX_SANDBOX
+// is set.
+std::vector<BrowserCandidate>
+collect_browser_candidates(const BrowserDiscoveryOptions& options,
+                           std::vector<std::filesystem::path>* sandbox_omitted);
+
 BrowserProbeResult probe_browser(
     const BrowserCandidate& candidate,
     const BrowserDiscoveryOptions& options = {});

@@ -195,6 +195,27 @@ if(TARGET pulp-native)
     list(APPEND PULP_SDK_TARGETS pulp-native)
 endif()
 
+# The optional Vellum editor bridge is part of the installed SDK when it was
+# enabled for this build. Generated `pulp create --ui vellum` projects link
+# against this exported target and its public headers.
+set(PULP_SDK_HAS_VELLUM_BRIDGE OFF)
+if(TARGET pulp-vellum)
+    list(APPEND PULP_SDK_TARGETS pulp-vellum)
+    set(PULP_SDK_HAS_VELLUM_BRIDGE ON)
+endif()
+if(TARGET pulp-vellum-scripted)
+    list(APPEND PULP_SDK_TARGETS pulp-vellum-scripted)
+endif()
+# The optional Vellum audio meters/scopes package links Vellum::Value and
+# Vellum::MirrorView_core PUBLIC, so PulpConfig must re-find Vellum for it too.
+if(TARGET pulp-vellum-audio)
+    list(APPEND PULP_SDK_TARGETS pulp-vellum-audio)
+    set(PULP_SDK_HAS_VELLUM_BRIDGE ON)
+    install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/integrations/pulp-vellum-audio/include/pulp/"
+        DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/pulp"
+        FILES_MATCHING PATTERN "*.hpp" PATTERN "*.h")
+endif()
+
 # pulp-canvas links pulp-bundled-fonts privately when Skia is on.
 # CMake exports the canvas target through PulpTargets, and refuses unless
 # every PRIVATE-linked dependency is also in the export set.
@@ -377,6 +398,12 @@ foreach(subsystem IN LISTS _pulp_sdk_header_subsystems)
     endif()
 endforeach()
 unset(_pulp_sdk_header_subsystems)
+
+if(TARGET pulp-vellum)
+    install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/integrations/pulp-vellum/include/pulp/"
+        DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/pulp"
+        FILES_MATCHING PATTERN "*.hpp" PATTERN "*.h")
+endif()
 
 if(TARGET pulp-native)
     install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/integrations/pulp-native/include/pulp/"
@@ -770,9 +797,8 @@ file(WRITE "${CMAKE_BINARY_DIR}/sdk_build_type.txt"
      "${CMAKE_BUILD_TYPE}\n")
 install(FILES "${CMAKE_BINARY_DIR}/sdk_build_type.txt" DESTINATION ".")
 
-# Preserve the exact source identity in ordinary cmake --install prefixes.
-# This is local provenance only; release eligibility still requires the
-# separately verified release marker.
+# Capture fallback provenance for installs where Git is unavailable.
+# The generated install script refreshes it from the checkout when Git is present.
 find_package(Git REQUIRED)
 execute_process(COMMAND "${GIT_EXECUTABLE}" -C "${PULP_ROOT_DIR}" rev-parse HEAD
     OUTPUT_VARIABLE PULP_SOURCE_INSTALL_SHA OUTPUT_STRIP_TRAILING_WHITESPACE
@@ -915,6 +941,8 @@ install(FILES
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpUiAssets.cmake"
     # Included by PulpUtils.cmake: pulp_add_plugin(... UI <package>).
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpEditorPackage.cmake"
+    # Included by generated --ui vellum projects.
+    "${CMAKE_CURRENT_SOURCE_DIR}/integrations/pulp-vellum/cmake/PulpVellumEditorPackage.cmake"
     # Included by PulpUtils.cmake: pulp_add_js_bytecode().
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpJsBytecode.cmake"
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpInstall.cmake"

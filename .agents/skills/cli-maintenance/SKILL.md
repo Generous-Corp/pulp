@@ -474,7 +474,7 @@ provide the required headless/CDP capture capabilities".
 `pulp create` parses its flags twice: in `tools/cli/cmd_create.cpp` and in the
 Rust `experimental/pulp-rs/src/cmd/create.rs`. A flag added to one only works
 from that binary. A flag that writes into the generated project through a
-template placeholder (for example `{{UI_MODE_LINE}}` for `--ui`) also needs the
+template placeholder (for example `{{UI_LINE}}` for `--ui`, which becomes `NO_EDITOR` or `UI <Name>_VellumEditor`) also needs the
 placeholder in `tools/scripts/verify_create_templates.py` and in
 `test/cmake/create_template_tests.cmake`'s expansion list. Otherwise the
 template check fails on an unknown placeholder, or a generated project carries
@@ -2359,6 +2359,20 @@ than compiling that source again. An edit to the processor body then
 recompiles one object and relinks each format; when the body lived in the
 header, every format's entry TU and the test recompiled it.
 
+A `--ui vellum` view source belongs to the editor package, not the plug-in:
+the CLIs emit it as `pulp_add_vellum_editor_package(... SOURCES "<name>_view.cpp")`,
+which compiles it in each format target that links the package. Listed under
+the plug-in's `SOURCES` it compiles in `<target>_Core`, which has no Vellum
+include paths, and a real installed SDK fails on `vellum/value/param_model.hpp`.
+The shell-out test caught this only after its fake Vellum headers moved off
+Pulp's own include path; a fake reachable from every Pulp target proves
+nothing about which target can see it.
+
+An out-of-tree `pulp create --output <dir>` reads `tools/templates/standalone/`,
+not `tools/templates/<type>/`. When a test or a control edits a template to
+see what breaks, edit the standalone copy, or the run reads an unchanged file
+and passes.
+
 ## The macOS CLI force-load list names implementation archives, not modules
 
 `tools/cli/CMakeLists.txt` force-loads a fixed list of static archives into
@@ -2676,6 +2690,16 @@ Gotchas:
   flags.
 - `--audio-scope-json` cannot be combined with `--audio-inspector` because
   both consume the live capture FIFO.
+
+## `pulp licenses`: a built bundle's third-party notices
+
+`tools/cli/cmd_licenses.cpp` reads the `ThirdPartyNotices.json` that
+`pulp_add_plugin` writes into each bundle, through the same parser the
+runtime `pulp::format::third_party_notices()` uses, so the CLI and an About
+view can never disagree. `--check` exits non-zero when
+`sdks_without_manifest` is non-empty (older bundles that still carry `unattributed_targets` also fail): a notice list
+with a gap must fail loudly, never print as complete. It takes a file path,
+so it is CLI-only in the MCP parity baseline.
 
 ## `pulp validate` — plugin-format validators
 

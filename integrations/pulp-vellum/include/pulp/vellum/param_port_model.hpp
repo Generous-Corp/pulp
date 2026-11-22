@@ -6,10 +6,10 @@
 /// parameters without either side naming the other's types.
 ///
 /// - Keys: each parameter resolves by its `ParamInfo::name`, and by its
-///   decimal `ParamID` as a second spelling. A name used twice (or a name that
-///   equals another parameter's decimal id) is refused at construction. A
-///   plug-in may pass its own resolver, for an allowlist or aliases; a
-///   parameter its resolver does not name never resolves.
+///   decimal `ParamID` as a second spelling. An ambiguous display name is
+///   unresolvable, while decimal ids remain available. A plug-in may pass its
+///   own resolver, for an allowlist or aliases; a parameter its resolver does
+///   not name never resolves.
 /// - Values: the model is normalized, the port is plain. Conversion goes
 ///   through `mapping.hpp`, which is Pulp's own range math.
 /// - Gestures: `begin`/`end` nest per parameter and only the outermost pair
@@ -38,6 +38,7 @@
 #include <map>
 #include <memory>
 #include <optional>
+#include <set>
 #include <string>
 #include <string_view>
 #include <unordered_map>
@@ -59,8 +60,7 @@ class ParamPortModel final : public ::vellum::value::ParamModel {
         ModulationReader modulation;
     };
 
-    /// Throws `std::invalid_argument` for a duplicate key under the default
-    /// resolution. The port must outlive the model.
+    /// The port must outlive the model.
     explicit ParamPortModel(format::ParamPort& port, Options options = {});
     ~ParamPortModel() override;
 
@@ -104,7 +104,9 @@ class ParamPortModel final : public ::vellum::value::ParamModel {
     Options options_;
     std::vector<Entry> entries_;
     std::unordered_map<state::ParamID, std::uint32_t> index_by_id_;
+    std::map<std::string, std::uint32_t, std::less<>> index_by_id_key_;
     std::map<std::string, std::uint32_t, std::less<>> index_by_key_;
+    std::set<std::string, std::less<>> ambiguous_names_;
     std::shared_ptr<ListenerSet> listeners_;
     std::uint32_t delivering_ = ::vellum::value::ParamHandle::invalid_id;
     format::ParamSubscription port_subscription_;

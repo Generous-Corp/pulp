@@ -31,6 +31,7 @@ pulp create "Agent Synth" --template agent-toolkit # synth an agent can drive th
 pulp create "Pinned FX" --pin                      # write an exact SDK version
 pulp create "Debug FX" --debug                     # configure Debug instead of Release
 pulp create "Audio FX" --ui none                   # audio-only, no UI/render stack
+pulp create "Vellum FX" --ui vellum                # Vellum view editor
 pulp create "My FX" --no-build                     # scaffold only, skip build
 pulp create "My FX" --no-interactive               # CI/scripting mode (no prompts)
 ```
@@ -56,7 +57,7 @@ projects_dir = "~/Code/PulpProjects"
 
 Set `PULP_HOME` to move the default `~/.pulp/` home used for SDK/cache/config storage.
 
-The full create path is meant to behave the same from a normal terminal, CI, or agent-driven workflows. The CLI prints which mode it selected and why, while `--no-interactive`, `PULP_PROJECTS_DIR`, and `PULP_HOME` make project creation predictable for automation. `--ui none` selects the audio-only `NO_EDITOR` path. `--ui vellum` and `--ui rmlui` are reserved until the pulp-vellum editor package is available.
+The full create path is meant to behave the same from a normal terminal, CI, or agent-driven workflows. The CLI prints which mode it selected and why, while `--no-interactive`, `PULP_PROJECTS_DIR`, and `PULP_HOME` make project creation predictable for automation. `--ui none` selects the audio-only `NO_EDITOR` path. `--ui vellum` emits a root Vellum view and links the pulp-vellum editor package; it requires an SDK that includes Vellum. `--ui rmlui` remains reserved.
 
 When the Rust front end runs its native `--ci` scaffolder instead of delegating to `pulp-cpp`, it creates files and prints the follow-up `pulp build` command, but it does not run doctor checks, SDK fetch/cache setup, project registration, configure, build, or ctest. Use the delegated C++ create path for the one-shot scaffold/build/test proof.
 
@@ -537,6 +538,7 @@ listed file.
 The optional `Control broker` row never contributes to a failing doctor exit.
 It uses the same connection-only probe as `pulp status`, performs no daemon or
 authority mutation, and reports an accepting socket without a trusted peer
+
 expectation as `reachable-unverified`, not healthy or verified.
 
 #### `gpu`
@@ -767,6 +769,13 @@ would be removed without touching the filesystem.
 The `status` field uses the lowercased label set above
 (`healthy`, `dangling-symlink`, `stale-commit`, `root-owned`,
 `unknown`).
+
+### licenses
+
+`pulp licenses <bundle-path> [--json] [--check]` reads the bundle's
+`ThirdPartyNotices.json` and displays its companion `ThirdPartyNotices.txt`.
+`--json` prints the generated document unchanged. `--check` returns a non-zero
+status when `sdks_without_manifest` is non-empty. Unattributed targets are a build diagnostic and live in the build directory (`pulp-notices/<format target>/ThirdPartyNotices.report.json`), not in the bundle.
 
 ### projects
 
