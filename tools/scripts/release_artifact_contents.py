@@ -81,6 +81,11 @@ CONTROL_STANDALONE_HOST_SDK_MANIFEST = (
     "pulp-sdk/libexec/pulp/pulp-control-standalone-host.inspector-capabilities.json"
 )
 VELLUM_D15_DEVELOPMENT_RUNTIME_MEMBER = "pulp-sdk/lib/libvellum-gpu.dylib"
+VELLUM_SDK_HEADERS = (
+    "pulp-sdk/include/pulp/vellum/editor.hpp",
+    "pulp-sdk/include/pulp/vellum_audio/audio_display_provider.hpp",
+)
+VELLUM_SDK_TARGETS = ("Pulp::vellum", "Pulp::vellum_audio")
 CONTROL_MANIFEST_PERMISSION_TERMS = (
     "implemented",
     "built",
@@ -494,6 +499,39 @@ def cli_asset_name(platform: str) -> str:
 
 def sdk_asset_name(platform: str) -> str:
     return f"pulp-sdk-{platform}.tar.gz"
+
+
+def vellum_locked_for_platform(source_root: Path | None, platform: str) -> bool:
+    """Return whether pulp.lock names a Vellum SDK asset for this platform."""
+    if source_root is None:
+        return False
+    lock_path = source_root / "pulp.lock"
+    if not lock_path.is_file():
+        return False
+    try:
+        lock = json.loads(lock_path.read_text(encoding="utf-8"))
+        url = str(lock["vellum"]["sdk_url"])
+    except (OSError, KeyError, TypeError, ValueError):
+        return False
+    return f"darwin-{platform.removeprefix('darwin-')}" in url
+
+
+def verify_vellum_sdk_contents(
+    path: Path, platform: str, source_root: Path | None
+) -> None:
+    """Require the locked Vellum bridge in the corresponding released SDK."""
+    if not vellum_locked_for_platform(source_root, platform):
+        return
+    with Archive(path) as archive:
+        for member in VELLUM_SDK_HEADERS:
+            archive.read(member, limit=4 * 1024 * 1024)
+        targets = archive.read("pulp-sdk/lib/cmake/Pulp/PulpTargets.cmake")
+        text = targets.decode("utf-8", errors="strict")
+        missing = [target for target in VELLUM_SDK_TARGETS if target not in text]
+        if missing:
+            raise ContentError(
+                f"{path.name}: PulpTargets.cmake is missing locked Vellum targets {missing}"
+            )
 
 
 def release_asset_names(matrix: ProductMatrix) -> tuple[str, ...]:
@@ -1360,6 +1398,7 @@ def verify_platform(
     verify_sdk_archive(
         sdk, platform, version, source_sha, matrix, expected_registry_digest
     )
+    verify_vellum_sdk_contents(sdk, platform, source_root)
     if native_signatures:
         verify_native_macos_signatures(asset_dir, platform, version, matrix)
 

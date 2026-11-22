@@ -108,7 +108,14 @@ find_dependency(Threads)
 # first. Consumers of an SDK without the bridge never look for Vellum.
 set(PULP_SDK_HAS_VELLUM_BRIDGE "@PULP_SDK_HAS_VELLUM_BRIDGE@")
 if(PULP_SDK_HAS_VELLUM_BRIDGE)
-    find_dependency(Vellum CONFIG)
+    find_package(Vellum CONFIG QUIET)
+    if(NOT Vellum_FOUND)
+        set(Pulp_FOUND FALSE)
+        set(Pulp_NOT_FOUND_MESSAGE
+            "Pulp: this SDK exports Pulp::vellum and requires a Vellum SDK. "
+            "Add the Vellum SDK prefix to CMAKE_PREFIX_PATH or set Vellum_DIR.")
+        return()
+    endif()
 endif()
 
 # The Pulp SDK is built and installed in the Release configuration only.

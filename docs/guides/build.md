@@ -47,6 +47,23 @@ ctest --test-dir build --output-on-failure    # test
 | `PULP_FUZZ_RUNTIME_ARCHIVE` | empty | Path to a libFuzzer static archive for a compiler that ships no `-fsanitize=fuzzer` runtime. Apple clang accepts `fuzzer-no-link`, so on macOS point this at Homebrew's `llvm@<N>/lib/clang/<N>/lib/darwin/libclang_rt.fuzzer_osx.a` (same LLVM major as the Xcode clang) and the fuzz targets link it instead of asking the driver. |
 | `PULP_ENABLE_ABLETON_LINK` | OFF | Enable the source-build-only desktop Link adapter. Requires a developer-supplied, out-of-tree checkout at `PULP_ABLETON_LINK_SDK_DIR`; its adapter header and target are build-interface-only and never installed or exported. |
 
+### Vellum editor SDKs
+
+The released Darwin SDK includes `Pulp::vellum`, `Pulp::vellum_audio`, and
+their `pulp/vellum/` and `pulp/vellum_audio/` headers when `pulp.lock` names a
+Vellum SDK asset for that platform. The release workflow downloads that exact
+asset, verifies `sdk_digest`, and configures both Vellum integrations against
+it. A plug-in consumer must also make the matching Vellum SDK discoverable:
+
+```bash
+cmake -S . -B build \
+  -DCMAKE_PREFIX_PATH=/path/to/pulp-sdk:/path/to/vellum-sdk
+```
+
+`find_package(Pulp CONFIG REQUIRED)` finds Vellum before loading
+`PulpTargets.cmake` and reports the missing Vellum SDK when the bridge is
+present but the consumer has not supplied its dependency.
+
 ### Native-only builds (`-DPULP_ENABLE_JS=OFF`)
 
 When `PULP_ENABLE_JS=OFF`, `pulp::view` links only the JS-free `pulp::view-core`;

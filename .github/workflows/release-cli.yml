@@ -1228,6 +1228,40 @@ jobs:
           RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.version || github.ref_name }}
         run: |
           set -euo pipefail
+          vellum_url="$(python3 - <<'PY'
+          import json
+          print(json.load(open("pulp.lock", encoding="utf-8"))["vellum"].get("sdk_url", ""))
+          PY
+          )"
+          vellum_digest="$(python3 - <<'PY'
+          import json
+          print(json.load(open("pulp.lock", encoding="utf-8"))["vellum"].get("sdk_digest", ""))
+          PY
+          )"
+          vellum_platform="${{ matrix.platform }}"
+          if [[ "$vellum_url" == *"${vellum_platform}"* ]]; then
+            test -n "$vellum_digest"
+            vellum_archive="$RUNNER_TEMP/vellum-sdk-${vellum_platform}.tar.gz"
+            vellum_root="$RUNNER_TEMP/vellum-sdk-${vellum_platform}"
+            echo "Downloading locked Vellum SDK for ${vellum_platform}"
+            curl --fail --location --retry 3 --silent --show-error \
+              "$vellum_url" -o "$vellum_archive"
+            printf '%s  %s\n' "$vellum_digest" "$vellum_archive" | shasum -a 256 -c -
+            mkdir -p "$vellum_root"
+            tar -xzf "$vellum_archive" -C "$vellum_root"
+            vellum_prefix="$vellum_root"
+            if [ -d "$vellum_root/sdk" ]; then
+              vellum_prefix="$vellum_root/sdk"
+            fi
+            export PULP_VELLUM_SDK_ARCHIVE="$vellum_archive"
+            export PULP_VELLUM_SDK_PREFIX="$vellum_prefix"
+            echo "PULP_VELLUM_SDK_ARCHIVE=$vellum_archive" >> "$GITHUB_ENV"
+            echo "PULP_VELLUM_SDK_PREFIX=$vellum_prefix" >> "$GITHUB_ENV"
+            echo "Vellum SDK prefix: $vellum_prefix"
+          else
+            echo "No locked Vellum SDK asset for ${vellum_platform}; keeping Vellum integration disabled"
+            unset PULP_VELLUM_SDK_ARCHIVE PULP_VELLUM_SDK_PREFIX
+          fi
           EXTRA_ARCH=""
           if [ "${{ matrix.platform }}" = "darwin-x64" ]; then
             unset SKIA_DIR
@@ -1250,6 +1284,14 @@ jobs:
           if python3 -c 'import sys; v=lambda s: tuple(map(int, s.split("."))); raise SystemExit(0 if v(sys.argv[1]) >= v(sys.argv[2]) else 1)' "${RELEASE_TAG#v}" "0.772.0"; then
             INSPECTOR="-DPULP_ENABLE_INSPECTOR=ON"
           fi
+          VELLUM_FLAGS=()
+          VELLUM_PREFIX_FLAGS=()
+          if [[ -n "${PULP_VELLUM_SDK_PREFIX:-}" ]]; then
+            VELLUM_FLAGS=(-DPULP_ENABLE_PULP_VELLUM=ON
+              -DPULP_ENABLE_PULP_VELLUM_AUDIO=ON
+              -DPULP_VELLUM_SDK_ARCHIVE="${PULP_VELLUM_SDK_ARCHIVE}")
+            VELLUM_PREFIX_FLAGS=(-DCMAKE_PREFIX_PATH="${PULP_VELLUM_SDK_PREFIX};${CMAKE_PREFIX_PATH:-}")
+          fi
           cmake -S . -B build-sdk \
             -DCMAKE_BUILD_TYPE=Release \
             -DPULP_SKIA_AUTOFETCH=OFF \
@@ -1260,6 +1302,8 @@ jobs:
             -DPULP_BUILD_WEBVIEW=ON \
             $INSPECTOR \
             "${GPU_AUDIO_FLAGS[@]}" \
+            "${VELLUM_FLAGS[@]}" \
+            "${VELLUM_PREFIX_FLAGS[@]}" \
             $EXTRA_ARCH
           jobs="${NUMBER_OF_PROCESSORS:-$(sysctl -n hw.ncpu 2>/dev/null || echo 4)}"
           echo "SDK build parallelism request: --parallel ${jobs}"
@@ -1406,10 +1450,16 @@ jobs:
               2>&1 | grep -q -- '--source-sha'; then
             source_sha_args+=(--source-sha "$(git rev-parse HEAD)")
           fi
+          source_dir_args=()
+          if python3 "$PULP_RELEASE_CONTENT_VERIFIER" --help \
+              2>&1 | grep -q -- '--source-dir'; then
+            source_dir_args+=(--source-dir .)
+          fi
           python3 "$PULP_RELEASE_CONTENT_VERIFIER" . \
             --platform "${{ matrix.platform }}" \
             --version "${RELEASE_TAG#v}" \
             "${source_sha_args[@]}" \
+            "${source_dir_args[@]}" \
             "${signature_args[@]}"
 
       - name: Verify release archive product matrix (Windows)

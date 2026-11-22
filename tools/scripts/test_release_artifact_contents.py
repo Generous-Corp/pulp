@@ -70,6 +70,64 @@ class SkiaSdkInstallBoundary(unittest.TestCase):
         )
 
 
+class VellumSdkReleaseContract(unittest.TestCase):
+    def _source_root(self, root: Path, url: str) -> Path:
+        root.mkdir(parents=True, exist_ok=True)
+        (root / "pulp.lock").write_text(
+            json.dumps({"vellum": {"sdk_url": url}}), encoding="utf-8"
+        )
+        return root
+
+    def _archive(self, path: Path, *, targets: str = "Pulp::vellum Pulp::vellum_audio") -> None:
+        members = set(rac.VELLUM_SDK_HEADERS) | {
+            "pulp-sdk/lib/cmake/Pulp/PulpTargets.cmake"
+        }
+        write_archive(
+            path,
+            members,
+            as_zip=False,
+            payload_overrides={
+                "pulp-sdk/lib/cmake/Pulp/PulpTargets.cmake": targets.encode()
+            },
+        )
+
+    def test_locked_platform_requires_headers_and_exported_targets(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            source = self._source_root(
+                root / "source",
+                "https://example.invalid/vellum-sdk-0.2.0-darwin-arm64.tar.gz",
+            )
+            archive = root / "pulp-sdk-darwin-arm64.tar.gz"
+            archive.parent.mkdir(exist_ok=True)
+            self._archive(archive)
+            rac.verify_vellum_sdk_contents(archive, "darwin-arm64", source)
+
+    def test_locked_platform_rejects_missing_vellum_target(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            source = self._source_root(
+                root / "source",
+                "https://example.invalid/vellum-sdk-0.2.0-darwin-arm64.tar.gz",
+            )
+            archive = root / "pulp-sdk-darwin-arm64.tar.gz"
+            archive.parent.mkdir(exist_ok=True)
+            self._archive(archive, targets="Pulp::vellum")
+            with self.assertRaises(rac.ContentError):
+                rac.verify_vellum_sdk_contents(archive, "darwin-arm64", source)
+
+    def test_unlocked_platform_keeps_existing_contract(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            source = self._source_root(
+                root / "source",
+                "https://example.invalid/vellum-sdk-0.2.0-darwin-arm64.tar.gz",
+            )
+            archive = root / "pulp-sdk-darwin-x64.tar.gz"
+            archive.parent.mkdir(exist_ok=True)
+            rac.verify_vellum_sdk_contents(archive, "darwin-x64", source)
+
+
 def installed_sdk_targets(text: str | None = None) -> set[str]:
     if text is None:
         text = INSTALL_RULES.read_text(encoding="utf-8")

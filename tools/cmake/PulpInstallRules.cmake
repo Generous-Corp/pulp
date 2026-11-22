@@ -239,6 +239,11 @@ foreach(_sdk_target IN LISTS PULP_SDK_TARGETS)
     string(REPLACE "pulp-" "" _sdk_export_name "${_sdk_target}")
     set_target_properties(${_sdk_target} PROPERTIES EXPORT_NAME "${_sdk_export_name}")
 endforeach()
+# Keep the public target spelling aligned with the header namespace. The source
+# target retains its historical hyphenated name for in-tree callers.
+if(TARGET pulp-vellum-audio)
+    set_target_properties(pulp-vellum-audio PROPERTIES EXPORT_NAME vellum_audio)
+endif()
 
 install(TARGETS ${PULP_SDK_TARGETS}
     EXPORT PulpTargets
