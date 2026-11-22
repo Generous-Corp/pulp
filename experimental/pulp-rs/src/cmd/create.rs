@@ -95,6 +95,8 @@ pub struct CreateArgs {
     pub ui: String,
     /// `--help` / `-h`.
     pub wants_help: bool,
+    /// Parse failure, surfaced before any files are written.
+    pub error: Option<String>,
 }
 
 impl Default for CreateArgs {
@@ -102,7 +104,7 @@ impl Default for CreateArgs {
         Self {
             name: String::new(),
             kind: "effect".to_owned(),
-            manufacturer: "Pulp".to_owned(),
+            manufacturer: "CHANGE-ME".to_owned(),
             template: None,
             output: None,
             targets: Vec::new(),
@@ -114,6 +116,7 @@ impl Default for CreateArgs {
             debug_build: false,
             ui: String::new(),
             wants_help: false,
+            error: None,
         }
     }
 }
@@ -125,6 +128,11 @@ pub fn parse_args(args: &[String]) -> CreateArgs {
     let mut i = 0;
     while i < args.len() {
         let a = &args[i];
+        if a.starts_with('-') && a.contains('=') {
+            let flag = a.split('=').next().unwrap_or(a);
+            out.error = Some(format!("unknown flag `{a}`; did you mean `{flag} <value>`?"));
+            break;
+        }
         match a.as_str() {
             "--help" | "-h" => {
                 out.wants_help = true;
@@ -160,11 +168,36 @@ pub fn parse_args(args: &[String]) -> CreateArgs {
             _ if !a.starts_with('-') && out.name.is_empty() => {
                 out.name = a.clone();
             }
-            _ => {} // ignore unknown flags (matches C++ tolerance)
+            _ if a.starts_with('-') => {
+                let known = ["--type", "--mpe", "--template", "--manufacturer", "--output", "--targets", "--target", "--ui", "--in-tree", "--example", "--no-build", "--no-interactive", "--ci", "--pin", "--debug"];
+                let hint = known.iter().min_by_key(|candidate| edit_distance(a, candidate));
+                out.error = Some(match hint {
+                    Some(candidate) => format!("unknown flag `{a}`; did you mean `{candidate}`?"),
+                    None => format!("unknown flag `{a}`"),
+                });
+                break;
+            }
+            _ if out.name.is_empty() => {
+                out.error = Some(format!("unexpected positional argument `{a}`"));
+                break;
+            }
+            _ => {}
         }
         i += 1;
     }
     out
+}
+
+fn edit_distance(a: &str, b: &str) -> usize {
+    let mut row: Vec<usize> = (0..=b.len()).collect();
+    for (i, ca) in a.bytes().enumerate() {
+        let mut next = vec![i + 1; b.len() + 1];
+        for (j, cb) in b.bytes().enumerate() {
+            next[j + 1] = (row[j + 1] + 1).min(next[j] + 1).min(row[j] + usize::from(ca != cb));
+        }
+        row = next;
+    }
+    row[b.len()]
 }
 
 /// Return true when `--template` points at a local Pulp package manifest or
@@ -410,7 +443,7 @@ pub fn scaffold(
     let plugin_code = make_plugin_code(&class_name);
     let aax_product_code = make_aax_product_code(&class_name);
     let mfr_code = make_mfr_code(&args.manufacturer);
-    let bundle_id = format!("com.{}.{}", to_namespace_name(&args.manufacturer), ns);
+    let bundle_id = format!("com.example.{}", ns);
     // The agent-toolkit template is a controlled instrument that builds as
     // Standalone only, whatever --type says.
     let agent_toolkit = args.template.as_deref() == Some("agent-toolkit");
@@ -509,8 +542,8 @@ pub fn scaffold(
         ("BUNDLE_ID", &bundle_id),
         ("VERSION", "1.0.0"),
         ("PLUGIN_CODE", &plugin_code),
-        ("AAX_PRODUCT_CODE", &aax_product_code),
-        ("AAX_NATIVE_CODE", &plugin_code),
+        ("AAX_PRODUCT_CODE", if formats.split_whitespace().any(|f| f == "AAX") { &aax_product_code } else { "" }),
+        ("AAX_NATIVE_CODE", if formats.split_whitespace().any(|f| f == "AAX") { &plugin_code } else { "" }),
         ("FORMATS", &formats),
         ("DESCRIPTION", &description),
         ("VST3_UID", &vst3_uid),
@@ -671,7 +704,9 @@ pub fn scaffold(
 
     // Standalone pulp.toml.
     if standalone_mode {
-        let body = format!("[pulp]\nsdk_version = \"{sdk_version}\"\n");
+        let generated_by = format!("pulp {} ({})", crate::build_info::cli_version_string(),
+            std::env::var("PULP_BUILD_INFO_GIT_SHA").unwrap_or_else(|_| "unknown".to_owned()));
+        let body = format!("[pulp]\nsdk_version = \"{sdk_version}\"\ngenerated_by = \"{generated_by}\"\n");
         let toml_path = out_dir.join("pulp.toml");
         fs::write(&toml_path, body).map_err(|e| CliError::io(toml_path, e))?;
         writeln!(log, "  Created pulp.toml").map_err(io)?;
@@ -783,6 +818,9 @@ fn copy_template_tree(
 ///
 /// Surfaces arg / scaffold failures.
 pub fn run(cwd: &Path, args: &CreateArgs, out: &mut impl Write) -> Result<i32> {
+    if let Some(error) = &args.error {
+        return Err(CliError::BadUsage(error.clone()));
+    }
     if args.wants_help {
         print_help(out)?;
         return Ok(0);
@@ -850,12 +888,9 @@ pub fn run(cwd: &Path, args: &CreateArgs, out: &mut impl Write) -> Result<i32> {
     // It is the baked value, never the PULP_RS_CLI_VERSION test override.
     let sdk_version = crate::build_info::baked_cli_version();
     if crate::build_info::baked_sdk_version().is_none() {
-        eprintln!(
-            "warning: this pulp was built by cargo alone, so it knows no Pulp SDK version; \
-             the project pins find_package(Pulp {sdk_version}) and sdk_version = \"{sdk_version}\", \
-             which is the CLI crate's version, not an SDK release. Rebuild the CLI with \
-             `pulp build` or fix both pins by hand."
-        );
+        return Err(CliError::BadUsage(
+            "pulp create requires a Pulp-built CLI because a cargo-only build has no SDK version".to_owned(),
+        ));
     }
     scaffold(
         args,
@@ -920,7 +955,7 @@ mod tests {
                 failures.push("missing src/entry/clap_entry.cpp".into());
             }
             let manifest = fs::read_to_string(out.join("pulp.toml")).unwrap();
-            if manifest != "[pulp]\nsdk_version = \"1.2.3\"\n" {
+            if !manifest.starts_with("[pulp]\nsdk_version = \"1.2.3\"\ngenerated_by = \"pulp ") {
                 failures.push(format!("unexpected SDK manifest: {manifest:?}"));
             }
             assert!(failures.is_empty(), "{kind}: {}", failures.join("; "));
@@ -1065,6 +1100,7 @@ mod tests {
             debug_build: false,
             ui: String::new(),
             wants_help: false,
+            error: None,
         };
 
         let out_dir = td.path().join("scaffold-out");
@@ -1388,14 +1424,19 @@ mod tests {
     }
 
     #[test]
-    fn parse_args_ignores_unknown_flags_permissively() {
+    fn parse_args_rejects_unknown_flags_with_hint() {
         let p = parse_args(&[
             "Foo".to_owned(),
             "--unknown-flag".to_owned(),
             "--another-unknown".to_owned(),
         ]);
-        assert_eq!(p.name, "Foo");
-        // Unknowns silently dropped; no panic.
+        assert!(p.error.as_deref().unwrap().contains("did you mean"));
+    }
+
+    #[test]
+    fn parse_args_rejects_equals_form() {
+        let p = parse_args(&["Foo".to_owned(), "--ui=vellum".to_owned()]);
+        assert!(p.error.as_deref().unwrap().contains("did you mean `--ui <value>`"));
     }
 
     #[test]
@@ -1441,7 +1482,7 @@ mod tests {
     }
 
     #[test]
-    fn run_native_ci_warns_when_full_path_flags_are_ignored() {
+    fn run_native_ci_refuses_without_sdk_identity() {
         let td = tempfile::tempdir().unwrap();
         let root = td.path().join("repo");
         fs::create_dir_all(root.join("core")).unwrap();
@@ -1452,7 +1493,7 @@ mod tests {
         );
 
         let mut buf = Vec::new();
-        let rc = run(
+        let err = run(
             &root,
             &CreateArgs {
                 name: "Warn Me".to_owned(),
@@ -1465,10 +1506,7 @@ mod tests {
             },
             &mut buf,
         )
-        .unwrap();
-        assert_eq!(rc, 0);
-        let stdout = String::from_utf8(buf).unwrap();
-        assert!(stdout.contains("--pin/--debug only takes effect in the full create path"));
-        assert!(stdout.contains("ignored by the native --ci scaffold path"));
+        .unwrap_err();
+        assert!(err.to_string().contains("requires a Pulp-built CLI"));
     }
 }
