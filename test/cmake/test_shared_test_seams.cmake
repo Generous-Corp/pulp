@@ -13,7 +13,8 @@ foreach(_needle
         "#define PULP_TEST_ENV(name)"
         "PULP_ENABLE_TEST_SEAMS"
         "std::getenv(name)")
-    if(NOT _env MATCHES "${_needle}")
+    string(FIND "${_env}" "${_needle}" _found)
+    if(_found EQUAL -1)
         message(FATAL_ERROR "PULP_TEST_ENV header lacks '${_needle}'")
     endif()
 endforeach()
@@ -21,15 +22,17 @@ endforeach()
 file(READ "${PULP_SOURCE_DIR}/tools/cmake/PulpPlugin.cmake" _plugin)
 foreach(_needle
         "::Processor"
-        "target_compile_definitions(\${target}::Processor PUBLIC"
-        "add_library(\${target}::Processor")
-    if(NOT _plugin MATCHES "${_needle}")
+        "target_compile_definitions(\${target}_Core PUBLIC"
+        "add_library(\${target}::Processor ALIAS")
+    string(FIND "${_plugin}" "${_needle}" _found)
+    if(_found EQUAL -1)
         message(FATAL_ERROR "pulp_add_plugin lacks processor target contract '${_needle}'")
     endif()
 endforeach()
 
 file(READ "${PULP_SOURCE_DIR}/tools/cmake/release_artifact_forbidden.json" _forbidden)
-if(NOT _forbidden MATCHES "test-seam")
+if(NOT _forbidden MATCHES "test-seam\\.forge-modular" OR
+   NOT _forbidden MATCHES "test-seam\\.super-convolver")
     message(FATAL_ERROR "forbidden-marker list does not register product test-seam prefixes")
 endif()
 
