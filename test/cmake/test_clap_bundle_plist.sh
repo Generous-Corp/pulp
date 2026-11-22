@@ -55,7 +55,8 @@ RENDERED="$(mktemp)"
 trap 'rm -f "$RENDERED"' EXIT
 sed -e 's/@PULP_PLUGIN_NAME@/TestPlug/g' \
     -e 's/@PULP_BUNDLE_ID@/com.example.testplug/g' \
-    -e 's/@PULP_VERSION@/1.2.3/g' "$TEMPLATE" > "$RENDERED"
+    -e 's/@PULP_VERSION@/1.2.3/g' \
+    -e 's/@PULP_MACOS_DEPLOYMENT_TARGET@/11.0/g' "$TEMPLATE" > "$RENDERED"
 
 if grep -qE '@[A-Z_]+@' "$RENDERED"; then
     bad "unsubstituted placeholders: $(grep -oE '@[A-Z_]+@' "$RENDERED" | sort -u | tr '\n' ' ')"

@@ -253,6 +253,7 @@ function(_pulp_add_vst3 target name bundle_id version manufacturer category)
         set(PULP_PLUGIN_NAME "${name}")
         set(PULP_BUNDLE_ID "${bundle_id}")
         set(PULP_VERSION "${version}")
+        set(PULP_MACOS_DEPLOYMENT_TARGET "${CMAKE_OSX_DEPLOYMENT_TARGET}")
         configure_file(
             "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/PulpInfoPlist.vst3.in"
             "${CMAKE_CURRENT_BINARY_DIR}/${target}_Info.plist.vst3"
@@ -459,6 +460,7 @@ function(_pulp_add_clap target name bundle_id version manufacturer category)
             set(PULP_PLUGIN_NAME "${name}")
             set(PULP_BUNDLE_ID "${bundle_id}")
             set(PULP_VERSION "${version}")
+            set(PULP_MACOS_DEPLOYMENT_TARGET "${CMAKE_OSX_DEPLOYMENT_TARGET}")
             configure_file(
                 "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/PulpInfoPlist.clap.in"
                 "${CMAKE_CURRENT_BINARY_DIR}/${target}_Info.plist.clap"
@@ -693,7 +695,7 @@ function(_pulp_add_aax target name bundle_id version manufacturer category manuf
 endfunction()
 
 # ── Internal: AU v2 target ──────────────────────────────────────────────
-function(_pulp_add_au target name bundle_id version manufacturer category plugin_code manufacturer_code accepts_midi)
+function(_pulp_add_au target name bundle_id version manufacturer category plugin_code manufacturer_code accepts_midi display_name)
     if(NOT _PULP_AUSDK_TARGET)
         message(FATAL_ERROR "pulp_add_plugin(${target}): AU requested but AudioUnitSDK is unavailable")
     endif()
@@ -817,6 +819,13 @@ function(_pulp_add_au target name bundle_id version manufacturer category plugin
         set(PULP_BUNDLE_ID "${bundle_id}")
         set(PULP_VERSION "${version}")
         set(PULP_MANUFACTURER "${manufacturer}")
+        # The display name lands inside an XML <string>; escape & first.
+        set(_pulp_au_display_xml "${display_name}")
+        string(REPLACE "&" "&amp;" _pulp_au_display_xml "${_pulp_au_display_xml}")
+        string(REPLACE "<" "&lt;" _pulp_au_display_xml "${_pulp_au_display_xml}")
+        string(REPLACE ">" "&gt;" _pulp_au_display_xml "${_pulp_au_display_xml}")
+        set(PULP_AU_DISPLAY_NAME "${_pulp_au_display_xml}")
+        set(PULP_MACOS_DEPLOYMENT_TARGET "${CMAKE_OSX_DEPLOYMENT_TARGET}")
         set(PULP_MANUFACTURER_CODE "${manufacturer_code}")
         set(PULP_PLUGIN_CODE "${plugin_code}")
         _pulp_metadata_resolve_au(_pulp_au_meta
