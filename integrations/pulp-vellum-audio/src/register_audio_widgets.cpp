@@ -3,6 +3,7 @@
 #include <cstddef>
 #include <memory>
 #include <optional>
+#include <string_view>
 
 namespace pulp::vellum_audio {
 namespace {
@@ -46,15 +47,27 @@ void sample_audio_widgets(::vellum::view::View& root, ::vellum::value::ValueFeed
             scope_channel = i;
     }
 
+    const auto find_channel = [&](std::string_view name, Shape shape,
+                                  std::optional<std::size_t> fallback) {
+        for (std::size_t i = 0; i < feed->channel_count(); ++i) {
+            const auto channel = feed->channel(i);
+            if (channel.shape == shape && channel.name == name)
+                return std::optional<std::size_t>{i};
+        }
+        return fallback;
+    };
+
     const auto visit = [&](const auto& self, ::vellum::view::View& view) -> void {
-        if (auto* meter = dynamic_cast<LevelMeter*>(&view); meter && meter_channel) {
-            if (meter->feed_ != feed || meter->channel_ != *meter_channel)
-                meter->set_feed(feed, *meter_channel);
+        if (auto* meter = dynamic_cast<LevelMeter*>(&view); meter) {
+            if (meter->feed_ == nullptr)
+                if (const auto channel = find_channel(view.id(), Shape::meter, meter_channel))
+                    meter->set_feed(feed, *channel);
             meter->sample();
         }
-        if (auto* scope = dynamic_cast<AnalyzerScope*>(&view); scope && scope_channel) {
-            if (scope->feed_ != feed || scope->channel_ != *scope_channel)
-                scope->set_feed(feed, *scope_channel);
+        if (auto* scope = dynamic_cast<AnalyzerScope*>(&view); scope) {
+            if (scope->feed_ == nullptr)
+                if (const auto channel = find_channel(view.id(), Shape::vector, scope_channel))
+                    scope->set_feed(feed, *channel);
             scope->sample();
         }
         for (std::size_t i = 0; i < view.child_count(); ++i)
