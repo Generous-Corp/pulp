@@ -492,6 +492,9 @@ function(pulp_add_plugin target)
             PULP_PLUGIN_EMAIL="${PLUGIN_VENDOR_EMAIL}")
         set(_PULP_CORE_OBJECTS "")
     endif()
+    # Public processor target for tests, graph nodes and adapters. Keep the
+    # historical _Core target so existing consumers continue to link unchanged.
+    add_library(${target}::Processor ALIAS ${target}_Core)
     # Store for format target functions (CMake doesn't propagate local vars to functions)
     set(_PULP_CORE_OBJECTS "${_PULP_CORE_OBJECTS}" PARENT_SCOPE)
     set(PULP_${target}_CORE_OBJECTS "${_PULP_CORE_OBJECTS}" CACHE INTERNAL "")
@@ -505,7 +508,7 @@ function(pulp_add_plugin target)
             PULP_PLUGIN_EMAIL="${PLUGIN_VENDOR_EMAIL}"
         )
         if(PLUGIN_AAX_HEADLESS)
-            target_compile_definitions(${target}_Core PRIVATE PULP_AAX_HEADLESS=1)
+            target_compile_definitions(${target}_Core PUBLIC PULP_AAX_HEADLESS=1)
         endif()
     endif()
 

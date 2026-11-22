@@ -418,6 +418,7 @@
       "pulp/format/standalone_settings.hpp",
       "pulp/format/standalone_settings_model.hpp",
       "pulp/format/state_restore_gate.hpp",
+      "pulp/format/test_env.hpp",
       "pulp/format/test_signal.hpp",
       "pulp/format/third_party_notices.hpp",
       "pulp/format/transport_fields.hpp",
