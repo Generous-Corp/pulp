@@ -271,6 +271,8 @@ for**: every Mach-O / ELF / PE file under a bundle, found by image header, or
 the loose file itself. The build's ctests already hold the list on the artifact
 classes they build; this holds it on the bytes that get signed and notarized.
 
+Product test seams are registered in the same list as `test-seam.<product>` entries with the `dev-env-off` gate. Code reads them through `PULP_TEST_ENV`, which compiles them out of Release, and the scan proves no seam name survives in a shipped artifact.
+
 - **Gates come from evidence, not from the command line.** The guard
   (`tools/cli/ship_artifact_scan_guard.hpp`, unit-tested in
   `test/test_ship_artifact_scan_guard.cpp`) mirrors
