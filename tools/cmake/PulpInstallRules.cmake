@@ -944,7 +944,7 @@ endif()
 
 include(CMakePackageConfigHelpers)
 include("${CMAKE_CURRENT_LIST_DIR}/PulpVellumLock.cmake")
-set(PULP_VELLUM_VERSION "${PULP_VELLUM_TAG}")
+set(PULP_VELLUM_VERSION "${PULP_VELLUM_tag}")
 string(REGEX REPLACE "^v" "" PULP_VELLUM_VERSION "${PULP_VELLUM_VERSION}")
 write_basic_package_version_file(
     "${CMAKE_BINARY_DIR}/PulpConfigVersion.cmake"
