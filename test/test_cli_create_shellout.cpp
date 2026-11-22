@@ -153,8 +153,7 @@ std::string pulp_binary_diagnostics(const fs::path& selected) {
 }
 
 pulp::platform::ProcessResult run_create(const std::vector<std::string>& args,
-                                         const fs::path& working_dir,
-                                         bool skip_bootstrap = true,
+                                         const fs::path& working_dir, bool skip_bootstrap = true,
                                          const fs::path& binary = pulp_binary()) {
     pulp::platform::ProcessOptions options;
     options.working_directory = native_path_string(working_dir);
@@ -193,8 +192,8 @@ TEST_CASE("pulp-cpp create rejects invalid flag syntax with a stderr hint",
     for (const std::string flag : {"--manufactuer", "--manufacturer=Acme"}) {
         CAPTURE(flag);
         const auto out_dir = tmp.path / "FlagCheck";
-        const auto r = run_create({"create", "Flag Check", flag, "--ci", "--no-build",
-                                   "--output", native_path_string(out_dir)},
+        const auto r = run_create({"create", "Flag Check", flag, "--ci", "--no-build", "--output",
+                                   native_path_string(out_dir)},
                                   source_root(), true, PULP_CLI_BINARY);
         INFO(r.stderr_output);
         REQUIRE_FALSE(r.timed_out);
@@ -224,8 +223,8 @@ TEST_CASE("pulp-cpp create writes manufacturer identity and scaffold provenance"
          }) {
         CAPTURE(c.name, c.manufacturer);
         const auto out_dir = tmp.path / c.bundle_id;
-        std::vector<std::string> args = {"create", c.name, "--ci", "--no-build",
-                                         "--output", native_path_string(out_dir)};
+        std::vector<std::string> args = {"create",     c.name,     "--ci",
+                                         "--no-build", "--output", native_path_string(out_dir)};
         if (!c.manufacturer.empty())
             args.insert(args.end(), {"--manufacturer", c.manufacturer});
         const auto r = run_create(args, source_root(), true, PULP_CLI_BINARY);

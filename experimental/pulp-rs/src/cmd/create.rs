@@ -67,8 +67,8 @@ pub struct CreateArgs {
     pub name: String,
     /// `--type` (effect / instrument / app / bare).
     pub kind: String,
-    /// `--manufacturer`.
-    pub manufacturer: String,
+    /// Explicit `--manufacturer`.
+    pub manufacturer: Option<String>,
     /// `--template` override (defaults to `kind`).
     pub template: Option<String>,
     /// `--output <dir>`.
@@ -104,7 +104,7 @@ impl Default for CreateArgs {
         Self {
             name: String::new(),
             kind: "effect".to_owned(),
-            manufacturer: "CHANGE-ME".to_owned(),
+            manufacturer: None,
             template: None,
             output: None,
             targets: Vec::new(),
@@ -149,7 +149,7 @@ pub fn parse_args(args: &[String]) -> CreateArgs {
             }
             "--manufacturer" if i + 1 < args.len() => {
                 i += 1;
-                out.manufacturer = args[i].clone();
+                out.manufacturer = Some(args[i].clone());
             }
             "--output" if i + 1 < args.len() => {
                 i += 1;
@@ -256,7 +256,7 @@ pub fn print_help(out: &mut impl Write) -> Result<()> {
         \x20 --type <effect|instrument|app|bare>  Plugin type (default: effect)\n\
         \x20 --mpe                                Opt into MPE (per-note expression) - instrument only\n\
         \x20 --template <name-or-kit-dir>         Use named template (e.g. gain, agent-toolkit) or local template kit\n\
-        \x20 --manufacturer <name>                Manufacturer (default: Pulp)\n\
+        \x20 --manufacturer <name>                Manufacturer (default: CHANGE-ME; replace before shipping)\n\
         \x20 --output <dir>                       Override output directory\n\
         \x20 --ui <vellum|rmlui|none>              Select UI stack; none is audio-only\n\
         \x20 --targets <list>                     Comma-separated extra targets (e.g. android)\n\
@@ -442,8 +442,10 @@ pub fn scaffold(
     let source_name = format!("{lower_underscored}.cpp");
     let plugin_code = make_plugin_code(&class_name);
     let aax_product_code = make_aax_product_code(&class_name);
-    let mfr_code = make_mfr_code(&args.manufacturer);
-    let bundle_id = format!("com.example.{}", ns);
+    let manufacturer = args.manufacturer.as_deref();
+    let mfr_code = make_mfr_code(manufacturer.unwrap_or(&class_name));
+    let vendor = manufacturer.map_or_else(|| "example".to_owned(), to_namespace_name);
+    let bundle_id = format!("com.{vendor}.{ns}");
     // The agent-toolkit template is a controlled instrument that builds as
     // Standalone only, whatever --type says.
     let agent_toolkit = args.template.as_deref() == Some("agent-toolkit");
@@ -537,7 +539,7 @@ pub fn scaffold(
         ("HEADER_NAME", &header_name),
         ("SOURCE_NAME", &source_name),
         ("TARGET_NAME", &class_name),
-        ("MANUFACTURER", &args.manufacturer),
+        ("MANUFACTURER", manufacturer.unwrap_or("CHANGE-ME")),
         ("MANUFACTURER_CODE", &mfr_code),
         ("BUNDLE_ID", &bundle_id),
         ("VERSION", "1.0.0"),
@@ -770,6 +772,9 @@ pub fn scaffold(
         }
     }
 
+    if manufacturer.is_none() {
+        writeln!(log, "Note: Set --manufacturer before shipping.").map_err(io)?;
+    }
     Ok(())
 }
 
@@ -1122,7 +1127,7 @@ mod tests {
         let args = CreateArgs {
             name: "My Gain".to_owned(),
             kind: "effect".to_owned(),
-            manufacturer: "Acme".to_owned(),
+            manufacturer: Some("Acme".to_owned()),
             template: None,
             output: None,
             targets: vec![],
@@ -1222,7 +1227,7 @@ mod tests {
         let args = CreateArgs {
             name: "Bliss".to_owned(),
             kind: "instrument".to_owned(),
-            manufacturer: "Pulp".to_owned(),
+            manufacturer: Some("Pulp".to_owned()),
             mpe: true,
             in_tree: true,
             no_build: true,
@@ -1389,7 +1394,7 @@ mod tests {
         assert_eq!(p.name, "Foo");
         assert!(p.mpe);
         assert_eq!(p.template.as_deref(), Some("gain"));
-        assert_eq!(p.manufacturer, "Acme");
+        assert_eq!(p.manufacturer.as_deref(), Some("Acme"));
     }
 
     #[test]

@@ -296,8 +296,8 @@ int cmd_create(const std::vector<std::string>& args) {
     }
 
     // Parse args
-    std::string name, type = "effect", manufacturer = "CHANGE-ME", output_path, tmpl, targets_arg,
-                      ui;
+    std::string name, type = "effect", output_path, tmpl, targets_arg, ui;
+    std::optional<std::string> manufacturer;
     bool no_build = false;
     bool ci_mode = false;
     bool in_tree_mode = false;
@@ -324,7 +324,11 @@ int cmd_create(const std::vector<std::string>& args) {
         if (args[i] == "--type") { if (!take_value(type, "--type")) return 2; continue; }
         if (args[i] == "--mpe") { mpe_mode = true; continue; }
         if (args[i] == "--template") { if (!take_value(tmpl, "--template")) return 2; continue; }
-        if (args[i] == "--manufacturer") { if (!take_value(manufacturer, "--manufacturer")) return 2; continue; }
+        if (args[i] == "--manufacturer") {
+            if (!take_value(manufacturer.emplace(), "--manufacturer"))
+                return 2;
+            continue;
+        }
         if (args[i] == "--output") { if (!take_value(output_path, "--output")) return 2; continue; }
         if (args[i] == "--ui") {
             if (!take_value(ui, "--ui"))
@@ -453,8 +457,9 @@ int cmd_create(const std::vector<std::string>& args) {
     std::string factory = ns;
     std::string plugin_code = make_plugin_code(class_name);
     std::string aax_product_code = make_aax_product_code(class_name);
-    std::string mfr_code = make_mfr_code(manufacturer);
-    std::string bundle_id = "com.example." + ns;
+    std::string mfr_code = make_mfr_code(manufacturer ? *manufacturer : class_name);
+    const std::string vendor = manufacturer ? to_namespace_name(*manufacturer) : "example";
+    std::string bundle_id = "com." + vendor + "." + ns;
     std::string header_name = replace_all_str(lower_name, "-", "_") + ".hpp";
     std::string source_name = replace_all_str(lower_name, "-", "_") + ".cpp";
 
@@ -591,7 +596,7 @@ int cmd_create(const std::vector<std::string>& args) {
         {"HEADER_NAME", header_name},
         {"SOURCE_NAME", source_name},
         {"TARGET_NAME", class_name},
-        {"MANUFACTURER", manufacturer},
+        {"MANUFACTURER", manufacturer.value_or("CHANGE-ME")},
         {"MANUFACTURER_CODE", mfr_code},
         {"BUNDLE_ID", bundle_id},
         {"VERSION", "1.0.0"},
@@ -969,6 +974,9 @@ int cmd_create(const std::vector<std::string>& args) {
     }
 
     log("\n");
+
+    if (!manufacturer)
+        std::cout << "Note: Set --manufacturer before shipping.\n";
 
     if (no_build) {
         log("Scaffolding complete. Run `pulp build` to build.\n");
