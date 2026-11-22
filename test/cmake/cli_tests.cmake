@@ -81,7 +81,7 @@ if(catch2_SOURCE_DIR)
     target_compile_definitions(pulp-test-cli-create-shellout PRIVATE
         PULP_CATCH2_SOURCE_DIR="${catch2_SOURCE_DIR}")
 endif()
-catch_discover_tests(pulp-test-cli-create-shellout)
+catch_discover_tests(pulp-test-cli-create-shellout PROPERTIES LABELS "cli;create")
 # `pulp create` reads the package kits and the built-in gain template (and
 # checks for a standalone variant of it), and the dependency-kit case copies
 # the package registry.

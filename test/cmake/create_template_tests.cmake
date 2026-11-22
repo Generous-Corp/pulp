@@ -29,7 +29,7 @@ function(_pulp_expand_create_template type in_file out_file)
             "TARGET_NAME=${class}"
             "MANUFACTURER=Pulp"
             "MANUFACTURER_CODE=Pulp"
-            "BUNDLE_ID=com.pulp.${lower}"
+            "BUNDLE_ID=com.example.${lower}"
             "VERSION=1.0.0"
             "PLUGIN_CODE=Tplc"
             "AAX_PRODUCT_CODE=TplC"

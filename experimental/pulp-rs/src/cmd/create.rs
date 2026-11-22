@@ -963,6 +963,40 @@ mod tests {
     }
 
     #[test]
+    fn scaffold_uses_explicit_or_project_derived_manufacturer_identity() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let templates = root.join("tools/templates");
+        for (name, manufacturer, bundle_id, code) in [
+            ("Echo Gain", Some("Acme"), "com.acme.echo_gain", "Acme"),
+            ("Echo Gain", Some("CHANGE-ME"), "com.change_me.echo_gain", "CHAN"),
+            ("Echo Gain", None, "com.example.echo_gain", "Echo"),
+            ("Tape Delay", None, "com.example.tape_delay", "Tape"),
+        ] {
+            let mut cli_args = vec![name.to_owned(), "--ci".to_owned(), "--no-build".to_owned()];
+            if let Some(manufacturer) = manufacturer {
+                cli_args.extend(["--manufacturer".to_owned(), manufacturer.to_owned()]);
+            }
+            let args = parse_args(&cli_args);
+            let out = temp.path().join(bundle_id);
+            let mut log = Vec::new();
+            scaffold(&args, &out, &templates, Some(&root), "1.2.3", &mut log).unwrap();
+            let cmake = fs::read_to_string(out.join("CMakeLists.txt")).unwrap();
+            let display = manufacturer.unwrap_or("CHANGE-ME");
+            assert!(
+                cmake.contains(&format!("BUNDLE_ID       \"{bundle_id}\"")),
+                "{name} ({manufacturer:?}): {cmake}"
+            );
+            assert!(cmake.contains(&format!("MANUFACTURER    \"{display}\"")));
+            assert!(cmake.contains(&format!("MANUFACTURER_CODE \"{code}\"")));
+            assert_eq!(
+                String::from_utf8(log).unwrap().contains("Set --manufacturer before shipping"),
+                manufacturer.is_none()
+            );
+        }
+    }
+
+    #[test]
     fn vellum_ui_is_refused_for_script_ui_templates() {
         let td = tempfile::tempdir().unwrap();
         let args = CreateArgs { name: "Gain".into(), ui: "vellum".into(), ..Default::default() };

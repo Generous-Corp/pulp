@@ -154,7 +154,8 @@ std::string pulp_binary_diagnostics(const fs::path& selected) {
 
 pulp::platform::ProcessResult run_create(const std::vector<std::string>& args,
                                          const fs::path& working_dir,
-                                         bool skip_bootstrap = true) {
+                                         bool skip_bootstrap = true,
+                                         const fs::path& binary = pulp_binary()) {
     pulp::platform::ProcessOptions options;
     options.working_directory = native_path_string(working_dir);
     // Generous budget, not a latency assertion. `pulp create` runs in ~1-2 s,
@@ -174,7 +175,6 @@ pulp::platform::ProcessResult run_create(const std::vector<std::string>& args,
     // the tree well beyond the fixtures these cases declare. None of them
     // depends on the SDK formats being available.
     ScopedEnvVar no_bootstrap("PULP_SKIP_DEPENDENCY_BOOTSTRAP", skip_bootstrap ? "1" : "0");
-    auto binary = pulp_binary();
     auto result =
         pulp::platform::ChildProcess::run(native_path_string(binary), args, options);
     if (result.exit_code == -1 && result.stderr_output.empty()) {
@@ -185,6 +185,100 @@ pulp::platform::ProcessResult run_create(const std::vector<std::string>& args,
 }
 
 }  // namespace
+
+#ifdef PULP_CLI_BINARY
+TEST_CASE("pulp-cpp create rejects invalid flag syntax with a stderr hint",
+          "[cli][create][shellout][create-hardening]") {
+    TempDir tmp("pulp-create-invalid-flag");
+    for (const std::string flag : {"--manufactuer", "--manufacturer=Acme"}) {
+        CAPTURE(flag);
+        const auto out_dir = tmp.path / "FlagCheck";
+        const auto r = run_create({"create", "Flag Check", flag, "--ci", "--no-build",
+                                   "--output", native_path_string(out_dir)},
+                                  source_root(), true, PULP_CLI_BINARY);
+        INFO(r.stderr_output);
+        REQUIRE_FALSE(r.timed_out);
+        CHECK(r.exit_code == 2);
+        CHECK(r.stderr_output.find("unknown flag: " + flag) != std::string::npos);
+        CHECK(r.stderr_output.find("did you mean") != std::string::npos);
+        CHECK_FALSE(fs::exists(out_dir));
+    }
+}
+
+TEST_CASE("pulp-cpp create writes manufacturer identity and scaffold provenance",
+          "[cli][create][shellout][create-hardening]") {
+    TempDir tmp("pulp-create-identity");
+    ScopedEnvVar pulp_home("PULP_HOME", native_path_string(tmp.path / "pulp-home").c_str());
+    ScopedEnvVar build_sha("PULP_BUILD_INFO_GIT_SHA", "abcd1234");
+    struct Case {
+        std::string name;
+        std::string manufacturer;
+        std::string bundle_id;
+        std::string code;
+    };
+    for (const Case& c : {
+             Case{"Echo Gain", "Acme", "com.acme.echo_gain", "Acme"},
+             Case{"Echo Gain", "CHANGE-ME", "com.change_me.echo_gain", "CHAN"},
+             Case{"Echo Gain", "", "com.example.echo_gain", "Echo"},
+             Case{"Tape Delay", "", "com.example.tape_delay", "Tape"},
+         }) {
+        CAPTURE(c.name, c.manufacturer);
+        const auto out_dir = tmp.path / c.bundle_id;
+        std::vector<std::string> args = {"create", c.name, "--ci", "--no-build",
+                                         "--output", native_path_string(out_dir)};
+        if (!c.manufacturer.empty())
+            args.insert(args.end(), {"--manufacturer", c.manufacturer});
+        const auto r = run_create(args, source_root(), true, PULP_CLI_BINARY);
+        INFO(r.stdout_output << r.stderr_output);
+        REQUIRE_FALSE(r.timed_out);
+        REQUIRE(r.exit_code == 0);
+        const auto cmake = read_file(out_dir / "CMakeLists.txt");
+        CHECK(cmake.find("BUNDLE_ID       \"" + c.bundle_id + "\"") != std::string::npos);
+        CHECK(cmake.find("MANUFACTURER_CODE \"" + c.code + "\"") != std::string::npos);
+        const auto display = c.manufacturer.empty() ? "CHANGE-ME" : c.manufacturer;
+        CHECK(cmake.find("MANUFACTURER    \"" + display + "\"") != std::string::npos);
+        const auto output = r.stdout_output + r.stderr_output;
+        CHECK((output.find("Set --manufacturer before shipping") != std::string::npos) ==
+              c.manufacturer.empty());
+        const auto toml = read_file(out_dir / "pulp.toml");
+        CHECK(toml.find("generated_by = \"pulp " PULP_EXPECTED_SDK_VERSION " (abcd1234)\"\n") !=
+              std::string::npos);
+    }
+}
+
+TEST_CASE("pulp-cpp create emits AAX codes only for AAX formats",
+          "[cli][create][shellout][create-hardening]") {
+    TempDir tmp("pulp-create-aax-codes");
+    ScopedEnvVar pulp_home("PULP_HOME", native_path_string(tmp.path / "pulp-home").c_str());
+    const auto sdk = tmp.path / "aax";
+    write_file(sdk / "Interfaces" / "AAX.h", "");
+    write_file(sdk / "Interfaces" / "AAX_Exports.cpp", "");
+    ScopedEnvVar aax_sdk("PULP_AAX_SDK_DIR", native_path_string(sdk).c_str());
+    for (const std::string type : {"bare", "effect"}) {
+        CAPTURE(type);
+        const auto out_dir = tmp.path / type;
+        const auto r = run_create({"create", "Echo Gain", "--type", type, "--template", "effect",
+                                   "--ci", "--no-build", "--output", native_path_string(out_dir)},
+                                  source_root(), true, PULP_CLI_BINARY);
+        INFO(r.stdout_output << r.stderr_output);
+        REQUIRE_FALSE(r.timed_out);
+        REQUIRE(r.exit_code == 0);
+        const auto cmake = read_file(out_dir / "CMakeLists.txt");
+        std::smatch formats;
+        REQUIRE(std::regex_search(cmake, formats, std::regex(R"(FORMATS +([^\r\n]+))")));
+#if defined(__APPLE__) || defined(_WIN32)
+        const bool has_aax = type == "effect";
+#else
+        const bool has_aax = false;
+#endif
+        CHECK(std::regex_search(formats.str(1), std::regex(R"(\bAAX\b)")) == has_aax);
+        CHECK(cmake.find(has_aax ? "AAX_PRODUCT_CODE \"EchP\"" : "AAX_PRODUCT_CODE \"\"") !=
+              std::string::npos);
+        CHECK(cmake.find(has_aax ? "AAX_NATIVE_CODE \"Echo\"" : "AAX_NATIVE_CODE \"\"") !=
+              std::string::npos);
+    }
+}
+#endif
 
 TEST_CASE("pulp create without a name fails before project resolution",
           "[cli][create][shellout][issue-643]") {
@@ -759,7 +853,7 @@ TEST_CASE("pulp create --template agent-toolkit scaffolds a controlled Standalon
 
     const auto cmake = read_file(out_dir / "CMakeLists.txt");
     CHECK(cmake.find("pulp_control_agent_toolkit_declaration(_agent_toolkit_operations VENDOR "
-                     "com.pulp.agent_synth)") != std::string::npos);
+                     "com.example.agent_synth)") != std::string::npos);
     CHECK(cmake.find("FORMATS         Standalone") != std::string::npos);
     CHECK(cmake.find("PROCESSOR_FACTORY create_agent_synth") != std::string::npos);
     CHECK(cmake.find("CONTROL_VENDOR_OPERATIONS \"${_agent_toolkit_operations}\"") !=
@@ -769,7 +863,7 @@ TEST_CASE("pulp create --template agent-toolkit scaffolds a controlled Standalon
 
     const auto operations = read_file(out_dir / "src" / "agent_operations.cpp");
     CHECK(operations.find("add_control_agent_toolkit") != std::string::npos);
-    CHECK(operations.find(".vendor_id = \"com.pulp.agent_synth\"") != std::string::npos);
+    CHECK(operations.find(".vendor_id = \"com.example.agent_synth\"") != std::string::npos);
     CHECK(operations.find("render_factory = &create_agent_synth") != std::string::npos);
     CHECK(read_file(out_dir / "src" / "main.cpp").find("config.input_channels = 0;") !=
           std::string::npos);
