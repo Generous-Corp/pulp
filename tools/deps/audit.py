@@ -1250,8 +1250,8 @@ def vellum_renderer_drift(manifest: list[dict], read_source=None, *,
                 f"at {pinned or 'nothing'}; they must be the same commit")
     transition_accepted = False
     if vellum_sha != pulp_sha.lower():
-        # Direction matters: the record moves from Pulp's pinned digest (old) to
-        # the digest Vellum's pin now names (new), never the reverse.
+        # Direction matters: the record moves from Vellum's old digest to Pulp's new digest,
+        # never the reverse.
         transition_errors = renderer_transition(
             f"renderer/{asset_key}", vellum_sha, pulp_sha.lower(),
             now=now if now is not None else datetime.datetime.now(datetime.timezone.utc))

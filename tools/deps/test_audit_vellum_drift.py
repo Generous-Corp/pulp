@@ -172,6 +172,13 @@ class RendererLockTests(unittest.TestCase):
         self.assertEqual(status, "match")
         self.assertEqual(problems, [])
 
+    def test_missing_transition_fails_closed(self) -> None:
+        now = PINNED_NOW
+        with self.transition_repo(None, commit_record=False):
+            status, problems = self.drift(now)
+        self.assertEqual(status, "mismatch")
+        self.assertIn("cannot be read", problems[0])
+
     def test_expired_transition_fails_closed(self) -> None:
         now = PINNED_NOW
         transition = self.transition(
