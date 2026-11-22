@@ -335,7 +335,7 @@ TEST_CASE("the mapping helpers need no model and round-trip the ends", "[pulp-ve
     }
 }
 
-TEST_CASE("keys resolve by name and by decimal id, and duplicates are refused",
+TEST_CASE("keys resolve by name and by decimal id, and ambiguous names are unresolved",
           "[pulp-vellum][keys]") {
     Fixture f;
     REQUIRE(f.model->resolve("Gain").valid());
@@ -349,7 +349,10 @@ TEST_CASE("keys resolve by name and by decimal id, and duplicates are refused",
     store.add_parameter(make_info(1, "Same", {}));
     store.add_parameter(make_info(2, "Same", {}));
     StateStoreParamPort port(store);
-    REQUIRE_THROWS_AS(ParamPortModel(port), std::invalid_argument);
+    ParamPortModel duplicate_names(port);
+    REQUIRE(duplicate_names.resolve("1").valid());
+    REQUIRE(duplicate_names.resolve("2").valid());
+    REQUIRE_FALSE(duplicate_names.resolve("Same").valid());
 
     // A custom resolver is an allowlist: a parameter it does not name is out.
     ParamPortModel::Options options;

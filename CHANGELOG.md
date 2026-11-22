@@ -9,6 +9,20 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
      release's bullet block. See docs/guides/versioning.md § Release pipeline
      for the full end-to-end flow. -->
 
+<a id="v11920"></a>
+## [1.192.0] - 2026-11-22
+
+- release/version bump ([#12737](https://github.com/Generous-Corp/pulp/pull/12737))
+
+<a id="v11910"></a>
+## [1.191.0] - 2026-11-22
+
+- release/version bump ([#12734](https://github.com/Generous-Corp/pulp/pull/12734))
+- lane/w waveform audio ([#12731](https://github.com/Generous-Corp/pulp/pull/12731))
+- fix/notices unattributed report ([#12730](https://github.com/Generous-Corp/pulp/pull/12730))
+- feature/state generation gate ([#12729](https://github.com/Generous-Corp/pulp/pull/12729))
+- feature/clap vst3 owned state ([#12728](https://github.com/Generous-Corp/pulp/pull/12728))
+
 <a id="v11900"></a>
 ## [1.190.0] - 2026-11-22
 
@@ -13547,6 +13561,8 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/Generous-Corp/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/Generous-Corp/pulp/pull/2))
 
+[1.192.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.192.0
+[1.191.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.191.0
 [1.190.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.190.0
 [1.189.1]: https://github.com/Generous-Corp/pulp/releases/tag/v1.189.1
 [1.189.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.189.0
