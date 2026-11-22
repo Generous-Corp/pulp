@@ -1,8 +1,8 @@
 # {{PLUGIN_NAME}} — Instrument with agent operations
 
-add_executable({{TARGET_NAME}}-test test_{{LOWER_NAME}}.cpp)
+add_executable({{TARGET_NAME}}-test tests/test_{{LOWER_NAME}}.cpp)
 target_link_libraries({{TARGET_NAME}}-test PRIVATE pulp::format Catch2::Catch2WithMain {{TARGET_NAME}}_Core)
-target_include_directories({{TARGET_NAME}}-test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_include_directories({{TARGET_NAME}}-test PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src")
 catch_discover_tests({{TARGET_NAME}}-test)
 
 # The agent tool kit's operation declaration uses the generated bundle ID as
@@ -11,7 +11,7 @@ catch_discover_tests({{TARGET_NAME}}-test)
 pulp_control_agent_toolkit_declaration(_agent_toolkit_operations VENDOR {{BUNDLE_ID}})
 
 pulp_add_plugin({{TARGET_NAME}}
-    SOURCES         {{SOURCE_NAME}}
+    SOURCES         src/{{SOURCE_NAME}}
     FORMATS         Standalone
     PLUGIN_NAME     "{{PLUGIN_NAME}}"
     BUNDLE_ID       "{{BUNDLE_ID}}"
@@ -34,5 +34,7 @@ pulp_add_plugin({{TARGET_NAME}}
         dev.pulp.vendor/render@1
         dev.pulp.vendor/destructive@1
     CONTROL_VENDOR_OPERATIONS "${_agent_toolkit_operations}"
-    CONTROL_VENDOR_SOURCES agent_operations.cpp
+    CONTROL_VENDOR_SOURCES src/agent_operations.cpp
 )
+
+target_include_directories({{TARGET_NAME}}_Core INTERFACE "${CMAKE_CURRENT_SOURCE_DIR}/src")

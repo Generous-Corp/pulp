@@ -2360,7 +2360,7 @@ recompiles one object and relinks each format; when the body lived in the
 header, every format's entry TU and the test recompiled it.
 
 A `--ui vellum` view source belongs to the editor package, not the plug-in:
-the CLIs emit it as `pulp_add_vellum_editor_package(... SOURCES "<name>_view.cpp")`,
+the CLIs emit it as `pulp_add_vellum_editor_package(... SOURCES "src/<name>_view.cpp")`,
 which compiles it in each format target that links the package. Listed under
 the plug-in's `SOURCES` it compiles in `<target>_Core`, which has no Vellum
 include paths, and a real installed SDK fails on `vellum/value/param_model.hpp`.

@@ -2250,16 +2250,16 @@ TEST_CASE("pulp create scaffolds a no-build app project with Android files",
     pulp_unsetenv("PULP_UPDATE_CHECK_DISABLED");
     pulp_unsetenv("PULP_HOME");
 
-    const bool has_header = fs::exists(project / "neon_drum.hpp");
-    const bool has_main = fs::exists(project / "main.cpp");
-    const bool has_test = fs::exists(project / "test_neon_drum.cpp");
+    const bool has_header = fs::exists(project / "src" / "neon_drum.hpp");
+    const bool has_main = fs::exists(project / "src" / "main.cpp");
+    const bool has_test = fs::exists(project / "tests" / "test_neon_drum.cpp");
     const bool has_cmake = fs::exists(project / "CMakeLists.txt");
     const bool has_toml = fs::exists(project / "pulp.toml");
     const bool has_android_settings = fs::exists(project / "android" / "settings.gradle.kts");
     const bool has_android_activity = fs::exists(project / "android" / "app" / "src" / "main" /
                                                  "java" / "neon_drum" / "MainActivity.kt");
-    const auto header = read_file(project / "neon_drum.hpp");
-    const auto main_cpp = read_file(project / "main.cpp");
+    const auto header = read_file(project / "src" / "neon_drum.hpp");
+    const auto main_cpp = read_file(project / "src" / "main.cpp");
     const auto cmake = read_file(project / "CMakeLists.txt");
     const auto toml = read_file(project / "pulp.toml");
     const auto registry = read_file(home / "projects.json");
@@ -2280,7 +2280,8 @@ TEST_CASE("pulp create scaffolds a no-build app project with Android files",
     REQUIRE(header.find("com.pulp.neon_drum") != std::string::npos);
     REQUIRE(main_cpp.find("neon_drum::create_neon_drum") != std::string::npos);
     REQUIRE(cmake.find("pulp_add_app(NeonDrum") != std::string::npos);
-    REQUIRE(toml.find("sdk_checkout") != std::string::npos);
+    REQUIRE(toml.find("sdk_path") == std::string::npos);
+    REQUIRE(toml.find("sdk_checkout") == std::string::npos);
     REQUIRE(registry.find("Neon Drum") != std::string::npos);
     REQUIRE(registry.find("neon-drum") != std::string::npos);
 }

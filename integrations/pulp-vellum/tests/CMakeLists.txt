@@ -66,6 +66,10 @@ if(PULP_BUILD_TESTS AND TARGET Catch2::Catch2WithMain)
             set_property(TARGET pulp-test-pulp-vellum-editor PROPERTY PULP_VELLUM_SCRIPTED_EDITOR TRUE)
         endif()
         catch_discover_tests(pulp-test-pulp-vellum-editor PROPERTIES LABELS pulp-vellum-editor)
+        add_test(NAME pulp-vellum-editor-bootstrap-failure
+            COMMAND pulp-test-pulp-vellum-editor "[.bootstrap-failure]")
+        set_tests_properties(pulp-vellum-editor-bootstrap-failure PROPERTIES
+            LABELS pulp-vellum-editor)
 
         add_executable(pulp-test-pulp-vellum-about-notices
             ${PULP_ROOT_DIR}/test/test_pulp_vellum_about_notices.cpp)

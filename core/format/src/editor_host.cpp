@@ -19,6 +19,11 @@
 #include <unordered_map>
 namespace pulp::format {
 
+std::string_view Editor::attach_error() const noexcept {
+    const auto* diagnostics = dynamic_cast<const EditorAttachDiagnostics*>(this);
+    return diagnostics ? diagnostics->attach_failure_reason() : std::string_view{};
+}
+
 namespace detail {
 
 namespace {

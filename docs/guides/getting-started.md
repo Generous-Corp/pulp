@@ -119,8 +119,14 @@ pulp create debug-knob --in-tree
 ```
 
 Pulp has two explicit creation/build modes:
-- **SDK mode**: the default for external projects. The generated project builds against a pinned installed SDK artifact and records that expectation in `pulp.toml`.
+- **SDK mode**: the default for external projects. The project resolves an installed SDK using the version recorded in `pulp.toml`. Use `--pin` to select the CLI’s exact SDK version.
 - **Source-tree mode**: used for the Pulp repo itself and in-repo examples. These builds use the live checkout directly.
+
+Built-in templates put processor and editor sources in `src/`, format entries
+in `src/entry/`, and C++ tests in `tests/`. Standalone projects include a
+README and a macOS GitHub Actions workflow that installs the SDK selected in
+`pulp.toml`, builds the project, and runs CTest. For a local SDK, follow the
+README to set `Pulp_DIR` on a fresh configure.
 
 When a newer Pulp release is available, use `pulp upgrade` to update
 the installed CLI/SDK tool. Then, from an SDK-mode project, use
