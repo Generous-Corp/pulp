@@ -91,6 +91,7 @@ pulp_test_data(pulp-test-cli-create-shellout NO_DEFINE PATHS
     tools/templates/gain
     tools/templates/agent-toolkit
     tools/templates/effect
+    tools/templates/instrument
     tools/templates/standalone
     tools/packages/registry.json
     # The package dependency root is found by a packages.lock.json probe.

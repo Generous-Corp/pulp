@@ -38,7 +38,7 @@ pulp create "My FX" --no-interactive               # CI/scripting mode (no promp
 
 Available types: `effect` (default), `instrument`, `app`, `bare`. Built-in templates are in `tools/templates/<type>/`.
 
-`--template agent-toolkit` scaffolds a one-voice synth that registers the agent tool kit's vendor operations (presets, patch, offline render) and builds as a development-only Standalone that an agent reaches through the capability broker, the same way `examples/agent-toolkit-synth` does. It is always an instrument and builds only the Standalone, so `--type` is ignored. The CLI derives a reverse-DNS bundle/vendor id such as `com.pulp.agent_synth` from the manufacturer and project name and writes the same id to `CMakeLists.txt` and `agent_operations.cpp`; if you customize it, keep those two values identical. See [Vendor operations](capability-control.md#vendor-operations).
+`--template agent-toolkit` scaffolds a one-voice synth that registers the agent tool kit's vendor operations (presets, patch, offline render) and builds as a development-only Standalone that an agent reaches through the capability broker, the same way `examples/agent-toolkit-synth` does. It is always an instrument and builds only the Standalone, so `--type` is ignored. The CLI derives a reverse-DNS bundle/vendor id such as `com.pulp.agent_synth` from the manufacturer and project name and writes the same id to `CMakeLists.txt` and `src/agent_operations.cpp`; if you customize it, keep those two values identical. See [Vendor operations](capability-control.md#vendor-operations).
 
 `--template <name-or-kit-dir>` accepts either a built-in template name or an explicit local template kit directory containing `pulp.package.json`. Local template kits are validated before scaffolding, must declare kind `template`, and must export exactly one safe template directory. They do not execute package CMake, JavaScript, scripts, or dynamic libraries. If a template kit declares dependency packages, install those curated dependencies explicitly with `pulp add <id>` first; `pulp create` will not widen the trust boundary by adding them implicitly. A template kit only builds format targets for entry templates it exports, so a small CLAP/Standalone starter does not pretend to support VST3/AU.
 
@@ -57,7 +57,7 @@ projects_dir = "~/Code/PulpProjects"
 
 Set `PULP_HOME` to move the default `~/.pulp/` home used for SDK/cache/config storage.
 
-The full create path is meant to behave the same from a normal terminal, CI, or agent-driven workflows. The CLI prints which mode it selected and why, while `--no-interactive`, `PULP_PROJECTS_DIR`, and `PULP_HOME` make project creation predictable for automation. `--ui none` selects the audio-only `NO_EDITOR` path. `--ui vellum` emits a root Vellum view and links the pulp-vellum editor package; it requires an SDK that includes Vellum. `--ui rmlui` remains reserved.
+The full create path is meant to behave the same from a normal terminal, CI, or agent-driven workflows. The CLI prints which mode it selected and why, while `--no-interactive`, `PULP_PROJECTS_DIR`, and `PULP_HOME` make project creation predictable for automation. `--ui none` selects the audio-only `NO_EDITOR` path. `--ui vellum` emits a Vellum view in `src/` and links the pulp-vellum editor package; it requires an SDK that includes Vellum. `--ui rmlui` remains reserved.
 
 When the Rust front end runs its native `--ci` scaffolder instead of delegating to `pulp-cpp`, it creates files and prints the follow-up `pulp build` command, but it does not run doctor checks, SDK fetch/cache setup, project registration, configure, build, or ctest. Use the delegated C++ create path for the one-shot scaffold/build/test proof.
 
@@ -71,9 +71,11 @@ What the full create path does:
 2. In standalone product mode: if run from inside a Pulp checkout, prepares pinned dependencies from that checkout and caches a local SDK install; otherwise downloads and caches the SDK release
 3. Scaffolds source files from built-in templates or an explicitly named local template kit (processor, format entries, test, CMakeLists.txt)
 4. In in-tree mode: adds the project to `examples/CMakeLists.txt`
-5. In standalone product mode: generates `pulp.toml` with `sdk_version = "latest"` by default, an exact SDK version when `--pin` is passed, and local SDK hints when created from a checkout
+5. In standalone product mode: generates `pulp.toml` with `sdk_version = "latest"` by default, an exact SDK version when `--pin` is passed, without machine-specific SDK paths. Built-in templates also get a README and a macOS workflow that installs the SDK version selected in `pulp.toml`, builds the project, and runs its tests
 6. Configures (with `-G Ninja` when `ninja` is on `PATH` and the build dir is new, as `pulp build` does), builds the generated test target plus the default platform outputs, and runs tests
 7. Leaves the project ready for `pulp build`, which you use for rebuilds, explicit targets, or optional deliverables after changing configuration
+
+Built-in templates put processor and editor sources in `src/`, format entry points in `src/entry/`, and C++ tests in `tests/`. For a local SDK, point a fresh CMake configure at its package directory by setting `Pulp_DIR` in the environment or passing `-DPulp_DIR=...`.
 
 The generated test target uses Catch2 3. When CMake can find an installed Catch2 at least as new as the pinned 3.16.1, within major version 3 (for example from `brew install catch2`, or a prefix on `CMAKE_PREFIX_PATH`), the project uses it and skips downloading and compiling Catch2; otherwise configure downloads the pinned Catch2 release archive and checks its SHA-256.
 
