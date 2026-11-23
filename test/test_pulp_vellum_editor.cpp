@@ -1,6 +1,8 @@
 // First, so this file proves the header compiles on its own, as a generated
 // editor package includes it.
 #include <pulp/vellum/editor.hpp>
+#include <pulp/vellum/interaction_adapter.hpp>
+#include <pulp/runtime/interaction_event.hpp>
 
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
@@ -36,6 +38,7 @@
 #include <memory>
 #include <optional>
 #include <string_view>
+#include <vector>
 
 namespace {
 
@@ -1069,4 +1072,127 @@ TEST_CASE("Vellum editor host opens on the plug-in's declared editor colour",
         REQUIRE(seen.has_value());
         CHECK(*seen == ::vellum::view::kEditorHostClearRgb);
     }
+}
+
+class InteractionView final : public ::vellum::view::View {
+  public:
+    InteractionView() = default;
+
+    void on_mouse_event(const ::vellum::view::MouseEvent& event) override {
+        events.push_back(event);
+    }
+
+    std::vector<::vellum::view::MouseEvent> events;
+};
+
+TEST_CASE("runtime interactions route in sequence order and reject stale epochs",
+          "[pulp-vellum][interaction]") {
+    InteractionView view;
+    pulp::vellum::InteractionAdapter adapter;
+    pulp::runtime::InteractionBatch<> batch;
+    batch.append({.epoch = 4,
+                  .sequence = 2,
+                  .object_id = 7,
+                  .phase = pulp::runtime::InteractionPhase::move,
+                  .x = 2.0f});
+    batch.append({.epoch = 4,
+                  .sequence = 1,
+                  .object_id = 7,
+                  .phase = pulp::runtime::InteractionPhase::press,
+                  .x = 1.0f});
+    REQUIRE(adapter.deliver(view, batch));
+    REQUIRE(view.events.size() == 2);
+    REQUIRE(view.events[0].phase == ::vellum::view::MousePhase::press);
+    REQUIRE(view.events[1].phase == ::vellum::view::MousePhase::drag);
+
+    pulp::runtime::InteractionBatch<> stale;
+    stale.append({.epoch = 3,
+                  .sequence = 3,
+                  .object_id = 7,
+                  .phase = pulp::runtime::InteractionPhase::release,
+                  .x = 3.0f});
+    REQUIRE_FALSE(adapter.deliver(view, stale));
+    REQUIRE(view.events.size() == 2);
+}
+
+TEST_CASE("runtime interaction batch routes only the first event's source",
+          "[pulp-vellum][interaction]") {
+    InteractionView view;
+    pulp::vellum::InteractionAdapter adapter;
+    pulp::runtime::InteractionBatch<> batch;
+    batch.append({.source_id = 1,
+                  .epoch = 1,
+                  .sequence = 1,
+                  .object_id = 5,
+                  .phase = pulp::runtime::InteractionPhase::press,
+                  .x = 1.0f});
+    batch.append({.source_id = 2,
+                  .epoch = 1,
+                  .sequence = 2,
+                  .object_id = 6,
+                  .phase = pulp::runtime::InteractionPhase::press,
+                  .x = 2.0f});
+    batch.append({.source_id = 1,
+                  .epoch = 1,
+                  .sequence = 3,
+                  .object_id = 5,
+                  .phase = pulp::runtime::InteractionPhase::move,
+                  .x = 3.0f});
+    REQUIRE(adapter.deliver(view, batch));
+    REQUIRE(view.events.size() == 2);
+    REQUIRE(view.events[0].phase == ::vellum::view::MousePhase::press);
+    REQUIRE(view.events[1].phase == ::vellum::view::MousePhase::drag);
+
+    pulp::runtime::InteractionBatch<> only_other;
+    only_other.append({.source_id = 2,
+                       .epoch = 1,
+                       .sequence = 4,
+                       .object_id = 6,
+                       .phase = pulp::runtime::InteractionPhase::move,
+                       .x = 4.0f});
+    REQUIRE_FALSE(adapter.deliver(view, only_other));
+    REQUIRE(view.events.size() == 2);
+}
+
+TEST_CASE("runtime interactions keep object pointers independent and cancel them",
+          "[pulp-vellum][interaction]") {
+    InteractionView view;
+    pulp::vellum::InteractionAdapter adapter;
+    pulp::runtime::InteractionBatch<> batch;
+    batch.append({.epoch = 1,
+                  .sequence = 1,
+                  .object_id = 10,
+                  .phase = pulp::runtime::InteractionPhase::press,
+                  .x = 1.0f});
+    batch.append({.epoch = 1,
+                  .sequence = 2,
+                  .object_id = 11,
+                  .phase = pulp::runtime::InteractionPhase::press,
+                  .x = 2.0f});
+    batch.append({.epoch = 1,
+                  .sequence = 3,
+                  .object_id = 10,
+                  .phase = pulp::runtime::InteractionPhase::cancel,
+                  .x = 3.0f});
+    REQUIRE(adapter.deliver(view, batch));
+    REQUIRE(view.events.size() == 3);
+    REQUIRE(view.events[0].pointer_id != view.events[1].pointer_id);
+    REQUIRE(view.events[2].is_cancelled);
+
+    pulp::runtime::InteractionBatch<> after_cancel;
+    after_cancel.append({.epoch = 1,
+                         .sequence = 4,
+                         .object_id = 10,
+                         .phase = pulp::runtime::InteractionPhase::move,
+                         .x = 4.0f});
+    REQUIRE_FALSE(adapter.deliver(view, after_cancel));
+    REQUIRE(view.events.size() == 3);
+}
+
+TEST_CASE("runtime interaction batch remains bounded", "[pulp-vellum][interaction]") {
+    pulp::runtime::InteractionBatch<2> batch;
+    REQUIRE(batch.append({}));
+    REQUIRE(batch.append({}));
+    REQUIRE_FALSE(batch.append({}));
+    REQUIRE(batch.count == 2);
 }

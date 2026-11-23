@@ -12,7 +12,8 @@ namespace pulp::runtime {
 
 // Provider-neutral phases for bounded interactions such as a press, pluck,
 // drag, strum, drawing trace, or tracked-object release.
-enum class InteractionPhase : std::uint8_t { invalid, press, hold, move, release, cancel };
+// Appended after cancel so the existing wire values (press=0 .. cancel=4) never change.
+enum class InteractionPhase : std::uint8_t { press, hold, move, release, cancel, invalid };
 
 struct InteractionEvent {
     std::uint32_t source_id = 0;
