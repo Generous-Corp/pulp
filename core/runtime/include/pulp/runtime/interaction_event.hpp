@@ -6,6 +6,7 @@
 #include <cstdint>
 #include <span>
 #include <type_traits>
+#include <pulp/runtime/spsc_queue.hpp>
 
 namespace pulp::runtime {
 
@@ -57,6 +58,24 @@ template <std::size_t Capacity = 16> struct InteractionBatch {
         const auto bounded_count = count > Capacity ? Capacity : count;
         return {events.data(), bounded_count};
     }
+};
+
+// Ordered transport for discrete interaction events. Unlike a latest-value
+// buffer, this preserves every press, hold, move, release, and cancel until
+// the single consumer has observed it.
+template <std::size_t Capacity = 256> class InteractionEventQueue {
+  public:
+    static_assert(Capacity > 0);
+
+    bool try_push(const InteractionEvent& event) noexcept { return queue_.try_push(event); }
+    bool try_pop(InteractionEvent& event) noexcept { return queue_.try_pop(event); }
+    bool empty() const noexcept { return queue_.empty(); }
+    std::size_t size_approx() const noexcept { return queue_.size_approx(); }
+    std::uint64_t overflow_count() const noexcept { return queue_.overflow_count(); }
+    static constexpr std::size_t capacity() noexcept { return Capacity; }
+
+  private:
+    SpscQueue<InteractionEvent, Capacity> queue_;
 };
 
 enum class InteractionVerdict : std::uint8_t {

@@ -44,6 +44,33 @@ TEST_CASE("interaction batches preserve identity and bounded capacity",
                               .phase = InteractionPhase::press}));
 }
 
+TEST_CASE("interaction event queue preserves ordered terminal events",
+          "[runtime][interaction-event]") {
+    InteractionEventQueue<2> queue;
+    const auto press = InteractionEvent{.source_id = 9,
+                                       .epoch = 1,
+                                       .sequence = 1,
+                                       .object_id = 3,
+                                       .phase = InteractionPhase::press,
+                                       .x = .2f,
+                                       .y = .4f,
+                                       .confidence = .95f};
+    auto release = press;
+    release.sequence = 2;
+    release.phase = InteractionPhase::release;
+    REQUIRE(queue.try_push(press));
+    REQUIRE(queue.try_push(release));
+    CHECK_FALSE(queue.try_push(press));
+    CHECK(queue.overflow_count() == 1);
+
+    InteractionEvent observed;
+    REQUIRE(queue.try_pop(observed));
+    CHECK(observed.phase == InteractionPhase::press);
+    REQUIRE(queue.try_pop(observed));
+    CHECK(observed.phase == InteractionPhase::release);
+    CHECK(queue.empty());
+}
+
 TEST_CASE("interaction tracker cancels held objects on restart and timeout",
           "[runtime][interaction-event]") {
     InteractionTracker<2> tracker;
