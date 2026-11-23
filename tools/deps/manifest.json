@@ -1764,10 +1764,7 @@
       },
       "documented_in_dependencies_md": true,
       "documented_in_notice_md": false,
-      "link_targets": [
-        "pulp-vellum",
-        "pulp-vellum-audio"
-      ],
+      "link_targets": [],
       "notes": "The lock-pinned Vellum SDK release asset (pulp.lock vellum.sdk_url and sdk_digest), fetched and SHA-256 verified by the darwin-arm64 release leg, used to build the optional pulp-vellum bridge and staged whole under share/pulp/vellum-sdk/<version>/sdk of the Pulp SDK. It bundles a Node.js runtime, TypeScript, esbuild, RmlUi, three.js and fonts under their own licenses.",
       "source_files": [
         "pulp.lock",
