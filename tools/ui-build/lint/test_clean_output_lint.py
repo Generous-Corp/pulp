@@ -326,7 +326,7 @@ export function Other() {
         self.assertIn('"$ROOT/tools/ui-build/lint/fixtures/clean"', block)
         self.assertIn('CLEAN_OUTPUT_CORPUS', block)
         self.assertNotIn('&& [ -d "$ROOT/tools/ui-build/lint/fixtures/clean" ]', block)
-        self.assertIn("fail=1", block)
+        self.assertIn("gate_fail", block)
 
 
 if __name__ == "__main__":

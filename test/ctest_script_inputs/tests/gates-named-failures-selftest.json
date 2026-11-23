@@ -1,0 +1,11 @@
+{
+ "name": "gates-named-failures-selftest",
+ "record": {
+  "entry": "tools/scripts/test_gates_named_failures.py",
+  "inputs": [
+   "tools/scripts/gates.sh",
+   "tools/scripts/test_gates_named_failures.py"
+  ],
+  "kind": "python"
+ }
+}
