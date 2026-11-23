@@ -312,6 +312,32 @@ These snippets are provider recipes, not a new Pulp sensor subsystem. A mobile
 plugin that cannot access the sensor permission can receive the same frames
 from its containing app or an external process over an existing transport.
 
+### Swift providers for discrete interactions
+
+An iOS, iPadOS or macOS app that produces presses, drags or tracked-object
+releases forwards them through `PulpInteractionProvider` (in the `PulpSwift`
+package) to an `InteractionRouter` created with `pulp_interaction_router_create`
+(`pulp/runtime/interaction_c.h`). `PulpInteractionEvent` has the 48-byte layout
+of `InteractionEvent`, and the C++ side asserts every offset.
+
+```swift
+let provider = PulpInteractionProvider(sourceId: 7, router: router,
+                                       clock: { DispatchTime.now().uptimeNanoseconds })
+let p = PulpInteractionProvider.normalized(x: touch.x, y: touch.y,
+                                           width: view.width, height: view.height)
+provider.press(object: touchId, x: p.x, y: p.y)
+provider.move(object: touchId, x: p.x, y: p.y)
+provider.release(object: touchId, x: p.x, y: p.y)
+provider.beginEpoch() // the tracking session restarted
+```
+
+The provider numbers its own events and starts a new epoch when you say so.
+It does not validate, reorder or cancel: the router's tracker rejects
+malformed or stale events and cancels held objects on a new epoch, a repeated
+press or a timeout (`pulp_interaction_check_timeout`). Each publish returns the
+router's verdict. Camera access, scene phases and other platform lifecycle stay
+in the application.
+
 ### Native camera and custom-model adapters
 
 Desktop applications can keep camera capture and inference in an optional

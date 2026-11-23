@@ -1436,6 +1436,10 @@ pulp_add_test_suite(pulp-test-external-input
     PROPERTIES WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
 pulp_test_data(pulp-test-external-input NO_DEFINE PATHS test/fixtures/external-input)
 
+pulp_add_test_suite(pulp-test-interaction-c
+    SOURCES test_interaction_c.cpp
+    LIBRARIES pulp::runtime)
+
 pulp_add_test_suite(pulp-test-durable-file-replacement GROUP pulp-test-group-core-runtime
     LIBRARIES pulp::runtime)
 

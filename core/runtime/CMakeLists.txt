@@ -93,6 +93,7 @@ target_sources(pulp-runtime PRIVATE
     src/runtime.cpp
     src/trace.cpp
     src/identity.cpp
+    src/interaction_c.cpp
     src/scoped_no_alloc.cpp
     src/memory_mapped_file.cpp
     src/temporary_file.cpp
@@ -326,6 +327,7 @@ set(PULP_RUNTIME_UNIT_HEADERS
     include/pulp/runtime/i18n.hpp
     include/pulp/runtime/identity.hpp
     include/pulp/runtime/inter_process_lock.hpp
+    include/pulp/runtime/interaction_c.h
     include/pulp/runtime/interaction_event.hpp
     include/pulp/runtime/interaction_router.hpp
     include/pulp/runtime/ip_address.hpp

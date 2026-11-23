@@ -899,3 +899,11 @@ or set an override for deterministic tests.
   later dereference. If you add another long-lived observer of a caller-owned
   clock, observe it the same way — a raw pointer parked in a singleton is a
   use-after-free waiting for the second test in the binary.
+
+## PulpBridge.h also carries the interaction router C ABI
+
+`apple/Sources/PulpSwift/PulpBridge.h` includes `pulp/runtime/interaction_c.h`
+(router handle, `PulpInteractionEvent`, `pulp_interaction_publish`), which is
+unrelated to motion tracing. Its Swift front end is `PulpInteraction.swift`; the
+package declares the Swift mirror of the C functions the same way it does for
+the parameter and motion calls, so SwiftPM builds without the native host.

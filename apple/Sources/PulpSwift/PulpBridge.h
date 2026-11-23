@@ -13,6 +13,10 @@
 // consumers keep a clean <pulp/format/ios_audio_session.h> include path.
 #include <pulp/format/ios_audio_session.h>
 
+// C ABI over the interaction router (PulpInteractionEvent, pulp_interaction_publish
+// and friends). PulpInteraction.swift is its Swift front end.
+#include <pulp/runtime/interaction_c.h>
+
 #ifdef __cplusplus
 extern "C" {
 #endif

@@ -799,6 +799,7 @@
       "pulp/runtime/i18n.hpp",
       "pulp/runtime/identity.hpp",
       "pulp/runtime/inter_process_lock.hpp",
+      "pulp/runtime/interaction_c.h",
       "pulp/runtime/interaction_event.hpp",
       "pulp/runtime/interaction_router.hpp",
       "pulp/runtime/ip_address.hpp",

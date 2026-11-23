@@ -29,6 +29,7 @@ let package = Package(
                 "PulpMotionControlSource.swift",
                 "PulpMotion.swift",
                 "PulpMotionProbe.swift",
+                "PulpInteraction.swift",
             ]
         ),
         .testTarget(

@@ -1,0 +1,13 @@
+{
+  "schema_version": 1,
+  "event_id": "20261123-w-interaction-swift-adapter",
+  "kind": "exported-path-change",
+  "created_at": "2026-11-23T22:13:58Z",
+  "receipt_export_id": "20261107-f0ac0a4ff392",
+  "paths": [
+    "core/runtime/include/pulp/runtime/interaction_c.h",
+    "core/runtime/src/interaction_c.cpp"
+  ],
+  "vellum_inherits": false,
+  "rationale": "The C ABI over the interaction router exists for Pulp's Swift package (apple/); the router and tracker stay provider-neutral Pulp runtime transport, and Vellum does not inherit the Apple bridge."
+}
