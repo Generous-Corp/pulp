@@ -83,11 +83,35 @@ template <std::size_t MaxObjects = 16> class InteractionTracker {
         if (source_seen_ && event.epoch == epoch_ && event.sequence <= sequence_)
             return event.sequence == sequence_ ? InteractionVerdict::unchanged
                                                : InteractionVerdict::rejected_order;
+        const auto terminal_slot = find(event.object_id);
+        if (terminal_slot >= 0 &&
+            (event.phase == InteractionPhase::release || event.phase == InteractionPhase::cancel)) {
+            auto terminal = event;
+            if (!std::isfinite(terminal.x) || terminal.x < 0.0f || terminal.x > 1.0f)
+                terminal.x = active_[terminal_slot].x;
+            if (!std::isfinite(terminal.y) || terminal.y < 0.0f || terminal.y > 1.0f)
+                terminal.y = active_[terminal_slot].y;
+            if (!std::isfinite(terminal.strength) || terminal.strength < 0.0f ||
+                terminal.strength > 1.0f)
+                terminal.strength = active_[terminal_slot].strength;
+            if (!std::isfinite(terminal.confidence) || terminal.confidence < 0.0f ||
+                terminal.confidence > 1.0f)
+                terminal.confidence = active_[terminal_slot].confidence;
+            if (!source_seen_)
+                source_id_ = terminal.source_id, source_seen_ = true;
+            epoch_ = terminal.epoch;
+            sequence_ = terminal.sequence;
+            active_[terminal_slot] = {};
+            ages_[terminal_slot] = 0;
+            output.append(terminal);
+            return InteractionVerdict::accepted;
+        }
         if (event.phase == InteractionPhase::invalid || !std::isfinite(event.x) ||
             !std::isfinite(event.y) || !std::isfinite(event.confidence) || event.x < 0.0f ||
             event.x > 1.0f || event.y < 0.0f || event.y > 1.0f)
             return InteractionVerdict::rejected_malformed;
-        if (event.confidence < 0.0f || event.confidence > 1.0f)
+        if (event.confidence < 0.0f || event.confidence > 1.0f || !std::isfinite(event.strength) ||
+            event.strength < 0.0f || event.strength > 1.0f)
             return InteractionVerdict::rejected_confidence;
 
         if (!source_seen_) {

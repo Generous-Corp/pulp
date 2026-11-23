@@ -120,6 +120,33 @@ TEST_CASE("interaction tracker expires each object independently and rejects sta
     CHECK(tracker.active_count() == 1);
 }
 
+TEST_CASE("interaction tracker clears an invalid terminating event and resets source",
+          "[runtime][interaction-event]") {
+    InteractionTracker<1> tracker;
+    InteractionBatch<2> result;
+    const auto press = InteractionEvent{.source_id = 4,
+                                        .epoch = 1,
+                                        .sequence = 1,
+                                        .object_id = 3,
+                                        .phase = InteractionPhase::press,
+                                        .x = .2f,
+                                        .y = .4f,
+                                        .strength = .8f,
+                                        .confidence = .9f};
+    REQUIRE(tracker.submit(press, result) == InteractionVerdict::accepted);
+    auto release = press;
+    release.sequence = 2;
+    release.phase = InteractionPhase::release;
+    release.x = 2.0f;
+    release.y = std::numeric_limits<float>::quiet_NaN();
+    release.strength = 2.0f;
+    REQUIRE(tracker.submit(release, result) == InteractionVerdict::accepted);
+    CHECK(tracker.active_count() == 0);
+    CHECK(result.events_view()[0].phase == InteractionPhase::release);
+    CHECK(result.events_view()[0].x == .2f);
+    CHECK(tracker.reset().count == 0);
+}
+
 template <std::size_t N = 3>
 static ExternalInputFrame<N> frame(std::uint32_t epoch = 1, std::uint64_t sequence = 1) {
     ExternalInputFrame<N> f;
