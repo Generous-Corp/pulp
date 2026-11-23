@@ -49,14 +49,14 @@ TEST_CASE("interaction tracker cancels held objects on restart and timeout",
     InteractionTracker<2> tracker;
     InteractionBatch<3> result;
     const auto press = InteractionEvent{.source_id = 4,
-                                       .epoch = 1,
-                                       .sequence = 1,
-                                       .provider_time_ns = 100,
-                                       .object_id = 7,
-                                       .phase = InteractionPhase::press,
-                                       .x = .25f,
-                                       .y = .5f,
-                                       .confidence = .9f};
+                                        .epoch = 1,
+                                        .sequence = 1,
+                                        .provider_time_ns = 100,
+                                        .object_id = 7,
+                                        .phase = InteractionPhase::press,
+                                        .x = .25f,
+                                        .y = .5f,
+                                        .confidence = .9f};
     REQUIRE(tracker.submit(press, result) == InteractionVerdict::accepted);
     REQUIRE(tracker.active_count() == 1);
 
@@ -76,6 +76,48 @@ TEST_CASE("interaction tracker cancels held objects on restart and timeout",
     CHECK(timeout.events_view()[0].phase == InteractionPhase::cancel);
     CHECK(timeout.events_view()[0].object_id == 8);
     CHECK(tracker.active_count() == 0);
+}
+
+TEST_CASE("interaction tracker expires each object independently and rejects stale epochs",
+          "[runtime][interaction-event]") {
+    InteractionTracker<2> tracker;
+    InteractionBatch<3> result;
+    const auto press_a = InteractionEvent{.source_id = 4,
+                                          .epoch = 2,
+                                          .sequence = 1,
+                                          .provider_time_ns = 100,
+                                          .object_id = 1,
+                                          .phase = InteractionPhase::press,
+                                          .x = .2f,
+                                          .y = .4f,
+                                          .strength = .8f,
+                                          .confidence = .9f};
+    auto press_b = press_a;
+    press_b.sequence = 2;
+    press_b.provider_time_ns = 110;
+    press_b.object_id = 2;
+    REQUIRE(tracker.submit(press_a, result) == InteractionVerdict::accepted);
+    REQUIRE(tracker.submit(press_b, result) == InteractionVerdict::accepted);
+
+    auto hold_b = press_b;
+    hold_b.sequence = 3;
+    hold_b.provider_time_ns = 120;
+    hold_b.phase = InteractionPhase::hold;
+    tracker.submit(hold_b, result);
+    tracker.advance(5, 10);
+    hold_b.sequence = 4;
+    hold_b.provider_time_ns = 130;
+    tracker.submit(hold_b, result);
+    const auto first_expiry = tracker.advance(5, 10);
+    REQUIRE(first_expiry.events_view().size() == 1);
+    CHECK(first_expiry.events_view()[0].object_id == 1);
+    CHECK(tracker.active_count() == 1);
+
+    auto stale = hold_b;
+    stale.epoch = 1;
+    stale.sequence = 99;
+    CHECK(tracker.submit(stale, result) == InteractionVerdict::rejected_order);
+    CHECK(tracker.active_count() == 1);
 }
 
 template <std::size_t N = 3>
