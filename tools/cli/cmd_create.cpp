@@ -151,6 +151,20 @@ static bool reject_missing_installed_vellum(const std::string& ui, const fs::pat
     return false;
 }
 
+// The release SDK stages the Vellum package at
+// <prefix>/share/pulp/vellum-sdk/<version>/sdk, and `pulp create` passes only
+// the Pulp prefix, so the generated find hints every CMAKE_PREFIX_PATH entry
+// itself (it may run before or after find_package(Pulp)).
+static std::string vellum_find_lines() {
+    return "set(_pulp_vellum_hints \"\")\n"
+           "foreach(_pulp_prefix IN LISTS CMAKE_PREFIX_PATH)\n"
+           "    file(GLOB _pulp_prefix_hints LIST_DIRECTORIES true\n"
+           "        \"${_pulp_prefix}/share/pulp/vellum-sdk/*/sdk\")\n"
+           "    list(APPEND _pulp_vellum_hints ${_pulp_prefix_hints})\n"
+           "endforeach()\n"
+           "find_package(Vellum CONFIG REQUIRED PATHS ${_pulp_vellum_hints})";
+}
+
 static std::string make_vst3_uid() {
     std::random_device rd;
     std::mt19937 gen(rd());
@@ -683,7 +697,7 @@ int cmd_create(const std::vector<std::string>& args) {
         {"UI_MODE_LINE", ui == "none" ? "NO_EDITOR" : ""},
         {"VIEW_HEADER", lower_name_underscored + "_view.hpp"},
         {"VIEW_TYPE", ns + "::" + class_name + "View"},
-        {"VELLUM_FIND_LINE", ui == "vellum" ? "find_package(Vellum CONFIG REQUIRED)" : ""},
+        {"VELLUM_FIND_LINE", ui == "vellum" ? vellum_find_lines() : std::string()},
         {"VELLUM_HELPER_LINE",
          ui == "vellum"
              ? "if(DEFINED PULP_ROOT_DIR)\n"

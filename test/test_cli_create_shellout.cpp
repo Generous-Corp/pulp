@@ -1262,6 +1262,11 @@ template <typename W, typename M, typename H> ParameterBinding bind_parameter(W&
     const auto cmake_lists = read_file(out_dir / "CMakeLists.txt");
     CHECK(cmake_lists.find("pulp_add_vellum_editor_package(VellumGain_VellumEditor") !=
           std::string::npos);
+    // The release SDK stages Vellum under <prefix>/share/pulp/vellum-sdk, so the
+    // generated find must hint the CMAKE_PREFIX_PATH entries itself.
+    CHECK(cmake_lists.find("share/pulp/vellum-sdk/*/sdk") != std::string::npos);
+    CHECK(cmake_lists.find("find_package(Vellum CONFIG REQUIRED PATHS ${_pulp_vellum_hints})") !=
+          std::string::npos);
     CHECK(cmake_lists.find("VIEW_HEADER \"vellumgain_view.hpp\"") != std::string::npos);
     CHECK(cmake_lists.find("VIEW_TYPE vellumgain::VellumGainView") != std::string::npos);
     CHECK(cmake_lists.find("VIEW_INCLUDE_DIRS \"${CMAKE_CURRENT_SOURCE_DIR}/src\"") !=
