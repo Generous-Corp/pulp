@@ -32,6 +32,16 @@ stay with your application.
 
 ## The default provider recipe
 
+## Native editor interaction
+
+Runtime interaction producers can publish a fixed-capacity
+`pulp::runtime::InteractionBatch` and hand it to the optional Pulp-to-Vellum
+bridge. `pulp::vellum::InteractionAdapter` translates each object into its own
+Vellum pointer session, orders events by sequence, rejects stale epochs, and
+routes press, move, release, and cancel through Vellum's native pointer
+router. Vellum's `MouseEvent` has no hold, velocity, or confidence metadata, so
+hold is represented as a drag tick and those fields are not forwarded.
+
 For a new real-world demo, use this sequence before choosing a provider SDK:
 
 1. Capture or receive a complete observation away from the audio callback.
