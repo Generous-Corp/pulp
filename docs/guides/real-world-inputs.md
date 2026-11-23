@@ -36,7 +36,9 @@ For a new real-world demo, use this sequence before choosing a provider SDK:
 
 1. Capture or receive a complete observation away from the audio callback.
 2. Translate it into `ExternalInputFrame<N>` and publish it through one existing
-   bounded handoff such as `TripleBuffer`, OSC/IPC, MIDI, or WAM ingress.
+   bounded handoff such as `TripleBuffer`, OSC/IPC, MIDI, or WAM ingress. Use an
+   ordered SPSC queue for discrete interaction events because a latest-value
+   buffer can overwrite a release before the audio reader sees it.
 3. Submit it to `ExternalInputGate<N>` with a policy that defines confidence,
    expiry, and restart behavior.
 4. Map only accepted values or events to existing parameters, modulation, MIDI,
@@ -59,8 +61,9 @@ object-owned actions such as a press, pluck, strum, drum hit, drag, or release.
 Use `ExternalInputFrame<N>` when the provider produces a coherent continuous
 snapshot such as position, pose, tilt, level, or confidence values. A demo can
 use both surfaces. The event batch is fixed-capacity and trivially copyable so
-it can cross an existing bounded handoff without allocations. Mapping events
-to notes, parameters, or DSP remains the consumer's responsibility.
+it can cross an ordered bounded handoff without allocations. Read through its
+bounded `events_view()` accessor. Mapping events to notes, parameters, or DSP
+remains the consumer's responsibility.
 
 ## How the contract works
 

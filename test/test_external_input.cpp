@@ -4,12 +4,45 @@
 #include <filesystem>
 #include <limits>
 #include <pulp/runtime/external_input.hpp>
+#include <pulp/runtime/interaction_event.hpp>
 #include <pulp/runtime/triple_buffer.hpp>
 #include <type_traits>
 
 using namespace pulp::runtime;
 static_assert(std::is_trivially_copyable_v<ExternalInputFrame<1>>);
 static_assert(std::is_trivially_copyable_v<ExternalInputFrame<64>>);
+
+TEST_CASE("interaction batches preserve identity and bounded capacity",
+          "[runtime][interaction-event]") {
+    InteractionBatch<2> batch;
+    REQUIRE(batch.append({.source_id = 4,
+                          .epoch = 2,
+                          .sequence = 10,
+                          .provider_time_ns = 100,
+                          .object_id = 7,
+                          .phase = InteractionPhase::press,
+                          .x = .25f,
+                          .y = .5f,
+                          .confidence = .9f}));
+    REQUIRE(batch.append({.source_id = 4,
+                          .epoch = 2,
+                          .sequence = 11,
+                          .provider_time_ns = 110,
+                          .object_id = 7,
+                          .phase = InteractionPhase::release,
+                          .x = .3f,
+                          .y = .5f,
+                          .confidence = .9f}));
+    CHECK(batch.count == 2);
+    REQUIRE(batch.events_view().size() == 2);
+    CHECK(batch.events[0].object_id == batch.events[1].object_id);
+    CHECK_FALSE(batch.append({.source_id = 4,
+                              .epoch = 2,
+                              .sequence = 12,
+                              .provider_time_ns = 120,
+                              .object_id = 9,
+                              .phase = InteractionPhase::press}));
+}
 
 template <std::size_t N = 3>
 static ExternalInputFrame<N> frame(std::uint32_t epoch = 1, std::uint64_t sequence = 1) {
