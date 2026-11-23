@@ -31,7 +31,7 @@ template <std::size_t Capacity = 16> struct InteractionBatch {
     std::size_t count = 0;
 
     bool append(const InteractionEvent& event) noexcept {
-        if (count == Capacity)
+        if (count >= Capacity)
             return false;
         events[count++] = event;
         return true;

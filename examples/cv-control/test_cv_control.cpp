@@ -54,6 +54,10 @@ TEST_CASE("interaction batches preserve object identity and bounded capacity") {
                               .sequence = 12,
                               .object_id = 9,
                               .phase = pulp::runtime::InteractionPhase::press}));
+
+    pulp::runtime::InteractionBatch<2> malformed;
+    malformed.count = malformed.events.size() + 1;
+    CHECK_FALSE(malformed.append({}));
 }
 
 struct ProcessorFixture {
