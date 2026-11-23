@@ -80,23 +80,28 @@ static std::string create_flag_hint(const std::string& flag) {
     return "did you mean `--type`, `--template`, or `--manufacturer`?";
 }
 
-// True when `text` declares the exact `Pulp::vellum` target (not only
-// `Pulp::vellum-audio` or a comment that mentions it).
+// True when `text` has an `add_library(Pulp::vellum ...)` declaration (not
+// `Pulp::vellum-audio`, and not a mention in a string, comment or
+// `if(TARGET ...)`).
 static bool text_declares_pulp_vellum_target(const std::string& text) {
-    static const std::string needle = "Pulp::vellum";
+    static const std::string call = "add_library(";
+    static const std::string target = "Pulp::vellum";
     std::size_t pos = 0;
-    while ((pos = text.find(needle, pos)) != std::string::npos) {
-        const auto after = pos + needle.size();
-        const char next = after < text.size() ? text[after] : '\0';
-        const bool exact = !(std::isalnum(static_cast<unsigned char>(next)) || next == '-' ||
-                             next == '_' || next == ':');
+    while ((pos = text.find(call, pos)) != std::string::npos) {
         const auto line_start = text.rfind('\n', pos);
         const auto first =
             text.find_first_not_of(" \t", line_start == std::string::npos ? 0 : line_start + 1);
         const bool commented = first != std::string::npos && text[first] == '#';
-        if (exact && !commented)
+        const bool at_command_start = first == pos;
+        pos += call.size();
+        if (commented || !at_command_start)
+            continue;
+        auto name = text.find_first_not_of(" \t", pos);
+        if (name == std::string::npos || text.compare(name, target.size(), target) != 0)
+            continue;
+        const auto after = name + target.size();
+        if (after >= text.size() || std::isspace(static_cast<unsigned char>(text[after])))
             return true;
-        pos = after;
     }
     return false;
 }

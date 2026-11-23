@@ -66,6 +66,18 @@ class CheckVellumSdkStagingTests(unittest.TestCase):
             checker.check(prefix),
         )
 
+    def test_misplaced_vellum_package_fails(self) -> None:
+        prefix = self.make_prefix()
+        sdk = next((prefix / "share/pulp/vellum-sdk").glob("*/sdk"))
+        next(sdk.rglob("VellumConfig.cmake")).unlink()
+        misplaced = sdk / "metadata/VellumConfig.cmake"
+        misplaced.parent.mkdir(parents=True)
+        misplaced.write_text("# not on the CMake search path\n", encoding="utf-8")
+        self.assertIn(
+            "share/pulp/vellum-sdk/<version>/sdk has no VellumConfig.cmake package",
+            checker.check(prefix),
+        )
+
     def test_missing_target_fails(self) -> None:
         prefix = self.make_prefix()
         (prefix / "lib/cmake/Pulp/PulpTargets.cmake").unlink()

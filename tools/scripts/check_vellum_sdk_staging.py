@@ -8,6 +8,17 @@ import re
 from pathlib import Path
 
 
+# Locations find_package(Vellum CONFIG PATHS <sdk>) searches under a prefix.
+VELLUM_CONFIG_LAYOUTS = (
+    ".",
+    "cmake",
+    "lib/cmake/Vellum",
+    "lib/cmake",
+    "share/Vellum",
+    "share/Vellum/cmake",
+    "share/cmake/Vellum",
+)
+
 TARGET_RE = re.compile(r"^\s*add_library\(\s*Pulp::vellum\s", re.MULTILINE)
 
 
@@ -23,14 +34,14 @@ def check(prefix: Path) -> list[str]:
     if not targets.is_file() or not TARGET_RE.search(targets.read_text(encoding="utf-8")):
         errors.append("the installed CMake package has no Pulp::vellum target")
 
-    # PulpConfig.cmake hints this staged package for find_package(Vellum), so
-    # an archive without VellumConfig.cmake would publish an SDK that fails at
-    # consumer configure time.
-    staged = (prefix / "share/pulp/vellum-sdk").glob("*/sdk")
+    # PulpConfig.cmake hints this staged package for find_package(Vellum), and
+    # CMake only reads VellumConfig.cmake from its documented search layouts
+    # under a prefix, so a misplaced file would still fail at configure time.
+    staged = [p for p in (prefix / "share/pulp/vellum-sdk").glob("*/sdk") if p.is_dir()]
     if not any(
-        next(sdk.rglob("VellumConfig.cmake"), None) is not None
+        (sdk / layout / "VellumConfig.cmake").is_file()
         for sdk in staged
-        if sdk.is_dir()
+        for layout in VELLUM_CONFIG_LAYOUTS
     ):
         errors.append(
             "share/pulp/vellum-sdk/<version>/sdk has no VellumConfig.cmake package"
