@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "event_id": "20261123-real-world-interaction-repair",
+  "kind": "exported-path-change",
+  "created_at": "2026-11-23T09:12:55Z",
+  "receipt_export_id": "20261107-f0ac0a4ff392",
+  "paths": [
+    "core/runtime/include/pulp/runtime/interaction_event.hpp"
+  ],
+  "vellum_inherits": false,
+  "rationale": "Clarifies the provider-neutral interaction event contract and moves its regression into the required runtime test suite. Vellum does not inherit this runtime-only API change."
+}
