@@ -48,13 +48,13 @@ TEST_CASE("interaction event queue preserves ordered terminal events",
           "[runtime][interaction-event]") {
     InteractionEventQueue<2> queue;
     const auto press = InteractionEvent{.source_id = 9,
-                                       .epoch = 1,
-                                       .sequence = 1,
-                                       .object_id = 3,
-                                       .phase = InteractionPhase::press,
-                                       .x = .2f,
-                                       .y = .4f,
-                                       .confidence = .95f};
+                                        .epoch = 1,
+                                        .sequence = 1,
+                                        .object_id = 3,
+                                        .phase = InteractionPhase::press,
+                                        .x = .2f,
+                                        .y = .4f,
+                                        .confidence = .95f};
     auto release = press;
     release.sequence = 2;
     release.phase = InteractionPhase::release;
