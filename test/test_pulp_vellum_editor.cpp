@@ -1157,3 +1157,44 @@ TEST_CASE("runtime interaction batch remains bounded", "[pulp-vellum][interactio
     REQUIRE_FALSE(batch.append({}));
     REQUIRE(batch.count == 2);
 }
+
+TEST_CASE("runtime interaction coordinates scale to Vellum backing pixels",
+          "[pulp-vellum][interaction]") {
+    InteractionView view;
+    pulp::vellum::InteractionAdapter adapter;
+    adapter.set_view_metrics(200.0f, 100.0f, 2.0f);
+    pulp::runtime::InteractionBatch<> batch;
+    batch.append({.source_id = 9,
+                  .epoch = 1,
+                  .sequence = 1,
+                  .object_id = 21,
+                  .phase = pulp::runtime::InteractionPhase::press,
+                  .x = 0.25f,
+                  .y = 0.5f});
+    REQUIRE(adapter.deliver(view, batch));
+    REQUIRE(view.events.size() == 1);
+    CHECK(view.events[0].position.x == Catch::Approx(100.0f));
+    CHECK(view.events[0].position.y == Catch::Approx(100.0f));
+
+    pulp::runtime::InteractionBatch<> release;
+    release.append({.source_id = 9,
+                    .epoch = 1,
+                    .sequence = 2,
+                    .object_id = 21,
+                    .phase = pulp::runtime::InteractionPhase::release,
+                    .x = 0.25f,
+                    .y = 0.5f});
+    REQUIRE(adapter.deliver(view, release));
+
+    pulp::runtime::InteractionBatch<> recycled;
+    recycled.append({.source_id = 9,
+                      .epoch = 1,
+                      .sequence = 3,
+                      .object_id = 22,
+                      .phase = pulp::runtime::InteractionPhase::press,
+                      .x = 0.1f,
+                      .y = 0.1f});
+    REQUIRE(adapter.deliver(view, recycled));
+    REQUIRE(view.events.size() == 3);
+    CHECK(view.events[2].pointer_id == view.events[0].pointer_id);
+}
