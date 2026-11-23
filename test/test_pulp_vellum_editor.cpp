@@ -1111,7 +1111,46 @@ TEST_CASE("runtime interactions route in sequence order and reject stale epochs"
                   .object_id = 7,
                   .phase = pulp::runtime::InteractionPhase::release,
                   .x = 3.0f});
-    REQUIRE(adapter.deliver(view, stale));
+    REQUIRE_FALSE(adapter.deliver(view, stale));
+    REQUIRE(view.events.size() == 2);
+}
+
+TEST_CASE("runtime interaction batch routes only the first event's source",
+          "[pulp-vellum][interaction]") {
+    InteractionView view;
+    pulp::vellum::InteractionAdapter adapter;
+    pulp::runtime::InteractionBatch<> batch;
+    batch.append({.source_id = 1,
+                  .epoch = 1,
+                  .sequence = 1,
+                  .object_id = 5,
+                  .phase = pulp::runtime::InteractionPhase::press,
+                  .x = 1.0f});
+    batch.append({.source_id = 2,
+                  .epoch = 1,
+                  .sequence = 2,
+                  .object_id = 6,
+                  .phase = pulp::runtime::InteractionPhase::press,
+                  .x = 2.0f});
+    batch.append({.source_id = 1,
+                  .epoch = 1,
+                  .sequence = 3,
+                  .object_id = 5,
+                  .phase = pulp::runtime::InteractionPhase::move,
+                  .x = 3.0f});
+    REQUIRE(adapter.deliver(view, batch));
+    REQUIRE(view.events.size() == 2);
+    REQUIRE(view.events[0].phase == ::vellum::view::MousePhase::press);
+    REQUIRE(view.events[1].phase == ::vellum::view::MousePhase::drag);
+
+    pulp::runtime::InteractionBatch<> only_other;
+    only_other.append({.source_id = 2,
+                       .epoch = 1,
+                       .sequence = 4,
+                       .object_id = 6,
+                       .phase = pulp::runtime::InteractionPhase::move,
+                       .x = 4.0f});
+    REQUIRE_FALSE(adapter.deliver(view, only_other));
     REQUIRE(view.events.size() == 2);
 }
 
