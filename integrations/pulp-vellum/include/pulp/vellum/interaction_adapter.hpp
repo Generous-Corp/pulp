@@ -29,15 +29,19 @@ class InteractionAdapter final {
         std::array<std::size_t, kMaxPointers> order{};
         std::size_t ordered = 0;
         bool delivered = false;
-        std::uint32_t batch_epoch = epoch_;
-        bool has_batch_epoch = has_epoch_;
-        for (std::size_t i = 0; i < batch.count; ++i) {
-            if (!has_batch_epoch || batch.events[i].epoch > batch_epoch) {
+        if (batch.count == 0)
+            return false;
+        const auto batch_source = batch.events[0].source_id;
+        std::uint32_t batch_epoch = batch.events[0].epoch;
+        for (std::size_t i = 1; i < batch.count; ++i) {
+            if (batch.events[i].source_id == batch_source &&
+                batch.events[i].epoch > batch_epoch)
                 batch_epoch = batch.events[i].epoch;
-                has_batch_epoch = true;
-            }
         }
-        if (has_batch_epoch && (!has_epoch_ || batch_epoch > epoch_)) {
+        if (!has_source_ || source_id_ != batch_source ||
+            !has_epoch_ || batch_epoch > epoch_) {
+            source_id_ = batch_source;
+            has_source_ = true;
             epoch_ = batch_epoch;
             has_epoch_ = true;
             for (auto& pointer : pointers_)
@@ -46,7 +50,7 @@ class InteractionAdapter final {
 
         for (std::size_t i = 0; i < batch.count; ++i) {
             const auto& event = batch.events[i];
-            if (!has_epoch_ || event.epoch != epoch_)
+            if (event.source_id != source_id_ || event.epoch != epoch_)
                 continue;
             std::size_t position = ordered;
             while (position > 0 &&
@@ -67,6 +71,8 @@ class InteractionAdapter final {
     }
 
     void reset() noexcept {
+        source_id_ = 0;
+        has_source_ = false;
         epoch_ = 0;
         has_epoch_ = false;
         for (auto& pointer : pointers_)
@@ -144,7 +150,9 @@ class InteractionAdapter final {
     }
 
     std::array<Pointer, kMaxPointers> pointers_{};
+    std::uint32_t source_id_ = 0;
     std::uint32_t epoch_ = 0;
+    bool has_source_ = false;
     bool has_epoch_ = false;
 };
 
