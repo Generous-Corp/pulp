@@ -33,6 +33,7 @@ ctest --test-dir build --output-on-failure    # test
 |--------|---------|-------------|
 | `PULP_BUILD_TESTS` | ON | Build test targets |
 | `PULP_BUILD_EXAMPLES` | ON | Build the example projects. `setup.sh` configures `OFF` unless `--examples` is passed. |
+| `PULP_EDITOR_AUTOMATION_EXTENSION` | OFF | Test-automation seam. CLAP plug-ins built with it ON also answer `get_extension("pulp.editor-automation/1")` with `capture_png` / `free_png`, which return the open editor's current frame as PNG to a host that dlopens the bundle (the bundle exports only `clap_entry`, so there is no other way in). With it OFF the code is not compiled into the plug-in. Never ship a plug-in with it ON. A project built against an installed SDK sets the same variable in its own configure. |
 | `PULP_ENABLE_GPU` | ON | Enable Dawn/Skia GPU rendering |
 | `PULP_TEST_PCH` | ON on Clang, OFF elsewhere | Share one precompiled Catch2 + standard-library header across the Catch2 test executables (`pulp-test-pch-cxx20` / `-cxx23` carriers). Suites with ObjC++ sources, per-target `-f`/`-std` options, or `NO_PCH` compile as before; `<build>/pulp-test-pch.tsv` lists every decision and the `test-pch-wiring` ctest verifies it against the generated compile lines. |
 | `PULP_ENABLE_PROJECT_PACKAGE` | ON | Build and export the optional project-package component and dependent Timeline authoring tools. `OFF` omits them, so the installed SDK cannot satisfy a request for the `project-package` component. |

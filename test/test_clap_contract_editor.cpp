@@ -14,6 +14,7 @@
 #include "support/recording_contract_editor.hpp"
 
 #include <pulp/format/clap_adapter.hpp>
+#include <pulp/format/clap_editor_automation.hpp>
 #include <pulp/format/contract_editor_session.hpp>
 #include <pulp/format/detail/main_thread_timer.hpp>
 #include <pulp/format/processor.hpp>
@@ -930,6 +931,91 @@ TEST_CASE("a CLAP host without timers leaves the platform layer without a loop",
     REQUIRE_FALSE(scope.post([] {}));
 #endif
     p.gui->destroy(p.plugin);
+}
+
+#endif
+
+#if defined(PULP_EDITOR_AUTOMATION_EXTENSION)
+
+namespace {
+
+std::uint32_t big_endian_u32(const std::uint8_t* p) {
+    return (std::uint32_t{p[0]} << 24) | (std::uint32_t{p[1]} << 16) | (std::uint32_t{p[2]} << 8) |
+           std::uint32_t{p[3]};
+}
+
+} // namespace
+
+TEST_CASE("the editor-automation extension captures the open editor as PNG",
+          "[clap][editor-host][clap-contract][editor-automation]") {
+    EditorEnvironment env;
+    reset_contract_recording();
+    g_processor_has_factory = true;
+    FakeHost host;
+    OpenPlugin p(host);
+    REQUIRE(p.gui != nullptr);
+
+    const auto* ext = static_cast<const pulp_clap_plugin_editor_automation_t*>(
+        p.plugin->get_extension(p.plugin, PULP_CLAP_EXT_EDITOR_AUTOMATION));
+    REQUIRE(ext != nullptr);
+    REQUIRE(ext->capture_png != nullptr);
+    REQUIRE(ext->free_png != nullptr);
+
+    // No editor yet: nothing to capture, outputs untouched.
+    std::uint8_t* data = nullptr;
+    std::size_t size = 0;
+    REQUIRE_FALSE(ext->capture_png(p.plugin, &data, &size));
+    REQUIRE(data == nullptr);
+    REQUIRE(size == 0);
+
+    REQUIRE(p.gui->create(p.plugin, platform_api(), false));
+    REQUIRE(ext->capture_png(p.plugin, &data, &size));
+    REQUIRE(data != nullptr);
+    REQUIRE(size > 33);
+    static const std::uint8_t signature[8] = {0x89, 'P', 'N', 'G', 0x0D, 0x0A, 0x1A, 0x0A};
+    REQUIRE(std::memcmp(data, signature, 8) == 0);
+    REQUIRE(std::memcmp(data + 12, "IHDR", 4) == 0);
+    // The recording editor's frame is the 1x1 PNG in recording_contract_editor.hpp.
+    REQUIRE(big_endian_u32(data + 16) == 1);
+    REQUIRE(big_endian_u32(data + 20) == 1);
+    REQUIRE(contract_log().saw("capture"));
+    ext->free_png(p.plugin, data);
+
+    p.gui->destroy(p.plugin);
+    data = nullptr;
+    REQUIRE_FALSE(ext->capture_png(p.plugin, &data, &size));
+    REQUIRE(data == nullptr);
+}
+
+TEST_CASE("the editor-automation extension reports false for an editor that cannot capture",
+          "[clap][editor-host][clap-contract][editor-automation]") {
+    EditorEnvironment env;
+    reset_contract_recording();
+    g_processor_has_factory = true;
+    contract_config().captures_frames = false;
+    FakeHost host;
+    OpenPlugin p(host);
+    const auto* ext = static_cast<const pulp_clap_plugin_editor_automation_t*>(
+        p.plugin->get_extension(p.plugin, PULP_CLAP_EXT_EDITOR_AUTOMATION));
+    REQUIRE(ext != nullptr);
+    REQUIRE(p.gui->create(p.plugin, platform_api(), false));
+    std::uint8_t* data = nullptr;
+    std::size_t size = 0;
+    REQUIRE_FALSE(ext->capture_png(p.plugin, &data, &size));
+    REQUIRE(data == nullptr);
+}
+
+#else
+
+TEST_CASE("the editor-automation extension is absent unless the build opts in",
+          "[clap][editor-host][clap-contract][editor-automation]") {
+    EditorEnvironment env;
+    reset_contract_recording();
+    g_processor_has_factory = true;
+    FakeHost host;
+    OpenPlugin p(host);
+    REQUIRE(p.gui != nullptr); // the GUI is offered, only the seam is not
+    REQUIRE(p.plugin->get_extension(p.plugin, "pulp.editor-automation/1") == nullptr);
 }
 
 #endif

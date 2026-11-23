@@ -125,6 +125,13 @@ if(PULP_ENABLE_TEST_SEAMS)
 else()
     add_compile_definitions(PULP_ENABLE_TEST_SEAMS=0)
 endif()
+# Opt-in CLAP extension "pulp.editor-automation/1": lets a test host capture a
+# shipped plug-in's open editor as PNG. Off by default; with it off the code is
+# not compiled into the plug-in. A consumer of an installed SDK sets the same
+# variable in its own configure.
+option(PULP_EDITOR_AUTOMATION_EXTENSION
+       "Expose the test-automation CLAP extension pulp.editor-automation/1 from CLAP plug-ins"
+       OFF)
 # Deterministic RT operation counters (pulp/signal/rt_work_counter.hpp) back
 # the per-callback transition-cost gate. The definition is directory-wide so
 # every translation unit of one build agrees on the inline counter hooks; it

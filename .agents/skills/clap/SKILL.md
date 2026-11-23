@@ -1328,6 +1328,25 @@ skip the open notification and first-frame preparation on refusal. Keep the
 created GUI available for a later `set_parent()` retry or `gui_destroy()`; a
 refused attempt must not publish an editor-open lifecycle event.
 
+## `pulp.editor-automation/1` (opt-in test seam)
+
+A built plug-in exports only `clap_entry`, so a host that dlopens the bundle
+cannot call `clap_adapter::contract_gui_session()`; the editor's
+`EditorAutomation::capture_png()` was reachable only by tests that link the
+plug-in's code in. `pulp/format/clap_editor_automation.hpp` adds a CLAP
+extension for that case: `capture_png(plugin, &data, &size)` returns the open
+editor's current frame as PNG (false when no editor is open or it cannot
+capture; outputs untouched), and `free_png(plugin, data)` releases the buffer.
+Both are main-thread, like every `clap_plugin_gui` call.
+
+It is a **test-automation seam, off by default**. `get_extension` returns it only
+when the CLAP target is compiled with `PULP_EDITOR_AUTOMATION_EXTENSION`, which
+`_pulp_add_clap` sets from the CMake variable of the same name (default OFF);
+otherwise the header's code is not compiled in and the id returns null. Never
+ship a plug-in with it ON. Tests: `[editor-automation]` in
+`test/test_clap_contract_editor.cpp`, built twice (`pulp-test-clap-contract-editor`
+proves it absent, `pulp-test-clap-contract-editor-automation` exercises it).
+
 ## Editor resize contract (aspect-lock vs free reflow)
 
 `gui_can_resize` returns resizable **iff `view_size().min_width>0 && min_height>0`** —
