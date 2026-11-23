@@ -18,6 +18,12 @@ namespace pulp::vellum {
 /// The adapter owns only fixed-capacity storage. Vellum's event type has no
 /// fields for hold, velocity, or confidence, so hold is delivered as a drag
 /// tick and those values are not represented in the Vellum event.
+///
+/// A batch is bound to the source of its first event: events from any other
+/// source in the same batch are dropped without routing. deliver() returns true
+/// only when at least one event was routed, so a false result can be a
+/// legitimately dropped batch (stale epoch, other source, or a pointer that is
+/// not active) and is not an error.
 class InteractionAdapter final {
   public:
     static constexpr std::size_t kMaxPointers = 64;
