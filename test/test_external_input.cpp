@@ -11,6 +11,12 @@
 using namespace pulp::runtime;
 static_assert(std::is_trivially_copyable_v<ExternalInputFrame<1>>);
 static_assert(std::is_trivially_copyable_v<ExternalInputFrame<64>>);
+// Wire values of InteractionPhase are persisted by replay and provider payloads: appending members only.
+static_assert(static_cast<std::uint8_t>(InteractionPhase::press) == 0);
+static_assert(static_cast<std::uint8_t>(InteractionPhase::hold) == 1);
+static_assert(static_cast<std::uint8_t>(InteractionPhase::move) == 2);
+static_assert(static_cast<std::uint8_t>(InteractionPhase::release) == 3);
+static_assert(static_cast<std::uint8_t>(InteractionPhase::cancel) == 4);
 
 TEST_CASE("interaction batches preserve identity and bounded capacity",
           "[runtime][interaction-event]") {
