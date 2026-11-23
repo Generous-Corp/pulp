@@ -1125,7 +1125,7 @@ TEST_CASE("runtime interactions keep object pointers independent and cancel them
     pulp::runtime::InteractionBatch<> after_cancel;
     after_cancel.append({.epoch = 1, .sequence = 4, .object_id = 10,
                          .phase = pulp::runtime::InteractionPhase::move, .x = 4.0f});
-    REQUIRE(adapter.deliver(view, after_cancel));
+    REQUIRE_FALSE(adapter.deliver(view, after_cancel));
     REQUIRE(view.events.size() == 3);
 }
 
