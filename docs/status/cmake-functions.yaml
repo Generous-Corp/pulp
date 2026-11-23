@@ -253,6 +253,7 @@ functions:
       - AU_TYPE
       - ACCEPTS_MIDI
       - SOURCES
+      - UI
     creates:
       - ${target}_Core
       - ${target}_AUv3
