@@ -143,6 +143,8 @@ class InteractionRouter final {
 
     void observe(const InteractionEvent& event) noexcept {
         last_event_ns_ = event.provider_time_ns;
+        if (last_event_ns_ == 0 && clock_ != nullptr)
+            last_event_ns_ = clock_();
         auto position = find_object(event.source_id, event.epoch, event.object_id);
         if (event.phase == InteractionPhase::press) {
             if (position == objects_.size())

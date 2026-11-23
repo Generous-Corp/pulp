@@ -247,3 +247,52 @@ TEST_CASE("interaction router orders events and cancels on epoch change",
     CHECK(event.phase == InteractionPhase::cancel);
     CHECK(event.object_id == 9);
 }
+
+namespace {
+std::uint64_t interaction_test_clock = 0;
+std::uint64_t interaction_clock() noexcept { return interaction_test_clock; }
+}
+
+TEST_CASE("interaction router cancels live objects after source timeout",
+          "[runtime][interaction-router]") {
+    interaction_test_clock = 100;
+    InteractionRouter<8, 4> router(50, interaction_clock);
+    REQUIRE(router.publish({.source_id = 2, .epoch = 1, .sequence = 1,
+                            .object_id = 3, .phase = InteractionPhase::press}));
+    interaction_test_clock = 151;
+    REQUIRE(router.check_timeout());
+    InteractionEvent event{};
+    REQUIRE(router.try_pop_audio(event));
+    CHECK(event.phase == InteractionPhase::press);
+    REQUIRE(router.try_pop_audio(event));
+    CHECK(event.phase == InteractionPhase::cancel);
+    CHECK(event.object_id == 3);
+    CHECK_FALSE(router.check_timeout());
+}
+
+TEST_CASE("interaction router synthesizes cancellation after queue overflow",
+          "[runtime][interaction-router]") {
+    InteractionRouter<1, 4> router;
+    REQUIRE(router.publish({.source_id = 3, .epoch = 1, .sequence = 1,
+                            .object_id = 4, .phase = InteractionPhase::press}));
+    CHECK_FALSE(router.publish({.source_id = 3, .epoch = 1, .sequence = 2,
+                                .object_id = 5, .phase = InteractionPhase::press}));
+    InteractionEvent event{};
+    REQUIRE(router.try_pop_ui(event));
+    CHECK(event.phase == InteractionPhase::press);
+    REQUIRE(router.try_pop_ui(event));
+    CHECK(event.phase == InteractionPhase::cancel);
+    CHECK(event.object_id == 4);
+}
+
+TEST_CASE("interaction router drains without heap allocation",
+          "[runtime][interaction-router]") {
+    REQUIRE(pulp::test::RtAllocationProbe::self_check());
+    InteractionRouter<8, 4> router;
+    REQUIRE(router.publish({.source_id = 4, .epoch = 1, .sequence = 1,
+                            .object_id = 6, .phase = InteractionPhase::press}));
+    InteractionEvent event{};
+    pulp::test::RtAllocationProbe probe;
+    while (router.try_pop_ui(event)) {}
+    CHECK_FALSE(probe.saw_allocation());
+}
