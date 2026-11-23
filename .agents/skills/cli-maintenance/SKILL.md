@@ -3804,6 +3804,15 @@ new transport field, new persisted key), update **both**:
 Test coverage lives in `test/test_standalone_transport_midi.cpp` —
 add a case there when you extend either surface.
 
+## Gotcha: `pulp create --ui vellum` must refuse an SDK without the bridge
+
+A generated `--ui vellum` project calls `pulp_add_vellum_editor_package`, which
+needs `Pulp::vellum` in the installed package. When the installed SDK (from
+`--sdk-dir` or `CMAKE_PREFIX_PATH`) has a Pulp CMake package without that
+target, `cmd_create` refuses before writing anything, so nobody is left with a
+project that only fails later at configure. The shell-out test
+`rejects an installed SDK without Pulp::vellum` covers it.
+
 ## Gotcha: MSVC caps a string literal at 16 KB (C2026) — split big embedded blobs
 
 `tools/mcp/pulp_mcp.cpp` `tools_list_json()` embeds the whole MCP tools-list JSON
