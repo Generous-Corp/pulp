@@ -1,6 +1,7 @@
 #pragma once
 
 #include <array>
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <span>
@@ -46,6 +47,140 @@ template <std::size_t Capacity = 16> struct InteractionBatch {
         const auto bounded_count = count > Capacity ? Capacity : count;
         return {events.data(), bounded_count};
     }
+};
+
+enum class InteractionVerdict : std::uint8_t {
+    accepted,
+    unchanged,
+    rejected_source,
+    rejected_order,
+    rejected_malformed,
+    rejected_confidence,
+    rejected_capacity,
+};
+
+template <std::size_t MaxObjects = 16> class InteractionTracker {
+  public:
+    static_assert(MaxObjects >= 1 && MaxObjects < 64);
+    using Result = InteractionBatch<MaxObjects + 1>;
+
+    InteractionVerdict submit(const InteractionEvent& event, Result& output) noexcept {
+        output = {};
+        if (source_seen_ && event.source_id != source_id_) return InteractionVerdict::rejected_source;
+        if (source_seen_ && event.epoch == epoch_ && event.sequence <= sequence_)
+            return event.sequence == sequence_ ? InteractionVerdict::unchanged
+                                                : InteractionVerdict::rejected_order;
+        if (event.phase == InteractionPhase::invalid || !std::isfinite(event.x) ||
+            !std::isfinite(event.y) || !std::isfinite(event.confidence) ||
+            event.x < 0.0f || event.x > 1.0f || event.y < 0.0f || event.y > 1.0f)
+            return InteractionVerdict::rejected_malformed;
+        if (event.confidence < 0.0f || event.confidence > 1.0f)
+            return InteractionVerdict::rejected_confidence;
+
+        if (!source_seen_) {
+            source_id_ = event.source_id;
+            source_seen_ = true;
+        }
+        if (event.epoch != epoch_) {
+            cancel_active(output, event);
+            epoch_ = event.epoch;
+            active_ = {};
+        }
+        epoch_ = event.epoch;
+        sequence_ = event.sequence;
+        age_samples_ = 0;
+
+        const auto slot = find(event.object_id);
+        if (event.phase == InteractionPhase::press) {
+            if (slot >= 0) output.append(cancel_for(active_[slot], event));
+            const auto free_slot = slot >= 0 ? slot : find_free();
+            if (free_slot < 0) return InteractionVerdict::rejected_capacity;
+            active_[free_slot] = event;
+            active_[free_slot].phase = InteractionPhase::press;
+            output.append(event);
+            return InteractionVerdict::accepted;
+        }
+        if (slot < 0) return InteractionVerdict::rejected_order;
+        if (event.phase == InteractionPhase::release || event.phase == InteractionPhase::cancel)
+            active_[slot] = {};
+        else
+            active_[slot] = event;
+        output.append(event);
+        return InteractionVerdict::accepted;
+    }
+
+    Result advance(std::uint64_t samples, std::uint64_t max_age_samples) noexcept {
+        Result output;
+        if (max_age_samples == 0 || active_count() == 0) return output;
+        age_samples_ = UINT64_MAX - age_samples_ < samples ? UINT64_MAX : age_samples_ + samples;
+        if (age_samples_ < max_age_samples) return output;
+        InteractionEvent reason{};
+        reason.source_id = source_id_;
+        reason.epoch = epoch_;
+        reason.sequence = sequence_;
+        reason.phase = InteractionPhase::cancel;
+        cancel_active(output, reason);
+        age_samples_ = 0;
+        return output;
+    }
+
+    Result reset() noexcept {
+        Result output;
+        InteractionEvent reason{};
+        reason.source_id = source_id_;
+        reason.epoch = epoch_;
+        reason.sequence = sequence_;
+        reason.phase = InteractionPhase::cancel;
+        cancel_active(output, reason);
+        active_ = {};
+        age_samples_ = 0;
+        return output;
+    }
+
+    std::size_t active_count() const noexcept {
+        std::size_t count = 0;
+        for (const auto& event : active_)
+            if (event.phase != InteractionPhase::invalid) ++count;
+        return count;
+    }
+
+  private:
+    int find(std::uint32_t object_id) const noexcept {
+        for (std::size_t i = 0; i < active_.size(); ++i)
+            if (active_[i].phase != InteractionPhase::invalid && active_[i].object_id == object_id)
+                return static_cast<int>(i);
+        return -1;
+    }
+
+    int find_free() const noexcept {
+        for (std::size_t i = 0; i < active_.size(); ++i)
+            if (active_[i].phase == InteractionPhase::invalid) return static_cast<int>(i);
+        return -1;
+    }
+
+    static InteractionEvent cancel_for(const InteractionEvent& active,
+                                       const InteractionEvent& reason) noexcept {
+        auto cancel = reason;
+        cancel.object_id = active.object_id;
+        cancel.x = active.x;
+        cancel.y = active.y;
+        cancel.confidence = active.confidence;
+        cancel.phase = InteractionPhase::cancel;
+        return cancel;
+    }
+
+    void cancel_active(Result& output, const InteractionEvent& reason) noexcept {
+        for (auto& active : active_)
+            if (active.phase != InteractionPhase::invalid) {
+                output.append(cancel_for(active, reason));
+                active = {};
+            }
+    }
+
+    std::array<InteractionEvent, MaxObjects> active_{};
+    std::uint32_t source_id_ = 0, epoch_ = 0;
+    std::uint64_t sequence_ = 0, age_samples_ = 0;
+    bool source_seen_ = false;
 };
 
 } // namespace pulp::runtime

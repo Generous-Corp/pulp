@@ -44,6 +44,40 @@ TEST_CASE("interaction batches preserve identity and bounded capacity",
                               .phase = InteractionPhase::press}));
 }
 
+TEST_CASE("interaction tracker cancels held objects on restart and timeout",
+          "[runtime][interaction-event]") {
+    InteractionTracker<2> tracker;
+    InteractionBatch<3> result;
+    const auto press = InteractionEvent{.source_id = 4,
+                                       .epoch = 1,
+                                       .sequence = 1,
+                                       .provider_time_ns = 100,
+                                       .object_id = 7,
+                                       .phase = InteractionPhase::press,
+                                       .x = .25f,
+                                       .y = .5f,
+                                       .confidence = .9f};
+    REQUIRE(tracker.submit(press, result) == InteractionVerdict::accepted);
+    REQUIRE(tracker.active_count() == 1);
+
+    auto restarted = press;
+    restarted.epoch = 2;
+    restarted.provider_time_ns = 200;
+    restarted.object_id = 8;
+    REQUIRE(tracker.submit(restarted, result) == InteractionVerdict::accepted);
+    REQUIRE(result.events_view().size() == 2);
+    CHECK(result.events_view()[0].phase == InteractionPhase::cancel);
+    CHECK(result.events_view()[0].object_id == 7);
+    CHECK(result.events_view()[1].phase == InteractionPhase::press);
+    CHECK(tracker.active_count() == 1);
+
+    const auto timeout = tracker.advance(128, 128);
+    REQUIRE(timeout.events_view().size() == 1);
+    CHECK(timeout.events_view()[0].phase == InteractionPhase::cancel);
+    CHECK(timeout.events_view()[0].object_id == 8);
+    CHECK(tracker.active_count() == 0);
+}
+
 template <std::size_t N = 3>
 static ExternalInputFrame<N> frame(std::uint32_t epoch = 1, std::uint64_t sequence = 1) {
     ExternalInputFrame<N> f;
