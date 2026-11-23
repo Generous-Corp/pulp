@@ -36,9 +36,10 @@ For a new real-world demo, use this sequence before choosing a provider SDK:
 
 1. Capture or receive a complete observation away from the audio callback.
 2. Translate it into `ExternalInputFrame<N>` and publish it through one existing
-   bounded handoff such as `TripleBuffer`, OSC/IPC, MIDI, or WAM ingress. Use an
-   ordered SPSC queue for discrete interaction events because a latest-value
-   buffer can overwrite a release before the audio reader sees it.
+   bounded handoff such as `TripleBuffer`, OSC/IPC, MIDI, or WAM ingress. For
+   discrete interactions, use `InteractionEventQueue<N>` or an equivalent
+   ordered SPSC queue because a latest-value buffer can overwrite a release
+   before the audio reader sees it.
 3. Submit it to `ExternalInputGate<N>` with a policy that defines confidence,
    expiry, and restart behavior.
 4. Map only accepted values or events to existing parameters, modulation, MIDI,
@@ -164,7 +165,7 @@ flowchart LR
 
 | Source and consumer | Recommended existing path |
 |---|---|
-| Native provider to the same application or plugin process | Application-owned `TripleBuffer<T>` or another existing bounded runtime primitive. |
+| Native provider to the same application or plugin process | `TripleBuffer<T>` for continuous frames, or `InteractionEventQueue<N>` for ordered discrete events. |
 | External process to a desktop/plugin consumer | Existing OSC or IPC. Keep the external process responsible for camera/device permissions and inference. |
 | Browser provider to a WAM processor | Existing WAM MIDI ingress; the example reserves channel-16 pitch bend for one compact control packet. |
 | Host automation or musical control | Existing MIDI/MPE and StateStore/modulation paths. |
