@@ -15,7 +15,14 @@ let package = Package(
     ],
     targets: [
         .target(
+            name: "PulpInteractionBridge",
+            path: "Sources/PulpInteractionBridge",
+            publicHeadersPath: ".",
+            cxxSettings: [.headerSearchPath("../../../core/runtime/include")]
+        ),
+        .target(
             name: "PulpSwift",
+            dependencies: ["PulpInteractionBridge"],
             path: "Sources/PulpSwift",
             exclude: [
                 "PulpBridge.cpp",

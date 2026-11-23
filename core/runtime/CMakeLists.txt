@@ -327,6 +327,7 @@ set(PULP_RUNTIME_UNIT_HEADERS
     include/pulp/runtime/identity.hpp
     include/pulp/runtime/inter_process_lock.hpp
     include/pulp/runtime/interaction_event.hpp
+    include/pulp/runtime/interaction_replay.hpp
     include/pulp/runtime/ip_address.hpp
     include/pulp/runtime/json_rpc.hpp
     include/pulp/runtime/license.hpp

@@ -5,6 +5,8 @@
 #include <cstdint>
 #include <span>
 #include <type_traits>
+#include <cmath>
+#include <algorithm>
 
 namespace pulp::runtime {
 
@@ -29,6 +31,29 @@ struct InteractionEvent {
 };
 
 static_assert(std::is_trivially_copyable_v<InteractionEvent>);
+
+/// Normalize a provider point into the declared finite surface bounds.
+inline bool normalize_coordinates(float point_x, float point_y,
+                                  float width, float height,
+                                  float& normalized_x,
+                                  float& normalized_y) noexcept {
+    if (!std::isfinite(point_x) || !std::isfinite(point_y) ||
+        !std::isfinite(width) || !std::isfinite(height) || width <= 0.0f ||
+        height <= 0.0f)
+        return false;
+    normalized_x = std::clamp(point_x / width, 0.0f, 1.0f);
+    normalized_y = std::clamp(point_y / height, 0.0f, 1.0f);
+    return true;
+}
+
+inline bool validate_event(const InteractionEvent& event) noexcept {
+    return event.source_id != 0 && event.epoch != 0 && event.sequence != 0 &&
+           event.phase != InteractionPhase::invalid &&
+           std::isfinite(event.x) && std::isfinite(event.y) &&
+           std::isfinite(event.confidence) && event.x >= 0.0f && event.x <= 1.0f &&
+           event.y >= 0.0f && event.y <= 1.0f && event.confidence >= 0.0f &&
+           event.confidence <= 1.0f;
+}
 
 template <std::size_t Capacity = 16> struct InteractionBatch {
     static_assert(Capacity >= 1 && Capacity <= 64);
