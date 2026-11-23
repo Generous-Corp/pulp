@@ -396,3 +396,38 @@ TEST_CASE("TouchDesigner sharing recipe fixture is replayed through the external
     REQUIRE(receipt.expects == 5);
     REQUIRE(receipt.failed == 0);
 }
+
+TEST_CASE("interaction tracker keeps active objects when a future-epoch event is malformed",
+          "[runtime][interaction-event]") {
+    InteractionTracker<2> tracker;
+    InteractionBatch<3> result;
+    const auto press = InteractionEvent{.source_id = 4,
+                                        .epoch = 1,
+                                        .sequence = 1,
+                                        .provider_time_ns = 100,
+                                        .object_id = 7,
+                                        .phase = InteractionPhase::press,
+                                        .x = .25f,
+                                        .y = .5f,
+                                        .strength = .75f,
+                                        .confidence = .9f};
+    REQUIRE(tracker.submit(press, result) == InteractionVerdict::accepted);
+
+    auto bad = press;
+    bad.epoch = 2;
+    bad.object_id = 8;
+    bad.x = 2.0f;
+    CHECK(tracker.submit(bad, result) == InteractionVerdict::rejected_malformed);
+    CHECK(result.events_view().empty());
+    CHECK(tracker.active_count() == 1);
+
+    // A valid restart still cancels, and the cancel keeps the contact strength.
+    auto restarted = press;
+    restarted.epoch = 2;
+    restarted.object_id = 8;
+    restarted.strength = 0.0f;
+    REQUIRE(tracker.submit(restarted, result) == InteractionVerdict::accepted);
+    REQUIRE(result.events_view().size() == 2);
+    CHECK(result.events_view()[0].phase == InteractionPhase::cancel);
+    CHECK(result.events_view()[0].strength == .75f);
+}
