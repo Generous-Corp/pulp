@@ -217,6 +217,8 @@ if [ -z "${GITHUB_PR_TITLE:-}" ]; then
 fi
 
 fail=0
+failed_gates=()
+gate_fail() { fail=1; failed_gates+=("$1"); }
 # Every suite a lane could not run locally, collected for the summary.
 not_checked_log="$(mktemp "${TMPDIR:-/tmp}/pulp-gates-not-checked.XXXXXX")"
 if [ "$gate_host_builds_skipped" -eq 1 ]; then
@@ -230,7 +232,7 @@ echo "gates: base = $BASE" >&2
 echo "" >&2
 echo "▸ shipyard PR stall-watchdog self-tests" >&2
 if ! "$PYTHON" "$SHIPYARD_WATCHDOG_TEST"; then
-    fail=1
+    gate_fail "shipyard PR stall-watchdog self-tests"
 fi
 
 # ── 0. host-vitals (ADVISORY) ──────────────────────────────────────────────
@@ -295,7 +297,7 @@ if [ -f "$VELLUM_HINT" ]; then
     vellum_rc=$?
     if [ "$vellum_rc" -eq 10 ] || [ "$vellum_rc" -eq 11 ] || [ "$vellum_rc" -eq 12 ] ||
        [ "$vellum_rc" -eq 13 ] || [ "$vellum_rc" -eq 14 ] || [ "$vellum_rc" -eq 15 ]; then
-        fail=1
+        gate_fail "vellum watch-event coverage"
     fi
 fi
 
@@ -306,12 +308,12 @@ fi
 # configured build, so run it in the same cheap gate as the watch preflight.
 if [ ! -f "$VELLUM_BOUNDARY" ]; then
     echo "gates: Vellum boundary linter is missing: $VELLUM_BOUNDARY" >&2
-    fail=1
+    gate_fail "Vellum extractable-package boundary"
 else
     echo "" >&2
     echo "▸ Vellum extractable-package boundary" >&2
     if ! "$PYTHON" "$VELLUM_BOUNDARY"; then
-        fail=1
+        gate_fail "Vellum extractable-package boundary"
     fi
 fi
 
@@ -324,7 +326,7 @@ fi
 # plants every lint class and the missing/empty negative controls.
 if [ ! -f "$CLEAN_OUTPUT_LINT" ]; then
     echo "gates: clean-output linter is missing: $CLEAN_OUTPUT_LINT" >&2
-    fail=1
+    gate_fail "clean-output source root"
 else
     for clean_output_root in \
         "$ROOT/tools/ui-build/lint/fixtures/clean" \
@@ -336,7 +338,7 @@ else
             clean_output_args+=(--manifest "$CLEAN_OUTPUT_CORPUS/manifest.json")
         fi
         if ! "$PYTHON" "$CLEAN_OUTPUT_LINT" "${clean_output_args[@]}"; then
-            fail=1
+            gate_fail "clean-output source root"
         fi
     done
 fi
@@ -345,7 +347,7 @@ fi
 echo "" >&2
 echo "▸ skill-sync check" >&2
 if ! "$PYTHON" "$SSC" --base "$BASE" --config "$CFG" --mode=report; then
-    fail=1
+    gate_fail "skill-sync check"
 fi
 
 # ── 1b. skill-path-map lint ────────────────────────────────────────────────
@@ -359,7 +361,7 @@ if [ -f "$SPML" ]; then
     echo "" >&2
     echo "▸ skill-path-map lint (patterns match real files; map matches its schema)" >&2
     if ! "$PYTHON" "$SPML" --base "$BASE" --mode=report; then
-        fail=1
+        gate_fail "skill-path-map lint"
     fi
 fi
 
@@ -373,7 +375,7 @@ echo "▸ version-bump check (fix:/feat: titles require a chore: bump versions c
 # CI passes (tools/ci/sync_job_parity.json pins this command to CI's).
 if ! "$PYTHON" "$VBC" --base "$BASE" --config "$CFG" --mode=report \
         --accept-intent-trailers; then
-    fail=1
+    gate_fail "version-bump check"
 fi
 
 # ── 2c. yoga-oracle lockstep ──────────────────────────────────────
@@ -389,7 +391,7 @@ if [ -f "$YOGA_ORACLE_PIN" ]; then
     echo "" >&2
     echo "▸ yoga-oracle lockstep check (compat oracle matches the Yoga pin)" >&2
     if ! "$PYTHON" "$YOGA_ORACLE_PIN"; then
-        fail=1
+        gate_fail "yoga-oracle lockstep check"
     fi
 fi
 
@@ -399,7 +401,7 @@ if [ -f "$CSC" ] && [ -f "$COMPAT_MAP" ]; then
     echo "" >&2
     echo "▸ compat-sync check" >&2
     if ! "$PYTHON" "$CSC" --base "$BASE" --mode=report --enforce; then
-        fail=1
+        gate_fail "compat-sync check"
     fi
 fi
 
@@ -408,7 +410,7 @@ if [ -f "$CDC" ] && [ -f "$CDC_MAP" ]; then
     echo "" >&2
     echo "▸ config→doc drift check" >&2
     if ! "$PYTHON" "$CDC" --base "$BASE" --mode=report; then
-        fail=1
+        gate_fail "config→doc drift check"
     fi
 fi
 
@@ -417,7 +419,7 @@ if [ -f "$COMPAT_AGG" ] && [ -f "$ROOT/compat.json" ] && [ -d "$ROOT/compat" ]; 
     echo "" >&2
     echo "▸ compat aggregate check" >&2
     if ! "$PYTHON" "$COMPAT_AGG" check; then
-        fail=1
+        gate_fail "compat aggregate check"
     fi
 fi
 
@@ -426,7 +428,7 @@ if [ -f "$NAG" ]; then
     echo "" >&2
     echo "▸ node-ABI virtual-order check" >&2
     if ! "$PYTHON" "$NAG" --base "$BASE" --mode=report; then
-        fail=1
+        gate_fail "node-ABI virtual-order check"
     fi
 fi
 
@@ -436,7 +438,7 @@ if [ -f "$HSG" ] && [ -f "$HSG_CFG" ]; then
     echo "▸ hotspot-size guard" >&2
     if ! "$PYTHON" "$HSG" --base "$BASE" --config "$HSG_CFG" --mode=report \
             --require-ceiling-reduction; then
-        fail=1
+        gate_fail "hotspot-size guard"
     fi
 fi
 
@@ -445,7 +447,7 @@ if [ -f "$HFG" ] && [ -f "$HFG_CFG" ]; then
     echo "" >&2
     echo "▸ header fan-out guard (no new umbrella include of a tracked header)" >&2
     if ! "$PYTHON" "$HFG" --base "$BASE" --config "$HFG_CFG" --mode=report; then
-        fail=1
+        gate_fail "header fan-out guard"
     fi
 fi
 
@@ -454,7 +456,7 @@ if [ -f "$PGL" ]; then
     echo "" >&2
     echo "▸ planning-gitlink guard (no accidental submodule pointer bump)" >&2
     if ! "$PYTHON" "$PGL" --base "$BASE" --mode=report; then
-        fail=1
+        gate_fail "planning-gitlink guard"
     fi
 fi
 
@@ -475,7 +477,7 @@ if [ -f "$FMT" ]; then
                 echo "format_changed: touched lines are not clang-format clean." >&2
                 echo "  Fix: tools/scripts/format_changed.sh, then stage the files it rewrote (git status) and commit" >&2
                 echo "  Demote to advisory: PULP_ENFORCE_PREPUSH_FORMAT=0" >&2
-                fail=1
+                gate_fail "diff-scoped clang-format check"
             else
                 echo "format_changed: ADVISORY (PULP_ENFORCE_PREPUSH_FORMAT=0) — touched lines are not clang-format clean; run tools/scripts/format_changed.sh" >&2
             fi
@@ -514,7 +516,7 @@ if [ -f "$GHP" ]; then
     echo "" >&2
     echo "▸ gpu-handoff pin freshness (no in-PR re-pin; no orphaned pinned path)" >&2
     if ! "$PYTHON" "$GHP" --base "$BASE" --mode=report; then
-        fail=1
+        gate_fail "gpu-handoff pin freshness"
     fi
 fi
 
@@ -529,7 +531,7 @@ if [ -f "$GLS" ]; then
     echo "" >&2
     echo "▸ gpu-ledger sentinel (no unregenerated ledger from a merge)" >&2
     if ! "$PYTHON" "$GLS" --root "$ROOT" --mode=report; then
-        fail=1
+        gate_fail "gpu-ledger sentinel"
     fi
 fi
 
@@ -546,7 +548,7 @@ if [ -f "$GPV" ]; then
     echo "" >&2
     echo "▸ gpu-provenance reachability (no pin that will not exist on the remote)" >&2
     if ! "$PYTHON" "$GPV" --root "$ROOT" --verify-only; then
-        fail=1
+        gate_fail "gpu-provenance reachability"
     fi
 fi
 
@@ -559,7 +561,7 @@ if [ -f "$SRG" ]; then
     echo "" >&2
     echo "▸ silent-revert guard (no byte-exact undo of a recent landing)" >&2
     if ! "$PYTHON" "$SRG" --base "$BASE" --mode=report; then
-        fail=1
+        gate_fail "silent-revert guard"
     fi
 fi
 
@@ -574,7 +576,7 @@ if [ -f "$DEPS_AUDIT" ]; then
     echo "▸ forge-descriptor coverage (indexed packs carry semantic descriptors)" >&2
     if ! "$PYTHON" "$ROOT/tools/scripts/forge_descriptor_coverage.py" --root "$ROOT" >/dev/null 2>&1; then
         echo "  forge-descriptor-coverage: the 77-family semantic manifest, descriptor sources, or export registry drifted — run \`python3 tools/scripts/forge_descriptor_coverage.py\` for details." >&2
-        fail=1
+        gate_fail "forge-descriptor coverage"
     else
         echo "  forge-descriptor-coverage: ok" >&2
     fi
@@ -582,7 +584,7 @@ if [ -f "$DEPS_AUDIT" ]; then
     echo "▸ deps-audit (attribution drift + license truthfulness)" >&2
     if ! "$PYTHON" "$DEPS_AUDIT" --strict --verify-licenses >/dev/null 2>&1; then
         echo "  deps-audit: attribution drift detected — run \`python3 tools/deps/audit.py --strict --verify-licenses\` for details." >&2
-        fail=1
+        gate_fail "deps-audit"
     else
         echo "  deps-audit: ok" >&2
     fi
@@ -599,7 +601,7 @@ if [ -f "$ROOT/tools/deps/test_audit.py" ]; then
     echo "▸ deps-audit self-tests" >&2
     if ! "$PYTHON" "$ROOT/tools/deps/test_audit.py" >/dev/null 2>&1; then
         echo "  deps-audit self-tests: failing — run \`python3 tools/deps/test_audit.py\` for details." >&2
-        fail=1
+        gate_fail "deps-audit self-tests"
     else
         echo "  deps-audit self-tests: ok" >&2
     fi
@@ -621,7 +623,7 @@ for _guard in "tools/deps/check_patches.py:vendored-patch verifier" \
         if ! _guard_out="$("$PYTHON" "$ROOT/$_guard_path" 2>&1)"; then
             echo "$_guard_out" | tail -n 20 >&2
             echo "  $_guard_label: failing — run \`python3 $_guard_path\` for details." >&2
-            fail=1
+            gate_fail "$_guard_label"
         else
             echo "  $_guard_label: ok" >&2
         fi
@@ -662,7 +664,7 @@ if [ -f "$ROOT/tools/scripts/gates_script_inputs.py" ]; then
     sti_log="$(mktemp "${TMPDIR:-/tmp}/pulp-gates-script-inputs.XXXXXX")"
     if ! PULP_GATES_NO_CONFIGURE="$sti_no_configure" PULP_GATES_CONFIGURE_ONLY_TEMP="$sti_temp_configure" \
             "$PYTHON" "$ROOT/tools/scripts/gates_script_inputs.py" --base "$BASE" --repo-root "$ROOT" >"$sti_log" 2>&1; then
-        fail=1
+        gate_fail "generated test manifests"
     fi
     grep -v "^NOT CHECKED locally: " "$sti_log" >&2
     sed -n "s/^\(NOT CHECKED locally: .*\)/[script-inputs] \1/p" "$sti_log" >>"$not_checked_log"
@@ -719,7 +721,7 @@ if [ "$gate_host_builds_skipped" -eq 0 ] && [ -f "$ROOT/tools/ci/source_selftest
         else
             tail -n 40 "$src_selftest_log" >&2
             echo "  $src_lane: failing — CI runs these; fix before pushing." >&2
-            fail=1
+            gate_fail "$src_lane"
         fi
         # A suite that did not run is not a pass; the summary lists every one.
         sed -n "s/^source-selftests: \(NOT CHECKED locally: .*\)/[$src_lane] \1/p; s/^source-selftests: \(NO USABLE BUILD: .*\)/[$src_lane] \1/p" \
@@ -761,7 +763,7 @@ if [ -f "$ROOT/tools/ci/sync_job_parity.json" ] && [ "${PULP_SKIP_SOURCE_SELFTES
     else
         tail -n 60 "$sync_job_log" >&2
         echo "  sync-job: failing — the required \`Enforce version & skill sync\` check runs these; fix before pushing." >&2
-        fail=1
+        gate_fail "required sync job checks"
     fi
     sed -n "s/^source-selftests: \(NOT CHECKED locally: .*\)/[sync-job] \1/p" "$sync_job_log" >>"$not_checked_log"
     rm -f "$sync_job_log"
@@ -776,7 +778,7 @@ if [ -f "$ROOT/tools/scripts/test_setup_source_cache.sh" ]; then
     echo "▸ setup.sh source-cache tests" >&2
     if ! bash "$ROOT/tools/scripts/test_setup_source_cache.sh" >/dev/null 2>&1; then
         echo "  setup.sh source-cache tests: failing — run \`bash tools/scripts/test_setup_source_cache.sh\` for details." >&2
-        fail=1
+        gate_fail "setup.sh source-cache tests"
     else
         echo "  setup.sh source-cache tests: ok" >&2
     fi
@@ -788,7 +790,7 @@ if [ -f "$ROOT/tools/scripts/test_worktree_lineage.sh" ]; then
     echo "▸ worktree-lineage tests" >&2
     if ! bash "$ROOT/tools/scripts/test_worktree_lineage.sh" >/dev/null 2>&1; then
         echo "  worktree-lineage tests: failing — run \`bash tools/scripts/test_worktree_lineage.sh\` for details." >&2
-        fail=1
+        gate_fail "worktree-lineage tests"
     else
         echo "  worktree-lineage tests: ok" >&2
     fi
@@ -804,7 +806,7 @@ if [ -f "$ROOT/tools/scripts/test_skia_cross_process_cache.py" ]; then
        ! "$PYTHON" "$ROOT/tools/ci/test_pulp_worktree_gc.py" >/dev/null 2>&1 ||
        ! "$PYTHON" "$ROOT/tools/ci/test_cache_routing_contract.py" >/dev/null 2>&1; then
         echo "  immutable shared-cache tests: failing — run the five focused Python tests for details." >&2
-        fail=1
+        gate_fail "immutable shared-cache tests"
     else
         echo "  immutable shared-cache tests: ok" >&2
     fi
@@ -821,7 +823,7 @@ if [ -f "$MANIFEST_MIRRORS" ]; then
     echo "▸ manifest-mirror drift (VERSION.md digests + DEPENDENCIES.md versions)" >&2
     if ! "$PYTHON" "$MANIFEST_MIRRORS" >/dev/null 2>&1; then
         echo "  manifest-mirrors: drift detected — run \`python3 tools/scripts/check_manifest_mirrors.py\` for details." >&2
-        fail=1
+        gate_fail "manifest-mirror drift"
     else
         echo "  manifest-mirrors: ok" >&2
     fi
@@ -848,7 +850,7 @@ if [ -f "$CODECOV_CFG_TEST" ] && [ -f "$CODECOV_COMP_TEST" ] && [ -f "$CODECOV_S
         echo "    python3 tools/scripts/test_coverage_surface_contract.py" >&2
         echo "    python3 tools/scripts/test_codecov_config.py" >&2
         echo "    python3 tools/scripts/test_codecov_components.py" >&2
-        fail=1
+        gate_fail "codecov-config drift"
     else
         echo "  codecov-config: ok" >&2
     fi
@@ -865,10 +867,10 @@ if [ -f "$TERMS_LINT" ] && [ -f "$SINGLE_BACKEND_GUARD" ]; then
     echo "▸ SignalGraph governance (single-backend + reserved terminology)" >&2
     if ! "$PYTHON" "$TERMS_LINT" >/dev/null; then
         echo "  terminology lint: reserved-phrase violation — run \`python3 tools/scripts/processing_model_terms_lint.py\` for details." >&2
-        fail=1
+        gate_fail "SignalGraph governance"
     fi
     if ! "$PYTHON" "$SINGLE_BACKEND_GUARD"; then
-        fail=1
+        gate_fail "SignalGraph governance"
     fi
 fi
 
@@ -880,7 +882,7 @@ if [ -f "$DESIGNATED_INIT_LINT" ]; then
     echo "" >&2
     echo "▸ designated-initializer lint (MSVC C7560)" >&2
     if ! "$PYTHON" "$DESIGNATED_INIT_LINT" --mode=changed --base "$BASE" >&2; then
-        fail=1
+        gate_fail "designated-initializer lint"
     fi
 fi
 
@@ -894,7 +896,7 @@ if [ -f "$WIN32_INCLUDE_LINT" ]; then
     echo "" >&2
     echo "▸ win32 include lint (MSVC C2589 min/max leak)" >&2
     if ! "$PYTHON" "$WIN32_INCLUDE_LINT" --root "$ROOT" >&2; then
-        fail=1
+        gate_fail "win32 include lint"
     fi
 fi
 
@@ -906,7 +908,7 @@ if [ -f "$FOUNDATION_INCLUDE_LINT" ]; then
     echo "" >&2
     echo "▸ foundation include lint (no upper-layer includes in core/platform|runtime|simd)" >&2
     if ! "$PYTHON" "$FOUNDATION_INCLUDE_LINT" --root "$ROOT" >&2; then
-        fail=1
+        gate_fail "foundation include lint"
     fi
 fi
 
@@ -917,7 +919,7 @@ if [ -f "$CORE_VELLUM_DIRECTION" ]; then
     echo "" >&2
     echo "▸ core -> Vellum direction (no vellum/ include or Vellum link under core/)" >&2
     if ! "$PYTHON" "$CORE_VELLUM_DIRECTION" --root "$ROOT" >&2; then
-        fail=1
+        gate_fail "core → Vellum direction"
     fi
 fi
 
@@ -925,7 +927,7 @@ if [ -f "$SAFE_PATH_LINT" ]; then
     echo "" >&2
     echo "▸ safe-path guard lint (untrusted paths screened by the shared helper)" >&2
     if ! "$PYTHON" "$SAFE_PATH_LINT" --root "$ROOT" >&2; then
-        fail=1
+        gate_fail "safe-path guard lint"
     fi
 fi
 
@@ -933,7 +935,7 @@ if [ -f "$TEXT_ENCODING_LINT" ]; then
     echo "" >&2
     echo "▸ text-encoding lint (Python text I/O names its encoding; per-file ratchet)" >&2
     if ! "$PYTHON" "$TEXT_ENCODING_LINT" --root "$ROOT" --base "$(git -C "$ROOT" merge-base "$BASE" HEAD)" >&2; then
-        fail=1
+        gate_fail "text-encoding lint"
     fi
 fi
 
@@ -944,7 +946,7 @@ if [ -f "$PYTHON_FLOOR_SYNTAX" ]; then
     echo "" >&2
     echo "▸ Python floor syntax (every tracked *.py parses on Python 3.11)" >&2
     if ! "$PYTHON" "$PYTHON_FLOOR_SYNTAX" >&2; then
-        fail=1
+        gate_fail "Python floor syntax"
     fi
 fi
 
@@ -958,7 +960,7 @@ if [ -f "$IMPORT_PROV" ] && [ -n "${PULP_IMPORT_PROVENANCE_DIRS:-}" ]; then
     echo "▸ import-provenance check" >&2
     # shellcheck disable=SC2086
     if ! "$PYTHON" "$IMPORT_PROV" $PULP_IMPORT_PROVENANCE_DIRS; then
-        fail=1
+        gate_fail "import-provenance check"
     fi
 fi
 
@@ -969,7 +971,7 @@ if [ -f "$FORK_GUARD" ]; then
     echo "" >&2
     echo "▸ scheduled-workflow fork-guard check" >&2
     if ! "$PYTHON" "$FORK_GUARD"; then
-        fail=1
+        gate_fail "scheduled-workflow fork-guard check"
     fi
 fi
 
@@ -978,7 +980,7 @@ if [ -f "$FORK_RUNNER_GUARD" ]; then
     echo "" >&2
     echo "▸ fork-runner guard check" >&2
     if ! "$PYTHON" "$FORK_RUNNER_GUARD"; then
-        fail=1
+        gate_fail "fork-runner guard check"
     fi
 fi
 
@@ -988,7 +990,7 @@ if [ -f "$SCHEDULE_BACKSTOP" ]; then
     echo "" >&2
     echo "▸ schedule-backstop manifest check" >&2
     if ! "$PYTHON" "$SCHEDULE_BACKSTOP" --root "$ROOT"; then
-        fail=1
+        gate_fail "schedule-backstop manifest check"
     fi
 fi
 
@@ -1022,7 +1024,7 @@ if [ -f "$CONFLICT_MARKER_GUARD" ]; then
     echo "" >&2
     echo "▸ conflict-marker guard (no committed <<<<<<< / ======= / >>>>>>>)" >&2
     if ! "$PYTHON" "$CONFLICT_MARKER_GUARD"; then
-        fail=1
+        gate_fail "conflict-marker guard"
     fi
 fi
 
@@ -1036,7 +1038,7 @@ if [ -f "$THREAD_ASSERT_GUARD" ]; then
     echo "" >&2
     echo "▸ thread-safe-assertions guard (no Catch2 assert in a worker thread)" >&2
     if ! "$PYTHON" "$THREAD_ASSERT_GUARD"; then
-        fail=1
+        gate_fail "thread-safe-assertions guard"
     fi
 fi
 
@@ -1050,7 +1052,7 @@ if [ -f "$UNBOUNDED_WAIT_LINT" ]; then
     echo "" >&2
     echo "▸ unbounded-wait lint (a test wait must be able to time out)" >&2
     if ! "$PYTHON" "$UNBOUNDED_WAIT_LINT" --base "$BASE"; then
-        fail=1
+        gate_fail "unbounded-wait lint"
     fi
 fi
 
@@ -1061,7 +1063,7 @@ if [ -f "$RAW_PID_PROBE_LINT" ]; then
     echo "" >&2
     echo "▸ raw pid-probe lint (no os.kill(pid, 0); Ctrl+C on Windows)" >&2
     if ! "$PYTHON" "$RAW_PID_PROBE_LINT" --root "$ROOT" >&2; then
-        fail=1
+        gate_fail "raw pid-probe lint"
     fi
 fi
 
@@ -1077,7 +1079,7 @@ if [ -f "$FRAMEWORK_NEUTRALITY" ]; then
     echo "" >&2
     echo "▸ framework-neutrality guard (no foreign-framework vocabulary in Pulp source)" >&2
     if ! "$PYTHON" "$FRAMEWORK_NEUTRALITY" --mode=report; then
-        fail=1
+        gate_fail "framework-neutrality guard"
     fi
 fi
 
@@ -1092,7 +1094,7 @@ if [ -f "$FORCED_RESTORE_LINT" ]; then
     echo "" >&2
     echo "▸ forced-restore lint (a forced worktree restore declares what it repairs)" >&2
     if ! "$PYTHON" "$FORCED_RESTORE_LINT"; then
-        fail=1
+        gate_fail "forced-restore lint"
     fi
 fi
 
@@ -1112,7 +1114,7 @@ if [ -f "$SEQ_EXPOSURE" ]; then
     echo "" >&2
     echo "▸ sequencer-exposure ledger (schema, evidence, append-only tombstones)" >&2
     if ! "$PYTHON" "$SEQ_EXPOSURE" --base "$BASE"; then
-        fail=1
+        gate_fail "sequencer-exposure ledger"
     fi
 fi
 
@@ -1127,7 +1129,7 @@ if [ -f "$NEG_CAPABILITY" ]; then
     echo "" >&2
     echo "▸ negative-capability registry (an authorable refusal carries a reason)" >&2
     if ! "$PYTHON" "$NEG_CAPABILITY" --repo-root "$ROOT"; then
-        fail=1
+        gate_fail "negative-capability registry"
     fi
 fi
 
@@ -1152,7 +1154,7 @@ if [ -f "$LABEL_EXCLUSION" ]; then
     case $label_exclusion_rc in
         0) ;;
         3) echo "[ctest-label-exclusion] NOT CHECKED: slow-test runtime of changed registrations (no local CTest timing data); the static label and TIMEOUT checks passed" >>"$not_checked_log" ;;
-        *) fail=1 ;;
+        *) gate_fail "ctest label-exclusion guard" ;;
     esac
 fi
 
@@ -1164,7 +1166,7 @@ if [ -f "$CLOCK_IN_TESTS" ]; then
     echo "" >&2
     echo "▸ clock-in-tests lint (a test must not read the real clock unmarked)" >&2
     if ! "$PYTHON" "$CLOCK_IN_TESTS" --base "$BASE"; then
-        fail=1
+        gate_fail "clock-in-tests lint"
     fi
 fi
 
@@ -1217,7 +1219,7 @@ if [ -f "$CAPABILITY_CONTRACT" ]; then
         echo "  reset the generated artifacts to the base FIRST, then set the higher" >&2
         echo "  constant and --write. Bumping the constant after a re-derive fails the" >&2
         echo "  opposite rule ('changed without a surface change')." >&2
-        fail=1
+        gate_fail "agent-capability contract"
     fi
 fi
 
@@ -1263,7 +1265,7 @@ EOF
         if [ "$prequeue_hit" -eq 1 ]; then
             echo "  ^ this violation is on a path THIS push changes." >&2
             echo "    The merge queue rejects it and ejects the PRs batched with you." >&2
-            fail=1
+            gate_fail "pre-queue guard: ${prequeue_guard%.py}"
         else
             echo "  ^ pre-existing on $BASE; not on a path this push changes." >&2
             echo "    Not fatal here, and not a pass: it still reds the required gate." >&2
@@ -1289,7 +1291,7 @@ for local_gate in migration_note_guard.py text_encoding_lint.py script_inputs_pr
     echo "" >&2
     echo "▸ ${local_gate%.py}" >&2
     if ! "$PYTHON" "$local_path" --root "$ROOT" --base "$BASE" >&2; then
-        fail=1
+        gate_fail "${local_gate%.py}"
     fi
 done
 
@@ -1327,6 +1329,9 @@ elif [ "$fail" -eq 0 ]; then
     diff_cover_hint
     exit 0
 else
+    failed_gates_joined=$(printf '%s, ' "${failed_gates[@]}")
+    failed_gates_joined=${failed_gates_joined%, }
+    echo "gates: failed: ${failed_gates_joined}" >&2
     echo "gates: ✗ one or more gates failed (see above)." >&2
     echo "" >&2
     echo "  Fix the listed gate(s), then re-run gates.sh. After it goes" >&2

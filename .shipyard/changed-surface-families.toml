@@ -9183,6 +9183,44 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
+name = "script-readers-c0597fe6589d"
+paths = ["tools/scripts/test_gates_named_failures.py"]
+tests = [
+  "build-parallelism-guard",
+  "changed-surface-policy-inventory",
+  "changed-surface-policy-selftest",
+  "changed-surface-script-families-drift",
+  "changed-surface-script-families-selftest",
+  "changed-surface-shadow-plans-selftest",
+  "clean-worktree-planning-selftest",
+  "configure-only-selftest",
+  "flake-exoneration-selftest",
+  "gate-common-selftest",
+  "gates-named-failures-selftest",
+  "gpu-audio-provider-identity-selftest",
+  "gpu-dpr-runner-selftest",
+  "gpu-first-visible-acceptance-selftest",
+  "gpu-first-visible-campaign-selftest",
+  "gpu-first-visible-external-adapter-selftest",
+  "gpu-first-visible-role-producers-selftest",
+  "gpu-handoff-provenance-selftest",
+  "pr-head-affected-tests-selftest",
+  "pr-head-diff-scoped-registrations",
+  "prepush-receipt",
+  "prepush-refresh-push",
+  "reuse-policy-replay-selftest",
+  "sample-region-compat-baseline-selftest",
+  "vellum-watch-preflight-selftest",
+  "wide-non-native-selftest",
+]
+build_targets = ["pulp-cli"]
+supported_build_types = [
+  "debug",
+  "release",
+]
+risk_class = "low"
+
+[[families]]
 name = "agent-skill-docs"
 paths = [".agents/skills/*/SKILL.md"]
 tests = [
@@ -9547,6 +9585,7 @@ paths = [
   "tools/scripts/test_gallery_visual_diff.py",
   "tools/scripts/test_gate_python_imports_check.py",
   "tools/scripts/test_gate_suite_executed.py",
+  "tools/scripts/test_gates_named_failures.py",
   "tools/scripts/test_generate_vellum_cut_manifest.py",
   "tools/scripts/test_generate_vellum_ownership_projection.py",
   "tools/scripts/test_generate_widget_bridge_api.py",
@@ -10180,6 +10219,7 @@ paths = [
   "tools/scripts/test_gallery_visual_diff.py",
   "tools/scripts/test_gate_python_imports_check.py",
   "tools/scripts/test_gate_suite_executed.py",
+  "tools/scripts/test_gates_named_failures.py",
   "tools/scripts/test_generate_vellum_cut_manifest.py",
   "tools/scripts/test_generate_vellum_ownership_projection.py",
   "tools/scripts/test_generate_widget_bridge_api.py",
