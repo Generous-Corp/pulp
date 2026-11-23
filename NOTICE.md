@@ -2585,6 +2585,16 @@ SOFTWARE.
 
 ---
 
+## vellum-sdk
+
+The lock-pinned Vellum SDK release (`pulp.lock` `vellum.sdk_url`, tag and
+SHA-256 digest verified by the darwin-arm64 release leg), staged whole under the
+Pulp SDK's `share/pulp/vellum-sdk/<version>/sdk` and used to build the optional
+pulp-vellum bridge. It redistributes a Node.js runtime, TypeScript, esbuild,
+RmlUi, three.js and fonts under their own licenses, whose notices the bundler
+merges into the SDK's NOTICE.md. Vellum itself is MIT licensed, as for
+vellum-gpu-runtime above.
+
 ## VST3 SDK
 
 Copyright (c) 2026, Steinberg Media Technologies GmbH
