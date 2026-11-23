@@ -802,7 +802,7 @@ int cmd_create(const std::vector<std::string>& args) {
             return 1;
         }
     }
-    if (reject_missing_installed_vellum(ui, sdk_dir))
+    if (standalone_mode && reject_missing_installed_vellum(ui, sdk_dir))
         return 1;
 
     std::string vellum_editor;
