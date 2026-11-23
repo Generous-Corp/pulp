@@ -30,6 +30,30 @@ It does not capture devices, request permissions, run inference, own model
 weights, or write saved parameters from a provider thread. Those responsibilities
 stay with your application.
 
+## The default provider recipe
+
+For a new real-world demo, use this sequence before choosing a provider SDK:
+
+1. Capture or receive a complete observation away from the audio callback.
+2. Translate it into `ExternalInputFrame<N>` and publish it through one existing
+   bounded handoff such as `TripleBuffer`, OSC/IPC, MIDI, or WAM ingress.
+3. Submit it to `ExternalInputGate<N>` with a policy that defines confidence,
+   expiry, and restart behavior.
+4. Map only accepted values or events to existing parameters, modulation, MIDI,
+   or DSP state.
+5. Record the observation stream so the same input can be replayed without the
+   device or model.
+
+This recipe works for hand, face, pose, audio-feature, motion, HID, and custom
+ML providers. The provider adapter owns permissions, model loading, calibration,
+and provider-specific names. Pulp owns bounded transport expectations,
+validation, expiry, and the audio-side fallback. A provider can therefore be
+replaced without changing the processor.
+
+The first acceptance pass should prove three independent surfaces: provider
+permission and capture, accepted observation and mapping, and audible or MIDI
+output. A camera preview or successful model load proves only the first part.
+
 ## How the contract works
 
 A provider publishes one complete observation at a time. The frame carries a
