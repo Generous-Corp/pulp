@@ -91,7 +91,8 @@ static bool text_declares_pulp_vellum_target(const std::string& text) {
         const bool exact = !(std::isalnum(static_cast<unsigned char>(next)) || next == '-' ||
                              next == '_' || next == ':');
         const auto line_start = text.rfind('\n', pos);
-        const auto first = text.find_first_not_of(" \t", line_start == std::string::npos ? 0 : line_start + 1);
+        const auto first =
+            text.find_first_not_of(" \t", line_start == std::string::npos ? 0 : line_start + 1);
         const bool commented = first != std::string::npos && text[first] == '#';
         if (exact && !commented)
             return true;
@@ -107,7 +108,8 @@ static bool installed_pulp_package_has_vellum(const fs::path& prefix) {
 
 static bool installed_pulp_package_exists(const fs::path& prefix) {
     const auto cmake_dir = prefix / "lib" / "cmake" / "Pulp";
-    return fs::exists(cmake_dir / "PulpTargets.cmake") || fs::exists(cmake_dir / "PulpConfig.cmake");
+    return fs::exists(cmake_dir / "PulpTargets.cmake") ||
+           fs::exists(cmake_dir / "PulpConfig.cmake");
 }
 
 static bool reject_missing_installed_vellum(const std::string& ui, const fs::path& sdk_dir) {
@@ -141,8 +143,9 @@ static bool reject_missing_installed_vellum(const std::string& ui, const fs::pat
             continue;
         if (installed_pulp_package_has_vellum(prefix))
             return false;
-        std::cerr << "Error: --ui vellum needs the Pulp SDK's optional pulp-vellum integration; "
-                     "the installed SDK has no Pulp::vellum target. Install a Vellum-enabled SDK.\n";
+        std::cerr
+            << "Error: --ui vellum needs the Pulp SDK's optional pulp-vellum integration; "
+               "the installed SDK has no Pulp::vellum target. Install a Vellum-enabled SDK.\n";
         return true;
     }
     return false;

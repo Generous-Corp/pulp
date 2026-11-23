@@ -1401,8 +1401,9 @@ TEST_CASE("pulp-cpp create --ui vellum rejects an SDK exporting only Pulp::vellu
         SKIP("pulp binary not built");
     TempDir tmp("pulp-create-ui-vellum-audio-only");
     const auto sdk = tmp.path / "sdk";
-    write_file(sdk / "lib/cmake/Pulp/PulpTargets.cmake",
-               "# Pulp::vellum is not in this SDK\nadd_library(Pulp::vellum-audio STATIC IMPORTED)\n");
+    write_file(
+        sdk / "lib/cmake/Pulp/PulpTargets.cmake",
+        "# Pulp::vellum is not in this SDK\nadd_library(Pulp::vellum-audio STATIC IMPORTED)\n");
     ScopedEnvVar prefix("CMAKE_PREFIX_PATH", native_path_string(sdk).c_str());
     const auto out_dir = tmp.path / "AudioOnly";
     auto result = run_create({"create", "AudioOnly", "--ui", "vellum", "--output",
