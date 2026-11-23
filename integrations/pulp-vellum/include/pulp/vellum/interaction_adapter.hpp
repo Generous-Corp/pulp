@@ -36,26 +36,40 @@ class InteractionAdapter final {
         const auto events = batch.events_view();
         if (events.empty())
             return false;
-        const auto source = events.front().source_id;
-        auto epoch = events.front().epoch;
-        for (const auto& event : events)
-            if (event.source_id == source && event.epoch > epoch)
-                epoch = event.epoch;
-        if (has_source_ && (source != source_id_ || epoch < epoch_))
-            return false;
-        if (!has_source_ || source != source_id_ || epoch > epoch_) {
-            if (has_source_ && source != source_id_)
-                for (auto& pointer : pointers_)
-                    pointer = {};
-            source_id_ = source;
-            epoch_ = epoch;
-            has_source_ = true;
+        // Events arrive in the tracker's order, so the epoch is followed event
+        // by event: a batch may end one epoch (its cancels) and start the next.
+        // Another source, and a non-cancel event from an older epoch, are stale.
+        // A caller may hand over a batch out of order. Order it by (epoch,
+        // sequence) with a stable insertion sort, so events with equal keys,
+        // such as a tracker cancel followed by the press that caused it, keep
+        // their relative order.
+        std::array<runtime::InteractionEvent, Capacity> ordered{};
+        std::size_t count = 0;
+        for (const auto& event : events) {
+            std::size_t at = count;
+            while (at > 0 && (ordered[at - 1].epoch > event.epoch ||
+                              (ordered[at - 1].epoch == event.epoch &&
+                               ordered[at - 1].sequence > event.sequence))) {
+                ordered[at] = ordered[at - 1];
+                --at;
+            }
+            ordered[at] = event;
+            ++count;
         }
         bool delivered = false;
-        for (const auto& event : events) {
-            if (event.source_id != source_id_ ||
-                (event.epoch != epoch_ && event.phase != runtime::InteractionPhase::cancel))
+        for (std::size_t i = 0; i < count; ++i) {
+            const auto& event = ordered[i];
+            if (!has_source_) {
+                source_id_ = event.source_id;
+                epoch_ = event.epoch;
+                has_source_ = true;
+            }
+            if (event.source_id != source_id_)
                 continue;
+            if (event.epoch < epoch_ && event.phase != runtime::InteractionPhase::cancel)
+                continue;
+            if (event.epoch > epoch_)
+                epoch_ = event.epoch;
             delivered = route(root, event) || delivered;
         }
         return delivered;
