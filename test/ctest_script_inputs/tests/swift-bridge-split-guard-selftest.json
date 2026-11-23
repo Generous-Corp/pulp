@@ -1,0 +1,10 @@
+{
+ "name": "swift-bridge-split-guard-selftest",
+ "record": {
+  "entry": "tools/scripts/test_swift_bridge_split_guard.py",
+  "inputs": [
+   "tools/scripts/test_swift_bridge_split_guard.py"
+  ],
+  "kind": "python"
+ }
+}
