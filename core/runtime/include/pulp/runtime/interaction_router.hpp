@@ -9,12 +9,6 @@
 
 namespace pulp::runtime {
 
-/// Bounded producer-to-consumer transport for discrete interactions.
-///
-/// The producer writes each event to independent UI and audio queues. The
-/// queues own their storage, and the consumer methods only copy into caller
-/// storage. A source restart, timeout, or queue overflow closes every live
-/// object with one cancel event per consumer.
 template <std::size_t QueueCapacity = 64, std::size_t MaxObjects = 64>
 class InteractionRouter final {
     static_assert(QueueCapacity > 0);
@@ -27,28 +21,28 @@ class InteractionRouter final {
         : source_timeout_ns_(source_timeout_ns), clock_(clock) {}
 
     bool publish(const InteractionEvent& event) noexcept {
-        if (event.phase == InteractionPhase::invalid)
+        typename InteractionTracker<MaxObjects>::Result output;
+        const auto verdict = tracker_.submit(event, output);
+        if (verdict != InteractionVerdict::accepted)
             return false;
-
-        if (!has_source_) {
-            begin_source(event.source_id, event.epoch);
-        } else if (event.source_id != source_id_ || event.epoch != epoch_) {
-            cancel_source(source_id_, epoch_, event);
-            begin_source(event.source_id, event.epoch);
+        if (event.provider_time_ns != 0)
+            last_event_ns_ = event.provider_time_ns;
+        else if (clock_ != nullptr)
+            last_event_ns_ = clock_();
+        bool delivered = true;
+        for (const auto& item : output.events_view()) {
+            if (fan_out(item))
+                continue;
+            delivered = false;
+            if (item.phase == InteractionPhase::cancel)
+                continue;
+            const auto cancelled = tracker_.reset();
+            for (const auto& cancel : cancelled.events_view())
+                (void)fan_out(cancel);
         }
-
-        const bool ui_pushed = ui_queue_.try_push(event);
-        const bool audio_pushed = audio_queue_.try_push(event);
-        if (!ui_pushed || !audio_pushed) {
-            cancel_source(event.source_id, event.epoch, event);
-            return false;
-        }
-
-        observe(event);
-        return true;
+        return delivered;
     }
 
-    /// Synthesizes source-loss cancels using the injected or configured clock.
     bool check_timeout() noexcept {
         if (clock_ == nullptr)
             return false;
@@ -56,15 +50,16 @@ class InteractionRouter final {
     }
 
     bool check_timeout(std::uint64_t now_ns) noexcept {
-        if (!has_source_ || source_timeout_ns_ == 0 || now_ns < last_event_ns_ ||
+        if (source_timeout_ns_ == 0 || last_event_ns_ == 0 || now_ns < last_event_ns_ ||
             now_ns - last_event_ns_ < source_timeout_ns_)
             return false;
-        InteractionEvent cause{};
-        cause.source_id = source_id_;
-        cause.epoch = epoch_;
-        cause.provider_time_ns = now_ns;
-        const bool cancelled = cancel_source(source_id_, epoch_, cause);
+        const auto output = tracker_.advance(now_ns - last_event_ns_, source_timeout_ns_);
         last_event_ns_ = now_ns;
+        bool cancelled = false;
+        for (const auto& item : output.events_view()) {
+            cancelled = true;
+            (void)fan_out(item);
+        }
         return cancelled;
     }
 
@@ -88,100 +83,32 @@ class InteractionRouter final {
     }
 
     void reset() noexcept {
-        source_id_ = 0;
-        epoch_ = 0;
+        const auto output = tracker_.reset();
+        for (const auto& item : output.events_view())
+            (void)fan_out(item);
         last_event_ns_ = 0;
-        has_source_ = false;
-        for (auto& object : objects_)
-            object = {};
-        for (auto& event : pending_ui_)
-            event = {};
-        for (auto& event : pending_audio_)
-            event = {};
     }
 
   private:
-    struct LiveObject {
-        std::uint32_t source_id = 0;
-        std::uint32_t epoch = 0;
-        std::uint32_t object_id = 0;
-        bool active = false;
-    };
-
-    void begin_source(std::uint32_t source_id, std::uint32_t epoch) noexcept {
-        source_id_ = source_id;
-        epoch_ = epoch;
-        has_source_ = true;
-        last_event_ns_ = 0;
-        for (auto& object : objects_)
-            object = {};
-    }
-
-    std::size_t find_object(std::uint32_t source_id, std::uint32_t epoch,
-                            std::uint32_t object_id) const noexcept {
-        for (std::size_t i = 0; i < objects_.size(); ++i) {
-            const auto& object = objects_[i];
-            if (object.active && object.source_id == source_id && object.epoch == epoch &&
-                object.object_id == object_id)
-                return i;
+    bool fan_out(const InteractionEvent& event) noexcept {
+        const bool ui_pushed = ui_queue_.try_push(event);
+        const bool audio_pushed = audio_queue_.try_push(event);
+        if (event.phase == InteractionPhase::cancel) {
+            if (!ui_pushed)
+                (void)remember_pending(pending_ui_, event);
+            if (!audio_pushed)
+                (void)remember_pending(pending_audio_, event);
         }
-        return objects_.size();
-    }
-
-    std::size_t allocate_object(std::uint32_t source_id, std::uint32_t epoch,
-                                std::uint32_t object_id) noexcept {
-        for (std::size_t i = 0; i < objects_.size(); ++i) {
-            if (!objects_[i].active) {
-                objects_[i] = {source_id, epoch, object_id, true};
-                return i;
-            }
-        }
-        return objects_.size();
-    }
-
-    void observe(const InteractionEvent& event) noexcept {
-        last_event_ns_ = event.provider_time_ns;
-        if (last_event_ns_ == 0 && clock_ != nullptr)
-            last_event_ns_ = clock_();
-        auto position = find_object(event.source_id, event.epoch, event.object_id);
-        if (event.phase == InteractionPhase::press) {
-            if (position == objects_.size())
-                (void)allocate_object(event.source_id, event.epoch, event.object_id);
-        } else if (event.phase == InteractionPhase::release ||
-                   event.phase == InteractionPhase::cancel) {
-            if (position != objects_.size())
-                objects_[position] = {};
-        }
-    }
-
-    bool cancel_source(std::uint32_t source_id, std::uint32_t epoch,
-                       const InteractionEvent& cause) noexcept {
-        bool cancelled = false;
-        for (auto& object : objects_) {
-            if (!object.active || object.source_id != source_id || object.epoch != epoch)
-                continue;
-            InteractionEvent cancel = cause;
-            cancel.source_id = source_id;
-            cancel.epoch = epoch;
-            cancel.object_id = object.object_id;
-            cancel.phase = InteractionPhase::cancel;
-            if (!ui_queue_.try_push(cancel))
-                (void)remember_pending(pending_ui_, cancel);
-            if (!audio_queue_.try_push(cancel))
-                (void)remember_pending(pending_audio_, cancel);
-            object = {};
-            cancelled = true;
-        }
-        return cancelled;
+        return ui_pushed && audio_pushed;
     }
 
     static bool pop_pending(std::array<InteractionEvent, MaxObjects>& pending,
                             InteractionEvent& event) noexcept {
-        for (std::size_t i = 0; i < pending.size(); ++i) {
-            if (pending[i].phase != InteractionPhase::cancel)
+        for (auto& slot : pending) {
+            if (slot.phase != InteractionPhase::cancel)
                 continue;
-            event = pending[i];
-            pending[i] = {};
+            event = slot;
+            slot = {};
             return true;
         }
         return false;
@@ -189,6 +116,10 @@ class InteractionRouter final {
 
     static bool remember_pending(std::array<InteractionEvent, MaxObjects>& pending,
                                  const InteractionEvent& event) noexcept {
+        for (auto& slot : pending) {
+            if (slot.phase == InteractionPhase::cancel && slot.object_id == event.object_id)
+                return true;
+        }
         for (auto& slot : pending) {
             if (slot.phase == InteractionPhase::invalid) {
                 slot = event;
@@ -198,17 +129,14 @@ class InteractionRouter final {
         return false;
     }
 
+    InteractionTracker<MaxObjects> tracker_;
     SpscQueue<InteractionEvent, QueueCapacity> ui_queue_;
     SpscQueue<InteractionEvent, QueueCapacity> audio_queue_;
-    std::array<LiveObject, MaxObjects> objects_{};
     std::array<InteractionEvent, MaxObjects> pending_ui_{};
     std::array<InteractionEvent, MaxObjects> pending_audio_{};
-    std::uint32_t source_id_ = 0;
-    std::uint32_t epoch_ = 0;
     std::uint64_t last_event_ns_ = 0;
     std::uint64_t source_timeout_ns_ = 0;
     Clock clock_ = nullptr;
-    bool has_source_ = false;
 };
 
 } // namespace pulp::runtime

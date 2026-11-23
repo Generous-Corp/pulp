@@ -1,6 +1,7 @@
 // First, so this file proves the header compiles on its own, as a generated
 // editor package includes it.
 #include <pulp/runtime/interaction_event.hpp>
+#include <pulp/runtime/interaction_router.hpp>
 #include <pulp/vellum/editor.hpp>
 #include <pulp/vellum/interaction_adapter.hpp>
 
@@ -1187,6 +1188,43 @@ TEST_CASE("runtime interactions keep object pointers independent and cancel them
                          .x = 4.0f});
     REQUIRE_FALSE(adapter.deliver(view, after_cancel));
     REQUIRE(view.events.size() == 3);
+}
+
+TEST_CASE("tracker router adapter scales events and cancels each consumer once",
+          "[pulp-vellum][interaction]") {
+    InteractionView view;
+    pulp::vellum::InteractionAdapter adapter;
+    adapter.set_view_metrics(100.0f, 80.0f, 2.0f);
+    pulp::runtime::InteractionRouter<8, 8> router;
+    REQUIRE(router.publish({.source_id = 5,
+                            .epoch = 1,
+                            .sequence = 1,
+                            .object_id = 3,
+                            .phase = pulp::runtime::InteractionPhase::press,
+                            .x = .25f,
+                            .y = .5f}));
+    REQUIRE(router.publish({.source_id = 5,
+                            .epoch = 2,
+                            .sequence = 1,
+                            .object_id = 4,
+                            .phase = pulp::runtime::InteractionPhase::press,
+                            .x = .75f,
+                            .y = .25f}));
+    pulp::runtime::InteractionBatch<8> batch;
+    pulp::runtime::InteractionEvent event{};
+    while (router.try_pop_ui(event))
+        REQUIRE(batch.append(event));
+    REQUIRE(adapter.deliver(view, batch));
+    REQUIRE(view.events.size() == 3);
+    CHECK(view.events[0].phase == ::vellum::view::MousePhase::press);
+    CHECK(view.events[1].is_cancelled);
+    CHECK(view.events[2].position.x == Catch::Approx(150.0f));
+    CHECK(view.events[2].position.y == Catch::Approx(40.0f));
+
+    std::size_t audio_cancels = 0;
+    while (router.try_pop_audio(event))
+        audio_cancels += event.phase == pulp::runtime::InteractionPhase::cancel;
+    CHECK(audio_cancels == 1);
 }
 
 TEST_CASE("runtime interaction batch remains bounded", "[pulp-vellum][interaction]") {

@@ -419,6 +419,34 @@ TEST_CASE("interaction router synthesizes cancellation after queue overflow",
     CHECK(event.object_id == 4);
 }
 
+TEST_CASE("interaction router keeps one pending cancel per overflowed consumer",
+          "[runtime][interaction-router]") {
+    InteractionRouter<1, 4> router;
+    REQUIRE(router.publish({.source_id = 8,
+                            .epoch = 1,
+                            .sequence = 1,
+                            .object_id = 12,
+                            .phase = InteractionPhase::press}));
+    CHECK_FALSE(router.publish({.source_id = 8,
+                                .epoch = 1,
+                                .sequence = 2,
+                                .object_id = 12,
+                                .phase = InteractionPhase::move}));
+    InteractionEvent event{};
+    REQUIRE(router.try_pop_ui(event));
+    CHECK(event.phase == InteractionPhase::press);
+    REQUIRE(router.try_pop_ui(event));
+    CHECK(event.phase == InteractionPhase::cancel);
+    CHECK(event.object_id == 12);
+    CHECK_FALSE(router.try_pop_ui(event));
+    REQUIRE(router.try_pop_audio(event));
+    CHECK(event.phase == InteractionPhase::press);
+    REQUIRE(router.try_pop_audio(event));
+    CHECK(event.phase == InteractionPhase::cancel);
+    CHECK(event.object_id == 12);
+    CHECK_FALSE(router.try_pop_audio(event));
+}
+
 TEST_CASE("interaction router drains without heap allocation", "[runtime][interaction-router]") {
     REQUIRE(pulp::test::RtAllocationProbe::self_check());
     InteractionRouter<8, 4> router;

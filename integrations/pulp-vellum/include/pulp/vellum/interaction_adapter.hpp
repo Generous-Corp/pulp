@@ -13,17 +13,12 @@ namespace pulp::vellum {
 
 /// Routes bounded runtime interactions into one Vellum editor root.
 ///
-/// Object IDs are kept as independent pointer sessions. Events older than the
-/// current epoch are ignored, and a newer epoch closes the previous sessions.
-/// The adapter owns only fixed-capacity storage. Vellum's event type has no
+/// Object IDs are kept as independent pointer sessions. The adapter owns only
+/// fixed-capacity storage. Vellum's event type has no
 /// fields for hold, velocity, or confidence, so hold is delivered as a drag
 /// tick and those values are not represented in the Vellum event.
 ///
-/// A batch is bound to the source of its first event: events from any other
-/// source in the same batch are dropped without routing. deliver() returns true
-/// only when at least one event was routed, so a false result can be a
-/// legitimately dropped batch (stale epoch, other source, or a pointer that is
-/// not active) and is not an error.
+/// deliver() returns true only when at least one event was routed.
 class InteractionAdapter final {
   public:
     static constexpr std::size_t kMaxPointers = 64;
@@ -38,59 +33,40 @@ class InteractionAdapter final {
     bool deliver(::vellum::view::View& root,
                  const runtime::InteractionBatch<Capacity>& batch) noexcept {
         static_assert(Capacity <= kMaxPointers);
-        std::array<std::size_t, kMaxPointers> order{};
-        std::size_t ordered = 0;
-        bool delivered = false;
-        if (batch.count == 0)
-            return false;
         const auto events = batch.events_view();
         if (events.empty())
             return false;
-        const auto batch_source = events[0].source_id;
-        std::uint32_t batch_epoch = events[0].epoch;
-        for (std::size_t i = 1; i < events.size(); ++i) {
-            if (events[i].source_id == batch_source && events[i].epoch > batch_epoch)
-                batch_epoch = events[i].epoch;
-        }
-        if (!has_source_ || source_id_ != batch_source || !has_epoch_ || batch_epoch > epoch_) {
-            if (has_source_)
-                cancel_active(root);
-            source_id_ = batch_source;
+        const auto source = events.front().source_id;
+        auto epoch = events.front().epoch;
+        for (const auto& event : events)
+            if (event.source_id == source && event.epoch > epoch)
+                epoch = event.epoch;
+        if (has_source_ && (source != source_id_ || epoch < epoch_))
+            return false;
+        if (!has_source_ || source != source_id_ || epoch > epoch_) {
+            if (has_source_ && source != source_id_)
+                for (auto& pointer : pointers_)
+                    pointer = {};
+            source_id_ = source;
+            epoch_ = epoch;
             has_source_ = true;
-            epoch_ = batch_epoch;
-            has_epoch_ = true;
-            for (auto& pointer : pointers_)
-                pointer = {};
         }
-
-        for (std::size_t i = 0; i < events.size(); ++i) {
-            const auto& event = events[i];
-            if (event.source_id != source_id_ || event.epoch != epoch_)
+        bool delivered = false;
+        for (const auto& event : events) {
+            if (event.source_id != source_id_ ||
+                (event.epoch != epoch_ && event.phase != runtime::InteractionPhase::cancel))
                 continue;
-            std::size_t position = ordered;
-            while (position > 0 && events[order[position - 1]].sequence > event.sequence) {
-                order[position] = order[position - 1];
-                --position;
-            }
-            order[position] = i;
-            ++ordered;
-        }
-
-        for (std::size_t i = 0; i < ordered; ++i) {
-            const auto& event = events[order[i]];
-            if (route(root, event))
-                delivered = true;
+            delivered = route(root, event) || delivered;
         }
         return delivered;
     }
 
     void reset() noexcept {
-        source_id_ = 0;
-        has_source_ = false;
-        epoch_ = 0;
-        has_epoch_ = false;
         for (auto& pointer : pointers_)
             pointer = {};
+        source_id_ = 0;
+        epoch_ = 0;
+        has_source_ = false;
     }
 
   private:
@@ -114,17 +90,6 @@ class InteractionAdapter final {
             }
         }
         return pointers_.size();
-    }
-
-    void cancel_active(::vellum::view::View& root) noexcept {
-        runtime::InteractionEvent cancel{};
-        cancel.phase = runtime::InteractionPhase::cancel;
-        for (const auto& pointer : pointers_) {
-            if (!pointer.active)
-                continue;
-            cancel.object_id = pointer.object_id;
-            (void)route(root, cancel);
-        }
     }
 
     bool route(::vellum::view::View& root, const runtime::InteractionEvent& event) noexcept {
@@ -175,7 +140,6 @@ class InteractionAdapter final {
     std::uint32_t source_id_ = 0;
     std::uint32_t epoch_ = 0;
     bool has_source_ = false;
-    bool has_epoch_ = false;
     float view_width_ = 1.0f;
     float view_height_ = 1.0f;
     float backing_scale_ = 1.0f;

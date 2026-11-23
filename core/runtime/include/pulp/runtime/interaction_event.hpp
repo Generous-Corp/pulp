@@ -72,8 +72,8 @@ enum class InteractionVerdict : std::uint8_t {
 
 template <std::size_t MaxObjects = 16> class InteractionTracker {
   public:
-    static_assert(MaxObjects >= 1 && MaxObjects < 64);
-    using Result = InteractionBatch<MaxObjects + 1>;
+    static_assert(MaxObjects >= 1 && MaxObjects <= 64);
+    using Result = InteractionBatch<(MaxObjects < 64 ? MaxObjects + 1 : MaxObjects)>;
 
     InteractionVerdict submit(const InteractionEvent& event, Result& output) noexcept {
         output = {};
