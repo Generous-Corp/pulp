@@ -4,4 +4,5 @@ if (!bindWidgetToParam('dial', 'Gain'))
 on('dial', 'change', value => setParam('Gain', value));
 createLabel('initial', String(getParam('Gain')), '');
 createMeter('meter');
+createMeter('default-meter');
 createSpectrum('scope');

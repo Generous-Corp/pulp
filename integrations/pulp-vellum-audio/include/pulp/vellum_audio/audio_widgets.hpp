@@ -22,6 +22,10 @@ struct MeterBallistics;
 
 namespace pulp::vellum_audio {
 
+namespace detail {
+class AudioWidgetSampler;
+}
+
 /// A Vellum view that snapshots one meter channel at the UI tick.
 class LevelMeter final : public ::vellum::view::View,
                          public ::vellum::view::AccessibilityValueInterface,
@@ -80,7 +84,7 @@ class LevelMeter final : public ::vellum::view::View,
     }
 
   private:
-    friend void sample_audio_widgets(::vellum::view::View&, ::vellum::value::ValueFeed*);
+    friend class detail::AudioWidgetSampler;
     ::vellum::value::ValueFeed* feed_ = nullptr;
     std::size_t channel_ = 0;
     float rms_ = 0.0f;
@@ -199,7 +203,7 @@ class AnalyzerScope final : public ::vellum::view::View, public ::vellum::view::
     }
 
   private:
-    friend void sample_audio_widgets(::vellum::view::View&, ::vellum::value::ValueFeed*);
+    friend class detail::AudioWidgetSampler;
     bool map_bins_(const float* values, std::size_t count) noexcept;
     ::vellum::value::ValueFeed* feed_ = nullptr;
     std::size_t channel_ = 0;
@@ -213,5 +217,31 @@ class AnalyzerScope final : public ::vellum::view::View, public ::vellum::view::
     std::uint32_t quiet_ticks_ = 0;
     bool stale_ = true;
 };
+
+namespace detail {
+
+/// Keeps the audio widgets in one mounted editor ready for idle sampling.
+class AudioWidgetSampler {
+  public:
+    AudioWidgetSampler(::vellum::view::View& root, ::vellum::value::ValueFeed* feed) noexcept
+        : root_(root), feed_(feed) {}
+
+    /// Unbound displays use a matching widget ID or the first channel of their shape.
+    void mount();
+    void sample();
+
+  private:
+    struct Widget {
+        ::vellum::view::ViewCapture view;
+        void (*sample)(::vellum::view::View&) noexcept;
+    };
+
+    ::vellum::view::View& root_;
+    ::vellum::value::ValueFeed* feed_;
+    std::uint64_t mounted_generation_ = 0;
+    std::vector<Widget> widgets_;
+};
+
+} // namespace detail
 
 } // namespace pulp::vellum_audio

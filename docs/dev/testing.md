@@ -16,6 +16,15 @@ builds are unaffected.
 Coverage and sanitizers are **mutually exclusive**. Use separate build
 directories (`build-coverage/`, `build-asan/`, etc.) so they coexist.
 
+## Product test seams
+
+Product code that needs an environment-backed test hook includes
+`<pulp/format/test_env.hpp>` and reads it with `PULP_TEST_ENV("NAME")`. The
+macro calls `getenv` only when `PULP_ENABLE_TEST_SEAMS=ON`. Release builds
+default that option to `OFF`, where the expression is compiled as `nullptr`.
+Register each product seam name in `tools/cmake/release_artifact_forbidden.json`
+so the release-artifact scan rejects a shipped binary that still contains it.
+
 ## Coverage
 
 ### Run locally

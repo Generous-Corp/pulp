@@ -27,13 +27,6 @@ std::atomic<std::uint64_t> g_callouts{0};
 // loop re-arms it and a fire costs no reposition in the loop's timer list.
 constexpr CFTimeInterval kParked = 1.0e10;
 
-// A tenth of the period, at least a few milliseconds, at most half the period.
-CFTimeInterval repeating_tolerance(CFTimeInterval period) {
-    constexpr CFTimeInterval kMin = 0.005;
-    const CFTimeInterval tol = period / 10 > kMin ? period / 10 : kMin;
-    return tol > period / 2 ? period / 2 : tol;
-}
-
 // Repeating timers at least this long are aligned to a common grid.
 constexpr CFTimeInterval kGridMinPeriod = 0.05;
 
@@ -233,10 +226,11 @@ struct MainThreadTimerState : std::enable_shared_from_this<MainThreadTimerState>
             timer = fresh;
             native_interval = repeat;
         }
-        // Repeating timers may be coalesced by the system: timers of one
-        // process whose phases differ then wake the main thread together
-        // instead of once each. One-shots stay exact.
-        CFRunLoopTimerSetTolerance(timer, repeat > 0 ? repeating_tolerance(repeat) : 0);
+        // Tolerance stays zero for every timer. A non-zero tolerance makes
+        // CoreFoundation arm the timer through libdispatch instead of a
+        // plain kernel timer, which costs idle CPU; wake-ups are coalesced by
+        // the shared grid below instead.
+        CFRunLoopTimerSetTolerance(timer, 0);
         pending = true;
         period = repeat;
         // The first fire is exactly one delay away (the documented contract).

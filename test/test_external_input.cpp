@@ -42,6 +42,11 @@ TEST_CASE("interaction batches preserve identity and bounded capacity",
                               .provider_time_ns = 120,
                               .object_id = 9,
                               .phase = InteractionPhase::press}));
+
+    // Malformed state (count already past capacity) must be rejected, not written past the array.
+    InteractionBatch<2> malformed;
+    malformed.count = static_cast<std::uint8_t>(malformed.events.size() + 1);
+    CHECK_FALSE(malformed.append({}));
 }
 
 template <std::size_t N = 3>

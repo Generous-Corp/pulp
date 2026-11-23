@@ -410,6 +410,15 @@ class EditorAutomation {
     }
 };
 
+/// Optional attach diagnostics for an editor implementation.
+class EditorAttachDiagnostics {
+  public:
+    virtual std::string_view attach_failure_reason() const noexcept = 0;
+
+  protected:
+    ~EditorAttachDiagnostics() = default;
+};
+
 /// One editor instance in one native window.
 ///
 /// Lifecycle: the factory creates it unattached. The size members may be
@@ -441,6 +450,9 @@ class Editor {
     /// Attach to and start drawing into `parent`. False if the editor cannot
     /// attach to it, in which case it stays unattached.
     virtual bool attach(const NativeParent& parent) = 0;
+
+    /// After a failed attach, an editor-owned reason or an empty view.
+    std::string_view attach_error() const noexcept;
 
     /// Stop drawing and remove everything the editor added to its parent. The
     /// parent is still valid during the call. A no-op when not attached.

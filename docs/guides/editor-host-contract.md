@@ -115,6 +115,11 @@ native attachment and before detachment or invalidation, respectively. Use
 session through processor state should check that the published session still
 belongs to that root before clearing it.
 
+View damage schedules repaint through the Vellum host. The idle tick also
+requests a frame when the editor's visual feed has published new data. If Dawn
+bootstrap fails, the editor logs the failure once per plug-in image and rejects
+attachment. The caller can read the reason through `Editor::attach_error()`.
+
 For a root-owned `vellum::view::ScriptedUiSession`, construct the session with
 `env.params` and register the existing JSON dispatcher with
 `session.attach_native_message_handler(name, env.native_message_handler(dispatch))`.
