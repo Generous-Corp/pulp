@@ -114,6 +114,12 @@ template <std::size_t MaxObjects = 16> class InteractionTracker {
         if (source_seen_ && event.epoch == epoch_ && event.sequence <= sequence_)
             return event.sequence == sequence_ ? InteractionVerdict::unchanged
                                                : InteractionVerdict::rejected_order;
+        if (source_seen_ && event.epoch > epoch_) {
+            cancel_active(output, event);
+            epoch_ = event.epoch;
+            active_ = {};
+            ages_ = {};
+        }
         const auto terminal_slot = find(event.object_id);
         if (terminal_slot >= 0 &&
             (event.phase == InteractionPhase::release || event.phase == InteractionPhase::cancel)) {
@@ -148,12 +154,6 @@ template <std::size_t MaxObjects = 16> class InteractionTracker {
         if (!source_seen_) {
             source_id_ = event.source_id;
             source_seen_ = true;
-        }
-        if (event.epoch > epoch_) {
-            cancel_active(output, event);
-            epoch_ = event.epoch;
-            active_ = {};
-            ages_ = {};
         }
         epoch_ = event.epoch;
         sequence_ = event.sequence;

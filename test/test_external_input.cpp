@@ -105,6 +105,34 @@ TEST_CASE("interaction tracker cancels held objects on restart and timeout",
     CHECK(tracker.active_count() == 0);
 }
 
+TEST_CASE("interaction tracker cancels every object on a restart terminal event",
+          "[runtime][interaction-event]") {
+    InteractionTracker<2> tracker;
+    InteractionBatch<3> result;
+    const auto press = [](std::uint32_t object_id, std::uint64_t sequence) {
+        return InteractionEvent{.source_id = 8,
+                                .epoch = 1,
+                                .sequence = sequence,
+                                .object_id = object_id,
+                                .phase = InteractionPhase::press,
+                                .x = .2f,
+                                .y = .4f,
+                                .confidence = .9f};
+    };
+    REQUIRE(tracker.submit(press(1, 1), result) == InteractionVerdict::accepted);
+    REQUIRE(tracker.submit(press(2, 2), result) == InteractionVerdict::accepted);
+    auto restart_release = press(1, 3);
+    restart_release.epoch = 2;
+    restart_release.phase = InteractionPhase::release;
+    REQUIRE(tracker.submit(restart_release, result) == InteractionVerdict::accepted);
+    REQUIRE(result.events_view().size() == 2);
+    CHECK(result.events_view()[0].phase == InteractionPhase::cancel);
+    CHECK(result.events_view()[0].object_id == 1);
+    CHECK(result.events_view()[1].phase == InteractionPhase::cancel);
+    CHECK(result.events_view()[1].object_id == 2);
+    CHECK(tracker.active_count() == 0);
+}
+
 TEST_CASE("interaction tracker expires each object independently and rejects stale epochs",
           "[runtime][interaction-event]") {
     InteractionTracker<2> tracker;
