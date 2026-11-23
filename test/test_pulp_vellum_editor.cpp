@@ -1,8 +1,8 @@
 // First, so this file proves the header compiles on its own, as a generated
 // editor package includes it.
+#include <pulp/runtime/interaction_event.hpp>
 #include <pulp/vellum/editor.hpp>
 #include <pulp/vellum/interaction_adapter.hpp>
-#include <pulp/runtime/interaction_event.hpp>
 
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
@@ -1188,12 +1188,12 @@ TEST_CASE("runtime interaction coordinates scale to Vellum backing pixels",
 
     pulp::runtime::InteractionBatch<> recycled;
     recycled.append({.source_id = 9,
-                      .epoch = 1,
-                      .sequence = 3,
-                      .object_id = 22,
-                      .phase = pulp::runtime::InteractionPhase::press,
-                      .x = 0.1f,
-                      .y = 0.1f});
+                     .epoch = 1,
+                     .sequence = 3,
+                     .object_id = 22,
+                     .phase = pulp::runtime::InteractionPhase::press,
+                     .x = 0.1f,
+                     .y = 0.1f});
     REQUIRE(adapter.deliver(view, recycled));
     REQUIRE(view.events.size() == 3);
     CHECK(view.events[2].pointer_id == view.events[0].pointer_id);

@@ -136,7 +136,7 @@ class InteractionAdapter final {
 
         const auto pointer_id = static_cast<int>(slot);
         const ::vellum::view::Point point{event.x * view_width_ * backing_scale_,
-                                           event.y * view_height_ * backing_scale_};
+                                          event.y * view_height_ * backing_scale_};
         const ::vellum::view::PointerAttributes attributes{
             .type = ::vellum::view::PointerType::touch, .pressure = 0.5f, .pointer_id = pointer_id};
 

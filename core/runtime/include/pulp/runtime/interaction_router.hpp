@@ -23,8 +23,7 @@ class InteractionRouter final {
   public:
     using Clock = std::uint64_t (*)() noexcept;
 
-    explicit InteractionRouter(std::uint64_t source_timeout_ns = 0,
-                               Clock clock = nullptr) noexcept
+    explicit InteractionRouter(std::uint64_t source_timeout_ns = 0, Clock clock = nullptr) noexcept
         : source_timeout_ns_(source_timeout_ns), clock_(clock) {}
 
     bool publish(const InteractionEvent& event) noexcept {
@@ -81,8 +80,12 @@ class InteractionRouter final {
         return pop_pending(pending_audio_, event);
     }
 
-    std::uint64_t ui_overflow_count() const noexcept { return ui_queue_.overflow_count(); }
-    std::uint64_t audio_overflow_count() const noexcept { return audio_queue_.overflow_count(); }
+    std::uint64_t ui_overflow_count() const noexcept {
+        return ui_queue_.overflow_count();
+    }
+    std::uint64_t audio_overflow_count() const noexcept {
+        return audio_queue_.overflow_count();
+    }
 
     void reset() noexcept {
         source_id_ = 0;
