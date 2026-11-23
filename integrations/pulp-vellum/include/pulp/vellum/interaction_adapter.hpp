@@ -79,22 +79,6 @@ class InteractionAdapter final {
         bool active = false;
     };
 
-    bool epoch_accepts(std::uint32_t epoch) noexcept {
-        if (!has_epoch_) {
-            epoch_ = epoch;
-            has_epoch_ = true;
-            return true;
-        }
-        if (epoch < epoch_)
-            return false;
-        if (epoch > epoch_) {
-            epoch_ = epoch;
-            for (auto& pointer : pointers_)
-                pointer = {};
-        }
-        return true;
-    }
-
     std::size_t find_pointer(std::uint32_t object_id) const noexcept {
         for (std::size_t i = 0; i < pointers_.size(); ++i)
             if (pointers_[i].active && pointers_[i].object_id == object_id)

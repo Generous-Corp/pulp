@@ -30,8 +30,6 @@ It does not capture devices, request permissions, run inference, own model
 weights, or write saved parameters from a provider thread. Those responsibilities
 stay with your application.
 
-## The default provider recipe
-
 ## Native editor interaction
 
 Runtime interaction producers can publish a fixed-capacity
@@ -41,6 +39,8 @@ Vellum pointer session, orders events by sequence, rejects stale epochs, and
 routes press, move, release, and cancel through Vellum's native pointer
 router. Vellum's `MouseEvent` has no hold, velocity, or confidence metadata, so
 hold is represented as a drag tick and those fields are not forwarded.
+
+## The default provider recipe
 
 For a new real-world demo, use this sequence before choosing a provider SDK:
 
