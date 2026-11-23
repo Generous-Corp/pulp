@@ -9,6 +9,13 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
      release's bullet block. See docs/guides/versioning.md § Release pipeline
      for the full end-to-end flow. -->
 
+<a id="v11991"></a>
+## [1.199.1] - 2026-11-23
+
+- release/version bump ([#12795](https://github.com/Generous-Corp/pulp/pull/12795))
+- lane/w release sdk pulp vellum ([#12791](https://github.com/Generous-Corp/pulp/pull/12791))
+- feature/audit swift bridge guard ([#12788](https://github.com/Generous-Corp/pulp/pull/12788))
+
 <a id="v11990"></a>
 ## [1.199.0] - 2026-11-23
 
@@ -13634,6 +13641,7 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/Generous-Corp/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/Generous-Corp/pulp/pull/2))
 
+[1.199.1]: https://github.com/Generous-Corp/pulp/releases/tag/v1.199.1
 [1.199.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.199.0
 [1.198.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.198.0
 [1.197.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.197.0
