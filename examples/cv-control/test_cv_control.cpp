@@ -6,6 +6,7 @@
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 #include <limits>
 #include <pulp/runtime/external_input.hpp>
+#include <pulp/runtime/interaction_event.hpp>
 #include <pulp/runtime/triple_buffer.hpp>
 #include <thread>
 #include <vector>
@@ -25,6 +26,39 @@ using pulp::examples::cv_control::ImuReplay;
 using pulp::examples::cv_control::ModelFrame;
 using pulp::examples::cv_control::ModelMapping;
 using pulp::examples::cv_control::ModelReplay;
+
+TEST_CASE("interaction batches preserve object identity and bounded capacity") {
+    pulp::runtime::InteractionBatch<2> batch;
+    REQUIRE(batch.append({.source_id = 4,
+                          .epoch = 2,
+                          .sequence = 10,
+                          .object_id = 7,
+                          .phase = pulp::runtime::InteractionPhase::press,
+                          .x = .25f,
+                          .y = .5f,
+                          .velocity = .8f,
+                          .confidence = .9f}));
+    REQUIRE(batch.append({.source_id = 4,
+                          .epoch = 2,
+                          .sequence = 11,
+                          .object_id = 7,
+                          .phase = pulp::runtime::InteractionPhase::release,
+                          .x = .3f,
+                          .y = .5f,
+                          .velocity = .2f,
+                          .confidence = .9f}));
+    CHECK(batch.count == 2);
+    CHECK(batch.events[0].object_id == batch.events[1].object_id);
+    CHECK_FALSE(batch.append({.source_id = 4,
+                              .epoch = 2,
+                              .sequence = 12,
+                              .object_id = 9,
+                              .phase = pulp::runtime::InteractionPhase::press}));
+
+    pulp::runtime::InteractionBatch<2> malformed;
+    malformed.count = malformed.events.size() + 1;
+    CHECK_FALSE(malformed.append({}));
+}
 
 struct ProcessorFixture {
     pulp::state::StateStore store;
