@@ -61,8 +61,15 @@ if(PULP_BUILD_TESTS AND TARGET Catch2::Catch2WithMain)
             endif()
             _pulp_vellum_scripted_package("scripted editor fixture" _scripted_package)
             target_link_libraries(pulp-test-pulp-vellum-editor PRIVATE "${_scripted_package}")
+            # The audio display widgets (meter, spectrum) need the view-audio
+            # provider, so without pulp-vellum-audio the script is the knob and
+            # label alone; main.js would throw at its first createMeter.
+            set(_scripted_fixture main-core.js)
+            if(TARGET pulp-vellum-audio)
+                set(_scripted_fixture main.js)
+            endif()
             _pulp_apply_ui_script_definition(pulp-test-pulp-vellum-editor
-                "${PULP_ROOT_DIR}/test/fixtures/scripted-editor/main.js")
+                "${PULP_ROOT_DIR}/test/fixtures/scripted-editor/${_scripted_fixture}")
             set_property(TARGET pulp-test-pulp-vellum-editor PROPERTY PULP_VELLUM_SCRIPTED_EDITOR TRUE)
         endif()
         catch_discover_tests(pulp-test-pulp-vellum-editor PROPERTIES LABELS pulp-vellum-editor)
