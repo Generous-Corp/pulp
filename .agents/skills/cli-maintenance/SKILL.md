@@ -3807,8 +3807,8 @@ add a case there when you extend either surface.
 ## Gotcha: `pulp create --ui vellum` must refuse an SDK without the bridge
 
 A generated `--ui vellum` project calls `pulp_add_vellum_editor_package`, which
-needs `Pulp::vellum` in the installed package. When the installed SDK (from
-`--sdk-dir` or `CMAKE_PREFIX_PATH`) has a Pulp CMake package without that
+needs `Pulp::vellum` in the installed package. When the installed SDK (the SDK `pulp create`
+resolves, or `CMAKE_PREFIX_PATH`) has a Pulp CMake package without that
 target, `cmd_create` refuses before writing anything, so nobody is left with a
 project that only fails later at configure. The shell-out test
 `rejects an installed SDK without Pulp::vellum` covers it.

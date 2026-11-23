@@ -80,17 +80,34 @@ static std::string create_flag_hint(const std::string& flag) {
     return "did you mean `--type`, `--template`, or `--manufacturer`?";
 }
 
-static bool installed_pulp_package_has_vellum(const fs::path& prefix) {
-    const auto cmake_dir = prefix / "lib" / "cmake" / "Pulp";
-    const auto targets = cmake_dir / "PulpTargets.cmake";
-    const auto config = cmake_dir / "PulpConfig.cmake";
-    if (!fs::exists(targets) && !fs::exists(config))
-        return false;
-    for (const auto& path : {targets, config}) {
-        if (fs::exists(path) && read_file_contents(path).find("Pulp::vellum") != std::string::npos)
+// True when `text` declares the exact `Pulp::vellum` target (not only
+// `Pulp::vellum-audio` or a comment that mentions it).
+static bool text_declares_pulp_vellum_target(const std::string& text) {
+    static const std::string needle = "Pulp::vellum";
+    std::size_t pos = 0;
+    while ((pos = text.find(needle, pos)) != std::string::npos) {
+        const auto after = pos + needle.size();
+        const char next = after < text.size() ? text[after] : '\0';
+        const bool exact = !(std::isalnum(static_cast<unsigned char>(next)) || next == '-' ||
+                             next == '_' || next == ':');
+        const auto line_start = text.rfind('\n', pos);
+        const auto first = text.find_first_not_of(" \t", line_start == std::string::npos ? 0 : line_start + 1);
+        const bool commented = first != std::string::npos && text[first] == '#';
+        if (exact && !commented)
             return true;
+        pos = after;
     }
     return false;
+}
+
+static bool installed_pulp_package_has_vellum(const fs::path& prefix) {
+    const auto targets = prefix / "lib" / "cmake" / "Pulp" / "PulpTargets.cmake";
+    return fs::exists(targets) && text_declares_pulp_vellum_target(read_file_contents(targets));
+}
+
+static bool installed_pulp_package_exists(const fs::path& prefix) {
+    const auto cmake_dir = prefix / "lib" / "cmake" / "Pulp";
+    return fs::exists(cmake_dir / "PulpTargets.cmake") || fs::exists(cmake_dir / "PulpConfig.cmake");
 }
 
 static bool reject_missing_installed_vellum(const std::string& ui, const fs::path& sdk_dir) {
@@ -100,10 +117,15 @@ static bool reject_missing_installed_vellum(const std::string& ui, const fs::pat
     if (!sdk_dir.empty())
         prefixes.push_back(sdk_dir);
     if (const char* env = std::getenv("CMAKE_PREFIX_PATH"); env && *env) {
+#ifdef _WIN32
+        const char separator = ';';
+#else
+        const char separator = ':';
+#endif
         std::string value = env;
         std::size_t start = 0;
         while (start <= value.size()) {
-            const auto end = value.find(':', start);
+            const auto end = value.find(separator, start);
             const auto item = value.substr(start, end == std::string::npos ? end : end - start);
             if (!item.empty())
                 prefixes.emplace_back(item);
@@ -112,16 +134,16 @@ static bool reject_missing_installed_vellum(const std::string& ui, const fs::pat
             start = end + 1;
         }
     }
+    // CMake resolves find_package(Pulp) from the first prefix that has the
+    // package, so only that prefix decides.
     for (const auto& prefix : prefixes) {
-        const auto cmake_dir = prefix / "lib" / "cmake" / "Pulp";
-        if ((fs::exists(cmake_dir / "PulpTargets.cmake") ||
-             fs::exists(cmake_dir / "PulpConfig.cmake")) &&
-            !installed_pulp_package_has_vellum(prefix)) {
-            std::cerr
-                << "Error: --ui vellum needs the Pulp SDK's optional pulp-vellum integration; "
-                   "the installed SDK has no Pulp::vellum target. Install a Vellum-enabled SDK.\n";
-            return true;
-        }
+        if (!installed_pulp_package_exists(prefix))
+            continue;
+        if (installed_pulp_package_has_vellum(prefix))
+            return false;
+        std::cerr << "Error: --ui vellum needs the Pulp SDK's optional pulp-vellum integration; "
+                     "the installed SDK has no Pulp::vellum target. Install a Vellum-enabled SDK.\n";
+        return true;
     }
     return false;
 }

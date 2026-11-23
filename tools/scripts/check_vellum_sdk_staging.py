@@ -4,20 +4,23 @@
 from __future__ import annotations
 
 import argparse
+import re
 from pathlib import Path
+
+
+TARGET_RE = re.compile(r"^\s*add_library\(\s*Pulp::vellum\s", re.MULTILINE)
 
 
 def check(prefix: Path) -> list[str]:
     errors: list[str] = []
-    if not (prefix / "include/pulp/vellum").is_dir():
-        errors.append("include/pulp/vellum is missing")
+    if not (prefix / "include/pulp/vellum/editor.hpp").is_file():
+        errors.append("include/pulp/vellum/editor.hpp is missing")
 
-    libraries = list((prefix / "lib").glob("libpulp-vellum.*"))
-    if not libraries:
-        errors.append("the pulp-vellum library is missing from lib")
+    if not (prefix / "lib/libpulp-vellum.a").is_file():
+        errors.append("lib/libpulp-vellum.a is missing")
 
     targets = prefix / "lib/cmake/Pulp/PulpTargets.cmake"
-    if not targets.is_file() or "Pulp::vellum" not in targets.read_text(encoding="utf-8"):
+    if not targets.is_file() or not TARGET_RE.search(targets.read_text(encoding="utf-8")):
         errors.append("the installed CMake package has no Pulp::vellum target")
     return errors
 

@@ -1172,8 +1172,6 @@ namespace pulp::vellum {
 struct ParamModel { int resolve(const char*) { return 0; } };
 struct EditorEnv { ParamModel params; };
 }
-
-
 )");
     write_file(vellum_include / "pulp" / "vellum" / "editor.hpp", R"(
 #pragma once
@@ -1393,6 +1391,25 @@ TEST_CASE("pulp-cpp create --ui vellum rejects an installed SDK without Pulp::ve
     REQUIRE(result.exit_code != 0);
     CHECK(result.stderr_output.find("Pulp SDK's optional pulp-vellum integration") !=
           std::string::npos);
+    CHECK(result.stderr_output.find("Pulp::vellum") != std::string::npos);
+    CHECK_FALSE(fs::exists(out_dir));
+}
+
+TEST_CASE("pulp-cpp create --ui vellum rejects an SDK exporting only Pulp::vellum-audio",
+          "[cli][create][shellout][ui-mode]") {
+    if (!pulp_binary_exists())
+        SKIP("pulp binary not built");
+    TempDir tmp("pulp-create-ui-vellum-audio-only");
+    const auto sdk = tmp.path / "sdk";
+    write_file(sdk / "lib/cmake/Pulp/PulpTargets.cmake",
+               "# Pulp::vellum is not in this SDK\nadd_library(Pulp::vellum-audio STATIC IMPORTED)\n");
+    ScopedEnvVar prefix("CMAKE_PREFIX_PATH", native_path_string(sdk).c_str());
+    const auto out_dir = tmp.path / "AudioOnly";
+    auto result = run_create({"create", "AudioOnly", "--ui", "vellum", "--output",
+                              native_path_string(out_dir), "--no-build", "--ci"},
+                             source_root());
+    REQUIRE_FALSE(result.timed_out);
+    REQUIRE(result.exit_code != 0);
     CHECK(result.stderr_output.find("Pulp::vellum") != std::string::npos);
     CHECK_FALSE(fs::exists(out_dir));
 }

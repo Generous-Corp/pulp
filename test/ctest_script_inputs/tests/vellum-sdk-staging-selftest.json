@@ -3,7 +3,10 @@
  "record": {
   "entry": "tools/scripts/test_check_vellum_sdk_staging.py",
   "inputs": [
+   ".github/workflows/release-cli.yml",
+   "tools/cmake/PulpConfig.cmake.in",
    "tools/scripts/check_vellum_sdk_staging.py",
+   "tools/scripts/release_product_matrix.json",
    "tools/scripts/test_check_vellum_sdk_staging.py"
   ],
   "kind": "python"
