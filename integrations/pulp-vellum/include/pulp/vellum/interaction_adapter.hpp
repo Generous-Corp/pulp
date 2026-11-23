@@ -22,6 +22,12 @@ class InteractionAdapter final {
   public:
     static constexpr std::size_t kMaxPointers = 64;
 
+    void set_view_metrics(float width, float height, float backing_scale = 1.0f) noexcept {
+        view_width_ = width;
+        view_height_ = height;
+        backing_scale_ = backing_scale;
+    }
+
     template <std::size_t Capacity>
     bool deliver(::vellum::view::View& root,
                  const runtime::InteractionBatch<Capacity>& batch) noexcept {
@@ -34,10 +40,12 @@ class InteractionAdapter final {
         const auto batch_source = batch.events[0].source_id;
         std::uint32_t batch_epoch = batch.events[0].epoch;
         for (std::size_t i = 1; i < batch.count; ++i) {
-            if (batch.events[i].source_id == batch_source && batch.events[i].epoch > batch_epoch)
-                batch_epoch = batch.events[i].epoch;
+            if (events[i].source_id == batch_source && events[i].epoch > batch_epoch)
+                batch_epoch = events[i].epoch;
         }
         if (!has_source_ || source_id_ != batch_source || !has_epoch_ || batch_epoch > epoch_) {
+            if (has_source_)
+                cancel_active(root);
             source_id_ = batch_source;
             has_source_ = true;
             epoch_ = batch_epoch;
@@ -46,12 +54,13 @@ class InteractionAdapter final {
                 pointer = {};
         }
 
-        for (std::size_t i = 0; i < batch.count; ++i) {
+        const auto events = batch.events_view();
+        for (std::size_t i = 0; i < events.size(); ++i) {
             const auto& event = batch.events[i];
             if (event.source_id != source_id_ || event.epoch != epoch_)
                 continue;
             std::size_t position = ordered;
-            while (position > 0 && batch.events[order[position - 1]].sequence > event.sequence) {
+            while (position > 0 && events[order[position - 1]].sequence > event.sequence) {
                 order[position] = order[position - 1];
                 --position;
             }
@@ -60,7 +69,7 @@ class InteractionAdapter final {
         }
 
         for (std::size_t i = 0; i < ordered; ++i) {
-            const auto& event = batch.events[order[i]];
+            const auto& event = events[order[i]];
             if (route(root, event))
                 delivered = true;
         }
@@ -99,6 +108,17 @@ class InteractionAdapter final {
         return pointers_.size();
     }
 
+    void cancel_active(::vellum::view::View& root) noexcept {
+        runtime::InteractionEvent cancel{};
+        cancel.phase = runtime::InteractionPhase::cancel;
+        for (const auto& pointer : pointers_) {
+            if (!pointer.active)
+                continue;
+            cancel.object_id = pointer.object_id;
+            (void)route(root, cancel);
+        }
+    }
+
     bool route(::vellum::view::View& root, const runtime::InteractionEvent& event) noexcept {
         using runtime::InteractionPhase;
         const auto existing = find_pointer(event.object_id);
@@ -113,7 +133,8 @@ class InteractionAdapter final {
         }
 
         const auto pointer_id = static_cast<int>(slot);
-        const ::vellum::view::Point point{event.x, event.y};
+        const ::vellum::view::Point point{event.x * view_width_ * backing_scale_,
+                                           event.y * view_height_ * backing_scale_};
         const ::vellum::view::PointerAttributes attributes{
             .type = ::vellum::view::PointerType::touch, .pressure = 0.5f, .pointer_id = pointer_id};
 
@@ -145,6 +166,9 @@ class InteractionAdapter final {
     std::uint32_t epoch_ = 0;
     bool has_source_ = false;
     bool has_epoch_ = false;
+    float view_width_ = 1.0f;
+    float view_height_ = 1.0f;
+    float backing_scale_ = 1.0f;
 };
 
 } // namespace pulp::vellum
