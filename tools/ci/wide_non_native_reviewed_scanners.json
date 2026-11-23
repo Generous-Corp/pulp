@@ -6,6 +6,7 @@
     "tools/ci/test_source_selftests.py": "walks temporary trees",
     "tools/scripts/test_configure_only.py": "walks the temporary build trees it configures",
     "tools/scripts/test_check_apple_bundle_signing.py": "walks the temporary bundles it builds",
+    "tools/scripts/test_check_vellum_sdk_staging.py": "walks the temporary SDK staging trees it builds",
     "tools/ci/test_drift_fast.py": "walks test/ for registration names; tools/ci routes to the native build",
     "tools/scripts/gate_python_imports_check.py": "reads the configured ctest inventory; runs in the pr-fast tier on the native gate",
     "tools/scripts/gpu_audio_p2_campaign.py": "authenticates the canonical tracked campaign driver with git ls-files; it does not walk tools/ payloads or scan non-native source trees",
