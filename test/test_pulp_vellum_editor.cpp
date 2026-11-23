@@ -1074,7 +1074,6 @@ TEST_CASE("Vellum editor host opens on the plug-in's declared editor colour",
     }
 }
 
-
 class InteractionView final : public ::vellum::view::View {
   public:
     InteractionView() = default;
@@ -1091,18 +1090,27 @@ TEST_CASE("runtime interactions route in sequence order and reject stale epochs"
     InteractionView view;
     pulp::vellum::InteractionAdapter adapter;
     pulp::runtime::InteractionBatch<> batch;
-    batch.append({.epoch = 4, .sequence = 2, .object_id = 7,
-                  .phase = pulp::runtime::InteractionPhase::move, .x = 2.0f});
-    batch.append({.epoch = 4, .sequence = 1, .object_id = 7,
-                  .phase = pulp::runtime::InteractionPhase::press, .x = 1.0f});
+    batch.append({.epoch = 4,
+                  .sequence = 2,
+                  .object_id = 7,
+                  .phase = pulp::runtime::InteractionPhase::move,
+                  .x = 2.0f});
+    batch.append({.epoch = 4,
+                  .sequence = 1,
+                  .object_id = 7,
+                  .phase = pulp::runtime::InteractionPhase::press,
+                  .x = 1.0f});
     REQUIRE(adapter.deliver(view, batch));
     REQUIRE(view.events.size() == 2);
     REQUIRE(view.events[0].phase == ::vellum::view::MousePhase::press);
     REQUIRE(view.events[1].phase == ::vellum::view::MousePhase::drag);
 
     pulp::runtime::InteractionBatch<> stale;
-    stale.append({.epoch = 3, .sequence = 3, .object_id = 7,
-                  .phase = pulp::runtime::InteractionPhase::release, .x = 3.0f});
+    stale.append({.epoch = 3,
+                  .sequence = 3,
+                  .object_id = 7,
+                  .phase = pulp::runtime::InteractionPhase::release,
+                  .x = 3.0f});
     REQUIRE(adapter.deliver(view, stale));
     REQUIRE(view.events.size() == 2);
 }
@@ -1112,20 +1120,32 @@ TEST_CASE("runtime interactions keep object pointers independent and cancel them
     InteractionView view;
     pulp::vellum::InteractionAdapter adapter;
     pulp::runtime::InteractionBatch<> batch;
-    batch.append({.epoch = 1, .sequence = 1, .object_id = 10,
-                  .phase = pulp::runtime::InteractionPhase::press, .x = 1.0f});
-    batch.append({.epoch = 1, .sequence = 2, .object_id = 11,
-                  .phase = pulp::runtime::InteractionPhase::press, .x = 2.0f});
-    batch.append({.epoch = 1, .sequence = 3, .object_id = 10,
-                  .phase = pulp::runtime::InteractionPhase::cancel, .x = 3.0f});
+    batch.append({.epoch = 1,
+                  .sequence = 1,
+                  .object_id = 10,
+                  .phase = pulp::runtime::InteractionPhase::press,
+                  .x = 1.0f});
+    batch.append({.epoch = 1,
+                  .sequence = 2,
+                  .object_id = 11,
+                  .phase = pulp::runtime::InteractionPhase::press,
+                  .x = 2.0f});
+    batch.append({.epoch = 1,
+                  .sequence = 3,
+                  .object_id = 10,
+                  .phase = pulp::runtime::InteractionPhase::cancel,
+                  .x = 3.0f});
     REQUIRE(adapter.deliver(view, batch));
     REQUIRE(view.events.size() == 3);
     REQUIRE(view.events[0].pointer_id != view.events[1].pointer_id);
     REQUIRE(view.events[2].is_cancelled);
 
     pulp::runtime::InteractionBatch<> after_cancel;
-    after_cancel.append({.epoch = 1, .sequence = 4, .object_id = 10,
-                         .phase = pulp::runtime::InteractionPhase::move, .x = 4.0f});
+    after_cancel.append({.epoch = 1,
+                         .sequence = 4,
+                         .object_id = 10,
+                         .phase = pulp::runtime::InteractionPhase::move,
+                         .x = 4.0f});
     REQUIRE_FALSE(adapter.deliver(view, after_cancel));
     REQUIRE(view.events.size() == 3);
 }
