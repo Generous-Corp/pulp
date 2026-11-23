@@ -215,7 +215,7 @@ class CoreVellumDirectionTests(unittest.TestCase):
     def test_cmake_outside_core_is_scanned(self):
         for rel, text in (("CMakeLists.txt", "target_link_libraries(pulp PRIVATE Vellum::Gpu)\n"),
                           ("tools/cmake/PulpX.cmake", "find_package(VellumUi CONFIG)\n"),
-                          ("tools/cmake/PulpConfig.cmake.in", "find_dependency(Vellum)\n")):
+                          ("tools/cmake/PulpConfig.cmake.in", "find_package(Vellum CONFIG QUIET)\n")):
             with self.subTest(file=rel):
                 self._write(rel, text)
                 self.assertEqual(self._run(), 1)

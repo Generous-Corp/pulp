@@ -1262,6 +1262,11 @@ template <typename W, typename M, typename H> ParameterBinding bind_parameter(W&
     const auto cmake_lists = read_file(out_dir / "CMakeLists.txt");
     CHECK(cmake_lists.find("pulp_add_vellum_editor_package(VellumGain_VellumEditor") !=
           std::string::npos);
+    // The release SDK stages Vellum under <prefix>/share/pulp/vellum-sdk, so the
+    // generated find must hint the CMAKE_PREFIX_PATH entries itself.
+    CHECK(cmake_lists.find("share/pulp/vellum-sdk/*/sdk") != std::string::npos);
+    CHECK(cmake_lists.find("find_package(Vellum CONFIG REQUIRED PATHS ${_pulp_vellum_hints})") !=
+          std::string::npos);
     CHECK(cmake_lists.find("VIEW_HEADER \"vellumgain_view.hpp\"") != std::string::npos);
     CHECK(cmake_lists.find("VIEW_TYPE vellumgain::VellumGainView") != std::string::npos);
     CHECK(cmake_lists.find("VIEW_INCLUDE_DIRS \"${CMAKE_CURRENT_SOURCE_DIR}/src\"") !=
@@ -1371,4 +1376,46 @@ template <typename W, typename M, typename H> ParameterBinding bind_parameter(W&
     CHECK((missing_configure.stderr_output + missing_configure.stdout_output).find("Vellum") !=
           std::string::npos);
 #endif
+}
+
+TEST_CASE("pulp-cpp create --ui vellum rejects an installed SDK without Pulp::vellum",
+          "[cli][create][shellout][ui-mode]") {
+    if (!pulp_binary_exists())
+        SKIP("pulp binary not built");
+    TempDir tmp("pulp-create-ui-vellum-missing-bridge");
+    const auto sdk = tmp.path / "sdk";
+    write_file(sdk / "lib/cmake/Pulp/PulpConfig.cmake", "set(PACKAGE_VERSION \"1.0.0\")\n");
+    ScopedEnvVar prefix("CMAKE_PREFIX_PATH", native_path_string(sdk).c_str());
+    const auto out_dir = tmp.path / "MissingBridge";
+    auto result = run_create({"create", "MissingBridge", "--ui", "vellum", "--output",
+                              native_path_string(out_dir), "--no-build", "--ci"},
+                             source_root());
+    INFO(result.stdout_output);
+    INFO(result.stderr_output);
+    REQUIRE_FALSE(result.timed_out);
+    REQUIRE(result.exit_code != 0);
+    CHECK(result.stderr_output.find("Pulp SDK's optional pulp-vellum integration") !=
+          std::string::npos);
+    CHECK(result.stderr_output.find("Pulp::vellum") != std::string::npos);
+    CHECK_FALSE(fs::exists(out_dir));
+}
+
+TEST_CASE("pulp-cpp create --ui vellum rejects an SDK exporting only Pulp::vellum-audio",
+          "[cli][create][shellout][ui-mode]") {
+    if (!pulp_binary_exists())
+        SKIP("pulp binary not built");
+    TempDir tmp("pulp-create-ui-vellum-audio-only");
+    const auto sdk = tmp.path / "sdk";
+    write_file(sdk / "lib/cmake/Pulp/PulpTargets.cmake",
+               "# Pulp::vellum is not in this SDK\nset(_note \"Pulp::vellum\")\nif(TARGET "
+               "Pulp::vellum)\nendif()\nadd_library(Pulp::vellum-audio STATIC IMPORTED)\n");
+    ScopedEnvVar prefix("CMAKE_PREFIX_PATH", native_path_string(sdk).c_str());
+    const auto out_dir = tmp.path / "AudioOnly";
+    auto result = run_create({"create", "AudioOnly", "--ui", "vellum", "--output",
+                              native_path_string(out_dir), "--no-build", "--ci"},
+                             source_root());
+    REQUIRE_FALSE(result.timed_out);
+    REQUIRE(result.exit_code != 0);
+    CHECK(result.stderr_output.find("Pulp::vellum") != std::string::npos);
+    CHECK_FALSE(fs::exists(out_dir));
 }

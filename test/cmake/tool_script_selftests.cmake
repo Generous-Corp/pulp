@@ -98,6 +98,12 @@ if(Python3_Interpreter_FOUND)
         "tools/scripts/test_bundle_vellum_sdk.py")
     set_tests_properties(vellum-sdk-bundle-selftest PROPERTIES
         LABELS "tools;selftest" TIMEOUT 120 WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
+    # check_vellum_sdk_staging.py: the release refuses an SDK staging tree
+    # without the pulp-vellum headers, library or Pulp::vellum export.
+    add_test(NAME vellum-sdk-staging-selftest COMMAND ${Python3_EXECUTABLE}
+        "tools/scripts/test_check_vellum_sdk_staging.py")
+    set_tests_properties(vellum-sdk-staging-selftest PROPERTIES
+        LABELS "tools;selftest" TIMEOUT 120 WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
     add_test(NAME harness-adapters-base-selftest COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/harness/tests/test_adapters_base.py")
     set_tests_properties(harness-adapters-base-selftest PROPERTIES LABELS "tools;selftest" TIMEOUT 120)

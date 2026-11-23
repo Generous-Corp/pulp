@@ -5568,6 +5568,15 @@ uses, or the golden warms a cache the real jobs never touch.
 
 ## GitHub workflow gotchas
 
+- **An integration that is off by default is absent from the release SDK
+  unless the release leg turns it on.** `PULP_ENABLE_PULP_VELLUM` defaults
+  OFF, and only `vellum-sdk-consumer.yml` set it, so released SDKs carried no
+  `Pulp::vellum` and every `--ui vellum` project failed at configure. The
+  darwin-arm64 leg of `release-cli.yml` now fetches the `pulp.lock` Vellum SDK,
+  verifies its digest, builds the bridge, and fails the release through
+  `tools/scripts/check_vellum_sdk_staging.py` if the staged SDK lacks it. A
+  consumer-lane green says nothing about what the release ships.
+
 - **A pre-push gate that reads the working tree can pass a commit it never
   saw.** The push sends HEAD's commit; a file fixed on disk but not committed
   let a bad commit through the encoding lint. The hook now hands the pushed

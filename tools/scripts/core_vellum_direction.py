@@ -63,7 +63,7 @@ _GPU_RUNTIME = "gpu-runtime: the neutral GPU device layer (tools/cmake/PulpGpuRu
 _VELLUM_BRIDGE = ("pulp-vellum bridge: the installed SDK loads the Vellum package for the exported "
                   "pulp-vellum target (tools/cmake/PulpConfig.cmake.in)")
 ALLOWED_CMAKE: dict[tuple[str, str], tuple[int, str]] = {
-    ("tools/cmake/PulpConfig.cmake.in", "find_dependency(Vellum"): (1, _VELLUM_BRIDGE),
+    ("tools/cmake/PulpConfig.cmake.in", "find_package(Vellum"): (1, _VELLUM_BRIDGE),
     ("core/gpu_audio/CMakeLists.txt", "VellumGpuRuntime::Device"): (1, _GPU_RUNTIME),
     ("core/render/CMakeLists.txt", "VellumGpuRuntime::Device"): (1, _GPU_RUNTIME),
     ("core/render/CMakeLists.txt", "VellumGpuRuntime::DeviceApi"): (1, _GPU_RUNTIME),

@@ -236,6 +236,7 @@ setup, the audio-thread gating rule, and the reference plugin.
 | **SDL3** | zlib | Cross-platform windowing and input | [github.com/libsdl-org/SDL](https://github.com/libsdl-org/SDL) |
 | **Skia** | BSD-3-Clause | 2D GPU rendering engine (Graphite backend), pinned to `chrome/m158 @ be7d7c3e996e` with bundled HarfBuzz and ICU DEPS revisions locked for deterministic text shaping | [skia.org](https://skia.org) |
 | **vellum-gpu-runtime** | MIT | The GPU device layer Pulp's macOS device targets forward to (the Vellum repository's `gpu-runtime/`, pinned by commit); adds no third-party code | [github.com/Generous-Corp/vellum](https://github.com/Generous-Corp/vellum) |
+| **vellum-sdk** | MIT | The lock-pinned Vellum SDK release staged whole under the darwin-arm64 Pulp SDK's `share/pulp/vellum-sdk`; redistributes a Node.js runtime, TypeScript, esbuild, RmlUi, three.js and fonts under their own licenses | [github.com/Generous-Corp/vellum](https://github.com/Generous-Corp/vellum) |
 | **WebGPU-distribution** | MIT | WebGPU C API wrapper for Dawn | [github.com/eliemichel/WebGPU-distribution](https://github.com/eliemichel/WebGPU-distribution) |
 | **wgpu-native** | MIT OR Apache-2.0 | Prebuilt WebGPU runtime library staged beside desktop GPU modules; release assets SHA-256 pinned | [github.com/gfx-rs/wgpu-native](https://github.com/gfx-rs/wgpu-native) |
 

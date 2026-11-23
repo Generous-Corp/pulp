@@ -2822,6 +2822,44 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
+name = "script-readers-8ccf31cbe484"
+paths = ["tools/scripts/test_check_vellum_sdk_staging.py"]
+tests = [
+  "build-parallelism-guard",
+  "changed-surface-policy-inventory",
+  "changed-surface-policy-selftest",
+  "changed-surface-script-families-drift",
+  "changed-surface-script-families-selftest",
+  "changed-surface-shadow-plans-selftest",
+  "clean-worktree-planning-selftest",
+  "configure-only-selftest",
+  "flake-exoneration-selftest",
+  "gate-common-selftest",
+  "gpu-audio-provider-identity-selftest",
+  "gpu-dpr-runner-selftest",
+  "gpu-first-visible-acceptance-selftest",
+  "gpu-first-visible-campaign-selftest",
+  "gpu-first-visible-external-adapter-selftest",
+  "gpu-first-visible-role-producers-selftest",
+  "gpu-handoff-provenance-selftest",
+  "pr-head-affected-tests-selftest",
+  "pr-head-diff-scoped-registrations",
+  "prepush-receipt",
+  "prepush-refresh-push",
+  "reuse-policy-replay-selftest",
+  "sample-region-compat-baseline-selftest",
+  "vellum-sdk-staging-selftest",
+  "vellum-watch-preflight-selftest",
+  "wide-non-native-selftest",
+]
+build_targets = ["pulp-cli"]
+supported_build_types = [
+  "debug",
+  "release",
+]
+risk_class = "low"
+
+[[families]]
 name = "script-readers-91e87cc6b3fa"
 paths = ["tools/scripts/test_check_visual_python_deps.py"]
 tests = [
@@ -9460,6 +9498,7 @@ paths = [
   "tools/scripts/test_check_skip_not_pass.py",
   "tools/scripts/test_check_test_file_paths.py",
   "tools/scripts/test_check_transient_interaction_trace.py",
+  "tools/scripts/test_check_vellum_sdk_staging.py",
   "tools/scripts/test_check_visual_python_deps.py",
   "tools/scripts/test_check_web_plugin_docs.py",
   "tools/scripts/test_check_yoga_oracle_pin.py",
@@ -10093,6 +10132,7 @@ paths = [
   "tools/scripts/test_check_skip_not_pass.py",
   "tools/scripts/test_check_test_file_paths.py",
   "tools/scripts/test_check_transient_interaction_trace.py",
+  "tools/scripts/test_check_vellum_sdk_staging.py",
   "tools/scripts/test_check_visual_python_deps.py",
   "tools/scripts/test_check_web_plugin_docs.py",
   "tools/scripts/test_check_yoga_oracle_pin.py",
