@@ -223,6 +223,24 @@ class GpuRuntimePrefixTests(unittest.TestCase):
 
 
 class RepositoryLockTests(unittest.TestCase):
+    def test_repository_lock_tracks_published_vellum_release(self) -> None:
+        vellum = pulp_lock.load(LOCK_FILE)["vellum"]
+        self.assertEqual(vellum["tag"], "v0.2.2")
+        self.assertEqual(vellum["sha"], "2a01d9d61855c8682db44b96ec27ca3d2566ed81")
+        self.assertEqual(
+            vellum["sdk_url"],
+            "https://github.com/Generous-Corp/vellum/releases/download/"
+            "v0.2.2/vellum-sdk-0.2.2-darwin-arm64.tar.gz",
+        )
+        self.assertEqual(
+            vellum["sdk_digest"],
+            "d87655d847987a6aa50992b2e90c91cceb9ec15e84ca01d8ef69265275d048f2",
+        )
+        self.assertEqual(
+            vellum["gpu_runtime_digest"],
+            "c368786555cdfd28c44af6dc336b107d475de8bf493f25230ca297733f2a7c59",
+        )
+
     def test_repository_lock_validates(self) -> None:
         # The lock the build actually reads, not a temporary copy.
         self.assertEqual(LOCK_FILE.resolve(), (REPO / "pulp.lock").resolve())
