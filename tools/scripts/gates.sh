@@ -1329,7 +1329,7 @@ elif [ "$fail" -eq 0 ]; then
     diff_cover_hint
     exit 0
 else
-    failed_gates_joined=$(printf '%s, ' "${failed_gates[@]}")
+    failed_gates_joined=$(printf '%s, ' ${failed_gates[@]+"${failed_gates[@]}"})
     failed_gates_joined=${failed_gates_joined%, }
     echo "gates: failed: ${failed_gates_joined}" >&2
     echo "gates: ✗ one or more gates failed (see above)." >&2
