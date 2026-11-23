@@ -1,0 +1,11 @@
+{
+ "name": "vellum-sdk-staging-selftest",
+ "record": {
+  "entry": "tools/scripts/test_check_vellum_sdk_staging.py",
+  "inputs": [
+   "tools/scripts/check_vellum_sdk_staging.py",
+   "tools/scripts/test_check_vellum_sdk_staging.py"
+  ],
+  "kind": "python"
+ }
+}
