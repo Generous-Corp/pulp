@@ -5,6 +5,7 @@
 #include <limits>
 #include <pulp/runtime/external_input.hpp>
 #include <pulp/runtime/interaction_event.hpp>
+#include <pulp/runtime/interaction_router.hpp>
 #include <pulp/runtime/triple_buffer.hpp>
 #include <type_traits>
 
@@ -226,4 +227,23 @@ TEST_CASE("TouchDesigner sharing recipe fixture is replayed through the external
     REQUIRE(receipt.advances == 1);
     REQUIRE(receipt.expects == 5);
     REQUIRE(receipt.failed == 0);
+}
+
+TEST_CASE("interaction router orders events and cancels on epoch change",
+          "[runtime][interaction-router]") {
+    InteractionRouter<8, 8> router;
+    REQUIRE(router.publish({.source_id = 1, .epoch = 1, .sequence = 1,
+                            .object_id = 9, .phase = InteractionPhase::press}));
+    REQUIRE(router.publish({.source_id = 1, .epoch = 1, .sequence = 2,
+                            .object_id = 9, .phase = InteractionPhase::move}));
+    REQUIRE(router.publish({.source_id = 1, .epoch = 2, .sequence = 1,
+                            .object_id = 10, .phase = InteractionPhase::press}));
+    InteractionEvent event{};
+    REQUIRE(router.try_pop_ui(event));
+    CHECK(event.phase == InteractionPhase::press);
+    REQUIRE(router.try_pop_ui(event));
+    CHECK(event.phase == InteractionPhase::move);
+    REQUIRE(router.try_pop_ui(event));
+    CHECK(event.phase == InteractionPhase::cancel);
+    CHECK(event.object_id == 9);
 }
