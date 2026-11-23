@@ -3,10 +3,10 @@
 
 PULP_VST3_PLUGIN(
     {{VST3_UID}},
-    "{{PLUGIN_NAME}}",
+    PULP_PLUGIN_NAME,
     Steinberg::Vst::PlugType::kInstrumentSynth,
-    "{{MANUFACTURER}}",
-    "{{VERSION}}",
+    PULP_PLUGIN_VENDOR,
+    PULP_PLUGIN_VERSION,
     "",
     {{NAMESPACE}}::create_{{FACTORY_NAME}}
 )

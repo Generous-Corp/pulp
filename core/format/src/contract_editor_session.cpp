@@ -11,6 +11,7 @@
 
 #include <algorithm>
 #include <atomic>
+#include <exception>
 #include <optional>
 #include <utility>
 
@@ -200,7 +201,15 @@ ContractEditorSession::create(Processor& processor, state::StateStore& store,
         return nullptr;
     std::unique_ptr<ContractEditorSession> session(
         new ContractEditorSession(processor, store, std::move(hooks), idle));
-    session->editor_ = factory.create(processor, *session->context_, EditorRole::editor);
+    try {
+        session->editor_ = factory.create(processor, *session->context_, EditorRole::editor);
+    } catch (const std::exception& error) {
+        runtime::log_error("editor host: editor factory threw: {}", error.what());
+        return nullptr;
+    } catch (...) {
+        runtime::log_error("editor host: editor factory threw an unknown exception");
+        return nullptr;
+    }
     if (!session->editor_) {
         runtime::log_error("editor host: the editor factory built no editor");
         return nullptr;

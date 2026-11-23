@@ -74,10 +74,12 @@ function(_pulp_add_standalone target name bundle_id version processor_factory)
         message(FATAL_ERROR "pulp_add_plugin(${target}): Standalone requested but Pulp::standalone is unavailable")
     endif()
 
-    # Find standalone entry (convention: main.cpp in source dir)
+    # Find the standalone entry in the project root or src/.
     set(standalone_entry "")
     if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/main.cpp")
         set(standalone_entry "${CMAKE_CURRENT_SOURCE_DIR}/main.cpp")
+    elseif(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/src/main.cpp")
+        set(standalone_entry "${CMAKE_CURRENT_SOURCE_DIR}/src/main.cpp")
     endif()
 
     if(APPLE)

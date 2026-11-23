@@ -297,18 +297,19 @@ class TestCatch2Fetch(unittest.TestCase):
 
     def _check(self, text: str) -> list[str]:
         with TemporaryDirectory() as td:
-            d = Path(td) / "standalone" / "effect"
+            d = Path(td) / "standalone" / "common"
             d.mkdir(parents=True)
-            (d / "CMakeLists.txt.template").write_text(text, encoding="utf-8")
+            (d / "Testing.cmake.template").write_text(text, encoding="utf-8")
             return vct.check_catch2_fetch("standalone", Path(td) / "standalone")
 
     def test_real_standalone_templates_pass_and_are_scanned(self) -> None:
         root = _HERE.parent / "templates" / "standalone"
         templates = sorted(root.rglob("CMakeLists.txt.template"))
-        # Positive control: the scan must reach real Catch2 declarations.
         self.assertGreaterEqual(len(templates), 4)
         for t in templates:
-            self.assertIn("FetchContent_Declare(Catch2", t.read_text(encoding="utf-8"))
+            self.assertIn("include(cmake/Testing.cmake)", t.read_text(encoding="utf-8"))
+        shared = root / "common" / "Testing.cmake.template"
+        self.assertIn("FetchContent_Declare(Catch2", shared.read_text(encoding="utf-8"))
         self.assertEqual(vct.check_catch2_fetch("standalone", root), [])
 
     def test_good_shape_passes(self) -> None:

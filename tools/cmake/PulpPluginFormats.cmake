@@ -25,6 +25,19 @@ if(APPLE AND NOT COMMAND pulp_make_bundle_relocatable)
     include("${CMAKE_CURRENT_LIST_DIR}/PulpBundleRelocatable.cmake")
 endif()
 
+# Consumers may keep format entry points under src/entry. Preserve the
+# historical project-root lookup while allowing generated projects to use a
+# conventional source layout.
+function(_pulp_plugin_entry_path out_var filename)
+    if(DEFINED PULP_PLUGIN_ENTRY_DIR AND EXISTS "${PULP_PLUGIN_ENTRY_DIR}/${filename}")
+        set(${out_var} "${PULP_PLUGIN_ENTRY_DIR}/${filename}" PARENT_SCOPE)
+    elseif(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/${filename}")
+        set(${out_var} "${CMAKE_CURRENT_SOURCE_DIR}/${filename}" PARENT_SCOPE)
+    else()
+        set(${out_var} "" PARENT_SCOPE)
+    endif()
+endfunction()
+
 # Plug-in modules are loaded by hosts through a handful of exported entry
 # points, so everything a module does not reach from them is dead weight in the
 # shipped binary. On Apple, optimized builds link with -dead_strip. The linker
@@ -138,10 +151,9 @@ function(_pulp_add_vst3 target name bundle_id version manufacturer category)
     # Both emit exactly one GetPluginFactory symbol, so the export list is
     # unchanged — the bundle's factory just enumerates N classes internally.
     set(vst3_entry "")
-    if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/vst3_bundle_entry.cpp")
-        set(vst3_entry "${CMAKE_CURRENT_SOURCE_DIR}/vst3_bundle_entry.cpp")
-    elseif(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/vst3_entry.cpp")
-        set(vst3_entry "${CMAKE_CURRENT_SOURCE_DIR}/vst3_entry.cpp")
+    _pulp_plugin_entry_path(vst3_entry vst3_bundle_entry.cpp)
+    if(NOT vst3_entry)
+        _pulp_plugin_entry_path(vst3_entry vst3_entry.cpp)
     endif()
 
     if(PULP_${target}_NO_EDITOR)
@@ -241,6 +253,7 @@ function(_pulp_add_vst3 target name bundle_id version manufacturer category)
         set(PULP_PLUGIN_NAME "${name}")
         set(PULP_BUNDLE_ID "${bundle_id}")
         set(PULP_VERSION "${version}")
+        set(PULP_MACOS_DEPLOYMENT_TARGET "${CMAKE_OSX_DEPLOYMENT_TARGET}")
         configure_file(
             "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/PulpInfoPlist.vst3.in"
             "${CMAKE_CURRENT_BINARY_DIR}/${target}_Info.plist.vst3"
@@ -382,10 +395,9 @@ function(_pulp_add_clap target name bundle_id version manufacturer category)
     # `clap_entry.cpp` (PULP_CLAP_PLUGIN). Both emit exactly one clap_entry
     # symbol — the bundle's factory enumerates N plugins internally.
     set(clap_entry "")
-    if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/clap_bundle_entry.cpp")
-        set(clap_entry "${CMAKE_CURRENT_SOURCE_DIR}/clap_bundle_entry.cpp")
-    elseif(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/clap_entry.cpp")
-        set(clap_entry "${CMAKE_CURRENT_SOURCE_DIR}/clap_entry.cpp")
+    _pulp_plugin_entry_path(clap_entry clap_bundle_entry.cpp)
+    if(NOT clap_entry)
+        _pulp_plugin_entry_path(clap_entry clap_entry.cpp)
     endif()
 
     add_library(${target}_CLAP MODULE
@@ -448,6 +460,7 @@ function(_pulp_add_clap target name bundle_id version manufacturer category)
             set(PULP_PLUGIN_NAME "${name}")
             set(PULP_BUNDLE_ID "${bundle_id}")
             set(PULP_VERSION "${version}")
+            set(PULP_MACOS_DEPLOYMENT_TARGET "${CMAKE_OSX_DEPLOYMENT_TARGET}")
             configure_file(
                 "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/PulpInfoPlist.clap.in"
                 "${CMAKE_CURRENT_BINARY_DIR}/${target}_Info.plist.clap"
@@ -495,9 +508,7 @@ function(_pulp_add_lv2 target name bundle_id version manufacturer category)
 
     # Find LV2 entry point (convention: lv2_entry.cpp in source dir)
     set(lv2_entry "")
-    if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/lv2_entry.cpp")
-        set(lv2_entry "${CMAKE_CURRENT_SOURCE_DIR}/lv2_entry.cpp")
-    endif()
+    _pulp_plugin_entry_path(lv2_entry lv2_entry.cpp)
 
     add_library(${target}_LV2 MODULE
         ${PULP_${target}_CORE_OBJECTS}
@@ -591,10 +602,8 @@ function(_pulp_add_aax target name bundle_id version manufacturer category manuf
 
     pulp_ensure_aax_sdk_targets()
 
-    set(aax_entry "")
-    if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/aax_entry.cpp")
-        set(aax_entry "${CMAKE_CURRENT_SOURCE_DIR}/aax_entry.cpp")
-    else()
+    _pulp_plugin_entry_path(aax_entry aax_entry.cpp)
+    if(NOT aax_entry)
         message(FATAL_ERROR
             "pulp_add_plugin(${target}): AAX requested but no aax_entry.cpp was found "
             "in ${CMAKE_CURRENT_SOURCE_DIR}")
@@ -686,7 +695,7 @@ function(_pulp_add_aax target name bundle_id version manufacturer category manuf
 endfunction()
 
 # ── Internal: AU v2 target ──────────────────────────────────────────────
-function(_pulp_add_au target name bundle_id version manufacturer category plugin_code manufacturer_code accepts_midi)
+function(_pulp_add_au target name bundle_id version manufacturer category plugin_code manufacturer_code accepts_midi display_name)
     if(NOT _PULP_AUSDK_TARGET)
         message(FATAL_ERROR "pulp_add_plugin(${target}): AU requested but AudioUnitSDK is unavailable")
     endif()
@@ -695,10 +704,7 @@ function(_pulp_add_au target name bundle_id version manufacturer category plugin
     endif()
 
     # Find AU entry point (convention: au_v2_entry.cpp in source dir)
-    set(au_entry "")
-    if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/au_v2_entry.cpp")
-        set(au_entry "${CMAKE_CURRENT_SOURCE_DIR}/au_v2_entry.cpp")
-    endif()
+    _pulp_plugin_entry_path(au_entry au_v2_entry.cpp)
 
     if(PULP_${target}_NO_EDITOR)
         # No Pulp view editor: without PULP_AU_GUI there is no ViewBridge
@@ -813,6 +819,13 @@ function(_pulp_add_au target name bundle_id version manufacturer category plugin
         set(PULP_BUNDLE_ID "${bundle_id}")
         set(PULP_VERSION "${version}")
         set(PULP_MANUFACTURER "${manufacturer}")
+        # The display name lands inside an XML <string>; escape & first.
+        set(_pulp_au_display_xml "${display_name}")
+        string(REPLACE "&" "&amp;" _pulp_au_display_xml "${_pulp_au_display_xml}")
+        string(REPLACE "<" "&lt;" _pulp_au_display_xml "${_pulp_au_display_xml}")
+        string(REPLACE ">" "&gt;" _pulp_au_display_xml "${_pulp_au_display_xml}")
+        set(PULP_AU_DISPLAY_NAME "${_pulp_au_display_xml}")
+        set(PULP_MACOS_DEPLOYMENT_TARGET "${CMAKE_OSX_DEPLOYMENT_TARGET}")
         set(PULP_MANUFACTURER_CODE "${manufacturer_code}")
         set(PULP_PLUGIN_CODE "${plugin_code}")
         _pulp_metadata_resolve_au(_pulp_au_meta

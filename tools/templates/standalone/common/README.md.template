@@ -1,0 +1,27 @@
+# {{PLUGIN_NAME}}
+
+Processor and editor sources live in `src/`. Format entry points, when present,
+live in `src/entry/`. C++ tests live in `tests/`.
+
+Install the [Pulp CLI](https://www.generouscorp.com/pulp/), then run:
+
+```sh
+pulp build
+pulp test
+```
+
+`pulp.toml` selects the SDK version. To install an exact pin ahead of the build,
+run `pulp sdk install --version <version>`. A project using `latest` tracks the
+newest installed SDK. Use `pulp project pin <version>` to lock the version.
+
+For a private SDK build, run `pulp sdk install --local --print-path` from its
+Pulp checkout. Use the returned prefix with CMake in a fresh build directory:
+
+```sh
+cmake -S . -B build -DPulp_DIR=/path/to/sdk/lib/cmake/Pulp
+```
+
+Keep this path in your local CMake cache or shell environment. Projects created
+with `--ui vellum` need a Pulp SDK built with `PULP_ENABLE_PULP_VELLUM=ON` and a
+matching Vellum CMake package. Set `Vellum_DIR` for local builds and provision
+both packages on the CI runner.

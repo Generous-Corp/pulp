@@ -1684,6 +1684,12 @@ set_tests_properties(cmake-canvas-fontconfig-link PROPERTIES
     LABELS "cmake;format" TIMEOUT 60)
 
 if(UNIX)
+    if(Python3_Interpreter_FOUND)
+        add_test(NAME pulp.plugin-identity-contract
+            COMMAND "${Python3_EXECUTABLE}"
+                "${CMAKE_SOURCE_DIR}/tools/cmake/test_pulp_plugin_identity.py")
+        set_tests_properties(pulp.plugin-identity-contract PROPERTIES LABELS "pr")
+    endif()
     add_test(NAME cmake-plugin-module-fontconfig
         COMMAND ${CMAKE_COMMAND}
             -DPULP_SOURCE_DIR=${CMAKE_SOURCE_DIR}

@@ -1,10 +1,10 @@
 #include <pulp/vellum/param_port_model.hpp>
 
 #include <pulp/vellum/mapping.hpp>
+#include <pulp/runtime/log.hpp>
 
 #include <algorithm>
 #include <cmath>
-#include <stdexcept>
 #include <utility>
 
 namespace pulp::vellum {
@@ -35,15 +35,27 @@ ParamPortModel::ParamPortModel(format::ParamPort& port, Options options)
         const auto index = static_cast<std::uint32_t>(entries_.size());
         entries_.push_back({&info, 0});
         index_by_id_.emplace(info.id, index);
-        if (options_.resolver)
-            continue;
-        const auto claim = [&](std::string key) {
-            if (!index_by_key_.emplace(std::move(key), index).second)
-                throw std::invalid_argument("ParamPortModel: duplicate parameter key");
-        };
-        if (!info.name.empty())
-            claim(info.name);
-        claim(std::to_string(info.id));
+        index_by_id_key_.emplace(std::to_string(info.id), index);
+    }
+    if (!options_.resolver) {
+        for (std::uint32_t index = 0; index < entries_.size(); ++index) {
+            const auto& info = *entries_[index].info;
+            if (info.name.empty())
+                continue;
+            const std::string name = info.name;
+            if (const auto id = index_by_id_key_.find(name); id != index_by_id_key_.end()) {
+                if (id->second != index && ambiguous_names_.emplace(name).second)
+                    runtime::log_warn("ParamPortModel: ambiguous parameter name '{}'", name);
+                continue;
+            }
+            if (ambiguous_names_.contains(name))
+                continue;
+            if (!index_by_key_.emplace(name, index).second) {
+                index_by_key_.erase(name);
+                if (ambiguous_names_.emplace(name).second)
+                    runtime::log_warn("ParamPortModel: ambiguous parameter name '{}'", name);
+            }
+        }
     }
     port_subscription_ =
         port_.add_listener([this](state::ParamID id, float value) { on_port_change(id, value); });
@@ -78,6 +90,11 @@ ParamHandle ParamPortModel::resolve(std::string_view key) {
         const auto it = index_by_id_.find(*id);
         return it == index_by_id_.end() ? ParamHandle{} : ParamHandle{it->second, this};
     }
+    const auto id = index_by_id_key_.find(key);
+    if (id != index_by_id_key_.end())
+        return ParamHandle{id->second, this};
+    if (ambiguous_names_.contains(key))
+        return {};
     const auto it = index_by_key_.find(key);
     return it == index_by_key_.end() ? ParamHandle{} : ParamHandle{it->second, this};
 }

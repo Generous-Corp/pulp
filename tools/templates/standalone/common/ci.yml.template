@@ -1,0 +1,30 @@
+name: CI
+
+on: [push, pull_request]
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - name: Install Pulp CLI and SDK
+        shell: bash
+        run: |
+          version=$(sed -nE 's/^sdk_version[[:space:]]*=[[:space:]]*"([^"]+)".*/\1/p' pulp.toml)
+          case "$version" in
+            latest) args=() ;;
+            ''|*[!0-9.]*) echo "Invalid SDK version in pulp.toml" >&2; exit 1 ;;
+            *) args=(--version "$version") ;;
+          esac
+          curl -fsSLo "$RUNNER_TEMP/pulp-install.sh" https://www.generouscorp.com/pulp/install.sh
+          sh "$RUNNER_TEMP/pulp-install.sh" --no-modify-path "${args[@]}"
+          export PATH="$HOME/.pulp/bin:$PATH"
+          pulp sdk install "${args[@]}"
+          echo "$HOME/.pulp/bin" >> "$GITHUB_PATH"
+      - name: Build
+        run: pulp build --all
+      - name: Test
+        run: ctest --test-dir build --output-on-failure --no-tests=error

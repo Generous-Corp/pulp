@@ -255,6 +255,7 @@ function(pulp_declare_standalone_document_type target)
         "\t<key>CFBundleDocumentTypes</key>\n\t<array>\n${_document_entries}\t</array>\n")
     set(PULP_EXPORTED_TYPES_BLOCK
         "\t<key>UTExportedTypeDeclarations</key>\n\t<array>\n${_exported_entries}\t</array>\n")
+    set(PULP_MACOS_DEPLOYMENT_TARGET "${CMAKE_OSX_DEPLOYMENT_TARGET}")
 
     file(MAKE_DIRECTORY "${_plist_dir}")
     # CMAKE_CURRENT_FUNCTION_LIST_DIR (not CMAKE_CURRENT_LIST_DIR, which inside a

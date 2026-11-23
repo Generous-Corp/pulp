@@ -58,6 +58,10 @@
      "reason": "Windows view-host fault-injection hook."},
     {"id": "devenv.embed-gpu-frame-stat", "kind": "string", "pattern": "PULP_EMBED_GPU_FRAME_STAT", "gates": ["dev-env-off"],
      "reason": "Plugin view-host GPU frame statistics hook."},
+    {"id": "test-seam.forge-modular", "kind": "string", "pattern": "FORGE_MODULAR_TEST_PROMPT", "gates": ["dev-env-off"],
+     "reason": "Forge Modular test seam; product test environments are excluded from release artifacts."},
+    {"id": "test-seam.super-convolver", "kind": "string", "pattern": "SC_GPU", "gates": ["dev-env-off"],
+     "reason": "Super Convolver test seam; product test environments are excluded from release artifacts."},
 
     {"id": "control.shipping-manifest-marker", "kind": "string", "pattern": "PULP_INSPECT_SHIPPING_MANIFEST_V1", "gates": ["control-stripped"],
      "reason": "Retained endpoint marker a control-enabled profile must carry and a stripped one must not."},

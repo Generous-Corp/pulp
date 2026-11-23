@@ -1,8 +1,10 @@
+set(PULP_PLUGIN_ENTRY_DIR "${CMAKE_CURRENT_SOURCE_DIR}/src/entry")
+
 # {{PLUGIN_NAME}} — Audio Effect Plugin
 
-add_executable({{TARGET_NAME}}-test test_{{LOWER_NAME}}.cpp)
+add_executable({{TARGET_NAME}}-test tests/test_{{LOWER_NAME}}.cpp)
 target_link_libraries({{TARGET_NAME}}-test PRIVATE pulp::format Catch2::Catch2WithMain {{TARGET_NAME}}_Core)
-target_include_directories({{TARGET_NAME}}-test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_include_directories({{TARGET_NAME}}-test PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src")
 catch_discover_tests({{TARGET_NAME}}-test)
 
 {{VELLUM_FIND_LINE}}
@@ -12,7 +14,7 @@ catch_discover_tests({{TARGET_NAME}}-test)
 pulp_add_plugin({{TARGET_NAME}}
     # The processor body is compiled once and shared by every format, so an
     # edit to process() rebuilds one file before the relinks.
-    SOURCES         {{SOURCE_NAME}}
+    SOURCES         src/{{SOURCE_NAME}}
     FORMATS         {{FORMATS}}
     PLUGIN_NAME     "{{PLUGIN_NAME}}"
     BUNDLE_ID       "{{BUNDLE_ID}}"
@@ -25,3 +27,5 @@ pulp_add_plugin({{TARGET_NAME}}
     AAX_NATIVE_CODE "{{AAX_NATIVE_CODE}}"
     {{UI_LINE}}
 )
+
+target_include_directories({{TARGET_NAME}}_Core INTERFACE "${CMAKE_CURRENT_SOURCE_DIR}/src")

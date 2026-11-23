@@ -67,8 +67,8 @@ pub struct CreateArgs {
     pub name: String,
     /// `--type` (effect / instrument / app / bare).
     pub kind: String,
-    /// `--manufacturer`.
-    pub manufacturer: String,
+    /// Explicit `--manufacturer`.
+    pub manufacturer: Option<String>,
     /// `--template` override (defaults to `kind`).
     pub template: Option<String>,
     /// `--output <dir>`.
@@ -95,6 +95,8 @@ pub struct CreateArgs {
     pub ui: String,
     /// `--help` / `-h`.
     pub wants_help: bool,
+    /// Parse failure, surfaced before any files are written.
+    pub error: Option<String>,
 }
 
 impl Default for CreateArgs {
@@ -102,7 +104,7 @@ impl Default for CreateArgs {
         Self {
             name: String::new(),
             kind: "effect".to_owned(),
-            manufacturer: "Pulp".to_owned(),
+            manufacturer: None,
             template: None,
             output: None,
             targets: Vec::new(),
@@ -114,6 +116,7 @@ impl Default for CreateArgs {
             debug_build: false,
             ui: String::new(),
             wants_help: false,
+            error: None,
         }
     }
 }
@@ -125,6 +128,11 @@ pub fn parse_args(args: &[String]) -> CreateArgs {
     let mut i = 0;
     while i < args.len() {
         let a = &args[i];
+        if a.starts_with('-') && a.contains('=') {
+            let flag = a.split('=').next().unwrap_or(a);
+            out.error = Some(format!("unknown flag `{a}`; did you mean `{flag} <value>`?"));
+            break;
+        }
         match a.as_str() {
             "--help" | "-h" => {
                 out.wants_help = true;
@@ -141,7 +149,7 @@ pub fn parse_args(args: &[String]) -> CreateArgs {
             }
             "--manufacturer" if i + 1 < args.len() => {
                 i += 1;
-                out.manufacturer = args[i].clone();
+                out.manufacturer = Some(args[i].clone());
             }
             "--output" if i + 1 < args.len() => {
                 i += 1;
@@ -160,11 +168,36 @@ pub fn parse_args(args: &[String]) -> CreateArgs {
             _ if !a.starts_with('-') && out.name.is_empty() => {
                 out.name = a.clone();
             }
-            _ => {} // ignore unknown flags (matches C++ tolerance)
+            _ if a.starts_with('-') => {
+                let known = ["--type", "--mpe", "--template", "--manufacturer", "--output", "--targets", "--target", "--ui", "--in-tree", "--example", "--no-build", "--no-interactive", "--ci", "--pin", "--debug"];
+                let hint = known.iter().min_by_key(|candidate| edit_distance(a, candidate));
+                out.error = Some(match hint {
+                    Some(candidate) => format!("unknown flag `{a}`; did you mean `{candidate}`?"),
+                    None => format!("unknown flag `{a}`"),
+                });
+                break;
+            }
+            _ if out.name.is_empty() => {
+                out.error = Some(format!("unexpected positional argument `{a}`"));
+                break;
+            }
+            _ => {}
         }
         i += 1;
     }
     out
+}
+
+fn edit_distance(a: &str, b: &str) -> usize {
+    let mut row: Vec<usize> = (0..=b.len()).collect();
+    for (i, ca) in a.bytes().enumerate() {
+        let mut next = vec![i + 1; b.len() + 1];
+        for (j, cb) in b.bytes().enumerate() {
+            next[j + 1] = (row[j + 1] + 1).min(next[j] + 1).min(row[j] + usize::from(ca != cb));
+        }
+        row = next;
+    }
+    row[b.len()]
 }
 
 /// Return true when `--template` points at a local Pulp package manifest or
@@ -223,7 +256,7 @@ pub fn print_help(out: &mut impl Write) -> Result<()> {
         \x20 --type <effect|instrument|app|bare>  Plugin type (default: effect)\n\
         \x20 --mpe                                Opt into MPE (per-note expression) - instrument only\n\
         \x20 --template <name-or-kit-dir>         Use named template (e.g. gain, agent-toolkit) or local template kit\n\
-        \x20 --manufacturer <name>                Manufacturer (default: Pulp)\n\
+        \x20 --manufacturer <name>                Manufacturer (default: CHANGE-ME; replace before shipping)\n\
         \x20 --output <dir>                       Override output directory\n\
         \x20 --ui <vellum|rmlui|none>              Select UI stack; none is audio-only\n\
         \x20 --targets <list>                     Comma-separated extra targets (e.g. android)\n\
@@ -409,8 +442,10 @@ pub fn scaffold(
     let source_name = format!("{lower_underscored}.cpp");
     let plugin_code = make_plugin_code(&class_name);
     let aax_product_code = make_aax_product_code(&class_name);
-    let mfr_code = make_mfr_code(&args.manufacturer);
-    let bundle_id = format!("com.{}.{}", to_namespace_name(&args.manufacturer), ns);
+    let manufacturer = args.manufacturer.as_deref();
+    let mfr_code = make_mfr_code(manufacturer.unwrap_or(&class_name));
+    let vendor = manufacturer.map_or_else(|| "example".to_owned(), to_namespace_name);
+    let bundle_id = format!("com.{vendor}.{ns}");
     // The agent-toolkit template is a controlled instrument that builds as
     // Standalone only, whatever --type says.
     let agent_toolkit = args.template.as_deref() == Some("agent-toolkit");
@@ -438,52 +473,6 @@ pub fn scaffold(
         )));
     }
 
-    let ui_mode_line = if args.ui == "none" { "NO_EDITOR".to_owned() } else { String::new() };
-    let view_header = format!("{lower_underscored}_view.hpp");
-    let view_source = format!("{lower_underscored}_view.cpp");
-    let view_type = format!("{ns}::{class_name}View");
-    let vellum_editor_line = if args.ui == "vellum" {
-        format!("pulp_add_vellum_editor_package({class_name}_VellumEditor\n    VIEW_HEADER \"{view_header}\"\n    VIEW_TYPE {view_type}\n    VIEW_INCLUDE_DIRS \"${{CMAKE_CURRENT_SOURCE_DIR}}\"\n    SOURCES \"{view_source}\"\n)")
-    } else { String::new() };
-    let ui_line = if args.ui == "vellum" {
-        format!("UI {class_name}_VellumEditor")
-    } else { ui_mode_line.clone() };
-    let vellum_find_line = if args.ui == "vellum" {
-        "find_package(Vellum CONFIG REQUIRED)".to_owned()
-    } else { String::new() };
-    let vellum_helper_line = if args.ui == "vellum" {
-        "if(DEFINED PULP_ROOT_DIR)\n    include(\"${PULP_ROOT_DIR}/integrations/pulp-vellum/cmake/PulpVellumEditorPackage.cmake\")\nelse()\n    include(\"${PULP_SDK_DIR}/lib/cmake/Pulp/PulpVellumEditorPackage.cmake\")\nendif()".to_owned()
-    } else { String::new() };
-    let vars: Vec<(&str, &str)> = vec![
-        ("PLUGIN_NAME", &args.name),
-        ("CLASS_NAME", &class_name),
-        ("LOWER_NAME", &lower_underscored),
-        ("PLUGIN_URI", &plugin_uri),
-        ("NAMESPACE", &ns),
-        ("FACTORY_NAME", &ns),
-        ("HEADER_NAME", &header_name),
-        ("SOURCE_NAME", &source_name),
-        ("TARGET_NAME", &class_name),
-        ("MANUFACTURER", &args.manufacturer),
-        ("MANUFACTURER_CODE", &mfr_code),
-        ("BUNDLE_ID", &bundle_id),
-        ("VERSION", "1.0.0"),
-        ("PLUGIN_CODE", &plugin_code),
-        ("AAX_PRODUCT_CODE", &aax_product_code),
-        ("AAX_NATIVE_CODE", &plugin_code),
-        ("FORMATS", &formats),
-        ("DESCRIPTION", &description),
-        ("VST3_UID", &vst3_uid),
-        ("SDK_VERSION", sdk_version),
-        ("UI_MODE_LINE", &ui_mode_line),
-        ("VIEW_HEADER", &view_header),
-        ("VIEW_TYPE", &view_type),
-        ("VELLUM_EDITOR_LINE", &vellum_editor_line),
-        ("UI_LINE", &ui_line),
-        ("VELLUM_FIND_LINE", &vellum_find_line),
-        ("VELLUM_HELPER_LINE", &vellum_helper_line),
-    ];
-
     // Pick template_key (prefer --template if supplied).
     let template_key = args.template.clone().unwrap_or_else(|| kind.to_owned());
     let source_template_dir = templates_base.join(&template_key);
@@ -504,10 +493,15 @@ pub fn scaffold(
         )));
     }
 
+    let cmake_content =
+        fs::read_to_string(cmake_template_dir.join("CMakeLists.txt.template")).unwrap_or_default();
+    let organized_layout = cmake_content.contains("tests/test_{{LOWER_NAME}}.cpp");
+    let source_dir = if organized_layout { "src" } else { "" };
+    let entry_dir = if organized_layout { "src/entry" } else { "" };
+    let tests_dir = if organized_layout { "tests" } else { "" };
+
     if args.ui == "vellum" {
-        let supports_ui = fs::read_to_string(cmake_template_dir.join("CMakeLists.txt.template"))
-            .map(|t| t.contains("{{UI_LINE}}"))
-            .unwrap_or(false);
+        let supports_ui = cmake_content.contains("{{UI_LINE}}");
         let has_view_templates = source_template_dir.join("view.hpp.template").is_file()
             && source_template_dir.join("view.cpp.template").is_file();
         if !supports_ui || !has_view_templates {
@@ -516,6 +510,54 @@ pub fn scaffold(
             )));
         }
     }
+
+    let ui_mode_line = if args.ui == "none" { "NO_EDITOR".to_owned() } else { String::new() };
+    let view_header = format!("{lower_underscored}_view.hpp");
+    let view_source = format!("{lower_underscored}_view.cpp");
+    let view_type = format!("{ns}::{class_name}View");
+    let vellum_editor_line = if args.ui == "vellum" {
+        let source_prefix = if organized_layout { "src/" } else { "" };
+        let include_suffix = if organized_layout { "/src" } else { "" };
+        format!("pulp_add_vellum_editor_package({class_name}_VellumEditor\n    VIEW_HEADER \"{view_header}\"\n    VIEW_TYPE {view_type}\n    VIEW_INCLUDE_DIRS \"${{CMAKE_CURRENT_SOURCE_DIR}}{include_suffix}\"\n    SOURCES \"{source_prefix}{view_source}\"\n)")
+    } else { String::new() };
+    let ui_line = if args.ui == "vellum" {
+        format!("UI {class_name}_VellumEditor")
+    } else { ui_mode_line.clone() };
+    let vellum_find_line = if args.ui == "vellum" {
+        "find_package(Vellum CONFIG REQUIRED)".to_owned()
+    } else { String::new() };
+    let vellum_helper_line = if args.ui == "vellum" {
+        "if(DEFINED PULP_ROOT_DIR)\n    include(\"${PULP_ROOT_DIR}/integrations/pulp-vellum/cmake/PulpVellumEditorPackage.cmake\")\nelse()\n    include(\"${PULP_SDK_DIR}/lib/cmake/Pulp/PulpVellumEditorPackage.cmake\")\nendif()".to_owned()
+    } else { String::new() };
+    let vars: Vec<(&str, &str)> = vec![
+        ("PLUGIN_NAME", &args.name),
+        ("CLASS_NAME", &class_name),
+        ("LOWER_NAME", &lower_underscored),
+        ("PLUGIN_URI", &plugin_uri),
+        ("NAMESPACE", &ns),
+        ("FACTORY_NAME", &ns),
+        ("HEADER_NAME", &header_name),
+        ("SOURCE_NAME", &source_name),
+        ("TARGET_NAME", &class_name),
+        ("MANUFACTURER", manufacturer.unwrap_or("CHANGE-ME")),
+        ("MANUFACTURER_CODE", &mfr_code),
+        ("BUNDLE_ID", &bundle_id),
+        ("VERSION", "1.0.0"),
+        ("PLUGIN_CODE", &plugin_code),
+        ("AAX_PRODUCT_CODE", if formats.split_whitespace().any(|f| f == "AAX") { &aax_product_code } else { "" }),
+        ("AAX_NATIVE_CODE", if formats.split_whitespace().any(|f| f == "AAX") { &plugin_code } else { "" }),
+        ("FORMATS", &formats),
+        ("DESCRIPTION", &description),
+        ("VST3_UID", &vst3_uid),
+        ("SDK_VERSION", sdk_version),
+        ("UI_MODE_LINE", &ui_mode_line),
+        ("VIEW_HEADER", &view_header),
+        ("VIEW_TYPE", &view_type),
+        ("VELLUM_EDITOR_LINE", &vellum_editor_line),
+        ("UI_LINE", &ui_line),
+        ("VELLUM_FIND_LINE", &vellum_find_line),
+        ("VELLUM_HELPER_LINE", &vellum_helper_line),
+    ];
 
     fs::create_dir_all(out_dir).map_err(|e| CliError::io(out_dir.to_path_buf(), e))?;
     if standalone_mode {
@@ -532,28 +574,20 @@ pub fn scaffold(
     )
     .map_err(io)?;
 
-    // File map — same source-to-output list as C++.
     let test_name = format!("test_{lower_underscored}.cpp");
-    let file_map: [(&str, &str); 12] = [
-        ("processor.hpp.template", "processor.hpp"), // overwritten below
-        ("processor.cpp.template", "processor.cpp"), // overwritten below
-        ("view.hpp.template", "view.hpp"),
-        ("view.cpp.template", "view.cpp"),
-        ("agent_operations.cpp.template", "agent_operations.cpp"),
-        ("CMakeLists.txt.template", "CMakeLists.txt"),
-        ("clap_entry.cpp.template", "clap_entry.cpp"),
-        ("vst3_entry.cpp.template", "vst3_entry.cpp"),
-        ("lv2_entry.cpp.template", "lv2_entry.cpp"),
-        ("au_v2_entry.cpp.template", "au_v2_entry.cpp"),
-        ("aax_entry.cpp.template", "aax_entry.cpp"),
-        ("test.cpp.template", "test.cpp"),
-    ];
-    // We overwrite the processor header to <header_name>, and the test
-    // to test_<lower>.cpp, via this table:
-    let rename: [(&str, &str); 3] = [
-        ("processor.hpp", header_name.as_str()),
-        ("processor.cpp", source_name.as_str()),
-        ("test.cpp", test_name.as_str()),
+    let file_map = [
+        ("processor.hpp.template", source_dir, header_name.as_str()),
+        ("processor.cpp.template", source_dir, source_name.as_str()),
+        ("view.hpp.template", source_dir, view_header.as_str()),
+        ("view.cpp.template", source_dir, view_source.as_str()),
+        ("agent_operations.cpp.template", source_dir, "agent_operations.cpp"),
+        ("CMakeLists.txt.template", "", "CMakeLists.txt"),
+        ("clap_entry.cpp.template", entry_dir, "clap_entry.cpp"),
+        ("vst3_entry.cpp.template", entry_dir, "vst3_entry.cpp"),
+        ("lv2_entry.cpp.template", entry_dir, "lv2_entry.cpp"),
+        ("au_v2_entry.cpp.template", entry_dir, "au_v2_entry.cpp"),
+        ("aax_entry.cpp.template", entry_dir, "aax_entry.cpp"),
+        ("test.cpp.template", tests_dir, test_name.as_str()),
     ];
 
     let mut mpe_mode = args.mpe;
@@ -566,7 +600,7 @@ pub fn scaffold(
         mpe_mode = false;
     }
 
-    for (tmpl_file, default_out) in file_map {
+    for (tmpl_file, directory, filename) in file_map {
         if (matches!(tmpl_file, "view.hpp.template" | "view.cpp.template") && args.ui != "vellum") {
             continue;
         }
@@ -608,17 +642,16 @@ pub fn scaffold(
                 expanded.insert_str(insert_at, "\n#include <pulp/midi/mpe_buffer.hpp>");
             }
         }
-        let final_name = match default_out {
-            "view.hpp" => view_header.as_str(),
-            "view.cpp" => view_source.as_str(),
-            _ => rename.iter().find(|(k, _)| *k == default_out).map_or(default_out, |(_, v)| *v),
-        };
-        let dest = out_dir.join(final_name);
+        let relative = Path::new(directory).join(filename);
+        let dest = out_dir.join(&relative);
+        let parent = dest.parent().expect("scaffold file has an output directory");
+        fs::create_dir_all(parent).map_err(|e| CliError::io(parent.to_path_buf(), e))?;
         fs::write(&dest, expanded).map_err(|e| CliError::io(dest.clone(), e))?;
         writeln!(
             log,
-            "  Created {final_name}{}",
-            if mpe_mode && final_name == header_name {
+            "  Created {}{}",
+            relative.display(),
+            if mpe_mode && tmpl_file == "processor.hpp.template" {
                 " (MPE)"
             } else {
                 ""
@@ -643,9 +676,12 @@ pub fn scaffold(
             ns = ns,
             in_ch = if kind == "instrument" { 0 } else { 2 },
         );
-        let main_path = out_dir.join("main.cpp");
+        let main_dir = out_dir.join(source_dir);
+        fs::create_dir_all(&main_dir).map_err(|e| CliError::io(main_dir.clone(), e))?;
+        let main_path = main_dir.join("main.cpp");
         fs::write(&main_path, main_body).map_err(|e| CliError::io(main_path, e))?;
-        writeln!(log, "  Created main.cpp").map_err(io)?;
+        writeln!(log, "  Created {}", Path::new(source_dir).join("main.cpp").display())
+            .map_err(io)?;
     }
 
     // UI directory copy.
@@ -670,20 +706,31 @@ pub fn scaffold(
 
     // Standalone pulp.toml.
     if standalone_mode {
-        use std::fmt::Write as _;
-        let mut body = String::new();
-        body.push_str("[pulp]\n");
-        let _ = writeln!(body, "sdk_version = \"{sdk_version}\"");
-        if let Some(r) = root {
-            let _ = writeln!(
-                body,
-                "sdk_checkout = \"{}\"",
-                r.display().to_string().replace('\\', "/")
-            );
-        }
+        let generated_by = format!("pulp {} ({})", crate::build_info::cli_version_string(),
+            std::env::var("PULP_BUILD_INFO_GIT_SHA").unwrap_or_else(|_| "unknown".to_owned()));
+        let body = format!("[pulp]\nsdk_version = \"{sdk_version}\"\ngenerated_by = \"{generated_by}\"\n");
         let toml_path = out_dir.join("pulp.toml");
         fs::write(&toml_path, body).map_err(|e| CliError::io(toml_path, e))?;
         writeln!(log, "  Created pulp.toml").map_err(io)?;
+    }
+
+    if standalone_mode && organized_layout {
+        let common = templates_base.join("standalone").join("common");
+        for (input, output) in [
+            ("README.md.template", "README.md"),
+            ("ci.yml.template", ".github/workflows/ci.yml"),
+            ("gitignore.template", ".gitignore"),
+            ("Testing.cmake.template", "cmake/Testing.cmake"),
+        ] {
+            let source = common.join(input);
+            let content = fs::read_to_string(&source).map_err(|e| CliError::io(source, e))?;
+            let destination = out_dir.join(output);
+            let parent = destination.parent().expect("scaffold file has an output directory");
+            fs::create_dir_all(parent).map_err(|e| CliError::io(parent.to_path_buf(), e))?;
+            fs::write(&destination, expand_template(&content, &vars))
+                .map_err(|e| CliError::io(destination, e))?;
+            writeln!(log, "  Created {output}").map_err(io)?;
+        }
     }
 
     // Android template tree copy (when --targets includes android).
@@ -725,6 +772,9 @@ pub fn scaffold(
         }
     }
 
+    if manufacturer.is_none() {
+        writeln!(log, "Note: Set --manufacturer before shipping.").map_err(io)?;
+    }
     Ok(())
 }
 
@@ -773,6 +823,9 @@ fn copy_template_tree(
 ///
 /// Surfaces arg / scaffold failures.
 pub fn run(cwd: &Path, args: &CreateArgs, out: &mut impl Write) -> Result<i32> {
+    if let Some(error) = &args.error {
+        return Err(CliError::BadUsage(error.clone()));
+    }
     if args.wants_help {
         print_help(out)?;
         return Ok(0);
@@ -840,12 +893,9 @@ pub fn run(cwd: &Path, args: &CreateArgs, out: &mut impl Write) -> Result<i32> {
     // It is the baked value, never the PULP_RS_CLI_VERSION test override.
     let sdk_version = crate::build_info::baked_cli_version();
     if crate::build_info::baked_sdk_version().is_none() {
-        eprintln!(
-            "warning: this pulp was built by cargo alone, so it knows no Pulp SDK version; \
-             the project pins find_package(Pulp {sdk_version}) and sdk_version = \"{sdk_version}\", \
-             which is the CLI crate's version, not an SDK release. Rebuild the CLI with \
-             `pulp build` or fix both pins by hand."
-        );
+        return Err(CliError::BadUsage(
+            "pulp create requires a Pulp-built CLI because a cargo-only build has no SDK version".to_owned(),
+        ));
     }
     scaffold(
         args,
@@ -881,6 +931,74 @@ mod tests {
         )
         .unwrap();
         fs::write(templates.join("test.cpp.template"), "t={{LOWER_NAME}}\n").unwrap();
+    }
+
+    #[test]
+    fn built_in_standalone_scaffolds_are_portable() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let templates = root.join("tools/templates");
+        for kind in ["effect", "instrument", "app", "bare", "gain", "agent-toolkit"] {
+            let plugin = matches!(kind, "effect" | "instrument" | "gain");
+            let args = CreateArgs {
+                name: "Demo".into(),
+                kind: if kind == "gain" { "effect".into() } else { kind.into() },
+                template: Some(kind.into()),
+                ..Default::default()
+            };
+            let out = temp.path().join(kind);
+            scaffold(&args, &out, &templates, Some(&root), "1.2.3", &mut Vec::new())
+                .unwrap();
+            let mut failures = Vec::new();
+            for file in ["src/demo.hpp", "src/main.cpp", "tests/test_demo.cpp",
+                         ".github/workflows/ci.yml", "README.md", "cmake/Testing.cmake"] {
+                if !out.join(file).is_file() {
+                    failures.push(format!("missing {file}"));
+                }
+            }
+            if plugin && !out.join("src/entry/clap_entry.cpp").is_file() {
+                failures.push("missing src/entry/clap_entry.cpp".into());
+            }
+            let manifest = fs::read_to_string(out.join("pulp.toml")).unwrap();
+            if !manifest.starts_with("[pulp]\nsdk_version = \"1.2.3\"\ngenerated_by = \"pulp ") {
+                failures.push(format!("unexpected SDK manifest: {manifest:?}"));
+            }
+            assert!(failures.is_empty(), "{kind}: {}", failures.join("; "));
+        }
+    }
+
+    #[test]
+    fn scaffold_uses_explicit_or_project_derived_manufacturer_identity() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let templates = root.join("tools/templates");
+        for (name, manufacturer, bundle_id, code) in [
+            ("Echo Gain", Some("Acme"), "com.acme.echo_gain", "Acme"),
+            ("Echo Gain", Some("CHANGE-ME"), "com.change_me.echo_gain", "CHAN"),
+            ("Echo Gain", None, "com.example.echo_gain", "Echo"),
+            ("Tape Delay", None, "com.example.tape_delay", "Tape"),
+        ] {
+            let mut cli_args = vec![name.to_owned(), "--ci".to_owned(), "--no-build".to_owned()];
+            if let Some(manufacturer) = manufacturer {
+                cli_args.extend(["--manufacturer".to_owned(), manufacturer.to_owned()]);
+            }
+            let args = parse_args(&cli_args);
+            let out = temp.path().join(bundle_id);
+            let mut log = Vec::new();
+            scaffold(&args, &out, &templates, Some(&root), "1.2.3", &mut log).unwrap();
+            let cmake = fs::read_to_string(out.join("CMakeLists.txt")).unwrap();
+            let display = manufacturer.unwrap_or("CHANGE-ME");
+            assert!(
+                cmake.contains(&format!("BUNDLE_ID       \"{bundle_id}\"")),
+                "{name} ({manufacturer:?}): {cmake}"
+            );
+            assert!(cmake.contains(&format!("MANUFACTURER    \"{display}\"")));
+            assert!(cmake.contains(&format!("MANUFACTURER_CODE \"{code}\"")));
+            assert_eq!(
+                String::from_utf8(log).unwrap().contains("Set --manufacturer before shipping"),
+                manufacturer.is_none()
+            );
+        }
     }
 
     #[test]
@@ -1009,7 +1127,7 @@ mod tests {
         let args = CreateArgs {
             name: "My Gain".to_owned(),
             kind: "effect".to_owned(),
-            manufacturer: "Acme".to_owned(),
+            manufacturer: Some("Acme".to_owned()),
             template: None,
             output: None,
             targets: vec![],
@@ -1021,6 +1139,7 @@ mod tests {
             debug_build: false,
             ui: String::new(),
             wants_help: false,
+            error: None,
         };
 
         let out_dir = td.path().join("scaffold-out");
@@ -1108,7 +1227,7 @@ mod tests {
         let args = CreateArgs {
             name: "Bliss".to_owned(),
             kind: "instrument".to_owned(),
-            manufacturer: "Pulp".to_owned(),
+            manufacturer: Some("Pulp".to_owned()),
             mpe: true,
             in_tree: true,
             no_build: true,
@@ -1275,7 +1394,7 @@ mod tests {
         assert_eq!(p.name, "Foo");
         assert!(p.mpe);
         assert_eq!(p.template.as_deref(), Some("gain"));
-        assert_eq!(p.manufacturer, "Acme");
+        assert_eq!(p.manufacturer.as_deref(), Some("Acme"));
     }
 
     #[test]
@@ -1344,14 +1463,19 @@ mod tests {
     }
 
     #[test]
-    fn parse_args_ignores_unknown_flags_permissively() {
+    fn parse_args_rejects_unknown_flags_with_hint() {
         let p = parse_args(&[
             "Foo".to_owned(),
             "--unknown-flag".to_owned(),
             "--another-unknown".to_owned(),
         ]);
-        assert_eq!(p.name, "Foo");
-        // Unknowns silently dropped; no panic.
+        assert!(p.error.as_deref().unwrap().contains("did you mean"));
+    }
+
+    #[test]
+    fn parse_args_rejects_equals_form() {
+        let p = parse_args(&["Foo".to_owned(), "--ui=vellum".to_owned()]);
+        assert!(p.error.as_deref().unwrap().contains("did you mean `--ui <value>`"));
     }
 
     #[test]
@@ -1397,7 +1521,7 @@ mod tests {
     }
 
     #[test]
-    fn run_native_ci_warns_when_full_path_flags_are_ignored() {
+    fn run_native_ci_refuses_without_sdk_identity() {
         let td = tempfile::tempdir().unwrap();
         let root = td.path().join("repo");
         fs::create_dir_all(root.join("core")).unwrap();
@@ -1408,7 +1532,7 @@ mod tests {
         );
 
         let mut buf = Vec::new();
-        let rc = run(
+        let err = run(
             &root,
             &CreateArgs {
                 name: "Warn Me".to_owned(),
@@ -1421,10 +1545,7 @@ mod tests {
             },
             &mut buf,
         )
-        .unwrap();
-        assert_eq!(rc, 0);
-        let stdout = String::from_utf8(buf).unwrap();
-        assert!(stdout.contains("--pin/--debug only takes effect in the full create path"));
-        assert!(stdout.contains("ignored by the native --ci scaffold path"));
+        .unwrap_err();
+        assert!(err.to_string().contains("requires a Pulp-built CLI"));
     }
 }

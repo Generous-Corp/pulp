@@ -1,14 +1,18 @@
 // First, so this file proves the header compiles on its own, as a generated
 // editor package includes it.
 #include <pulp/vellum/editor.hpp>
+#include <pulp/vellum/interaction_adapter.hpp>
+#include <pulp/runtime/interaction_event.hpp>
 
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 
 #include <pulp/format/editor_host.hpp>
 #include <pulp/format/processor.hpp>
+#include <pulp/runtime/log_sink.hpp>
 #include <pulp/state/store.hpp>
 
+#include <vellum/graphics/dawn_bootstrap.hpp>
 #include <vellum/value/param_model.hpp>
 #include <vellum/view/plugin_view_host.hpp>
 #include <vellum/view/view.hpp>
@@ -26,13 +30,15 @@
 
 #if defined(PULP_TEST_VELLUM_SCRIPTED_AUDIO)
 #include <pulp/vellum_audio/audio_widgets.hpp>
-#include <algorithm>
-#include <array>
 #endif
 
+#include <algorithm>
+#include <array>
 #include <cstdint>
 #include <memory>
 #include <optional>
+#include <string_view>
+#include <vector>
 
 namespace {
 
@@ -143,7 +149,9 @@ class StubHost final : public ::vellum::view::PluginViewHost {
     void detach() override {
         attached_ = false;
     }
-    void repaint() override {}
+    void repaint() override {
+        ++repaint_calls;
+    }
     bool present_first_frame() override {
         ++present_first_frame_calls;
         return present_first_frame_result;
@@ -170,6 +178,7 @@ class StubHost final : public ::vellum::view::PluginViewHost {
 
     int design_viewport_calls = 0;
     int fixed_aspect_calls = 0;
+    int repaint_calls = 0;
     int present_first_frame_calls = 0;
     int capture_back_buffer_calls = 0;
     bool present_first_frame_result = true;
@@ -298,7 +307,8 @@ template <typename Root = HookView> struct HookFixture {
     StubHost* host = nullptr;
     std::unique_ptr<pulp::format::Editor> editor;
 
-    HookFixture() {
+    explicit HookFixture(pulp::format::VisualPort* visuals = nullptr)
+        : context(*fixture.port, visuals) {
         PluginViewHost::set_factory(
             [this](::vellum::view::View& view, const PluginViewHost::Options& options) {
                 root = &static_cast<Root&>(view);
@@ -318,6 +328,52 @@ template <typename Root = HookView> struct HookFixture {
 };
 
 } // namespace
+
+TEST_CASE("Vellum editor reports a Dawn bootstrap failure on attach",
+          "[pulp-vellum][.bootstrap-failure]") {
+    using namespace ::vellum::graphics;
+    const DawnBootstrap incompatible{
+        .abi_version = kDawnBootstrapAbiVersion,
+        .callback = +[](const DawnBootstrapRequest&, void*,
+                        std::string*) { return DawnBootstrapResult::ready; },
+    };
+    // This registration owns the process, so CTest runs this case on its own.
+    REQUIRE(register_dawn_bootstrap(incompatible, "test-incompatible-revision", nullptr));
+    std::string reason;
+    REQUIRE_FALSE(::vellum::app_host::register_native_dawn_bootstrap(&reason));
+    REQUIRE_FALSE(reason.empty());
+
+    pulp::runtime::CaptureLogSink capture;
+    pulp::runtime::ScopedLogSink log(capture.sink());
+    FactoryReset reset;
+    int hosts_created = 0;
+    ::vellum::view::PluginViewHost::set_factory(
+        [&](::vellum::view::View&, const ::vellum::view::PluginViewHost::Options&) {
+            ++hosts_created;
+            return std::make_unique<StubHost>();
+        });
+    Fixture fixture;
+    Context context(*fixture.port);
+    Processor processor;
+    pulp::vellum::EditorFactory<EmptyView> factory;
+    for (int i = 0; i < 2; ++i) {
+        auto editor = factory.create(processor, context, pulp::format::EditorRole::editor);
+        REQUIRE(editor);
+        CHECK_FALSE(editor->attach({.kind = pulp::format::NativeParentKind::none}));
+        CHECK_FALSE(editor->attach(
+            {.kind = pulp::format::NativeParentKind::cocoa_view, .handle = &context}));
+        const auto attach_error = []<typename Editor>(const Editor& failed) -> std::string_view {
+            if constexpr (requires { failed.attach_error(); })
+                return failed.attach_error();
+            return {};
+        };
+        CHECK(attach_error(*editor) == reason);
+    }
+    CHECK(hosts_created == 0);
+    const auto errors = capture.records_at_least(pulp::runtime::LogLevel::Error);
+    REQUIRE(errors.size() == 1);
+    CHECK(errors.front().message.find(reason) != std::string::npos);
+}
 
 TEST_CASE("Vellum editor factory supports editor and inspector roles", "[pulp-vellum][editor]") {
     Fixture fixture;
@@ -750,11 +806,12 @@ TEST_CASE("Vellum native messages are scoped to the editor attachment that regis
 #if defined(PULP_TEST_VELLUM_SCRIPTED_EDITOR)
 namespace {
 
-template <typename Widget> Widget* find_widget(::vellum::view::View& view) {
-    if (auto* widget = dynamic_cast<Widget*>(&view))
+template <typename Widget>
+Widget* find_widget(::vellum::view::View& view, std::string_view id = {}) {
+    if (auto* widget = dynamic_cast<Widget*>(&view); widget && (id.empty() || view.id() == id))
         return widget;
     for (std::size_t i = 0; i < view.child_count(); ++i) {
-        if (auto* widget = find_widget<Widget>(*view.child_at(i)))
+        if (auto* widget = find_widget<Widget>(*view.child_at(i), id))
             return widget;
     }
     return nullptr;
@@ -835,21 +892,22 @@ TEST_CASE("Vellum scripted editor mounts and exchanges parameters through the ho
 }
 #endif
 
-#if defined(PULP_TEST_VELLUM_SCRIPTED_AUDIO)
 namespace {
 
-class ScriptVisualPort final : public pulp::format::VisualPort {
+class TestVisualPort final : public pulp::format::VisualPort {
   public:
     std::size_t channel_count() const noexcept override {
-        return 3;
+        return 5;
     }
 
     pulp::format::VisualChannelInfo channel(std::size_t index) const noexcept override {
         using Shape = pulp::format::VisualChannelShape;
         constexpr std::array channels{
-            pulp::format::VisualChannelInfo{"scope", {}, Shape::vector, 0.0f},
+            pulp::format::VisualChannelInfo{"input-spectrum", {}, Shape::vector, 0.0f},
             pulp::format::VisualChannelInfo{"aux", {}, Shape::scalar, 0.0f},
+            pulp::format::VisualChannelInfo{"input-meter", {}, Shape::meter, 0.0f},
             pulp::format::VisualChannelInfo{"meter", {}, Shape::meter, 0.0f},
+            pulp::format::VisualChannelInfo{"scope", {}, Shape::vector, 0.0f},
         };
         return channels[index];
     }
@@ -860,18 +918,18 @@ class ScriptVisualPort final : public pulp::format::VisualPort {
 
     std::size_t read_meter(std::size_t index, std::span<float> rms,
                            std::span<float> peak) noexcept override {
-        if (index != 2 || rms.empty() || peak.empty())
+        if ((index != 2 && index != 3) || rms.empty() || peak.empty())
             return 0;
-        rms.front() = level;
-        peak.front() = level + 0.2f;
+        rms.front() = index == 3 ? level : 0.125f;
+        peak.front() = rms.front() + 0.2f;
         return 1;
     }
 
     std::size_t read_vector(std::size_t index, std::span<float> values) noexcept override {
-        if (index != 0 || values.size() < bins.size())
+        if ((index != 0 && index != 4) || values.size() < bins.size())
             return 0;
         std::copy(bins.begin(), bins.end(), values.begin());
-        return bins.size();
+        return index == 4 ? bins.size() : 1;
     }
 
     std::size_t read_events(std::size_t, std::span<pulp::format::VisualEvent>) noexcept override {
@@ -879,7 +937,7 @@ class ScriptVisualPort final : public pulp::format::VisualPort {
     }
 
     std::uint32_t publish_count(std::size_t index) const noexcept override {
-        return index == 0 || index == 2 ? frame : 0;
+        return index < channel_count() && index != 1 ? frame : 0;
     }
 
     float level = 0.0f;
@@ -889,6 +947,37 @@ class ScriptVisualPort final : public pulp::format::VisualPort {
 
 } // namespace
 
+TEST_CASE("Vellum editor idle repaints for visual publishes and preserves view damage",
+          "[pulp-vellum][editor][idle-damage]") {
+    TestVisualPort visual_port;
+    HookFixture fixture(&visual_port);
+    REQUIRE(fixture.editor->attach(fixture.parent()));
+    fixture.host->clear_pending_dirty();
+    fixture.host->repaint_calls = 0;
+
+    for (int i = 0; i < 60; ++i)
+        fixture.editor->idle();
+    CHECK(fixture.lifecycle.ticks == 60);
+    CHECK(fixture.host->repaint_calls == 0);
+
+    fixture.host->repaint_calls = 0;
+    visual_port.level = 0.5f;
+    ++visual_port.frame;
+    fixture.editor->idle();
+    CHECK(fixture.host->repaint_calls == 1);
+    fixture.editor->idle();
+    CHECK(fixture.host->repaint_calls == 1);
+
+    fixture.host->repaint_calls = 0;
+    fixture.host->mark_dirty_region({1, 2, 3, 4});
+    REQUIRE(fixture.host->has_pending_dirty_bounds());
+    CHECK(fixture.host->repaint_calls == 1);
+    fixture.editor->idle();
+    CHECK(fixture.host->repaint_calls == 1);
+    CHECK(fixture.host->pending_dirty_bounds().width == 3.0f);
+}
+
+#if defined(PULP_TEST_VELLUM_SCRIPTED_AUDIO)
 TEST_CASE("Vellum scripted editor samples its own visual feed on idle",
           "[pulp-vellum][editor][scripted-editor]") {
     using pulp::vellum_audio::AnalyzerScope;
@@ -903,7 +992,7 @@ TEST_CASE("Vellum scripted editor samples its own visual feed on idle",
         });
 
     Fixture first, second;
-    ScriptVisualPort first_port, second_port;
+    TestVisualPort first_port, second_port;
     Context first_context{*first.port, &first_port};
     Context second_context{*second.port, &second_port};
     Processor first_processor, second_processor;
@@ -929,12 +1018,15 @@ TEST_CASE("Vellum scripted editor samples its own visual feed on idle",
     second_editor->idle();
 
     const auto require_widgets = [](::vellum::view::View& view, float level) {
-        const auto* meter = find_widget<LevelMeter>(view);
+        const auto* meter = find_widget<LevelMeter>(view, "meter");
+        const auto* default_meter = find_widget<LevelMeter>(view, "default-meter");
         const auto* scope = find_widget<AnalyzerScope>(view);
         REQUIRE(meter);
+        REQUIRE(default_meter);
         REQUIRE(scope);
         CHECK(meter->rms() == Catch::Approx(level));
         CHECK(meter->peak() == Catch::Approx(level + 0.2f));
+        CHECK(default_meter->rms() == Catch::Approx(0.125f));
         CHECK(scope->column_count() == 3);
         CHECK_FALSE(meter->stale());
         CHECK_FALSE(scope->stale());
@@ -980,4 +1072,127 @@ TEST_CASE("Vellum editor host opens on the plug-in's declared editor colour",
         REQUIRE(seen.has_value());
         CHECK(*seen == ::vellum::view::kEditorHostClearRgb);
     }
+}
+
+class InteractionView final : public ::vellum::view::View {
+  public:
+    InteractionView() = default;
+
+    void on_mouse_event(const ::vellum::view::MouseEvent& event) override {
+        events.push_back(event);
+    }
+
+    std::vector<::vellum::view::MouseEvent> events;
+};
+
+TEST_CASE("runtime interactions route in sequence order and reject stale epochs",
+          "[pulp-vellum][interaction]") {
+    InteractionView view;
+    pulp::vellum::InteractionAdapter adapter;
+    pulp::runtime::InteractionBatch<> batch;
+    batch.append({.epoch = 4,
+                  .sequence = 2,
+                  .object_id = 7,
+                  .phase = pulp::runtime::InteractionPhase::move,
+                  .x = 2.0f});
+    batch.append({.epoch = 4,
+                  .sequence = 1,
+                  .object_id = 7,
+                  .phase = pulp::runtime::InteractionPhase::press,
+                  .x = 1.0f});
+    REQUIRE(adapter.deliver(view, batch));
+    REQUIRE(view.events.size() == 2);
+    REQUIRE(view.events[0].phase == ::vellum::view::MousePhase::press);
+    REQUIRE(view.events[1].phase == ::vellum::view::MousePhase::drag);
+
+    pulp::runtime::InteractionBatch<> stale;
+    stale.append({.epoch = 3,
+                  .sequence = 3,
+                  .object_id = 7,
+                  .phase = pulp::runtime::InteractionPhase::release,
+                  .x = 3.0f});
+    REQUIRE_FALSE(adapter.deliver(view, stale));
+    REQUIRE(view.events.size() == 2);
+}
+
+TEST_CASE("runtime interaction batch routes only the first event's source",
+          "[pulp-vellum][interaction]") {
+    InteractionView view;
+    pulp::vellum::InteractionAdapter adapter;
+    pulp::runtime::InteractionBatch<> batch;
+    batch.append({.source_id = 1,
+                  .epoch = 1,
+                  .sequence = 1,
+                  .object_id = 5,
+                  .phase = pulp::runtime::InteractionPhase::press,
+                  .x = 1.0f});
+    batch.append({.source_id = 2,
+                  .epoch = 1,
+                  .sequence = 2,
+                  .object_id = 6,
+                  .phase = pulp::runtime::InteractionPhase::press,
+                  .x = 2.0f});
+    batch.append({.source_id = 1,
+                  .epoch = 1,
+                  .sequence = 3,
+                  .object_id = 5,
+                  .phase = pulp::runtime::InteractionPhase::move,
+                  .x = 3.0f});
+    REQUIRE(adapter.deliver(view, batch));
+    REQUIRE(view.events.size() == 2);
+    REQUIRE(view.events[0].phase == ::vellum::view::MousePhase::press);
+    REQUIRE(view.events[1].phase == ::vellum::view::MousePhase::drag);
+
+    pulp::runtime::InteractionBatch<> only_other;
+    only_other.append({.source_id = 2,
+                       .epoch = 1,
+                       .sequence = 4,
+                       .object_id = 6,
+                       .phase = pulp::runtime::InteractionPhase::move,
+                       .x = 4.0f});
+    REQUIRE_FALSE(adapter.deliver(view, only_other));
+    REQUIRE(view.events.size() == 2);
+}
+
+TEST_CASE("runtime interactions keep object pointers independent and cancel them",
+          "[pulp-vellum][interaction]") {
+    InteractionView view;
+    pulp::vellum::InteractionAdapter adapter;
+    pulp::runtime::InteractionBatch<> batch;
+    batch.append({.epoch = 1,
+                  .sequence = 1,
+                  .object_id = 10,
+                  .phase = pulp::runtime::InteractionPhase::press,
+                  .x = 1.0f});
+    batch.append({.epoch = 1,
+                  .sequence = 2,
+                  .object_id = 11,
+                  .phase = pulp::runtime::InteractionPhase::press,
+                  .x = 2.0f});
+    batch.append({.epoch = 1,
+                  .sequence = 3,
+                  .object_id = 10,
+                  .phase = pulp::runtime::InteractionPhase::cancel,
+                  .x = 3.0f});
+    REQUIRE(adapter.deliver(view, batch));
+    REQUIRE(view.events.size() == 3);
+    REQUIRE(view.events[0].pointer_id != view.events[1].pointer_id);
+    REQUIRE(view.events[2].is_cancelled);
+
+    pulp::runtime::InteractionBatch<> after_cancel;
+    after_cancel.append({.epoch = 1,
+                         .sequence = 4,
+                         .object_id = 10,
+                         .phase = pulp::runtime::InteractionPhase::move,
+                         .x = 4.0f});
+    REQUIRE_FALSE(adapter.deliver(view, after_cancel));
+    REQUIRE(view.events.size() == 3);
+}
+
+TEST_CASE("runtime interaction batch remains bounded", "[pulp-vellum][interaction]") {
+    pulp::runtime::InteractionBatch<2> batch;
+    REQUIRE(batch.append({}));
+    REQUIRE(batch.append({}));
+    REQUIRE_FALSE(batch.append({}));
+    REQUIRE(batch.count == 2);
 }

@@ -9,6 +9,81 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
      release's bullet block. See docs/guides/versioning.md § Release pipeline
      for the full end-to-end flow. -->
 
+<a id="v11970"></a>
+## [1.197.0] - 2026-11-23
+
+- release/version bump ([#12778](https://github.com/Generous-Corp/pulp/pull/12778))
+- codex/real world instrument 20261122 ([#12775](https://github.com/Generous-Corp/pulp/pull/12775))
+- lane/w pulp lock 022 ([#12776](https://github.com/Generous-Corp/pulp/pull/12776))
+- fix/win32 gl surface test ([#12774](https://github.com/Generous-Corp/pulp/pull/12774))
+- lane/w choc windows patch ([#12773](https://github.com/Generous-Corp/pulp/pull/12773))
+- lane/closure win paths ([#12772](https://github.com/Generous-Corp/pulp/pull/12772))
+
+<a id="v11962"></a>
+## [1.196.2] - 2026-11-22
+
+- release/version bump ([#12771](https://github.com/Generous-Corp/pulp/pull/12771))
+- lane/w create hardening ([#12768](https://github.com/Generous-Corp/pulp/pull/12768))
+- lane/closure win env ([#12767](https://github.com/Generous-Corp/pulp/pull/12767))
+
+<a id="v11961"></a>
+## [1.196.1] - 2026-11-22
+
+- release/version bump ([#12765](https://github.com/Generous-Corp/pulp/pull/12765))
+
+<a id="v11960"></a>
+## [1.196.0] - 2026-11-22
+
+- release/version bump ([#12764](https://github.com/Generous-Corp/pulp/pull/12764))
+- feature/timer zero tolerance ([#12762](https://github.com/Generous-Corp/pulp/pull/12762))
+- lane/w plugin identity ([#12752](https://github.com/Generous-Corp/pulp/pull/12752))
+- repair/pulp 12758 ([#12759](https://github.com/Generous-Corp/pulp/pull/12759))
+- lane/pin transition record a2 ([#12751](https://github.com/Generous-Corp/pulp/pull/12751))
+
+<a id="v11950"></a>
+## [1.195.0] - 2026-11-22
+
+- release/version bump ([#12761](https://github.com/Generous-Corp/pulp/pull/12761))
+
+<a id="v11940"></a>
+## [1.194.0] - 2026-11-22
+
+- release/version bump ([#12757](https://github.com/Generous-Corp/pulp/pull/12757))
+- fix/renderer attested 20261119 ([#12596](https://github.com/Generous-Corp/pulp/pull/12596))
+- lane/w test seams ([#12755](https://github.com/Generous-Corp/pulp/pull/12755))
+
+<a id="v11930"></a>
+## [1.193.0] - 2026-11-22
+
+- release/version bump ([#12754](https://github.com/Generous-Corp/pulp/pull/12754))
+- lane/w fix idle repaint ([#12744](https://github.com/Generous-Corp/pulp/pull/12744))
+- codex/real world instrument 20261122 ([#12749](https://github.com/Generous-Corp/pulp/pull/12749))
+- fix/win32 glsurface input ([#12748](https://github.com/Generous-Corp/pulp/pull/12748))
+- lane/w template hygiene ([#12742](https://github.com/Generous-Corp/pulp/pull/12742))
+
+<a id="v11921"></a>
+## [1.192.1] - 2026-11-22
+
+- release/version bump ([#12746](https://github.com/Generous-Corp/pulp/pull/12746))
+- lane/w fix param throw ([#12743](https://github.com/Generous-Corp/pulp/pull/12743))
+- lane/w fix meter bind ([#12739](https://github.com/Generous-Corp/pulp/pull/12739))
+- lane/w linux fontconfig ([#12740](https://github.com/Generous-Corp/pulp/pull/12740))
+- lane/w cut motion ([#12738](https://github.com/Generous-Corp/pulp/pull/12738))
+
+<a id="v11920"></a>
+## [1.192.0] - 2026-11-22
+
+- release/version bump ([#12737](https://github.com/Generous-Corp/pulp/pull/12737))
+
+<a id="v11910"></a>
+## [1.191.0] - 2026-11-22
+
+- release/version bump ([#12734](https://github.com/Generous-Corp/pulp/pull/12734))
+- lane/w waveform audio ([#12731](https://github.com/Generous-Corp/pulp/pull/12731))
+- fix/notices unattributed report ([#12730](https://github.com/Generous-Corp/pulp/pull/12730))
+- feature/state generation gate ([#12729](https://github.com/Generous-Corp/pulp/pull/12729))
+- feature/clap vst3 owned state ([#12728](https://github.com/Generous-Corp/pulp/pull/12728))
+
 <a id="v11900"></a>
 ## [1.190.0] - 2026-11-22
 
@@ -13547,6 +13622,16 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/Generous-Corp/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/Generous-Corp/pulp/pull/2))
 
+[1.197.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.197.0
+[1.196.2]: https://github.com/Generous-Corp/pulp/releases/tag/v1.196.2
+[1.196.1]: https://github.com/Generous-Corp/pulp/releases/tag/v1.196.1
+[1.196.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.196.0
+[1.195.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.195.0
+[1.194.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.194.0
+[1.193.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.193.0
+[1.192.1]: https://github.com/Generous-Corp/pulp/releases/tag/v1.192.1
+[1.192.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.192.0
+[1.191.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.191.0
 [1.190.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.190.0
 [1.189.1]: https://github.com/Generous-Corp/pulp/releases/tag/v1.189.1
 [1.189.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.189.0

@@ -281,7 +281,8 @@ TEST_CASE("pointer messages reach the handler in logical points", "[native][gl-s
     SendMessageW(child, WM_MOUSEMOVE, 0, at(100, 50));
     SendMessageW(child, WM_MOUSEMOVE, MK_LBUTTON, at(110, 50));
 
-    REQUIRE(pointer.size() >= 10);
+    // Six button events, one enter, one move and one drag.
+    REQUIRE(pointer.size() == 9);
     REQUIRE(pointer[0].kind == PointerKind::down);
     REQUIRE(pointer[0].x == 20.0);
     REQUIRE(pointer[0].y == 30.0);
@@ -315,6 +316,102 @@ TEST_CASE("pointer messages reach the handler in logical points", "[native][gl-s
     SendMessageW(child, WM_LBUTTONUP, 0, at(41, 60));
     REQUIRE(pointer.size() == 4);
     REQUIRE(pointer[2].click_count == 2);
+    surface->detach();
+}
+
+TEST_CASE("a drag holds the capture and keeps reporting outside the window",
+          "[native][gl-surface][win32]") {
+    HostWindow host;
+    GlSurfaceOptions options = any_driver();
+    options.scale = 1.0;
+    auto surface = GlSurface::create(options);
+    REQUIRE(surface->attach(host.hwnd));
+    std::vector<PointerEvent> pointer;
+    InputHandler handler;
+    handler.pointer = [&](const PointerEvent& e) { pointer.push_back(e); };
+    surface->set_input_handler(handler);
+    HWND child = child_of(*surface);
+
+    REQUIRE(GetCapture() != child); // control: nothing holds it before the press
+    SendMessageW(child, WM_LBUTTONDOWN, MK_LBUTTON, at(50, 50));
+    REQUIRE(GetCapture() == child);
+    // Outside the client area the coordinates are negative or past the edge.
+    SendMessageW(child, WM_MOUSEMOVE, MK_LBUTTON, at(-30, 50));
+    SendMessageW(child, WM_MOUSEMOVE, MK_LBUTTON, at(5000, 50));
+    SendMessageW(child, WM_LBUTTONUP, 0, at(-30, 50));
+    REQUIRE(GetCapture() != child);
+
+    std::vector<PointerEvent> drags;
+    for (const auto& e : pointer)
+        if (e.kind == PointerKind::drag)
+            drags.push_back(e);
+    REQUIRE(drags.size() == 2);
+    REQUIRE(drags[0].x == -30.0);
+    REQUIRE(drags[1].x == 5000.0);
+    REQUIRE(drags[0].button == PointerButton::left);
+    REQUIRE(pointer.back().kind == PointerKind::up);
+    REQUIRE(pointer.back().x == -30.0);
+    surface->detach();
+}
+
+TEST_CASE("losing the capture mid-drag ends the press once", "[native][gl-surface][win32]") {
+    HostWindow host;
+    auto surface = GlSurface::create(any_driver());
+    REQUIRE(surface->attach(host.hwnd));
+    std::vector<PointerEvent> pointer;
+    InputHandler handler;
+    handler.pointer = [&](const PointerEvent& e) { pointer.push_back(e); };
+    surface->set_input_handler(handler);
+    HWND child = child_of(*surface);
+
+    SendMessageW(child, WM_LBUTTONDOWN, MK_LBUTTON, at(20, 20));
+    SendMessageW(child, WM_MOUSEMOVE, MK_LBUTTON, at(30, 20));
+    // The system moves the capture elsewhere (a modal dialog, alt-tab).
+    SendMessageW(child, WM_CAPTURECHANGED, 0, reinterpret_cast<LPARAM>(host.hwnd));
+    REQUIRE(pointer.back().kind == PointerKind::up);
+    REQUIRE(pointer.back().buttons_held == 0u);
+    REQUIRE(pointer.back().x == 30.0);
+    const auto count = pointer.size();
+    // No second end: a later capture change, or a stray release, adds nothing.
+    SendMessageW(child, WM_CAPTURECHANGED, 0, reinterpret_cast<LPARAM>(host.hwnd));
+    REQUIRE(pointer.size() == count);
+
+    // A normal release is not ended a second time by its own ReleaseCapture.
+    pointer.clear();
+    SendMessageW(child, WM_LBUTTONDOWN, MK_LBUTTON, at(20, 20));
+    SendMessageW(child, WM_LBUTTONUP, 0, at(20, 20));
+    int ups = 0;
+    for (const auto& e : pointer)
+        ups += e.kind == PointerKind::up;
+    REQUIRE(ups == 1);
+    surface->detach();
+}
+
+TEST_CASE("a scripted press, move and release gives a control its drag events",
+          "[native][gl-surface][win32]") {
+    HostWindow host;
+    auto surface = GlSurface::create(any_driver());
+    REQUIRE(surface->attach(host.hwnd));
+    std::vector<PointerKind> kinds;
+    InputHandler handler;
+    handler.pointer = [&](const PointerEvent& e) { kinds.push_back(e.kind); };
+    surface->set_input_handler(handler);
+    HWND child = child_of(*surface);
+
+    SendMessageW(child, WM_MOUSEMOVE, 0, at(10, 10));
+    SendMessageW(child, WM_LBUTTONDOWN, MK_LBUTTON, at(10, 10));
+    for (int i = 1; i <= 12; ++i)
+        SendMessageW(child, WM_MOUSEMOVE, MK_LBUTTON, at(10 + i, 10));
+    SendMessageW(child, WM_LBUTTONUP, 0, at(22, 10));
+
+    const std::vector<PointerKind> head = {PointerKind::enter, PointerKind::move,
+                                           PointerKind::down};
+    REQUIRE(kinds.size() == 3 + 12 + 1);
+    for (std::size_t i = 0; i < head.size(); ++i)
+        REQUIRE(kinds[i] == head[i]);
+    for (std::size_t i = 3; i < 15; ++i)
+        REQUIRE(kinds[i] == PointerKind::drag);
+    REQUIRE(kinds.back() == PointerKind::up);
     surface->detach();
 }
 
@@ -474,9 +571,9 @@ TEST_CASE("the cursor over the surface follows set_cursor", "[native][gl-surface
                      MAKELPARAM(HTCLIENT, WM_MOUSEMOVE));
         return GetCursor();
     };
-    const HCURSOR crosshair = LoadCursorW(nullptr, IDC_CROSS);
-    const HCURSOR ibeam = LoadCursorW(nullptr, IDC_IBEAM);
-    const HCURSOR hand = LoadCursorW(nullptr, IDC_HAND);
+    const HCURSOR crosshair = LoadCursorW(nullptr, reinterpret_cast<LPCWSTR>(IDC_CROSS));
+    const HCURSOR ibeam = LoadCursorW(nullptr, reinterpret_cast<LPCWSTR>(IDC_IBEAM));
+    const HCURSOR hand = LoadCursorW(nullptr, reinterpret_cast<LPCWSTR>(IDC_HAND));
     REQUIRE(shown_after_setcursor() == crosshair);
     surface->set_cursor(Cursor::ibeam);
     REQUIRE(shown_after_setcursor() == ibeam);

@@ -279,7 +279,9 @@ def check_catch2_fetch(type_name: str, dir_path: Path) -> list[str]:
     whole history. `catch2_SOURCE_DIR` is empty when the installed package is
     used, so the template must not append `extras/` unconditionally."""
     failures: list[str] = []
-    for template_file in sorted(dir_path.rglob("CMakeLists.txt.template")):
+    for template_file in sorted(dir_path.rglob("*.template")):
+        if template_file.name not in {"CMakeLists.txt.template", "Testing.cmake.template"}:
+            continue
         text = template_file.read_text(encoding="utf-8")
         rel = template_file.relative_to(dir_path)
         for m in _CATCH2_DECLARE.finditer(text):
