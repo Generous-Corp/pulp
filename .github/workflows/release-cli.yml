@@ -1250,6 +1250,33 @@ jobs:
           if python3 -c 'import sys; v=lambda s: tuple(map(int, s.split("."))); raise SystemExit(0 if v(sys.argv[1]) >= v(sys.argv[2]) else 1)' "${RELEASE_TAG#v}" "0.772.0"; then
             INSPECTOR="-DPULP_ENABLE_INSPECTOR=ON"
           fi
+          VELLUM_FLAGS=()
+          if [ "${{ matrix.platform }}" = "darwin-arm64" ]; then
+            python3 -I - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          data = json.loads(Path("pulp.lock").read_text(encoding="utf-8"))["vellum"]
+          Path(os.environ["RUNNER_TEMP"], "pulp-vellum-sdk-url").write_text(
+              data["sdk_url"] + "\n", encoding="utf-8")
+          Path(os.environ["RUNNER_TEMP"], "pulp-vellum-sdk-digest").write_text(
+              data["sdk_digest"] + "\n", encoding="utf-8")
+          PY
+            VELLUM_URL="$(cat "$RUNNER_TEMP/pulp-vellum-sdk-url")"
+            VELLUM_DIGEST="$(cat "$RUNNER_TEMP/pulp-vellum-sdk-digest")"
+            VELLUM_ARCHIVE="$RUNNER_TEMP/vellum-sdk.tar.gz"
+            VELLUM_ROOT="$RUNNER_TEMP/vellum-sdk"
+            curl --fail --location --silent --show-error "$VELLUM_URL" --output "$VELLUM_ARCHIVE"
+            printf '%s  %s\n' "$VELLUM_DIGEST" "$VELLUM_ARCHIVE" | shasum -a 256 -c -
+            mkdir -p "$VELLUM_ROOT"
+            tar -xzf "$VELLUM_ARCHIVE" -C "$VELLUM_ROOT"
+            VELLUM_FLAGS=(
+              "-DCMAKE_PREFIX_PATH=$VELLUM_ROOT/sdk"
+              -DPULP_ENABLE_PULP_VELLUM=ON
+              -DPULP_ENABLE_PULP_VELLUM_AUDIO=ON
+            )
+          fi
           cmake -S . -B build-sdk \
             -DCMAKE_BUILD_TYPE=Release \
             -DPULP_SKIA_AUTOFETCH=OFF \
@@ -1260,6 +1287,7 @@ jobs:
             -DPULP_BUILD_WEBVIEW=ON \
             $INSPECTOR \
             "${GPU_AUDIO_FLAGS[@]}" \
+            "${VELLUM_FLAGS[@]}" \
             $EXTRA_ARCH
           jobs="${NUMBER_OF_PROCESSORS:-$(sysctl -n hw.ncpu 2>/dev/null || echo 4)}"
           echo "SDK build parallelism request: --parallel ${jobs}"
@@ -1276,6 +1304,15 @@ jobs:
           # build-sdk is a Scene3D=OFF SDK-only configuration. On Linux it also
           # turns WebView back ON without relinking the portable CLI.
           cmake --install build-sdk --prefix sdk-staging --config Release
+          if [ "$MATRIX_PLATFORM" = "darwin-arm64" ]; then
+            python3 tools/scripts/bundle_vellum_sdk.py \
+              --lock pulp.lock \
+              --prefix sdk-staging \
+              --platform darwin-arm64 \
+              --archive "$RUNNER_TEMP/vellum-sdk.tar.gz" \
+              --integrations integrations
+            python3 tools/scripts/check_vellum_sdk_staging.py sdk-staging
+          fi
           # CMake rewrites install RPATHs while copying executables into the SDK.
           # On Mach-O that invalidates the build-time code signature. Re-sign the
           # installed bytes before stamping provenance: the agent-capability
