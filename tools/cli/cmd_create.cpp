@@ -84,7 +84,8 @@ static bool installed_pulp_package_has_vellum(const fs::path& prefix) {
     const auto cmake_dir = prefix / "lib" / "cmake" / "Pulp";
     const auto targets = cmake_dir / "PulpTargets.cmake";
     const auto config = cmake_dir / "PulpConfig.cmake";
-    if (!fs::exists(targets) && !fs::exists(config)) return false;
+    if (!fs::exists(targets) && !fs::exists(config))
+        return false;
     for (const auto& path : {targets, config}) {
         if (fs::exists(path) && read_file_contents(path).find("Pulp::vellum") != std::string::npos)
             return true;
@@ -93,26 +94,32 @@ static bool installed_pulp_package_has_vellum(const fs::path& prefix) {
 }
 
 static bool reject_missing_installed_vellum(const std::string& ui, const fs::path& sdk_dir) {
-    if (ui != "vellum") return false;
+    if (ui != "vellum")
+        return false;
     std::vector<fs::path> prefixes;
-    if (!sdk_dir.empty()) prefixes.push_back(sdk_dir);
+    if (!sdk_dir.empty())
+        prefixes.push_back(sdk_dir);
     if (const char* env = std::getenv("CMAKE_PREFIX_PATH"); env && *env) {
         std::string value = env;
         std::size_t start = 0;
         while (start <= value.size()) {
             const auto end = value.find(':', start);
             const auto item = value.substr(start, end == std::string::npos ? end : end - start);
-            if (!item.empty()) prefixes.emplace_back(item);
-            if (end == std::string::npos) break;
+            if (!item.empty())
+                prefixes.emplace_back(item);
+            if (end == std::string::npos)
+                break;
             start = end + 1;
         }
     }
     for (const auto& prefix : prefixes) {
         const auto cmake_dir = prefix / "lib" / "cmake" / "Pulp";
-        if ((fs::exists(cmake_dir / "PulpTargets.cmake") || fs::exists(cmake_dir / "PulpConfig.cmake")) &&
+        if ((fs::exists(cmake_dir / "PulpTargets.cmake") ||
+             fs::exists(cmake_dir / "PulpConfig.cmake")) &&
             !installed_pulp_package_has_vellum(prefix)) {
-            std::cerr << "Error: --ui vellum needs the Pulp SDK's optional pulp-vellum integration; "
-                         "the installed SDK has no Pulp::vellum target. Install a Vellum-enabled SDK.\n";
+            std::cerr
+                << "Error: --ui vellum needs the Pulp SDK's optional pulp-vellum integration; "
+                   "the installed SDK has no Pulp::vellum target. Install a Vellum-enabled SDK.\n";
             return true;
         }
     }
@@ -751,7 +758,8 @@ int cmd_create(const std::vector<std::string>& args) {
             return 1;
         }
     }
-    if (reject_missing_installed_vellum(ui, sdk_dir)) return 1;
+    if (reject_missing_installed_vellum(ui, sdk_dir))
+        return 1;
 
     std::string vellum_editor;
     if (ui == "vellum") {

@@ -1375,15 +1375,13 @@ template <typename W, typename M, typename H> ParameterBinding bind_parameter(W&
 #endif
 }
 
-
 TEST_CASE("pulp-cpp create --ui vellum rejects an installed SDK without Pulp::vellum",
           "[cli][create][shellout][ui-mode]") {
     if (!pulp_binary_exists())
         SKIP("pulp binary not built");
     TempDir tmp("pulp-create-ui-vellum-missing-bridge");
     const auto sdk = tmp.path / "sdk";
-    write_file(sdk / "lib/cmake/Pulp/PulpConfig.cmake",
-               "set(PACKAGE_VERSION \"1.0.0\")\n");
+    write_file(sdk / "lib/cmake/Pulp/PulpConfig.cmake", "set(PACKAGE_VERSION \"1.0.0\")\n");
     ScopedEnvVar prefix("CMAKE_PREFIX_PATH", native_path_string(sdk).c_str());
     const auto out_dir = tmp.path / "MissingBridge";
     auto result = run_create({"create", "MissingBridge", "--ui", "vellum", "--output",
