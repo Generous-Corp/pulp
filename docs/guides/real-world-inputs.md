@@ -39,6 +39,9 @@ Vellum pointer session, orders events by sequence, rejects stale epochs, and
 routes press, move, release, and cancel through Vellum's native pointer
 router. Vellum's `MouseEvent` has no hold, velocity, or confidence metadata, so
 hold is represented as a drag tick and those fields are not forwarded.
+The interaction router publishes every discrete event to separate bounded SPSC queues for the UI and audio consumers. A producer emits events in sequence order. `press` starts an object session, `hold` keeps it alive without a new attack, `move` updates the session, and `release` ends it. `cancel` ends it when the provider restarts, stops producing within the configured timeout, or an event queue overflows. Consumers drain their own queue without allocation.
+
+The optional audio seam maps note-like interactions to the existing MPE voice tracker and `MpeVoiceAllocator` APIs. It does not add a parallel expression model. Camera, sensor, inference, and permission lifecycle code belongs in the editor or application layer. It must publish into the router from a provider or worker thread and never enter `Processor` or the audio callback.
 
 ## The default provider recipe
 
