@@ -118,6 +118,12 @@ class ReleaseWorkflowWiringTests(unittest.TestCase):
         self.assertLess(install, bundle)
         self.assertLess(bundle, check)
 
+    def test_release_configures_a_consumer_against_only_the_staged_prefix(self) -> None:
+        check = WORKFLOW.index("tools/scripts/check_vellum_sdk_staging.py sdk-staging")
+        smoke = WORKFLOW.index("vellum-consumer-smoke", check)
+        self.assertIn('-DCMAKE_PREFIX_PATH="$PWD/sdk-staging"', WORKFLOW[smoke:smoke + 2500])
+        self.assertIn("find_package(Vellum CONFIG REQUIRED PATHS", WORKFLOW[smoke:smoke + 2500])
+
     def test_matrix_lists_all_bridge_archives_for_darwin_arm64(self) -> None:
         import json
 

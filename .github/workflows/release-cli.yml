@@ -1326,6 +1326,26 @@ jobs:
               --archive "$RUNNER_TEMP/vellum-sdk.tar.gz" \
               --integrations integrations
             python3 tools/scripts/check_vellum_sdk_staging.py sdk-staging
+            # Configure-level proof: a consumer given only the SDK prefix must
+            # resolve both find_package(Pulp) and the staged Vellum package, the
+            # way a `pulp create --ui vellum` project does.
+            VELLUM_SMOKE="$RUNNER_TEMP/vellum-consumer-smoke"
+            rm -rf "$VELLUM_SMOKE"
+            mkdir -p "$VELLUM_SMOKE"
+            cat > "$VELLUM_SMOKE/CMakeLists.txt" <<'CMK'
+          cmake_minimum_required(VERSION 3.24)
+          project(vellum_consumer_smoke LANGUAGES CXX)
+          find_package(Pulp REQUIRED)
+          set(_pulp_vellum_hints "")
+          foreach(_pulp_prefix IN LISTS CMAKE_PREFIX_PATH)
+              file(GLOB _pulp_prefix_hints LIST_DIRECTORIES true
+                  "${_pulp_prefix}/share/pulp/vellum-sdk/*/sdk")
+              list(APPEND _pulp_vellum_hints ${_pulp_prefix_hints})
+          endforeach()
+          find_package(Vellum CONFIG REQUIRED PATHS ${_pulp_vellum_hints})
+          CMK
+            cmake -S "$VELLUM_SMOKE" -B "$VELLUM_SMOKE/build" \
+              -DCMAKE_PREFIX_PATH="$PWD/sdk-staging"
           fi
           # CMake rewrites install RPATHs while copying executables into the SDK.
           # On Mach-O that invalidates the build-time code signature. Re-sign the
