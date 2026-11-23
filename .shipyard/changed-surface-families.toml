@@ -7579,6 +7579,44 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
+name = "script-readers-7766d4b49b65"
+paths = ["tools/scripts/test_swift_bridge_split_guard.py"]
+tests = [
+  "build-parallelism-guard",
+  "changed-surface-policy-inventory",
+  "changed-surface-policy-selftest",
+  "changed-surface-script-families-drift",
+  "changed-surface-script-families-selftest",
+  "changed-surface-shadow-plans-selftest",
+  "clean-worktree-planning-selftest",
+  "configure-only-selftest",
+  "flake-exoneration-selftest",
+  "gate-common-selftest",
+  "gpu-audio-provider-identity-selftest",
+  "gpu-dpr-runner-selftest",
+  "gpu-first-visible-acceptance-selftest",
+  "gpu-first-visible-campaign-selftest",
+  "gpu-first-visible-external-adapter-selftest",
+  "gpu-first-visible-role-producers-selftest",
+  "gpu-handoff-provenance-selftest",
+  "pr-head-affected-tests-selftest",
+  "pr-head-diff-scoped-registrations",
+  "prepush-receipt",
+  "prepush-refresh-push",
+  "reuse-policy-replay-selftest",
+  "sample-region-compat-baseline-selftest",
+  "swift-bridge-split-guard-selftest",
+  "vellum-watch-preflight-selftest",
+  "wide-non-native-selftest",
+]
+build_targets = ["pulp-cli"]
+supported_build_types = [
+  "debug",
+  "release",
+]
+risk_class = "low"
+
+[[families]]
 name = "script-readers-b540ed94a2bb"
 paths = ["tools/scripts/test_tart_home_resolution.py"]
 tests = [
@@ -9690,6 +9728,7 @@ paths = [
   "tools/scripts/test_stale_run_reaper.py",
   "tools/scripts/test_status_tone_signal_lint.py",
   "tools/scripts/test_summarize_daw_bench_results.py",
+  "tools/scripts/test_swift_bridge_split_guard.py",
   "tools/scripts/test_tart_home_resolution.py",
   "tools/scripts/test_text_encoding_lint.py",
   "tools/scripts/test_timeline_fixture_coverage_check.py",
@@ -9861,6 +9900,7 @@ tests = [
   "status-tone-signal-lint-selftest",
   "style-dedup-table-sync",
   "swift-bridge-split-guard",
+  "swift-bridge-split-guard-selftest",
   "test-file-paths-lint",
   "test-file-paths-lint-selftest",
   "timeline-mcp-drift",
@@ -10321,6 +10361,7 @@ paths = [
   "tools/scripts/test_stale_run_reaper.py",
   "tools/scripts/test_status_tone_signal_lint.py",
   "tools/scripts/test_summarize_daw_bench_results.py",
+  "tools/scripts/test_swift_bridge_split_guard.py",
   "tools/scripts/test_tart_home_resolution.py",
   "tools/scripts/test_text_encoding_lint.py",
   "tools/scripts/test_timeline_fixture_coverage_check.py",
