@@ -59,6 +59,33 @@ TEST_CASE("interaction batches preserve identity and bounded capacity",
     CHECK_FALSE(malformed.append({}));
 }
 
+TEST_CASE("interaction event queue preserves ordered terminal events",
+          "[runtime][interaction-event]") {
+    InteractionEventQueue<2> queue;
+    const auto press = InteractionEvent{.source_id = 9,
+                                        .epoch = 1,
+                                        .sequence = 1,
+                                        .object_id = 3,
+                                        .phase = InteractionPhase::press,
+                                        .x = .2f,
+                                        .y = .4f,
+                                        .confidence = .95f};
+    auto release = press;
+    release.sequence = 2;
+    release.phase = InteractionPhase::release;
+    REQUIRE(queue.try_push(press));
+    REQUIRE(queue.try_push(release));
+    CHECK_FALSE(queue.try_push(press));
+    CHECK(queue.overflow_count() == 1);
+
+    InteractionEvent observed;
+    REQUIRE(queue.try_pop(observed));
+    CHECK(observed.phase == InteractionPhase::press);
+    REQUIRE(queue.try_pop(observed));
+    CHECK(observed.phase == InteractionPhase::release);
+    CHECK(queue.empty());
+}
+
 TEST_CASE("interaction tracker cancels held objects on restart and timeout",
           "[runtime][interaction-event]") {
     InteractionTracker<2> tracker;
@@ -90,6 +117,34 @@ TEST_CASE("interaction tracker cancels held objects on restart and timeout",
     REQUIRE(timeout.events_view().size() == 1);
     CHECK(timeout.events_view()[0].phase == InteractionPhase::cancel);
     CHECK(timeout.events_view()[0].object_id == 8);
+    CHECK(tracker.active_count() == 0);
+}
+
+TEST_CASE("interaction tracker cancels every object on a restart terminal event",
+          "[runtime][interaction-event]") {
+    InteractionTracker<2> tracker;
+    InteractionBatch<3> result;
+    const auto press = [](std::uint32_t object_id, std::uint64_t sequence) {
+        return InteractionEvent{.source_id = 8,
+                                .epoch = 1,
+                                .sequence = sequence,
+                                .object_id = object_id,
+                                .phase = InteractionPhase::press,
+                                .x = .2f,
+                                .y = .4f,
+                                .confidence = .9f};
+    };
+    REQUIRE(tracker.submit(press(1, 1), result) == InteractionVerdict::accepted);
+    REQUIRE(tracker.submit(press(2, 2), result) == InteractionVerdict::accepted);
+    auto restart_release = press(1, 3);
+    restart_release.epoch = 2;
+    restart_release.phase = InteractionPhase::release;
+    REQUIRE(tracker.submit(restart_release, result) == InteractionVerdict::accepted);
+    REQUIRE(result.events_view().size() == 2);
+    CHECK(result.events_view()[0].phase == InteractionPhase::cancel);
+    CHECK(result.events_view()[0].object_id == 1);
+    CHECK(result.events_view()[1].phase == InteractionPhase::cancel);
+    CHECK(result.events_view()[1].object_id == 2);
     CHECK(tracker.active_count() == 0);
 }
 
@@ -567,4 +622,39 @@ TEST_CASE("interaction router hands overflow cancels across threads",
     CHECK(bad_ui.load() == 0);
     CHECK(bad_audio.load() == 0);
     CHECK(router.pending_cancel_dropped_count() == 0);
+}
+
+TEST_CASE("interaction tracker keeps active objects when a future-epoch event is malformed",
+          "[runtime][interaction-event]") {
+    InteractionTracker<2> tracker;
+    InteractionBatch<3> result;
+    const auto press = InteractionEvent{.source_id = 4,
+                                        .epoch = 1,
+                                        .sequence = 1,
+                                        .provider_time_ns = 100,
+                                        .object_id = 7,
+                                        .phase = InteractionPhase::press,
+                                        .x = .25f,
+                                        .y = .5f,
+                                        .strength = .75f,
+                                        .confidence = .9f};
+    REQUIRE(tracker.submit(press, result) == InteractionVerdict::accepted);
+
+    auto bad = press;
+    bad.epoch = 2;
+    bad.object_id = 8;
+    bad.x = 2.0f;
+    CHECK(tracker.submit(bad, result) == InteractionVerdict::rejected_malformed);
+    CHECK(result.events_view().empty());
+    CHECK(tracker.active_count() == 1);
+
+    // A valid restart still cancels, and the cancel keeps the contact strength.
+    auto restarted = press;
+    restarted.epoch = 2;
+    restarted.object_id = 8;
+    restarted.strength = 0.0f;
+    REQUIRE(tracker.submit(restarted, result) == InteractionVerdict::accepted);
+    REQUIRE(result.events_view().size() == 2);
+    CHECK(result.events_view()[0].phase == InteractionPhase::cancel);
+    CHECK(result.events_view()[0].strength == .75f);
 }

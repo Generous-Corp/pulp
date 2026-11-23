@@ -837,6 +837,9 @@ class ReleaseArtifactContentsTests(unittest.TestCase):
         matrix_targets = set(rac.DEFAULT_MATRIX.pulp_library_stems)
         for platform_targets in rac.DEFAULT_MATRIX.platform_library_stems.values():
             matrix_targets.update(platform_targets)
+        # The optional Vellum bridge archives are conditional in the install
+        # rules but listed for darwin-arm64 in the matrix.
+        matrix_targets -= {"pulp-vellum", "pulp-vellum-audio", "pulp-vellum-scripted"}
         self.assertEqual(
             archive_targets,
             matrix_targets,

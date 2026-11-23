@@ -69,6 +69,16 @@ class BaselineTests(unittest.TestCase):
         self.assertIn("runtime::base64_encode", persistence)
         self.assertIn('${ROOT}/core/runtime/src/base64.cpp"', listing)
 
+    def test_web_sources_define_assemble_runtime_the_prepare_seam_calls(self):
+        # signal_graph_prepare.cpp calls SignalGraph::assemble_runtime_, defined
+        # in signal_graph_compile_runtime.cpp; omitting it fails wasm-ld.
+        repo = Path(__file__).resolve().parents[2]
+        listing = (repo / "tools" / "cmake" /
+                   "PulpSampleRegionWebSources.cmake").read_text(encoding="utf-8")
+        prepare = (repo / "core/host/src/signal_graph_prepare.cpp").read_text(encoding="utf-8")
+        self.assertIn("assemble_runtime_(", prepare)
+        self.assertIn('${ROOT}/core/host/src/signal_graph_compile_runtime.cpp"', listing)
+
     def test_web_sources_define_every_host_query_the_closure_calls(self):
         # The isolated web profile links only the curated closure, so a
         # function its sources call must be DEFINED by one of its sources or

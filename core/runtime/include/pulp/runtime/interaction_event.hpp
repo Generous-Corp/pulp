@@ -6,6 +6,7 @@
 #include <cstdint>
 #include <span>
 #include <type_traits>
+#include <pulp/runtime/spsc_queue.hpp>
 
 namespace pulp::runtime {
 
@@ -60,6 +61,36 @@ template <std::size_t Capacity = 16> struct InteractionBatch {
     }
 };
 
+// Ordered transport for discrete interaction events. Unlike a latest-value
+// buffer, this preserves every press, hold, move, release, and cancel until
+// the single consumer has observed it.
+template <std::size_t Capacity = 256> class InteractionEventQueue {
+  public:
+    static_assert(Capacity > 0);
+
+    bool try_push(const InteractionEvent& event) noexcept {
+        return queue_.try_push(event);
+    }
+    bool try_pop(InteractionEvent& event) noexcept {
+        return queue_.try_pop(event);
+    }
+    bool empty() const noexcept {
+        return queue_.empty();
+    }
+    std::size_t size_approx() const noexcept {
+        return queue_.size_approx();
+    }
+    std::uint64_t overflow_count() const noexcept {
+        return queue_.overflow_count();
+    }
+    static constexpr std::size_t capacity() noexcept {
+        return Capacity;
+    }
+
+  private:
+    SpscQueue<InteractionEvent, Capacity> queue_;
+};
+
 enum class InteractionVerdict : std::uint8_t {
     accepted,
     unchanged,
@@ -84,6 +115,16 @@ template <std::size_t MaxObjects = 16> class InteractionTracker {
         if (source_seen_ && event.epoch == epoch_ && event.sequence <= sequence_)
             return event.sequence == sequence_ ? InteractionVerdict::unchanged
                                                : InteractionVerdict::rejected_order;
+        if (source_seen_ && event.epoch > epoch_) {
+            // Validate before any destructive restart: a malformed provider
+            // event must not cancel the active interactions.
+            if (const auto invalid = validate(event); invalid != InteractionVerdict::accepted)
+                return invalid;
+            cancel_active(output, event);
+            epoch_ = event.epoch;
+            active_ = {};
+            ages_ = {};
+        }
         const auto terminal_slot = find(event.object_id);
         if (terminal_slot >= 0 &&
             (event.phase == InteractionPhase::release || event.phase == InteractionPhase::cancel)) {
@@ -107,23 +148,12 @@ template <std::size_t MaxObjects = 16> class InteractionTracker {
             output.append(terminal);
             return InteractionVerdict::accepted;
         }
-        if (event.phase == InteractionPhase::invalid || !std::isfinite(event.x) ||
-            !std::isfinite(event.y) || !std::isfinite(event.confidence) || event.x < 0.0f ||
-            event.x > 1.0f || event.y < 0.0f || event.y > 1.0f)
-            return InteractionVerdict::rejected_malformed;
-        if (event.confidence < 0.0f || event.confidence > 1.0f || !std::isfinite(event.strength) ||
-            event.strength < 0.0f || event.strength > 1.0f)
-            return InteractionVerdict::rejected_confidence;
+        if (const auto invalid = validate(event); invalid != InteractionVerdict::accepted)
+            return invalid;
 
         if (!source_seen_) {
             source_id_ = event.source_id;
             source_seen_ = true;
-        }
-        if (event.epoch > epoch_) {
-            cancel_active(output, event);
-            epoch_ = event.epoch;
-            active_ = {};
-            ages_ = {};
         }
         epoch_ = event.epoch;
         sequence_ = event.sequence;
@@ -215,6 +245,17 @@ template <std::size_t MaxObjects = 16> class InteractionTracker {
         return -1;
     }
 
+    static InteractionVerdict validate(const InteractionEvent& event) noexcept {
+        if (event.phase == InteractionPhase::invalid || !std::isfinite(event.x) ||
+            !std::isfinite(event.y) || !std::isfinite(event.confidence) || event.x < 0.0f ||
+            event.x > 1.0f || event.y < 0.0f || event.y > 1.0f)
+            return InteractionVerdict::rejected_malformed;
+        if (event.confidence < 0.0f || event.confidence > 1.0f || !std::isfinite(event.strength) ||
+            event.strength < 0.0f || event.strength > 1.0f)
+            return InteractionVerdict::rejected_confidence;
+        return InteractionVerdict::accepted;
+    }
+
     static InteractionEvent cancel_for(const InteractionEvent& active,
                                        const InteractionEvent& reason) noexcept {
         auto cancel = reason;
@@ -222,6 +263,7 @@ template <std::size_t MaxObjects = 16> class InteractionTracker {
         cancel.x = active.x;
         cancel.y = active.y;
         cancel.confidence = active.confidence;
+        cancel.strength = active.strength;
         cancel.phase = InteractionPhase::cancel;
         return cancel;
     }

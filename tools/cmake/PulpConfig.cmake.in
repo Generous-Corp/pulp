@@ -108,7 +108,16 @@ find_dependency(Threads)
 # first. Consumers of an SDK without the bridge never look for Vellum.
 set(PULP_SDK_HAS_VELLUM_BRIDGE "@PULP_SDK_HAS_VELLUM_BRIDGE@")
 if(PULP_SDK_HAS_VELLUM_BRIDGE)
-    find_dependency(Vellum CONFIG)
+    # The release stages the lock-pinned Vellum SDK inside this prefix at
+    # share/pulp/vellum-sdk/<version>/sdk. Hint it so a consumer that passes
+    # only the Pulp prefix still resolves Vellum, and keep the find QUIET and
+    # optional: the exported targets only name Vellum::* from pulp-vellum, so a
+    # consumer that never links the bridge must not fail to configure.
+    file(GLOB _pulp_vellum_sdk_hints LIST_DIRECTORIES true
+        "${PACKAGE_PREFIX_DIR}/share/pulp/vellum-sdk/*/sdk")
+    list(SORT _pulp_vellum_sdk_hints COMPARE NATURAL ORDER DESCENDING)
+    find_package(Vellum CONFIG QUIET PATHS ${_pulp_vellum_sdk_hints})
+    unset(_pulp_vellum_sdk_hints)
 endif()
 
 # The Pulp SDK is built and installed in the Release configuration only.

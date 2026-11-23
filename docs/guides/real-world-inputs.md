@@ -45,7 +45,7 @@ mouse events. Vellum's `MouseEvent` has no hold, velocity, or confidence
 metadata, so hold is represented as a drag tick and those fields are not
 forwarded.
 
-The optional audio seam maps note-like interactions to the existing MPE voice tracker and `MpeVoiceAllocator` APIs. It does not add a parallel expression model. Camera, sensor, inference, and permission lifecycle code belongs in the editor or application layer. It must publish into the router from a provider or worker thread and never enter `Processor` or the audio callback.
+A planned optional audio seam would map note-like interactions to the existing MPE voice tracker and `MpeVoiceAllocator` APIs. This change does not add it, and it will not add a parallel expression model. Camera, sensor, inference, and permission lifecycle code belongs in the editor or application layer. It must publish into the router from a provider or worker thread and never enter `Processor` or the audio callback.
 
 ## The default provider recipe
 
@@ -53,9 +53,10 @@ For a new real-world demo, use this sequence before choosing a provider SDK:
 
 1. Capture or receive a complete observation away from the audio callback.
 2. Translate it into `ExternalInputFrame<N>` and publish it through one existing
-   bounded handoff such as `TripleBuffer`, OSC/IPC, MIDI, or WAM ingress. Use an
-   ordered SPSC queue for discrete interaction events because a latest-value
-   buffer can overwrite a release before the audio reader sees it.
+   bounded handoff such as `TripleBuffer`, OSC/IPC, MIDI, or WAM ingress. For
+   discrete interactions, use `InteractionEventQueue<N>` or an equivalent
+   ordered SPSC queue because a latest-value buffer can overwrite a release
+   before the audio reader sees it.
 3. Submit it to `ExternalInputGate<N>` with a policy that defines confidence,
    expiry, and restart behavior.
 4. Map only accepted values or events to existing parameters, modulation, MIDI,
@@ -181,7 +182,7 @@ flowchart LR
 
 | Source and consumer | Recommended existing path |
 |---|---|
-| Native provider to the same application or plugin process | Application-owned `TripleBuffer<T>` or another existing bounded runtime primitive. |
+| Native provider to the same application or plugin process | `TripleBuffer<T>` for continuous frames, or `InteractionEventQueue<N>` for ordered discrete events. |
 | External process to a desktop/plugin consumer | Existing OSC or IPC. Keep the external process responsible for camera/device permissions and inference. |
 | Browser provider to a WAM processor | Existing WAM MIDI ingress; the example reserves channel-16 pitch bend for one compact control packet. |
 | Host automation or musical control | Existing MIDI/MPE and StateStore/modulation paths. |
