@@ -1,0 +1,13 @@
+{
+  "schema_version": 1,
+  "event_id": "20261123-w-interaction-bridge-v2",
+  "kind": "exported-path-change",
+  "created_at": "2026-11-23T10:41:25Z",
+  "receipt_export_id": "20261107-f0ac0a4ff392",
+  "paths": [
+    "core/runtime/CMakeLists.txt",
+    "core/runtime/include/pulp/runtime/interaction_router.hpp"
+  ],
+  "vellum_inherits": false,
+  "rationale": "Adds Pulp runtime interaction routing (interaction_router.hpp: SPSC per consumer, cancel synthesis) beside interaction_event.hpp. These are Pulp runtime types; Vellum deliberately takes no dependency on them, and the translation to Vellum input lives in Pulp's integrations/pulp-vellum bridge, so the Vellum re-export does not carry them."
+}
