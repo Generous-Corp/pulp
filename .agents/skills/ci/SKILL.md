@@ -49,6 +49,8 @@ on a real PR. Do them in order.
    it build-free; its families prediction can still fail.
    The skipped lanes are listed as NOT CHECKED, so the verdict reads "not a full
    pass" rather than "safe to push". The cheap gates still run.
+   When a gate fails, the final summary names every failed gate in a comma-separated
+   `gates: failed:` line before the remediation advice.
    Two lanes read their commands from the CI jobs themselves, so a step added
    there reaches `gates.sh` with no edit: the required `Enforce version & skill
    sync` job's `python3 <script>` commands that `gates.sh` has no block for
