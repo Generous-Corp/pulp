@@ -37,9 +37,12 @@ class InteractionAdapter final {
         bool delivered = false;
         if (batch.count == 0)
             return false;
-        const auto batch_source = batch.events[0].source_id;
-        std::uint32_t batch_epoch = batch.events[0].epoch;
-        for (std::size_t i = 1; i < batch.count; ++i) {
+        const auto events = batch.events_view();
+        if (events.empty())
+            return false;
+        const auto batch_source = events[0].source_id;
+        std::uint32_t batch_epoch = events[0].epoch;
+        for (std::size_t i = 1; i < events.size(); ++i) {
             if (events[i].source_id == batch_source && events[i].epoch > batch_epoch)
                 batch_epoch = events[i].epoch;
         }
@@ -54,9 +57,8 @@ class InteractionAdapter final {
                 pointer = {};
         }
 
-        const auto events = batch.events_view();
         for (std::size_t i = 0; i < events.size(); ++i) {
-            const auto& event = batch.events[i];
+            const auto& event = events[i];
             if (event.source_id != source_id_ || event.epoch != epoch_)
                 continue;
             std::size_t position = ordered;
