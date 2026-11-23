@@ -64,9 +64,9 @@ class InteractionRouter final {
         cause.source_id = source_id_;
         cause.epoch = epoch_;
         cause.provider_time_ns = now_ns;
-        cancel_source(source_id_, epoch_, cause);
+        const bool cancelled = cancel_source(source_id_, epoch_, cause);
         last_event_ns_ = now_ns;
-        return true;
+        return cancelled;
     }
 
     bool try_pop_ui(InteractionEvent& event) noexcept {
@@ -95,8 +95,6 @@ class InteractionRouter final {
             event = {};
         for (auto& event : pending_audio_)
             event = {};
-        pending_ui_count_ = 0;
-        pending_audio_count_ = 0;
     }
 
   private:
@@ -153,8 +151,9 @@ class InteractionRouter final {
         }
     }
 
-    void cancel_source(std::uint32_t source_id, std::uint32_t epoch,
+    bool cancel_source(std::uint32_t source_id, std::uint32_t epoch,
                        const InteractionEvent& cause) noexcept {
+        bool cancelled = false;
         for (auto& object : objects_) {
             if (!object.active || object.source_id != source_id || object.epoch != epoch)
                 continue;
@@ -164,11 +163,13 @@ class InteractionRouter final {
             cancel.object_id = object.object_id;
             cancel.phase = InteractionPhase::cancel;
             if (!ui_queue_.try_push(cancel))
-                (void)remember_pending(pending_ui_, pending_ui_count_, cancel);
+                (void)remember_pending(pending_ui_, cancel);
             if (!audio_queue_.try_push(cancel))
-                (void)remember_pending(pending_audio_, pending_audio_count_, cancel);
+                (void)remember_pending(pending_audio_, cancel);
             object = {};
+            cancelled = true;
         }
+        return cancelled;
     }
 
     static bool pop_pending(std::array<InteractionEvent, MaxObjects>& pending,
@@ -184,11 +185,10 @@ class InteractionRouter final {
     }
 
     static bool remember_pending(std::array<InteractionEvent, MaxObjects>& pending,
-                                 std::size_t& count, const InteractionEvent& event) noexcept {
+                                 const InteractionEvent& event) noexcept {
         for (auto& slot : pending) {
             if (slot.phase == InteractionPhase::invalid) {
                 slot = event;
-                ++count;
                 return true;
             }
         }
@@ -200,8 +200,6 @@ class InteractionRouter final {
     std::array<LiveObject, MaxObjects> objects_{};
     std::array<InteractionEvent, MaxObjects> pending_ui_{};
     std::array<InteractionEvent, MaxObjects> pending_audio_{};
-    std::size_t pending_ui_count_ = 0;
-    std::size_t pending_audio_count_ = 0;
     std::uint32_t source_id_ = 0;
     std::uint32_t epoch_ = 0;
     std::uint64_t last_event_ns_ = 0;
