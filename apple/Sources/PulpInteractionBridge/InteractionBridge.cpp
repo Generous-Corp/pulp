@@ -30,11 +30,14 @@ extern "C" void pulp_interaction_recorder_destroy(void* ptr) {
 }
 extern "C" bool pulp_interaction_recorder_record(void* ptr, const PulpInteractionEvent* events,
                                                  uint8_t count) {
-    if (!ptr || !events || count > 16)
+    if (!ptr || !events || count == 0 || count > 16)
         return false;
+    // A batch is recorded whole or not at all.
     pulp::runtime::InteractionBatch<> batch;
     for (uint8_t i = 0; i < count; ++i) {
         const auto& event = events[i];
+        if (!pulp_interaction_validate(&event))
+            return false;
         const auto phase = static_cast<pulp::runtime::InteractionPhase>(event.phase);
         if (!batch.append({event.source_id, event.epoch, event.sequence, event.provider_time_ns,
                            event.object_id, phase, event.x, event.y, event.confidence}))

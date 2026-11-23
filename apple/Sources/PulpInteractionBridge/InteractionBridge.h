@@ -5,12 +5,13 @@
 extern "C" {
 #endif
 typedef enum PulpInteractionPhase : uint8_t {
-    PulpInteractionPhaseInvalid = 0,
-    PulpInteractionPhasePress = 1,
-    PulpInteractionPhaseHold = 2,
-    PulpInteractionPhaseMove = 3,
-    PulpInteractionPhaseRelease = 4,
-    PulpInteractionPhaseCancel = 5
+    // Values match pulp::runtime::InteractionPhase; invalid stays last.
+    PulpInteractionPhasePress = 0,
+    PulpInteractionPhaseHold = 1,
+    PulpInteractionPhaseMove = 2,
+    PulpInteractionPhaseRelease = 3,
+    PulpInteractionPhaseCancel = 4,
+    PulpInteractionPhaseInvalid = 5
 } PulpInteractionPhase;
 typedef struct PulpInteractionEvent {
     uint32_t source_id, epoch, object_id;

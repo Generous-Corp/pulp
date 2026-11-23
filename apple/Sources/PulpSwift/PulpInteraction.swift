@@ -4,7 +4,7 @@ import PulpInteractionBridge
 public struct InteractionPoint: Sendable { public let x: Float; public let y: Float; public init(x: Float, y: Float) { self.x = x; self.y = y } }
 public struct InteractionSurface: Sendable { public let width: Float; public let height: Float; public init(width: Float, height: Float) { self.width = width; self.height = height } }
 
-public enum InteractionPhase: UInt8, Sendable { case invalid = 0, press, hold, move, release, cancel }
+public enum InteractionPhase: UInt8, Sendable { case press = 0, hold, move, release, cancel, invalid }
 
 public struct InteractionEvent: Sendable, Equatable {
     public let sourceID: UInt32
@@ -17,11 +17,17 @@ public struct InteractionEvent: Sendable, Equatable {
     public let y: Float
     public let confidence: Float
 
-    fileprivate init(_ raw: PulpInteractionEvent) {
+    init(_ raw: PulpInteractionEvent) {
         sourceID = raw.source_id; epoch = raw.epoch; sequence = raw.sequence
         providerTimeNanoseconds = raw.provider_time_ns; objectID = raw.object_id
         phase = InteractionPhase(rawValue: raw.phase.rawValue) ?? .invalid
         x = raw.x; y = raw.y; confidence = raw.confidence
+    }
+
+    fileprivate var cValue: PulpInteractionEvent {
+        PulpInteractionEvent(source_id: sourceID, epoch: epoch, object_id: objectID,
+                             sequence: sequence, provider_time_ns: providerTimeNanoseconds,
+                             phase: phase.cValue, x: x, y: y, confidence: confidence)
     }
 }
 
@@ -30,6 +36,7 @@ public protocol InteractionProvider: AnyObject {
     func stop()
 }
 
+/// Not thread-safe: call from a single thread or serialize access externally.
 public final class InteractionSource: @unchecked Sendable {
     private let sourceID: UInt32
     private let surfaceSize: InteractionSurface
@@ -71,7 +78,7 @@ public final class ManualInteractionProvider: InteractionProvider {
 
 private extension InteractionPhase {
     var cValue: PulpInteractionPhase {
-        PulpInteractionPhase(rawValue: rawValue)!
+        PulpInteractionPhase(rawValue: rawValue)
     }
 }
 
@@ -80,12 +87,15 @@ public final class InteractionReplayRecorder {
     public init() { handle = UnsafeMutableRawPointer(pulp_interaction_recorder_create()) }
     deinit { pulp_interaction_recorder_destroy(handle) }
     @discardableResult public func record(_ events: [InteractionEvent]) -> Bool {
-        events.withUnsafeBufferPointer { buffer in
-            pulp_interaction_recorder_record(handle, buffer.baseAddress, UInt8(events.count))
+        guard !events.isEmpty, events.count <= 16 else { return false }
+        let raw = events.map(\.cValue)
+        return raw.withUnsafeBufferPointer { buffer in
+            pulp_interaction_recorder_record(handle, buffer.baseAddress, UInt8(raw.count))
         }
     }
     public var batchCount: Int { Int(pulp_interaction_recorder_count(handle)) }
     public func event(batch: Int, index: Int) -> InteractionEvent? {
+        guard batch >= 0, batch <= 255, index >= 0, index <= 255 else { return nil }
         var raw = PulpInteractionEvent()
         guard pulp_interaction_recorder_event(handle, UInt8(batch), UInt8(index), &raw) else { return nil }
         return InteractionEvent(raw)

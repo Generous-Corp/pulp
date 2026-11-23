@@ -5,8 +5,10 @@
 #include <limits>
 #include <pulp/runtime/external_input.hpp>
 #include <pulp/runtime/interaction_event.hpp>
+#include <pulp/runtime/interaction_replay.hpp>
 #include <pulp/runtime/triple_buffer.hpp>
 #include <type_traits>
+#include <vector>
 
 using namespace pulp::runtime;
 static_assert(std::is_trivially_copyable_v<ExternalInputFrame<1>>);
@@ -17,6 +19,81 @@ static_assert(static_cast<std::uint8_t>(InteractionPhase::hold) == 1);
 static_assert(static_cast<std::uint8_t>(InteractionPhase::move) == 2);
 static_assert(static_cast<std::uint8_t>(InteractionPhase::release) == 3);
 static_assert(static_cast<std::uint8_t>(InteractionPhase::cancel) == 4);
+
+namespace {
+InteractionEvent good_interaction(std::uint64_t sequence, InteractionPhase phase) {
+    return {.source_id = 4,
+            .epoch = 1,
+            .sequence = sequence,
+            .provider_time_ns = sequence * 10,
+            .object_id = 9,
+            .phase = phase,
+            .x = 0.25f,
+            .y = 0.75f,
+            .confidence = 0.5f};
+}
+} // namespace
+
+TEST_CASE("interaction recorder replays batches in order with every field intact",
+          "[runtime][interaction-event]") {
+    InteractionRecorder recorder;
+    InteractionBatch<> first;
+    REQUIRE(first.append(good_interaction(1, InteractionPhase::press)));
+    REQUIRE(first.append(good_interaction(2, InteractionPhase::move)));
+    InteractionBatch<> second;
+    REQUIRE(second.append(good_interaction(3, InteractionPhase::cancel)));
+    recorder.record(first);
+    recorder.record(second);
+    REQUIRE(recorder.size() == 2);
+
+    std::vector<InteractionEvent> seen;
+    recorder.replay([&](const auto& batch) {
+        for (const auto& e : batch.events_view())
+            seen.push_back(e);
+    });
+    REQUIRE(seen.size() == 3);
+    CHECK(seen[0].sequence == 1);
+    CHECK(seen[1].phase == InteractionPhase::move);
+    CHECK(seen[2].phase == InteractionPhase::cancel);
+    CHECK(seen[2].provider_time_ns == 30);
+    CHECK(seen[0].object_id == 9);
+    CHECK(seen[0].x == 0.25f);
+    CHECK(seen[0].y == 0.75f);
+
+    recorder.clear();
+    CHECK(recorder.size() == 0);
+}
+
+TEST_CASE("interaction normalization and validation reject malformed input",
+          "[runtime][interaction-event]") {
+    const float nan = std::numeric_limits<float>::quiet_NaN();
+    float x = -1.0f, y = -1.0f;
+    CHECK(normalize_coordinates(25.0f, 100.0f, 100.0f, 200.0f, x, y));
+    CHECK(x == 0.25f);
+    CHECK(y == 0.5f);
+    CHECK(normalize_coordinates(500.0f, -5.0f, 100.0f, 200.0f, x, y));
+    CHECK(x == 1.0f);
+    CHECK(y == 0.0f);
+    CHECK_FALSE(normalize_coordinates(nan, 1.0f, 100.0f, 200.0f, x, y));
+    CHECK_FALSE(normalize_coordinates(1.0f, 1.0f, 0.0f, 200.0f, x, y));
+    CHECK_FALSE(normalize_coordinates(1.0f, 1.0f, 100.0f, -3.0f, x, y));
+    CHECK_FALSE(normalize_coordinates(1.0f, 1.0f, nan, 200.0f, x, y));
+
+    CHECK(validate_event(good_interaction(1, InteractionPhase::press)));
+    auto bad = good_interaction(1, InteractionPhase::invalid);
+    CHECK_FALSE(validate_event(bad));
+    bad = good_interaction(1, InteractionPhase::press);
+    bad.x = nan;
+    CHECK_FALSE(validate_event(bad));
+    bad = good_interaction(1, InteractionPhase::press);
+    bad.y = 1.5f;
+    CHECK_FALSE(validate_event(bad));
+    bad = good_interaction(0, InteractionPhase::press);
+    CHECK_FALSE(validate_event(bad));
+    bad = good_interaction(1, InteractionPhase::press);
+    bad.confidence = 2.0f;
+    CHECK_FALSE(validate_event(bad));
+}
 
 TEST_CASE("interaction batches preserve identity and bounded capacity",
           "[runtime][interaction-event]") {

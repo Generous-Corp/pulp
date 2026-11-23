@@ -2,7 +2,14 @@
 // Package.swift — Pulp Swift layer for Apple platforms
 // Provides SwiftUI views and parameter bindings for plugin UIs
 
+import Foundation
 import PackageDescription
+
+// The runtime headers live outside the package root, which SwiftPM rejects as a
+// headerSearchPath, so the include directory is passed as an absolute -I flag.
+let runtimeInclude = URL(fileURLWithPath: #filePath)
+    .deletingLastPathComponent().deletingLastPathComponent()
+    .appendingPathComponent("core/runtime/include").path
 
 let package = Package(
     name: "PulpSwift",
@@ -18,7 +25,7 @@ let package = Package(
             name: "PulpInteractionBridge",
             path: "Sources/PulpInteractionBridge",
             publicHeadersPath: ".",
-            cxxSettings: [.headerSearchPath("../../../core/runtime/include")]
+            cxxSettings: [.unsafeFlags(["-I", runtimeInclude])]
         ),
         .target(
             name: "PulpSwift",
@@ -36,6 +43,7 @@ let package = Package(
                 "PulpMotionControlSource.swift",
                 "PulpMotion.swift",
                 "PulpMotionProbe.swift",
+                "PulpInteraction.swift",
             ]
         ),
         .testTarget(
