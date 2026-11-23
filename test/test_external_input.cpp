@@ -2,7 +2,10 @@
 #include "support/external_input_replay.hpp"
 #include <catch2/catch_test_macros.hpp>
 #include <filesystem>
+#include <atomic>
 #include <limits>
+#include <set>
+#include <thread>
 #include <pulp/runtime/external_input.hpp>
 #include <pulp/runtime/interaction_event.hpp>
 #include <pulp/runtime/interaction_router.hpp>
@@ -460,4 +463,108 @@ TEST_CASE("interaction router drains without heap allocation", "[runtime][intera
     while (router.try_pop_ui(event)) {
     }
     CHECK_FALSE(probe.saw_allocation());
+}
+
+TEST_CASE("interaction router keeps a pending cancel for every live object on a full queue",
+          "[runtime][interaction-router]") {
+    InteractionRouter<1, 8> router;
+    REQUIRE(router.publish({.source_id = 9,
+                            .epoch = 1,
+                            .sequence = 1,
+                            .object_id = 21,
+                            .phase = InteractionPhase::press}));
+    CHECK_FALSE(router.publish({.source_id = 9,
+                                .epoch = 1,
+                                .sequence = 2,
+                                .object_id = 22,
+                                .phase = InteractionPhase::press}));
+    CHECK_FALSE(router.publish({.source_id = 9,
+                                .epoch = 1,
+                                .sequence = 3,
+                                .object_id = 23,
+                                .phase = InteractionPhase::press}));
+    CHECK(router.pending_cancel_dropped_count() == 0);
+    for (const bool ui : {true, false}) {
+        InteractionEvent event{};
+        std::multiset<std::uint32_t> cancelled;
+        int presses = 0;
+        while (ui ? router.try_pop_ui(event) : router.try_pop_audio(event)) {
+            if (event.phase == InteractionPhase::press)
+                ++presses;
+            else if (event.phase == InteractionPhase::cancel)
+                cancelled.insert(event.object_id);
+        }
+        CHECK(presses == 1);
+        // Every live object is cancelled exactly once at each consumer.
+        CHECK(cancelled.count(21) == 1);
+        CHECK(cancelled.count(22) == 1);
+        CHECK(cancelled.count(23) == 1);
+        CHECK(cancelled.size() == 3);
+    }
+}
+
+TEST_CASE("interaction router rejects an invalid phase and ignores a zero clock",
+          "[runtime][interaction-router]") {
+    interaction_test_clock = 0;
+    InteractionRouter<8, 4> router(50, interaction_clock);
+    CHECK_FALSE(router.publish({.source_id = 10,
+                                .epoch = 1,
+                                .sequence = 1,
+                                .object_id = 1,
+                                .phase = InteractionPhase::invalid}));
+    InteractionEvent event{};
+    CHECK_FALSE(router.try_pop_ui(event));
+    REQUIRE(router.publish({.source_id = 10,
+                            .epoch = 1,
+                            .sequence = 2,
+                            .object_id = 1,
+                            .phase = InteractionPhase::press}));
+    // No usable clock reading: the timeout never fires and nothing is cancelled.
+    CHECK_FALSE(router.check_timeout());
+    CHECK_FALSE(router.check_timeout(1000));
+    REQUIRE(router.try_pop_ui(event));
+    CHECK(event.phase == InteractionPhase::press);
+    CHECK_FALSE(router.try_pop_ui(event));
+}
+
+// Producer overflows tiny queues while two consumers drain concurrently. Under
+// TSan this fails if the pending-cancel slots are plain (non-atomic) storage.
+TEST_CASE("interaction router hands overflow cancels across threads",
+          "[runtime][interaction-router][concurrency]") {
+    InteractionRouter<2, 16> router;
+    std::atomic<bool> done{false};
+    std::atomic<int> bad_ui{0};
+    std::atomic<int> bad_audio{0};
+    auto consume = [&](bool ui, std::atomic<int>& bad) {
+        InteractionEvent event{};
+        auto pop = [&] { return ui ? router.try_pop_ui(event) : router.try_pop_audio(event); };
+        for (;;) {
+            const bool finished = done.load(std::memory_order_acquire);
+            while (pop()) {
+                if (event.phase == InteractionPhase::invalid || event.object_id < 1 ||
+                    event.object_id > 16)
+                    bad.fetch_add(1);
+            }
+            if (finished)
+                break;
+        }
+    };
+    std::thread ui_thread(consume, true, std::ref(bad_ui));
+    std::thread audio_thread(consume, false, std::ref(bad_audio));
+    std::uint64_t seq = 0;
+    for (std::uint32_t epoch = 1; epoch <= 400; ++epoch) {
+        seq = 0;
+        for (std::uint32_t id = 1; id <= 16; ++id)
+            (void)router.publish({.source_id = 11,
+                                  .epoch = epoch,
+                                  .sequence = ++seq,
+                                  .object_id = id,
+                                  .phase = InteractionPhase::press});
+    }
+    done.store(true, std::memory_order_release);
+    ui_thread.join();
+    audio_thread.join();
+    CHECK(bad_ui.load() == 0);
+    CHECK(bad_audio.load() == 0);
+    CHECK(router.pending_cancel_dropped_count() == 0);
 }

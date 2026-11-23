@@ -4,6 +4,7 @@
 #include "pulp/runtime/spsc_queue.hpp"
 
 #include <array>
+#include <atomic>
 #include <cstddef>
 #include <cstdint>
 
@@ -82,6 +83,11 @@ class InteractionRouter final {
         return audio_queue_.overflow_count();
     }
 
+    /// Cancels that could not be kept because every pending slot was in use.
+    std::uint64_t pending_cancel_dropped_count() const noexcept {
+        return pending_dropped_.load(std::memory_order_relaxed);
+    }
+
     void reset() noexcept {
         const auto output = tracker_.reset();
         for (const auto& item : output.events_view())
@@ -102,38 +108,54 @@ class InteractionRouter final {
         return ui_pushed && audio_pushed;
     }
 
-    static bool pop_pending(std::array<InteractionEvent, MaxObjects>& pending,
-                            InteractionEvent& event) noexcept {
+    // One overflowed cancel per object, kept until its consumer pops it. The
+    // producer thread is the only writer of `event` (and only while `ready` is
+    // false); the consumer thread only reads it while `ready` is true and then
+    // hands the slot back by clearing `ready` (release). The event bytes are
+    // never touched by the consumer, so no slot is ever read and written at once.
+    struct PendingSlot {
+        InteractionEvent event{};
+        std::atomic<bool> ready{false};
+    };
+    using PendingArray = std::array<PendingSlot, MaxObjects>;
+
+    static bool pop_pending(PendingArray& pending, InteractionEvent& event) noexcept {
         for (auto& slot : pending) {
-            if (slot.phase != InteractionPhase::cancel)
+            if (!slot.ready.load(std::memory_order_acquire))
                 continue;
-            event = slot;
-            slot = {};
+            event = slot.event;
+            slot.ready.store(false, std::memory_order_release);
             return true;
         }
         return false;
     }
 
-    static bool remember_pending(std::array<InteractionEvent, MaxObjects>& pending,
-                                 const InteractionEvent& event) noexcept {
+    // Producer thread only.
+    bool remember_pending(PendingArray& pending, const InteractionEvent& event) noexcept {
+        PendingSlot* free_slot = nullptr;
         for (auto& slot : pending) {
-            if (slot.phase == InteractionPhase::cancel && slot.object_id == event.object_id)
-                return true;
-        }
-        for (auto& slot : pending) {
-            if (slot.phase == InteractionPhase::invalid) {
-                slot = event;
-                return true;
+            if (slot.ready.load(std::memory_order_acquire)) {
+                if (slot.event.object_id == event.object_id)
+                    return true;
+            } else if (free_slot == nullptr) {
+                free_slot = &slot;
             }
         }
-        return false;
+        if (free_slot == nullptr) {
+            pending_dropped_.fetch_add(1, std::memory_order_relaxed);
+            return false;
+        }
+        free_slot->event = event;
+        free_slot->ready.store(true, std::memory_order_release);
+        return true;
     }
 
     InteractionTracker<MaxObjects> tracker_;
     SpscQueue<InteractionEvent, QueueCapacity> ui_queue_;
     SpscQueue<InteractionEvent, QueueCapacity> audio_queue_;
-    std::array<InteractionEvent, MaxObjects> pending_ui_{};
-    std::array<InteractionEvent, MaxObjects> pending_audio_{};
+    PendingArray pending_ui_{};
+    PendingArray pending_audio_{};
+    std::atomic<std::uint64_t> pending_dropped_{0};
     std::uint64_t last_event_ns_ = 0;
     std::uint64_t source_timeout_ns_ = 0;
     Clock clock_ = nullptr;
