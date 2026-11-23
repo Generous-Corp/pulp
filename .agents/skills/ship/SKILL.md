@@ -2266,6 +2266,14 @@ Facts worth keeping (measured):
   (e.g. both `pulp-host-m5` and `pulp-host-macstudio`) makes `pin` land somewhere you
   did not choose. Check the labels before trusting a pin.
 
+## The macOS SDK must carry every editor integration a template needs
+
+`pulp create --ui vellum` depends on the pulp-vellum bridge in the SDK. The
+darwin-arm64 release leg stages it from the `pulp.lock` Vellum SDK (digest
+checked) and `check_vellum_sdk_staging.py` fails the release when the headers,
+library or `Pulp::vellum` target are missing. Check an SDK by hand with
+`python3 tools/scripts/check_vellum_sdk_staging.py <sdk-prefix>`.
+
 ## cmd_ship shells out with shell_quote(), never concatenated quotes
 
 Every shell-out in `tools/cli/cmd_ship.cpp` goes through `shell_quote()` from

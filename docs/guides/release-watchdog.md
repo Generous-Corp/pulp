@@ -487,6 +487,12 @@ SkUnicode core/icu link-order, future Skia bumps that change asset
 layout) sails through PR green and only detonates post-tag, when
 release-cli.yml is the only workflow exercising that code path.
 
+The `darwin-arm64` SDK leg also provisions the Vellum SDK from `pulp.lock`,
+verifies its SHA-256 digest, and configures `PULP_ENABLE_PULP_VELLUM` and
+`PULP_ENABLE_PULP_VELLUM_AUDIO`. The installed SDK is checked for
+`include/pulp/vellum`, `libpulp-vellum`, and the exported `Pulp::vellum` target
+before the archive is published. A missing surface fails the release leg.
+
 The PR gate runs the exact `release-cli.yml` build steps —
 `fetch_skia_for_release.py`, the `PULP_REQUIRE_GPU_FOR_SDK=ON`
 configure, `cmake --build … --target pulp-cli`, and a

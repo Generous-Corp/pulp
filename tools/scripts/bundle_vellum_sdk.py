@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """Verify and stage the lock-pinned darwin-arm64 Vellum SDK.
 
-Release wiring and the distribution guard come next. Nothing in Pulp's CMake
-reads ``share/pulp/vellum-sdk`` yet.
+The darwin-arm64 release leg runs this after ``cmake --install``; the installed
+``PulpConfig.cmake`` hints ``share/pulp/vellum-sdk/<version>/sdk`` when it looks
+for the Vellum package.
 """
 from __future__ import annotations
 

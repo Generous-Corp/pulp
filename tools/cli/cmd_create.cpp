@@ -80,6 +80,96 @@ static std::string create_flag_hint(const std::string& flag) {
     return "did you mean `--type`, `--template`, or `--manufacturer`?";
 }
 
+// True when `text` has an `add_library(Pulp::vellum ...)` declaration (not
+// `Pulp::vellum-audio`, and not a mention in a string, comment or
+// `if(TARGET ...)`).
+static bool text_declares_pulp_vellum_target(const std::string& text) {
+    static const std::string call = "add_library(";
+    static const std::string target = "Pulp::vellum";
+    std::size_t pos = 0;
+    while ((pos = text.find(call, pos)) != std::string::npos) {
+        const auto line_start = text.rfind('\n', pos);
+        const auto first =
+            text.find_first_not_of(" \t", line_start == std::string::npos ? 0 : line_start + 1);
+        const bool commented = first != std::string::npos && text[first] == '#';
+        const bool at_command_start = first == pos;
+        pos += call.size();
+        if (commented || !at_command_start)
+            continue;
+        auto name = text.find_first_not_of(" \t", pos);
+        if (name == std::string::npos || text.compare(name, target.size(), target) != 0)
+            continue;
+        const auto after = name + target.size();
+        if (after >= text.size() || std::isspace(static_cast<unsigned char>(text[after])))
+            return true;
+    }
+    return false;
+}
+
+static bool installed_pulp_package_has_vellum(const fs::path& prefix) {
+    const auto targets = prefix / "lib" / "cmake" / "Pulp" / "PulpTargets.cmake";
+    return fs::exists(targets) && text_declares_pulp_vellum_target(read_file_contents(targets));
+}
+
+static bool installed_pulp_package_exists(const fs::path& prefix) {
+    const auto cmake_dir = prefix / "lib" / "cmake" / "Pulp";
+    return fs::exists(cmake_dir / "PulpTargets.cmake") ||
+           fs::exists(cmake_dir / "PulpConfig.cmake");
+}
+
+static bool reject_missing_installed_vellum(const std::string& ui, const fs::path& sdk_dir) {
+    if (ui != "vellum")
+        return false;
+    std::vector<fs::path> prefixes;
+    if (!sdk_dir.empty())
+        prefixes.push_back(sdk_dir);
+    if (const char* env = std::getenv("CMAKE_PREFIX_PATH"); env && *env) {
+#ifdef _WIN32
+        const char separator = ';';
+#else
+        const char separator = ':';
+#endif
+        std::string value = env;
+        std::size_t start = 0;
+        while (start <= value.size()) {
+            const auto end = value.find(separator, start);
+            const auto item = value.substr(start, end == std::string::npos ? end : end - start);
+            if (!item.empty())
+                prefixes.emplace_back(item);
+            if (end == std::string::npos)
+                break;
+            start = end + 1;
+        }
+    }
+    // CMake resolves find_package(Pulp) from the first prefix that has the
+    // package, so only that prefix decides.
+    for (const auto& prefix : prefixes) {
+        if (!installed_pulp_package_exists(prefix))
+            continue;
+        if (installed_pulp_package_has_vellum(prefix))
+            return false;
+        std::cerr
+            << "Error: --ui vellum needs the Pulp SDK's optional pulp-vellum integration; "
+               "the installed SDK has no Pulp::vellum target. Install a Vellum-enabled SDK.\n";
+        return true;
+    }
+    return false;
+}
+
+// The release SDK stages the Vellum package at
+// <prefix>/share/pulp/vellum-sdk/<version>/sdk, and `pulp create` passes only
+// the Pulp prefix, so the generated find hints every CMAKE_PREFIX_PATH entry
+// itself (it may run before or after find_package(Pulp)).
+static std::string vellum_find_lines() {
+    return "set(_pulp_vellum_hints \"\")\n"
+           "foreach(_pulp_prefix IN LISTS CMAKE_PREFIX_PATH)\n"
+           "    file(GLOB _pulp_prefix_hints LIST_DIRECTORIES true\n"
+           "        \"${_pulp_prefix}/share/pulp/vellum-sdk/*/sdk\")\n"
+           "    list(APPEND _pulp_vellum_hints ${_pulp_prefix_hints})\n"
+           "endforeach()\n"
+           "find_package(Vellum CONFIG REQUIRED PATHS ${_pulp_vellum_hints})";
+}
+
 static std::string make_vst3_uid() {
     std::random_device rd;
     std::mt19937 gen(rd());
@@ -612,7 +702,7 @@ int cmd_create(const std::vector<std::string>& args) {
         {"UI_MODE_LINE", ui == "none" ? "NO_EDITOR" : ""},
         {"VIEW_HEADER", lower_name_underscored + "_view.hpp"},
         {"VIEW_TYPE", ns + "::" + class_name + "View"},
-        {"VELLUM_FIND_LINE", ui == "vellum" ? "find_package(Vellum CONFIG REQUIRED)" : ""},
+        {"VELLUM_FIND_LINE", ui == "vellum" ? vellum_find_lines() : std::string()},
         {"VELLUM_HELPER_LINE",
          ui == "vellum"
              ? "if(DEFINED PULP_ROOT_DIR)\n"
@@ -712,6 +802,8 @@ int cmd_create(const std::vector<std::string>& args) {
             return 1;
         }
     }
+    if (standalone_mode && reject_missing_installed_vellum(ui, sdk_dir))
+        return 1;
 
     std::string vellum_editor;
     if (ui == "vellum") {

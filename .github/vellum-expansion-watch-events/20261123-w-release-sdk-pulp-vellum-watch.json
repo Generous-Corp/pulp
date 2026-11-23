@@ -1,0 +1,20 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20261123-w-release-sdk-pulp-vellum-watch",
+  "created_at": "2026-11-23T14:06:06Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "design-output-and-packaging"
+  ],
+  "rationale": "The macOS darwin-arm64 release SDK leg now configures with the pulp-vellum editor bridge on, using the Vellum SDK archive pinned and digest-verified in pulp.lock. It adds a post-install assertion that the staged SDK has the bridge headers, library and Pulp::vellum target, and makes pulp create --ui vellum refuse an installed SDK without that target. This packages an existing integration; it adds no design-import, Chromium, rendering or packaging authority and changes no importer or renderer behaviour.",
+  "tests": [
+    "ctest --test-dir build -R pulp-test-cli-create-shellout",
+    "python3 tools/scripts/test_check_vellum_sdk_staging.py",
+    "python3 tools/scripts/vellum_expansion_watch_check.py --base <merge-base origin/main HEAD> --head <HEAD>",
+    "vellum-expansion-watch"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}

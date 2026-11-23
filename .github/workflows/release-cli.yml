@@ -719,6 +719,9 @@ jobs:
           selected_platforms = set(selected["platforms"])
           for key, value in authoritative["platform_library_stems"].items():
               if key in selected_platforms:
+                  # The Vellum bridge archives only exist in tags whose own
+                  # matrix lists them; never require them of an older tag.
+                  value = [s for s in value if not s.startswith("pulp-vellum")]
                   selected["platform_library_stems"].setdefault(key, value)
           selected_path.write_text(json.dumps(selected, indent=2) + "\n", encoding="utf-8")
           PY
@@ -1250,6 +1253,44 @@ jobs:
           if python3 -c 'import sys; v=lambda s: tuple(map(int, s.split("."))); raise SystemExit(0 if v(sys.argv[1]) >= v(sys.argv[2]) else 1)' "${RELEASE_TAG#v}" "0.772.0"; then
             INSPECTOR="-DPULP_ENABLE_INSPECTOR=ON"
           fi
+          VELLUM_FLAGS=()
+          if [ "${{ matrix.platform }}" = "darwin-arm64" ]; then
+            python3 -I - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          data = json.loads(Path("pulp.lock").read_text(encoding="utf-8"))["vellum"]
+          Path(os.environ["RUNNER_TEMP"], "pulp-vellum-sdk-url").write_text(
+              data["sdk_url"] + "\n", encoding="utf-8")
+          Path(os.environ["RUNNER_TEMP"], "pulp-vellum-sdk-digest").write_text(
+              data["sdk_digest"] + "\n", encoding="utf-8")
+          PY
+            VELLUM_URL="$(cat "$RUNNER_TEMP/pulp-vellum-sdk-url")"
+            VELLUM_DIGEST="$(cat "$RUNNER_TEMP/pulp-vellum-sdk-digest")"
+            VELLUM_ARCHIVE="$RUNNER_TEMP/vellum-sdk.tar.gz"
+            VELLUM_ROOT="$RUNNER_TEMP/vellum-sdk"
+            python3 -I tools/deps/pulp_lock.py
+            case "$VELLUM_DIGEST" in
+              *[!0-9a-f]*|"") echo "::error::vellum sdk_digest is not lowercase hex"; exit 1 ;;
+            esac
+            [ "${#VELLUM_DIGEST}" -eq 64 ] || { echo "::error::vellum sdk_digest is not 64 hex chars"; exit 1; }
+            case "$VELLUM_URL" in
+              https://*) ;;
+              *) echo "::error::vellum sdk_url is not https"; exit 1 ;;
+            esac
+            curl --fail --location --silent --show-error --proto '=https' --retry 3 --retry-all-errors \
+              "$VELLUM_URL" --output "$VELLUM_ARCHIVE"
+            printf '%s  %s\n' "$VELLUM_DIGEST" "$VELLUM_ARCHIVE" | shasum -a 256 -c -
+            rm -rf "$VELLUM_ROOT"
+            mkdir -p "$VELLUM_ROOT"
+            tar -xzf "$VELLUM_ARCHIVE" -C "$VELLUM_ROOT"
+            VELLUM_FLAGS=(
+              "-DCMAKE_PREFIX_PATH=$VELLUM_ROOT/sdk"
+              -DPULP_ENABLE_PULP_VELLUM=ON
+              -DPULP_ENABLE_PULP_VELLUM_AUDIO=ON
+            )
+          fi
           cmake -S . -B build-sdk \
             -DCMAKE_BUILD_TYPE=Release \
             -DPULP_SKIA_AUTOFETCH=OFF \
@@ -1260,6 +1301,7 @@ jobs:
             -DPULP_BUILD_WEBVIEW=ON \
             $INSPECTOR \
             "${GPU_AUDIO_FLAGS[@]}" \
+            ${VELLUM_FLAGS[@]+"${VELLUM_FLAGS[@]}"} \
             $EXTRA_ARCH
           jobs="${NUMBER_OF_PROCESSORS:-$(sysctl -n hw.ncpu 2>/dev/null || echo 4)}"
           echo "SDK build parallelism request: --parallel ${jobs}"
@@ -1276,6 +1318,35 @@ jobs:
           # build-sdk is a Scene3D=OFF SDK-only configuration. On Linux it also
           # turns WebView back ON without relinking the portable CLI.
           cmake --install build-sdk --prefix sdk-staging --config Release
+          if [ "$MATRIX_PLATFORM" = "darwin-arm64" ]; then
+            python3 tools/scripts/bundle_vellum_sdk.py \
+              --lock pulp.lock \
+              --prefix sdk-staging \
+              --platform darwin-arm64 \
+              --archive "$RUNNER_TEMP/vellum-sdk.tar.gz" \
+              --integrations integrations
+            python3 tools/scripts/check_vellum_sdk_staging.py sdk-staging
+            # Configure-level proof: a consumer given only the SDK prefix must
+            # resolve both find_package(Pulp) and the staged Vellum package, the
+            # way a `pulp create --ui vellum` project does.
+            VELLUM_SMOKE="$RUNNER_TEMP/vellum-consumer-smoke"
+            rm -rf "$VELLUM_SMOKE"
+            mkdir -p "$VELLUM_SMOKE"
+            cat > "$VELLUM_SMOKE/CMakeLists.txt" <<'CMK'
+          cmake_minimum_required(VERSION 3.24)
+          project(vellum_consumer_smoke LANGUAGES CXX)
+          find_package(Pulp REQUIRED)
+          set(_pulp_vellum_hints "")
+          foreach(_pulp_prefix IN LISTS CMAKE_PREFIX_PATH)
+              file(GLOB _pulp_prefix_hints LIST_DIRECTORIES true
+                  "${_pulp_prefix}/share/pulp/vellum-sdk/*/sdk")
+              list(APPEND _pulp_vellum_hints ${_pulp_prefix_hints})
+          endforeach()
+          find_package(Vellum CONFIG REQUIRED PATHS ${_pulp_vellum_hints})
+          CMK
+            cmake -S "$VELLUM_SMOKE" -B "$VELLUM_SMOKE/build" \
+              -DCMAKE_PREFIX_PATH="$PWD/sdk-staging"
+          fi
           # CMake rewrites install RPATHs while copying executables into the SDK.
           # On Mach-O that invalidates the build-time code signature. Re-sign the
           # installed bytes before stamping provenance: the agent-capability
@@ -2190,6 +2261,9 @@ jobs:
           selected_platforms = set(selected["platforms"])
           for key, value in authoritative["platform_library_stems"].items():
               if key in selected_platforms:
+                  # The Vellum bridge archives only exist in tags whose own
+                  # matrix lists them; never require them of an older tag.
+                  value = [s for s in value if not s.startswith("pulp-vellum")]
                   selected["platform_library_stems"].setdefault(key, value)
           output_path.write_text(
               json.dumps(selected, indent=2) + "\n",
