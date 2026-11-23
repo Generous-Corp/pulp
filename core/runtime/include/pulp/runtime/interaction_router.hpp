@@ -6,7 +6,6 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
-#include <limits>
 
 namespace pulp::runtime {
 
@@ -58,8 +57,8 @@ class InteractionRouter final {
     }
 
     bool check_timeout(std::uint64_t now_ns) noexcept {
-        if (!has_source_ || source_timeout_ns_ == 0 || last_event_ns_ == 0 ||
-            now_ns < last_event_ns_ || now_ns - last_event_ns_ < source_timeout_ns_)
+        if (!has_source_ || source_timeout_ns_ == 0 || now_ns < last_event_ns_ ||
+            now_ns - last_event_ns_ < source_timeout_ns_)
             return false;
         InteractionEvent cause{};
         cause.source_id = source_id_;
@@ -107,8 +106,6 @@ class InteractionRouter final {
         std::uint32_t object_id = 0;
         bool active = false;
     };
-
-    static constexpr std::uint32_t kNoObject = std::numeric_limits<std::uint32_t>::max();
 
     void begin_source(std::uint32_t source_id, std::uint32_t epoch) noexcept {
         source_id_ = source_id;

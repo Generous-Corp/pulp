@@ -141,6 +141,8 @@ class InteractionAdapter final {
             .type = ::vellum::view::PointerType::touch, .pressure = 0.5f, .pointer_id = pointer_id};
 
         switch (event.phase) {
+        case InteractionPhase::invalid:
+            return false;
         case InteractionPhase::press:
             return ::vellum::view::deliver_mouse_down(
                 root, &root, point, 0, 1, true, ::vellum::view::MouseButton::left, {}, attributes);
