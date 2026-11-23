@@ -166,8 +166,10 @@ class InteractionRouter final {
             cancel.epoch = epoch;
             cancel.object_id = object.object_id;
             cancel.phase = InteractionPhase::cancel;
-            (void)ui_queue_.try_push(cancel) || remember_pending(pending_ui_, pending_ui_count_, cancel);
-            (void)audio_queue_.try_push(cancel) || remember_pending(pending_audio_, pending_audio_count_, cancel);
+            if (!ui_queue_.try_push(cancel))
+                (void)remember_pending(pending_ui_, pending_ui_count_, cancel);
+            if (!audio_queue_.try_push(cancel))
+                (void)remember_pending(pending_audio_, pending_audio_count_, cancel);
             object = {};
         }
     }
