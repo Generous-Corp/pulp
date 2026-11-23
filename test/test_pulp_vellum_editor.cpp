@@ -1121,6 +1121,12 @@ TEST_CASE("runtime interactions keep object pointers independent and cancel them
     REQUIRE(view.events.size() == 3);
     REQUIRE(view.events[0].pointer_id != view.events[1].pointer_id);
     REQUIRE(view.events[2].is_cancelled);
+
+    pulp::runtime::InteractionBatch<> after_cancel;
+    after_cancel.append({.epoch = 1, .sequence = 4, .object_id = 10,
+                         .phase = pulp::runtime::InteractionPhase::move, .x = 4.0f});
+    REQUIRE(adapter.deliver(view, after_cancel));
+    REQUIRE(view.events.size() == 3);
 }
 
 TEST_CASE("runtime interaction batch remains bounded", "[pulp-vellum][interaction]") {
