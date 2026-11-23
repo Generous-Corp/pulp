@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "event_id": "20261123-w-interaction-swift",
+  "kind": "exported-path-change",
+  "created_at": "2026-11-23T09:32:03Z",
+  "receipt_export_id": "20261107-f0ac0a4ff392",
+  "paths": [
+    "core/runtime/CMakeLists.txt",
+    "core/runtime/include/pulp/runtime/interaction_event.hpp",
+    "core/runtime/include/pulp/runtime/interaction_replay.hpp"
+  ],
+  "vellum_inherits": false,
+  "rationale": "The interaction contract and deterministic replay helper remain in Pulp runtime. The Swift adapter calls this shared audio-side contract and does not move UI semantics into Vellum."
+}
