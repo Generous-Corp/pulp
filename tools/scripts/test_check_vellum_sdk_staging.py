@@ -22,6 +22,9 @@ class CheckVellumSdkStagingTests(unittest.TestCase):
         targets = root / "lib/cmake/Pulp/PulpTargets.cmake"
         targets.parent.mkdir(parents=True)
         targets.write_text("add_library(Pulp::vellum STATIC IMPORTED)\n", encoding="utf-8")
+        package = root / "share/pulp/vellum-sdk/0.2.2/sdk/lib/cmake/Vellum/VellumConfig.cmake"
+        package.parent.mkdir(parents=True)
+        package.write_text("# Vellum package\n", encoding="utf-8")
         return root
 
     def setUp(self) -> None:
@@ -54,6 +57,14 @@ class CheckVellumSdkStagingTests(unittest.TestCase):
         (prefix / "lib/libpulp-vellum.a").unlink()
         (prefix / "lib/libpulp-vellum.txt").write_text("not a library", encoding="utf-8")
         self.assertIn("lib/libpulp-vellum.a is missing", checker.check(prefix))
+
+    def test_missing_staged_vellum_package_fails(self) -> None:
+        prefix = self.make_prefix()
+        next((prefix / "share/pulp/vellum-sdk").rglob("VellumConfig.cmake")).unlink()
+        self.assertIn(
+            "share/pulp/vellum-sdk/<version>/sdk has no VellumConfig.cmake package",
+            checker.check(prefix),
+        )
 
     def test_missing_target_fails(self) -> None:
         prefix = self.make_prefix()

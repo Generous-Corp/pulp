@@ -22,6 +22,19 @@ def check(prefix: Path) -> list[str]:
     targets = prefix / "lib/cmake/Pulp/PulpTargets.cmake"
     if not targets.is_file() or not TARGET_RE.search(targets.read_text(encoding="utf-8")):
         errors.append("the installed CMake package has no Pulp::vellum target")
+
+    # PulpConfig.cmake hints this staged package for find_package(Vellum), so
+    # an archive without VellumConfig.cmake would publish an SDK that fails at
+    # consumer configure time.
+    staged = (prefix / "share/pulp/vellum-sdk").glob("*/sdk")
+    if not any(
+        next(sdk.rglob("VellumConfig.cmake"), None) is not None
+        for sdk in staged
+        if sdk.is_dir()
+    ):
+        errors.append(
+            "share/pulp/vellum-sdk/<version>/sdk has no VellumConfig.cmake package"
+        )
     return errors
 
 
