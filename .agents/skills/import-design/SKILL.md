@@ -46,6 +46,21 @@ holds one subtree past the fixture's destruction to prove the readback fails.
 counters (`paint_calls`, `paint_commands_total`, `layout_passes`, bridge and
 invalidation counts) included: they start at the first sampled frame.
 
+### Web-compat ui.js is flex-only: a DesignIR grid becomes wrapped rows
+
+`CodeGenMode::web_compat` emits `document.createElement` + `el.style`, and the
+web-compat runtime treats `display:grid` as a no-op (`setGrid` stores tracks but
+never switches a view to `LayoutMode::grid`; only the bridge lane's `createGrid`
+does). So `generate_node` lowers a row-flow grid with more than one column
+track to `flexDirection:'row'` + `flexWrap:'wrap'`, which reproduces the rows
+for fixed-width cells. Single-column and column-flow grids keep the stacked
+column. Every node with an authored height also gets `flexShrink:'0'`, which in
+a row parent pins its width too: a grid lowered as an unwrapped row overflows
+rather than shrinking. Assert grid fixes on live bounds after
+`WidgetBridge::load_script`, not on emitted text, and note that
+`emit_js_container` (bridge lane) is a different emitter from the web-compat
+`generate_node`. Forge's Designer link uses web_compat.
+
 ### A DOM node's own layout row: one rule per language
 
 Chromium's DOMSnapshot emits several layout rows for one DOM node: a
