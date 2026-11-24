@@ -552,7 +552,11 @@ if(PULP_HAS_CLAP)
         pulp::format-clap-core clap Catch2::Catch2WithMain)
     target_compile_definitions(pulp-test-clap-contract-editor-automation PRIVATE
         PULP_EDITOR_AUTOMATION_EXTENSION=1)
-    catch_discover_tests(pulp-test-clap-contract-editor-automation)
+    # Only the extension's own cases: the plain executable above already
+    # registers every other case of this source, and a ctest name must be
+    # registered once.
+    catch_discover_tests(pulp-test-clap-contract-editor-automation
+        TEST_SPEC "[editor-automation]")
 
     add_executable(pulp-test-clap-entry test_clap_entry.cpp
         ${CMAKE_SOURCE_DIR}/core/format/src/clap_adapter.cpp
