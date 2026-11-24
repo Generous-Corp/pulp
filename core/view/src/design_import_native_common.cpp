@@ -2082,6 +2082,11 @@ bool apply_designed_body_skin(View& control, const IRNode& node) {
 
 std::string captured_art_path(
     std::string path, const NativeMaterializeOptions& options) {
+    // Manifest-materialized assets arrive as file:// URIs; the sprite loader
+    // wants a bare filesystem path.
+    constexpr std::string_view kFileScheme = "file://";
+    if (path.rfind(kFileScheme, 0) == 0)
+        path.erase(0, kFileScheme.size());
     std::filesystem::path resolved{std::move(path)};
     if (resolved.is_relative() && !options.asset_base_directory.empty())
         resolved = options.asset_base_directory / resolved;
