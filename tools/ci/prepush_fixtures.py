@@ -509,4 +509,9 @@ def main(argv: list[str] | None = None) -> int:
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    status = main()
+    sys.stdout.flush()
+    sys.stderr.flush()
+    # A selection thread the cap gave up on may still be running; do not let
+    # interpreter shutdown wait for it.
+    os._exit(status)
