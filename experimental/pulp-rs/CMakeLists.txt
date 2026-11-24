@@ -103,6 +103,29 @@ if(NOT _pulp_rs_rustc_version_result EQUAL 0)
     return()
 endif()
 
+# On Windows, cargo resolves `link.exe` from PATH. Git for Windows puts
+# `usr\bin\link.exe` (the coreutils `link`) ahead of MSVC's linker on some
+# runners, and every build script then fails with "extra operand". Pin cargo to
+# the linker CMake already selected for the MSVC toolchain, so the result does
+# not depend on PATH order. Only the triple of the architecture CMake builds
+# for is pinned; an explicit PULP_RUST_CLI_TARGET that is not an MSVC triple
+# is left alone.
+set(_pulp_rs_cargo_env "")
+if(WIN32 AND CMAKE_LINKER AND EXISTS "${CMAKE_LINKER}"
+   AND (NOT PULP_RUST_CLI_TARGET OR PULP_RUST_CLI_TARGET MATCHES "windows-msvc$"))
+    string(TOLOWER "${CMAKE_SYSTEM_PROCESSOR}" _pulp_rs_arch)
+    if(_pulp_rs_arch MATCHES "^(arm64|aarch64)$")
+        set(_pulp_rs_msvc_triple_env "AARCH64_PC_WINDOWS_MSVC")
+    elseif(_pulp_rs_arch MATCHES "^(amd64|x86_64)$")
+        set(_pulp_rs_msvc_triple_env "X86_64_PC_WINDOWS_MSVC")
+    endif()
+    if(_pulp_rs_msvc_triple_env)
+        set(_pulp_rs_cargo_env
+            "CARGO_TARGET_${_pulp_rs_msvc_triple_env}_LINKER=${CMAKE_LINKER}")
+        message(STATUS "pulp-rs: cargo linker pinned to ${CMAKE_LINKER}")
+    endif()
+endif()
+
 # Pick the Cargo profile. Default to release for installable
 # artifacts; let the build matrix override via PULP_RUST_CLI_PROFILE
 # (e.g. "debug" for faster CI iteration where binary speed doesn't
@@ -175,7 +198,7 @@ set(_pulp_rs_manifest_inputs
     "${CMAKE_CURRENT_SOURCE_DIR}/build.rs")
 add_custom_command(
     OUTPUT "${_pulp_rs_cargo_bin}" "${_pulp_rs_dest_bin}"
-    COMMAND ${CMAKE_COMMAND} -E env
+    COMMAND ${CMAKE_COMMAND} -E env ${_pulp_rs_cargo_env}
         "RUSTC=${RUSTC_EXECUTABLE}"
         "CARGO_TARGET_DIR=${_pulp_rs_target_dir}"
         "PULP_RS_BUILD_VERSION=${PROJECT_VERSION}"
@@ -221,7 +244,7 @@ if(PULP_BUILD_TESTS)
     set(_pulp_rs_test_target_dir "${CMAKE_CURRENT_BINARY_DIR}/cargo-test/target")
 
     add_test(NAME pulp-rust-gpu-trace-analysis-unit
-        COMMAND ${CMAKE_COMMAND} -E env
+        COMMAND ${CMAKE_COMMAND} -E env ${_pulp_rs_cargo_env}
             "RUSTC=${RUSTC_EXECUTABLE}"
             "CARGO_TARGET_DIR=${_pulp_rs_test_target_dir}"
             ${CARGO_EXECUTABLE} test ${_pulp_rs_lock_args}
@@ -230,7 +253,7 @@ if(PULP_BUILD_TESTS)
     set_tests_properties(pulp-rust-gpu-trace-analysis-unit
         PROPERTIES RESOURCE_LOCK pulp-rs-cargo-test LABELS "trace;gpu;rust")
     add_test(NAME pulp-rust-gpu-trace-analysis-integration
-        COMMAND ${CMAKE_COMMAND} -E env "RUSTC=${RUSTC_EXECUTABLE}"
+        COMMAND ${CMAKE_COMMAND} -E env ${_pulp_rs_cargo_env} "RUSTC=${RUSTC_EXECUTABLE}"
             ${Python3_EXECUTABLE}
             "${CMAKE_CURRENT_SOURCE_DIR}/tests/run_trace_gpu_analysis_integration.py"
             --cargo "${CARGO_EXECUTABLE}"
@@ -249,7 +272,7 @@ if(PULP_BUILD_TESTS)
     # The stale-CLI guard: unit cases plus the real binary refusing, or
     # re-running through a checkout's own CLI, before any configure.
     add_test(NAME pulp-rust-stale-cli-guard
-        COMMAND ${CMAKE_COMMAND} -E env
+        COMMAND ${CMAKE_COMMAND} -E env ${_pulp_rs_cargo_env}
             "RUSTC=${RUSTC_EXECUTABLE}"
             "CARGO_TARGET_DIR=${_pulp_rs_test_target_dir}"
             ${CARGO_EXECUTABLE} test ${_pulp_rs_lock_args}
@@ -275,7 +298,7 @@ if(PULP_BUILD_TESTS)
         endif()
     endforeach()
     add_test(NAME pulp-rust-cli-cargo-tests
-        COMMAND ${CMAKE_COMMAND} -E env
+        COMMAND ${CMAKE_COMMAND} -E env ${_pulp_rs_cargo_env}
             "RUSTC=${RUSTC_EXECUTABLE}"
             "CARGO_TARGET_DIR=${_pulp_rs_test_target_dir}"
             ${CARGO_EXECUTABLE} test ${_pulp_rs_lock_args}
@@ -286,7 +309,7 @@ if(PULP_BUILD_TESTS)
         LABELS "cli;rust"
         TIMEOUT 900)
     add_test(NAME pulp-rust-cli-doc-tests
-        COMMAND ${CMAKE_COMMAND} -E env
+        COMMAND ${CMAKE_COMMAND} -E env ${_pulp_rs_cargo_env}
             "RUSTC=${RUSTC_EXECUTABLE}"
             "CARGO_TARGET_DIR=${_pulp_rs_test_target_dir}"
             ${CARGO_EXECUTABLE} test ${_pulp_rs_lock_args}
