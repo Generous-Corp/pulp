@@ -1089,8 +1089,9 @@ TEST_CASE("a captured fader indicator travels the padded content box and keeps i
     write_png(temp.root / "ind.png", solid(10, 16));
     auto load = [&](const char* name, int w, int h) {
         auto strip = std::make_shared<pulp::view::SpriteStrip>();
-        REQUIRE(strip->load_from_file((temp.root / name).string(), w, h, 1,
-                                      pulp::view::SpriteStrip::Orientation::vertical));
+        strip->load_from_file((temp.root / name).string(), w, h, 1,
+                              pulp::view::SpriteStrip::Orientation::vertical);
+        REQUIRE(strip->loaded());
         return strip;
     };
 
