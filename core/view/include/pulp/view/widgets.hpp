@@ -1495,6 +1495,22 @@ public:
         return skew_ == 1.0f ? p : std::pow(p, 1.0f / skew_);
     }
 
+    static float thumb_axis_position(float box_length, float leading_border, float trailing_border,
+                                     float thumb_extent, float normalized_position) {
+        const float content = std::max(0.0f, box_length - leading_border - trailing_border);
+        const float usable = std::max(0.0f, content - std::max(0.0f, thumb_extent));
+        return leading_border + std::max(0.0f, thumb_extent) * 0.5f +
+               std::clamp(normalized_position, 0.0f, 1.0f) * usable;
+    }
+
+    float effective_axis_border(bool vertical, bool leading) const {
+        if (vertical)
+            return leading ? (has_border_top_set() ? border_top_width() : border_width())
+                           : (has_border_bottom_set() ? border_bottom_width() : border_width());
+        return leading ? (has_border_left_set() ? border_left_width() : border_width())
+                       : (has_border_right_set() ? border_right_width() : border_width());
+    }
+
     // Custom body shader comes from CustomShaderHost.
     void set_widget_schema(std::string json) { widget_schema_ = std::move(json); }
     const std::string& widget_schema() const { return widget_schema_; }
