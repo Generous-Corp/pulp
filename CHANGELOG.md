@@ -9,6 +9,15 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
      release's bullet block. See docs/guides/versioning.md § Release pipeline
      for the full end-to-end flow. -->
 
+<a id="v12040"></a>
+## [1.204.0] - 2026-11-24
+
+- release/version bump ([#12818](https://github.com/Generous-Corp/pulp/pull/12818))
+- release/version bump ([#12815](https://github.com/Generous-Corp/pulp/pull/12815))
+- lane/w fader parity art ([#12811](https://github.com/Generous-Corp/pulp/pull/12811))
+- feat/gates receipt prepush ([#12812](https://github.com/Generous-Corp/pulp/pull/12812))
+- fix/windows cargo msvc linker ([#12808](https://github.com/Generous-Corp/pulp/pull/12808))
+
 <a id="v12030"></a>
 ## [1.203.0] - 2026-11-24
 
@@ -13669,6 +13678,7 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/Generous-Corp/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/Generous-Corp/pulp/pull/2))
 
+[1.204.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.204.0
 [1.203.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.203.0
 [1.202.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.202.0
 [1.201.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.201.0
