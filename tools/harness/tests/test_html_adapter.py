@@ -133,7 +133,7 @@ class HtmlAdapterTests(unittest.TestCase):
             "web-compat-selector.js",
             "web-compat-runtime-apis.js",
         ):
-            (js_dir / script).write_text(f"// {script}\n")
+            (js_dir / script).write_text(f"// {script}\n", encoding="utf-8")
 
         bridge_dir = self.repo / "core" / "view" / "src"
         bridge_dir.mkdir(parents=True)
@@ -179,7 +179,7 @@ class HtmlAdapterTests(unittest.TestCase):
 
     def test_whitespace_only_script_is_reported_as_empty(self) -> None:
         (self.repo / "core" / "view" / "js" / "web-compat-animation.js").write_text(
-            " \n\t\n"
+            " \n\t\n", encoding="utf-8"
         )
         with self.assertRaisesRegex(ValueError, r"empty: .*web-compat-animation\.js"):
             HtmlAdapter(self.repo)
