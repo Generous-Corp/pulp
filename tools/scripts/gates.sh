@@ -105,6 +105,23 @@ if [ -z "$ROOT" ]; then
 fi
 cd "$ROOT" || exit 2
 
+# Head-keyed receipt (tools/scripts/gates_receipt.py). Capture the head and
+# whether any tracked file differs from it before a gate runs; the success
+# paths below record a receipt for this exact head only when the tree was
+# clean at both ends, and the pre-push hook refuses a head without one.
+GATES_RECEIPT="$ROOT/tools/scripts/gates_receipt.py"
+gates_receipt_head="$(git rev-parse HEAD 2>/dev/null || true)"
+gates_receipt_dirty_flag=""
+if [ -n "$(git diff --name-only --ignore-submodules HEAD 2>/dev/null | head -n 1)" ]; then
+    gates_receipt_dirty_flag="--dirty-at-start"
+fi
+gates_write_receipt() {
+    [ -f "$GATES_RECEIPT" ] && [ -n "$gates_receipt_head" ] || return 0
+    # shellcheck disable=SC2086
+    "${PYTHON:-python3}" "$GATES_RECEIPT" write --root "$ROOT" --head "$gates_receipt_head" \
+        --base "$BASE" --exit-code 0 --not-checked "${1:-0}" $gates_receipt_dirty_flag || true
+}
+
 if git remote get-url origin >/dev/null 2>&1; then
     if ! git fetch --quiet origin main; then
         echo "gates.sh: could not refresh origin/main; refusing to validate a stale base" >&2
@@ -1322,11 +1339,13 @@ if [ "$fail" -eq 0 ] && { [ "$not_checked" -gt 0 ] || [ -n "$no_build" ]; }; the
     fi
     echo "" >&2
     diff_cover_hint
+    gates_write_receipt "$not_checked"
     exit 0
 elif [ "$fail" -eq 0 ]; then
     echo "gates: ✓ all gates pass — safe to push." >&2
     echo "" >&2
     diff_cover_hint
+    gates_write_receipt 0
     exit 0
 else
     failed_gates_joined=$(printf '%s, ' ${failed_gates[@]+"${failed_gates[@]}"})

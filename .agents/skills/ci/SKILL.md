@@ -62,6 +62,19 @@ on a real PR. Do them in order.
    `tools/ci/sync_job_parity.json` names what `gates.sh` runs itself, and
    `tools/scripts/test_gates_sync_parity.py` fails when the workflow and
    `gates.sh` disagree.
+   **The pre-push hook enforces this.** A passing run on a clean tree (no
+   tracked file differing from HEAD at the start or the end) writes a receipt
+   for that exact head under `$(git rev-parse --git-common-dir)/pulp-gates/`,
+   and the hook refuses to push a branch head without one, naming the head and
+   the command. Amending or committing after the run means running it again.
+   Deletions, tags and commits already on `origin/main` are exempt; a merge of
+   main is not. `PULP_SKIP_PREPUSH` and `PULP_DISABLE_PREPUSH_GATES` do not skip
+   the check. `PULP_GATES_RECEIPT_OWNER_OVERRIDE=1` is for the repository
+   owner only and is logged to `pulp-gates/owner-overrides.log`; agents never
+   set it. A run that passes with NOT CHECKED lanes (a gate host) still writes
+   the receipt and records the count. The hook also runs
+   `test_version_bump_surfaces.py` (about 2 s) when the range touches a CMake
+   module.
    The pre-push hook and `local_diff_cover.sh` (exit 4) refuse the
    diff-coverage build the same way, and the hook ends "gates clean except
    diff coverage: NOT CHECKED". Run the full set on m1 (`light`) or a
