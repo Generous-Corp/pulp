@@ -1712,6 +1712,33 @@ class PrepushCapTests(unittest.TestCase):
                                               5, selector=lambda *a: ["x"])
         self.assertEqual((picked, error), (["x"], None))
 
+    def test_the_whole_step_ends_inside_its_cap(self) -> None:
+        # End to end: a selected test that would run 30 s, a 3 s cap.
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp).resolve()
+            (root / "tools" / "scripts").mkdir(parents=True)
+            (root / "tools" / "scripts" / "test_sleepy.py").write_text(
+                "import time\ntime.sleep(30)\n", encoding="utf-8")
+            (root / ".github" / "workflows").mkdir(parents=True)
+            (root / ".github" / "workflows" / "version-skill-check.yml").write_text(
+                "jobs:\n  version-skill-check:\n    steps:\n      - name: Gate-script fixture tests\n"
+                "        run: |\n          python3 tools/scripts/test_sleepy.py\n",
+                encoding="utf-8")
+            git = ["git", "-c", "user.name=t", "-c", "user.email=t@t", "-c", "commit.gpgsign=false"]
+            subprocess.run(["git", "init", "-q"], cwd=root, check=True)
+            subprocess.run([*git, "commit", "-q", "--allow-empty", "-m", "base"], cwd=root, check=True)
+            subprocess.run(["git", "add", "-A"], cwd=root, check=True)
+            subprocess.run([*git, "commit", "-q", "-m", "head"], cwd=root, check=True)
+            out = io.StringIO()
+            start = time.monotonic()
+            with contextlib.redirect_stdout(out):
+                rc = prepush.main(["--repo", str(root), "--base", "HEAD~1", "--budget", "3",
+                                   "--triggers", str(root / "none.json")])
+            elapsed = time.monotonic() - start
+        self.assertEqual(rc, 0)
+        self.assertLess(elapsed, 3.0)
+        self.assertIn("NOT CHECKED within the 3 s cap (1): tools/scripts/test_sleepy.py", out.getvalue())
+
     def test_the_cap_is_never_raised_past_sixty_seconds(self) -> None:
         with mock.patch.dict(os.environ, {"PULP_PREPUSH_FIXTURE_BUDGET": "600"}):
             self.assertEqual(prepush.cap_seconds(None), 60.0)

@@ -55,6 +55,9 @@ MAX_WORKERS = 4
 GATES_COMMAND = "tools/scripts/gates.sh origin/main"
 # Order hint for a test with no measured time in the triggers file.
 UNKNOWN_COST = 10.0
+# Seconds kept back from the test runs for killing an overrunning test and
+# printing the report, so the step as a whole ends inside the cap.
+CAP_RESERVE = 2.0
 # A test the selector reaches only through a name or helper it shares with the
 # change (priority 1) runs when it is cheap; a longer one is left to gates.sh
 # and CI, and printed as NOT CHECKED, so a broad textual match cannot spend
@@ -487,7 +490,8 @@ def main(argv: list[str] | None = None) -> int:
 
     # The cap counts from the start of this step, selection included.
     finished, not_checked = run_budgeted(
-        runnable, repo, budget=max(0.0, budget - (time.monotonic() - started)), workers=jobs)
+        runnable, repo, budget=max(0.0, budget - CAP_RESERVE - (time.monotonic() - started)),
+        workers=jobs)
     not_checked += deferred
     failures = [(e, r) for e, r in finished if r["returncode"] != 0]
     passed = len(finished) - len(failures)
