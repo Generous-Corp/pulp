@@ -1600,6 +1600,17 @@ TEST_CASE("web compat lowers a multi-row grid of fixed cards onto grid rows",
         rows.insert(static_cast<int>(b.y + 0.5f));
     }
     CHECK(rows.size() == 2);
+
+    // A grid with a single implicit column keeps stacking its children.
+    DesignIR single;
+    single.root.type = "frame";
+    single.root.name = "Stack";
+    single.root.layout.display = "grid";
+    single.root.layout.grid_template_columns = "1fr";
+    single.root.children.push_back(ir.root.children[0].children[0]);
+    const auto single_js = generate_pulp_js(single, opts);
+    CHECK(single_js.find("root.style.flexDirection = 'column'") != std::string::npos);
+    CHECK(single_js.find("root.style.flexWrap") == std::string::npos);
 }
 
 TEST_CASE("generate_pulp_js web compat emits extended style and layout properties",
