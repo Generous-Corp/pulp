@@ -5,6 +5,7 @@
 #include "track_input_access.hpp"
 
 #include <algorithm>
+#include <exception>
 #include <atomic>
 #include <tuple>
 #include <unordered_set>

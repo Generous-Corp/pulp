@@ -1,0 +1,39 @@
+{
+  "id": "timeline-wasm-terminate-include-portability",
+  "title": "Timeline source includes the standard exception declaration required by headless WASM builds",
+  "classification": "engine_internal",
+  "delivery_state": "pending",
+  "claim_id": "timeline-wasm-terminate-include-20261124",
+  "owned_paths": [
+    "core/timeline/src/track.cpp",
+    "docs/status/sequencer-exposure/rows/timeline-wasm-terminate-include-portability.json"
+  ],
+  "evidence": [
+    {
+      "path": "core/timeline/src/track.cpp",
+      "needles": ["#include <exception>", "std::terminate();"]
+    }
+  ],
+  "surfaces": {
+    "installed_sdk": {
+      "disposition": "not_applicable",
+      "rationale": "This is a private source include required for a headless WASM compilation and changes no public SDK declaration or symbol."
+    },
+    "offline_timeline_cli": {
+      "disposition": "not_applicable",
+      "rationale": "No timeline CLI command, flag, or output contract changes."
+    },
+    "offline_timeline_mcp": {
+      "disposition": "not_applicable",
+      "rationale": "No MCP operation, schema, or handler changes."
+    },
+    "live_product_control": {
+      "disposition": "not_applicable",
+      "rationale": "No runtime operation, executor binding, grant, or profile policy changes."
+    },
+    "design_time_agent_manifest": {
+      "disposition": "not_applicable",
+      "rationale": "No design-time capability or authoring contract changes."
+    }
+  }
+}
