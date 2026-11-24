@@ -735,6 +735,36 @@ def case_the_capability_check_runs_only_when_the_range_touches_its_inputs(fx: Fi
     assert merge_tree_state._touches_capability_inputs(fx.repo, "nonexistent-ref", head2) is True
 
 
+def case_both_capability_triggers_cover_manifest_data_and_helpers(fx: Fixture) -> None:
+    fx.setup()
+    hook = HOOK.read_text(encoding="utf-8")
+    trigger = next(line for line in hook.splitlines()
+                   if 'elif git diff --name-only "$capability_base"' in line)
+    pattern = trigger.split("grep -qE '", 1)[1].split("'", 1)[0]
+    paths = (
+        "tools/dsp_vocabulary.py",
+        "docs/status/forge-catalog.json",
+        "test/test_agent_capability_compile.cpp",
+        "tools/scripts/json_schema_lite.py",
+        "tools/scripts/gate_common.py",
+        "tools/scripts/agent_capability_manifest.py",
+        "core/signal/include/pulp/signal/test.hpp",
+        "tools/agent-capabilities/history/test.json",
+        "docs/status/agent-capabilities.json",
+        "docs/status/agent-capability-surface/test.json",
+        "docs/readme.txt",
+    )
+    for path in paths:
+        # Compare each change with its own parent: an earlier matching path
+        # must not hide a missing dependency later in the table.
+        base = fx.git("rev-parse", "HEAD")
+        head = fx.commit(path, "fixture\n", "change one capability input")
+        expected = path != "docs/readme.txt"
+        assert merge_tree_state._touches_capability_inputs(fx.repo, base, head) is expected, path
+        result = subprocess.run(["grep", "-qE", pattern], input=path + "\n", text=True)
+        assert result.returncode == (0 if expected else 1), path
+
+
 def case_cheap_unrunnable_checks_come_before_the_slow_ones(fx: Fixture) -> None:
     src = MERGE_TREE_STATE.read_text(encoding="utf-8")
     body = src[src.index("checks: list[tuple[str, list[str]]] = []"):src.index("failed: list[str]")]

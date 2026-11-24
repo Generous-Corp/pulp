@@ -1194,7 +1194,7 @@ if [ -f "$CAPABILITY_CONTRACT" ]; then
     capability_base="$(git rev-parse --verify --quiet "$BASE^{commit}" || true)"
     if [ -z "$capability_base" ]; then
         echo "[pre-push] agent-capability contract: SKIPPED — base '$BASE' does not resolve. A skip is not a pass." >&2
-    elif git diff --name-only "$capability_base"...HEAD 2>/dev/null | grep -qE '^(core/[^/]+/include/|tools/scripts/agent_capability_|tools/agent-capabilities/|docs/status/agent-capabilit)'; then
+    elif git diff --name-only "$capability_base"...HEAD 2>/dev/null | grep -qE '^(core/[^/]+/include/|tools/scripts/|tools/agent-capabilities/|docs/status/agent-capabilit|tools/dsp_vocabulary\.py$|docs/status/forge-catalog\.json$|test/test_agent_capability_compile\.cpp$)'; then
         run_gate_captured env PULP_AGENT_CAPABILITY_BASE_REF="$capability_base" \
             "$PYTHON" "$CAPABILITY_CONTRACT" --check
         gate_rc=$?; case $gate_rc in
