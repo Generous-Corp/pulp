@@ -209,6 +209,42 @@ def case_gates_sh_writes_only_on_its_success_paths(fx: Gates) -> None:
     assert "--exit-code 0" in text and "$gates_receipt_dirty_flag" in text
 
 
+def _install_version_surface_stub(fx: Gates, exit_code: int) -> None:
+    # The hook's gate section is a no-op until the version-bump and skill-sync
+    # scripts and the versioning config exist, so give it passing stand-ins.
+    scripts = fx.repo / "tools/scripts"
+    scripts.mkdir(parents=True, exist_ok=True)
+    for name in ("version_bump_check.py", "skill_sync_check.py"):
+        (scripts / name).write_text("import sys\nsys.exit(0)\n", encoding="utf-8")
+    (scripts / "versioning.json").write_text("{}\n", encoding="utf-8")
+    stub = scripts / "test_version_bump_surfaces.py"
+    stub.write_text(f"import sys\nprint('stub version-surface test ran')\nsys.exit({exit_code})\n", encoding="utf-8")
+
+
+def case_a_cmake_change_runs_the_version_surface_test_and_refuses_on_failure(fx: Gates) -> None:
+    fx.setup()
+    fx.commit("cmake/Example.cmake", "# module\n", "touch a cmake module")
+    assert fx.write_receipt().returncode == 0
+    _install_version_surface_stub(fx, 1)
+    res = fx.hook()
+    assert res.returncode == 1, (res.returncode, res.stderr)
+    assert "stub version-surface test ran" in res.stdout + res.stderr, (res.stdout, res.stderr)
+    _install_version_surface_stub(fx, 0)
+    res = fx.hook()
+    assert res.returncode == 0, res.stderr
+    assert "stub version-surface test ran" in res.stdout + res.stderr, (res.stdout, res.stderr)
+
+
+def case_a_range_without_cmake_paths_does_not_run_the_version_surface_test(fx: Gates) -> None:
+    fx.setup()
+    fx.new_head()
+    assert fx.write_receipt().returncode == 0
+    _install_version_surface_stub(fx, 1)
+    res = fx.hook()
+    assert res.returncode == 0, res.stderr
+    assert "stub version-surface test ran" not in res.stdout + res.stderr, (res.stdout, res.stderr)
+
+
 CASES = [v for k, v in sorted(globals().items()) if k.startswith("case_")]
 
 
@@ -222,7 +258,7 @@ def main() -> int:
             except AssertionError as exc:
                 failures.append(case.__name__)
                 print(f"FAIL {case.__name__}: {exc}")
-    if len(CASES) < 11:
+    if len(CASES) < 13:
         print(f"FAIL collected only {len(CASES)} cases")
         return 1
     print(f"{len(CASES) - len(failures)}/{len(CASES)} passed")
