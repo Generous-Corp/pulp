@@ -943,7 +943,10 @@ void Fader::paint_modulated_marker(canvas::Canvas& canvas) {
     const float length = vert ? b.height : b.width;
     const float cross = (vert ? b.width : b.height) * 0.5f;
     const float p = position_for_value();
-    const float base = vert ? (1.0f - p) * length : p * length;
+    // Follow the same border-inset travel as the thumb (zero-extent thumb).
+    const float base = Fader::thumb_axis_position(
+        length, effective_axis_border(vert, true), effective_axis_border(vert, false), 0.0f,
+        vert ? (1.0f - p) : p);
     const auto thumb = resolve_color("control.thumb", canvas::Color::rgba8(220, 220, 220));
     // The tick is the resolved thumb token at 85 % alpha.
     const auto tick = canvas::Color::rgba(thumb.r, thumb.g, thumb.b, 0.85f); // token-lint:allow

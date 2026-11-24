@@ -201,3 +201,10 @@ TEST_CASE("DesignIR JSON keeps Chromium's sub-pixel layout on large boxes",
     REQUIRE(parsed.root.style.width == ir.root.style.width);
     REQUIRE(parsed.root.style.height == ir.root.style.height);
 }
+
+TEST_CASE("modulation marker base follows border-inset thumb travel",
+          "[view][widgets][fader][geometry]") {
+    // Zero-extent travel (the marker) uses the same border-inset axis as the thumb.
+    CHECK(Fader::thumb_axis_position(100.0f, 4.0f, 6.0f, 0.0f, 0.0f) == Catch::Approx(4.0f));
+    CHECK(Fader::thumb_axis_position(100.0f, 4.0f, 6.0f, 0.0f, 1.0f) == Catch::Approx(94.0f));
+}
