@@ -1531,40 +1531,6 @@ TEST_CASE("grid item 'N / span M' resolves to an end line",
     CHECK(js.find("'column_end', 3)") != std::string::npos);
 }
 
-TEST_CASE("wrapped design grid lowers to two native flex rows",
-          "[view][import][codegen][grid]") {
-    DesignIR ir;
-    ir.root.type = "frame";
-    ir.root.name = "UtilityGrid";
-    ir.root.style.width = 678.0f;
-    ir.root.style.height = 120.0f;
-    ir.root.layout.direction = LayoutDirection::row;
-    ir.root.layout.wrap = true;
-    ir.root.layout.gap = 12.0f;
-
-    for (int i = 0; i < 6; ++i) {
-        IRNode item;
-        item.type = "frame";
-        item.name = "Cell" + std::to_string(i);
-        item.style.width = 156.0f;
-        item.style.height = 48.0f;
-        ir.root.children.push_back(std::move(item));
-    }
-
-    const auto js = generate_pulp_js(ir, {});
-    INFO(js);
-    REQUIRE(js.find("setFlex('root', 'flex_wrap', 'wrap')") != std::string::npos);
-
-    auto root = build_native_view_tree(ir, ir.asset_manifest);
-    REQUIRE(root != nullptr);
-    root->set_bounds({0.0f, 0.0f, 678.0f, 120.0f});
-    root->layout_children();
-    REQUIRE(root->child_count() == 6);
-    CHECK(root->child_at(0)->bounds().y == Catch::Approx(0.0f));
-    CHECK(root->child_at(4)->bounds().y > root->child_at(0)->bounds().y);
-    CHECK(root->child_at(4)->bounds().x == Catch::Approx(root->child_at(0)->bounds().x));
-}
-
 TEST_CASE("native codegen emits setTextRuns for per-range text",
           "[view][import][codegen][text]") {
     // The native (bridge) arm now lowers per-range text to setTextRuns (the

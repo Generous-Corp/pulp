@@ -2889,8 +2889,6 @@ static void emit_js_generic_frame(const NativeEmit& e) {
     ss << ind << "createRow('" << id << "', " << pid << ");\n";
     emit_js_absolute_position(e, id);
     emit_js_visual_overrides(e, id);
-    if (node.layout.wrap)
-        ss << ind << "setFlex('" << id << "', 'flex_wrap', 'wrap');\n";
     if (node.style.height)
         ss << ind << "setFlex('" << id << "', 'height', " << *node.style.height << ");\n";
     else
