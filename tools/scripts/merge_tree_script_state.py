@@ -37,6 +37,11 @@ UNAVAILABLE = None
 # (stale) and from 3 (the merge conflicts), so a caller can never read "did
 # not run" as "passed".
 NOT_CHECKED = 4
+# The overall time bound (--overall-bound) ran out before every check finished.
+# Distinct from NOT_CHECKED: the hook treats it as advisory, never a pass and
+# never a refusal. A check that finished with a failure still outranks it.
+BOUND_EXCEEDED = 5
+BOUND = "bound"
 BASE_CHECK_TIMEOUT = 60.0
 LOAD_SCALE_SECONDS = 20.0
 MAX_CHECK_TIMEOUT = 240.0
@@ -69,15 +74,24 @@ def _check_timeout() -> float:
     return min(MAX_CHECK_TIMEOUT, max(BASE_CHECK_TIMEOUT, scaled))
 
 
-def _run(cmd: list[str], cwd: Path, env: dict[str, str], timeout: float | None = None) -> int | None:
+def _run(cmd: list[str], cwd: Path, env: dict[str, str], timeout: float | None = None,
+         deadline: float | None = None) -> int | str | None:
     """Run one check. A timeout is retried once with double the limit; a second
     timeout (or a start failure) is UNAVAILABLE, which callers treat as not
-    checked, never as a pass."""
+    checked, never as a pass. `deadline` (a time.monotonic() value) caps every
+    attempt at the time left; running out of it returns BOUND, with no retry."""
     if timeout is None:
         timeout = _check_timeout()
     proc = None
     for limit in (timeout, timeout * 2):
         start = time.monotonic()
+        bounded = False
+        if deadline is not None:
+            remaining = deadline - start
+            if remaining <= 0:
+                return BOUND
+            if limit >= remaining:
+                limit, bounded = remaining, True
         try:
             proc = subprocess.run(cmd, cwd=cwd, env=env, text=True, encoding="utf-8",
                                   timeout=limit, capture_output=True)
@@ -85,6 +99,10 @@ def _run(cmd: list[str], cwd: Path, env: dict[str, str], timeout: float | None =
         except (OSError, subprocess.TimeoutExpired) as exc:
             elapsed = time.monotonic() - start
             load, _ = _load_per_core()
+            if bounded and isinstance(exc, subprocess.TimeoutExpired):
+                print(f"merge-tree script-state: {cmd[0]} stopped at the overall bound "
+                      f"(elapsed {elapsed:.1f}s, 1-min load {load:.1f})", file=sys.stderr)
+                return BOUND
             retrying = isinstance(exc, subprocess.TimeoutExpired) and limit == timeout
             print(f"merge-tree script-state: {cmd[0]} unavailable or timed out: {exc} "
                   f"(elapsed {elapsed:.1f}s, limit {limit:.0f}s, 1-min load {load:.1f}); "
@@ -104,12 +122,25 @@ def _run(cmd: list[str], cwd: Path, env: dict[str, str], timeout: float | None =
     return proc.returncode
 
 
+def _bound_exceeded(bound: float, unrun: list[str]) -> int:
+    names = f" (not finished: {', '.join(unrun)})" if unrun else ""
+    print(f"merge-tree script-state: NOT CHECKED: the {bound:.0f}s overall bound ran out{names}. "
+          "ADVISORY, NOT A PASS: CI builds the same merged tree on pull_request. Run "
+          "`python3 tools/scripts/merge_tree_script_state.py` on a quieter host to check it now.",
+          file=sys.stderr)
+    return BOUND_EXCEEDED
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--repo-root", type=Path, default=Path.cwd())
     ap.add_argument("--base", default="origin/main")
     ap.add_argument("--head", default="HEAD")
+    ap.add_argument("--overall-bound", type=float, default=0.0, metavar="SECONDS",
+                    help="stop after this many seconds in total and exit "
+                         f"{BOUND_EXCEEDED} (not checked, advisory); 0 means no bound")
     args = ap.parse_args(argv)
+    deadline = time.monotonic() + args.overall_bound if args.overall_bound > 0 else None
     root = args.repo_root.resolve()
     base = git(root, "rev-parse", "--verify", args.base)
     head = git(root, "rev-parse", "--verify", args.head)
@@ -156,8 +187,14 @@ def main(argv: list[str] | None = None) -> int:
 
     old_handlers = {s: signal.signal(s, on_signal) for s in (signal.SIGINT, signal.SIGTERM, signal.SIGHUP)}
     try:
-        added = subprocess.run(["git", "-C", str(root), "worktree", "add", "--detach", str(tmp), synthetic],
-                               text=True, encoding="utf-8", capture_output=True)
+        try:
+            added = subprocess.run(
+                ["git", "-C", str(root), "worktree", "add", "--detach", str(tmp), synthetic],
+                text=True, encoding="utf-8", capture_output=True,
+                timeout=None if deadline is None else max(0.1, deadline - time.monotonic()))
+        except subprocess.TimeoutExpired:
+            added_worktree = True  # cleanup() removes the half-made worktree
+            return _bound_exceeded(args.overall_bound, [])
         if added.returncode:
             print(added.stderr, file=sys.stderr)
             return 2
@@ -202,12 +239,18 @@ def main(argv: list[str] | None = None) -> int:
                             "--root", str(tmp), "--base", base_sha]))
         failed: list[str] = []
         unavailable: list[str] = []
+        unrun: list[str] = []
         for name, cmd in checks:
             if not Path(cmd[1]).exists():
                 continue
             print(f"merge-tree script-state: {name}", file=sys.stderr)
-            rc = _run(cmd, tmp, env)
-            if rc is UNAVAILABLE:
+            if unrun:  # the bound already ran out; do not start another check
+                unrun.append(name)
+                continue
+            rc = _run(cmd, tmp, env, deadline=deadline)
+            if rc == BOUND:
+                unrun.append(name)
+            elif rc is UNAVAILABLE:
                 unavailable.append(name)
             elif rc:
                 failed.append(name)
@@ -221,6 +264,8 @@ def main(argv: list[str] | None = None) -> int:
                   "not a pass. Re-run on a less loaded host or raise "
                   "PULP_MERGE_TREE_CHECK_TIMEOUT.", file=sys.stderr)
             return NOT_CHECKED
+        if unrun:
+            return _bound_exceeded(args.overall_bound, unrun)
         return 0
     finally:
         cleanup()

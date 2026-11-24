@@ -591,6 +591,46 @@ def case_an_invalid_check_fails(fx: Fixture) -> None:
     assert "INVALID" in res.stderr, res.stderr
 
 
+def case_the_overall_bound_is_advisory_not_a_pass_or_a_stale_verdict(fx: Fixture) -> None:
+    """A check still running at the bound exits BOUND_EXCEEDED (5), well before
+    its own timeout, never STALE and never 0."""
+    fx.setup()
+    path = "tools/scripts/vellum_inheritance_ledger_check.py"
+    checker = fx.repo / path
+    checker.parent.mkdir(parents=True, exist_ok=True)
+    checker.write_text("import time; time.sleep(60)\n", encoding="utf-8")
+    fx.git("add", path)
+    fx.git("commit", "-qm", "slow checker")
+    started = time.monotonic()
+    res = subprocess.run(
+        [sys.executable, str(MERGE_TREE_STATE), "--repo-root", str(fx.repo),
+         "--base", "origin/main", "--head", "HEAD", "--overall-bound", "5"],
+        cwd=fx.repo, capture_output=True, text=True, encoding="utf-8", timeout=55,
+    )
+    assert res.returncode == merge_tree_state.BOUND_EXCEEDED == 5, (res.returncode, res.stderr)
+    assert time.monotonic() - started < 45
+    assert "NOT CHECKED" in res.stderr and "ADVISORY" in res.stderr, res.stderr
+    assert merge_tree_state.STALE not in res.stderr, res.stderr
+
+
+def case_a_real_failure_still_refuses_under_the_bound(fx: Fixture) -> None:
+    """The bound does not hide a failure that finished inside it."""
+    fx.setup()
+    path = "tools/scripts/vellum_inheritance_ledger_check.py"
+    checker = fx.repo / path
+    checker.parent.mkdir(parents=True, exist_ok=True)
+    checker.write_text("raise SystemExit(1)\n", encoding="utf-8")
+    fx.git("add", path)
+    fx.git("commit", "-qm", "failing checker")
+    res = subprocess.run(
+        [sys.executable, str(MERGE_TREE_STATE), "--repo-root", str(fx.repo),
+         "--base", "origin/main", "--head", "HEAD", "--overall-bound", "120"],
+        cwd=fx.repo, capture_output=True, text=True, encoding="utf-8", timeout=125,
+    )
+    assert res.returncode == 1, (res.returncode, res.stderr)
+    assert merge_tree_state.STALE in res.stderr, res.stderr
+
+
 def case_the_check_timeout_scales_with_load(fx: Fixture) -> None:
     """60 s floor, scaled up past one runnable task per core, capped."""
     from unittest import mock
@@ -684,7 +724,7 @@ def main() -> int:
                 failures.append(case.__name__)
                 print(f"FAIL {case.__name__}: {exc}")
     # Control: a suite that collected nothing would pass vacuously.
-    if len(CASES) < 14:
+    if len(CASES) < 16:
         print(f"FAIL collected only {len(CASES)} cases")
         return 1
     print(f"{len(CASES) - len(failures)}/{len(CASES)} passed")
