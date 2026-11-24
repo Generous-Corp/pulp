@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import re
 import shutil
 import signal
 import subprocess
@@ -122,6 +123,62 @@ def _run(cmd: list[str], cwd: Path, env: dict[str, str], timeout: float | None =
     return proc.returncode
 
 
+def add_worktree(root: Path, path: Path, commit: str,
+                 timeout: float | None) -> subprocess.CompletedProcess[str] | None:
+    """`git worktree add --detach`, in its own process group so a timeout can
+    kill the whole group (git and the checkout it spawned). None on timeout."""
+    proc = subprocess.Popen(
+        ["git", "-C", str(root), "worktree", "add", "--detach", str(path), commit],
+        text=True, encoding="utf-8", stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE, start_new_session=True)
+    try:
+        out, err = proc.communicate(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        try:
+            os.killpg(proc.pid, signal.SIGKILL)
+        except (ProcessLookupError, PermissionError):
+            pass
+        proc.communicate()
+        return None
+    return subprocess.CompletedProcess(proc.args, proc.returncode, out, err)
+
+
+REMOVE_TRIES = 5
+REMOVE_PAUSE = 0.4
+
+
+def remove_worktree(root: Path, path: Path) -> None:
+    """Remove our own worktree at `path`, including one whose add was killed.
+
+    Git leaves an interrupted add locked ("initializing"); `prune` skips it and
+    a single --force will not remove it. Unlock, remove with --force twice,
+    retry the directory removal (a file written as it starts makes it fail
+    once), then prune. Only `path`, our own mkdtemp directory, is touched."""
+    def git_quiet(*a: str) -> None:
+        subprocess.run(["git", "-C", str(root), *a], stdout=subprocess.DEVNULL,
+                       stderr=subprocess.DEVNULL)
+    git_quiet("worktree", "unlock", str(path))
+    git_quiet("worktree", "remove", "--force", "--force", str(path))
+    for _ in range(REMOVE_TRIES):
+        shutil.rmtree(path, ignore_errors=True)
+        if not path.exists():
+            break
+        time.sleep(REMOVE_PAUSE)
+    git_quiet("worktree", "prune", "--expire", "now")
+
+
+CAPABILITY_INPUTS = re.compile(
+    r"^(core/[^/]+/include/|tools/scripts/agent_capability_|tools/agent-capabilities/|docs/status/agent-capabilit)")
+
+
+def _touches_capability_inputs(root: Path, base: str, head: str) -> bool:
+    """Same paths as the hook's own capability gate. Unreadable means yes."""
+    res = git(root, "diff", "--name-only", f"{base}...{head}")
+    if res.returncode:
+        return True
+    return any(CAPABILITY_INPUTS.match(line) for line in res.stdout.splitlines())
+
+
 def _bound_exceeded(bound: float, unrun: list[str]) -> int:
     names = f" (not finished: {', '.join(unrun)})" if unrun else ""
     print(f"merge-tree script-state: NOT CHECKED: the {bound:.0f}s overall bound ran out{names}. "
@@ -136,6 +193,9 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--repo-root", type=Path, default=Path.cwd())
     ap.add_argument("--base", default="origin/main")
     ap.add_argument("--head", default="HEAD")
+    ap.add_argument("--only-if-capability-inputs", action="store_true",
+                    help="run the agent-capability manifest check only when base...head touches "
+                         "its inputs (the pre-push hook passes this; gates.sh always runs it)")
     ap.add_argument("--overall-bound", type=float, default=0.0, metavar="SECONDS",
                     help="stop after this many seconds in total and exit "
                          f"{BOUND_EXCEEDED} (not checked, advisory); 0 means no bound")
@@ -174,12 +234,10 @@ def main(argv: list[str] | None = None) -> int:
     def cleanup() -> None:
         nonlocal added_worktree
         if added_worktree:
-            subprocess.run(["git", "-C", str(root), "worktree", "remove", "--force", str(tmp)],
-                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            remove_worktree(root, tmp)
             added_worktree = False
-        shutil.rmtree(tmp, ignore_errors=True)
-        subprocess.run(["git", "-C", str(root), "worktree", "prune", "--expire", "now"],
-                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        else:
+            shutil.rmtree(tmp, ignore_errors=True)
 
     def on_signal(signum: int, _frame: object) -> None:
         cleanup()
@@ -187,44 +245,47 @@ def main(argv: list[str] | None = None) -> int:
 
     old_handlers = {s: signal.signal(s, on_signal) for s in (signal.SIGINT, signal.SIGTERM, signal.SIGHUP)}
     try:
-        try:
-            added = subprocess.run(
-                ["git", "-C", str(root), "worktree", "add", "--detach", str(tmp), synthetic],
-                text=True, encoding="utf-8", capture_output=True,
-                timeout=None if deadline is None else max(0.1, deadline - time.monotonic()))
-        except subprocess.TimeoutExpired:
-            added_worktree = True  # cleanup() removes the half-made worktree
+        # Set before the add: an interrupted add leaves a locked record that
+        # cleanup() must still remove.
+        added_worktree = True
+        added = add_worktree(root, tmp, synthetic,
+                             None if deadline is None else max(0.1, deadline - time.monotonic()))
+        if added is None:
             return _bound_exceeded(args.overall_bound, [])
         if added.returncode:
             print(added.stderr, file=sys.stderr)
             return 2
-        added_worktree = True
         env = os.environ.copy()
         env["PULP_GATES_NO_CONFIGURE"] = "1"
-        checks: list[tuple[str, list[str]]] = [
-            ("changed-surface-script-families-drift", [sys.executable, str(tmp / "tools/scripts/changed_surface_script_families.py"),
-                                                        "--repo-root", str(tmp), "--static", "--base", base_sha,
-                                                        "--head", synthetic]),
-            ("agent-capability-manifest", [sys.executable, str(tmp / "tools/scripts/agent_capability_manifest.py"), "--check"]),
-            ("unregistered-tests", [sys.executable, str(tmp / "tools/scripts/unregistered_tests_check.py"),
-                                    "--repo-root", str(tmp)]),
-        ]
+        # Cheapest first. A bound hit drops only what is last in line, so the
+        # checks the hook cannot re-run itself (ledger, unregistered tests) go
+        # first; families --static and the capability check are re-run by the
+        # hook when this one does not finish.
+        checks: list[tuple[str, list[str]]] = []
+        ledger = tmp / "tools/scripts/vellum_inheritance_ledger_check.py"
+        if ledger.exists():
+            checks.append(("vellum-inheritance-ledger", [sys.executable, str(ledger),
+                            "--root", str(tmp), "--base", base_sha]))
+        checks.append(("unregistered-tests", [sys.executable, str(tmp / "tools/scripts/unregistered_tests_check.py"),
+                                              "--repo-root", str(tmp)]))
+        checks.append(("changed-surface-script-families-drift",
+                       [sys.executable, str(tmp / "tools/scripts/changed_surface_script_families.py"),
+                        "--repo-root", str(tmp), "--static", "--base", base_sha, "--head", synthetic]))
         # The ctest script-input inventory is compiled/build-owned and has no
         # build-free equivalent. Run it only when a configured build is
         # explicitly supplied; never substitute its schema-only validator.
-        # The lane runs with the temporary merge-tree worktree as its root,
-        # and a configured build belongs to the checkout it was configured
-        # in: its registered commands carry that checkout's absolute paths,
-        # which the lane reads as paths outside the (temporary) checkout and
-        # reports as manifest drift. So the check runs here only for a build
-        # configured under this root -- which the caller's PULP_GATES_BUILD_DIR
-        # never is -- and is otherwise skipped, named. gates.sh runs the same
-        # lane against the caller's build in its own pass.
+        # A configured build belongs to the checkout it was configured in: its
+        # registered commands carry that checkout's absolute paths, which the
+        # lane reads as paths outside the (temporary) checkout and reports as
+        # manifest drift. So the check runs here only for a build configured
+        # under this root -- which the caller's PULP_GATES_BUILD_DIR never is --
+        # and is otherwise skipped, named. gates.sh runs the same lane against
+        # the caller's build in its own pass.
         configured = os.environ.get("PULP_GATES_BUILD_DIR", "")
         configured_path = Path(configured).expanduser().resolve() if configured else None
         if (configured_path is not None and (configured_path / "CMakeCache.txt").exists()
                 and configured_path.is_relative_to(tmp.resolve())):
-            checks.insert(0, ("script-test-inputs-drift", [sys.executable,
+            checks.append(("script-test-inputs-drift", [sys.executable,
                             str(tmp / "tools/scripts/gates_script_inputs.py"),
                             "--base", base_sha, "--repo-root", str(tmp),
                             "--build-dir", str(configured_path)]))
@@ -232,11 +293,14 @@ def main(argv: list[str] | None = None) -> int:
             print("merge-tree script-state: script-test-inputs-drift (no build-free variant; "
                   "a build configured outside the merge-tree root cannot be checked here; skipped)",
                   file=sys.stderr)
-
-        ledger = tmp / "tools/scripts/vellum_inheritance_ledger_check.py"
-        if ledger.exists():
-            checks.append(("vellum-inheritance-ledger", [sys.executable, str(ledger),
-                            "--root", str(tmp), "--base", base_sha]))
+        # The capability check is ~10 s and can only change when the range
+        # touches its inputs: the same trigger the hook uses for its own run.
+        if args.only_if_capability_inputs and not _touches_capability_inputs(root, base_sha, head_sha):
+            print("merge-tree script-state: agent-capability-manifest (the range touches none of its "
+                  "inputs; skipped)", file=sys.stderr)
+        else:
+            checks.append(("agent-capability-manifest",
+                           [sys.executable, str(tmp / "tools/scripts/agent_capability_manifest.py"), "--check"]))
         failed: list[str] = []
         unavailable: list[str] = []
         unrun: list[str] = []

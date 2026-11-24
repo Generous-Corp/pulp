@@ -631,6 +631,73 @@ def case_a_real_failure_still_refuses_under_the_bound(fx: Fixture) -> None:
     assert merge_tree_state.STALE in res.stderr, res.stderr
 
 
+def _make_checkout_slow(fx: Fixture) -> None:
+    """A smudge filter that sleeps keeps `git worktree add` inside its checkout,
+    where git holds the "initializing" lock."""
+    fx.commit(".gitattributes", "*.slow filter=slow\n", "attrs")
+    fx.commit("a.slow", "x\n", "slow file")
+    fx.git("config", "filter.slow.smudge", "sleep 60; cat")
+
+
+def case_an_interrupted_worktree_add_leaves_no_record_or_directory(fx: Fixture) -> None:
+    """A bound hit while `git worktree add` runs must not leave a locked
+    "initializing" record or its directory in the shared repo."""
+    fx.setup()
+    _make_checkout_slow(fx)
+    target = Path(tempfile.mkdtemp(prefix="pulp-merge-tree-", dir=fx.tmp))
+    started = time.monotonic()
+    res = merge_tree_state.add_worktree(fx.repo, target, "HEAD", 3.0)
+    assert res is None, "the slow add should have hit the timeout"
+    assert time.monotonic() - started < 30
+    assert "locked" in fx.git("worktree", "list", "--porcelain"), "the add should leave a locked record"
+    merge_tree_state.remove_worktree(fx.repo, target)
+    assert str(target) not in fx.git("worktree", "list", "--porcelain")
+    assert not target.exists(), target
+    leftovers = list((fx.repo / ".git" / "worktrees").glob("*")) if (fx.repo / ".git" / "worktrees").exists() else []
+    assert leftovers == [], leftovers
+
+
+def case_the_overall_bound_during_the_add_exits_not_checked_and_cleans_up(fx: Fixture) -> None:
+    fx.setup()
+    _make_checkout_slow(fx)
+    res = subprocess.run(
+        [sys.executable, str(MERGE_TREE_STATE), "--repo-root", str(fx.repo),
+         "--base", "origin/main", "--head", "HEAD", "--overall-bound", "3"],
+        cwd=fx.repo, capture_output=True, text=True, encoding="utf-8", timeout=55)
+    assert res.returncode == 5, (res.returncode, res.stderr)
+    assert fx.git("worktree", "list", "--porcelain").count("worktree ") == 1, fx.git("worktree", "list")
+    assert not list(fx.repo.parent.glob("pulp-merge-tree-*")), list(fx.repo.parent.glob("pulp-merge-tree-*"))
+
+
+def case_the_capability_check_runs_only_when_the_range_touches_its_inputs(fx: Fixture) -> None:
+    fx.setup()
+    base = fx.git("rev-parse", "origin/main")
+    head = fx.commit("docs/readme.txt", "x\n", "docs only")
+    assert merge_tree_state._touches_capability_inputs(fx.repo, base, head) is False
+    head2 = fx.commit("core/state/include/pulp/state/x.hpp", "// h\n", "header")
+    assert merge_tree_state._touches_capability_inputs(fx.repo, base, head2) is True
+    assert merge_tree_state._touches_capability_inputs(fx.repo, "nonexistent-ref", head2) is True
+
+
+def case_cheap_unrunnable_checks_come_before_the_slow_ones(fx: Fixture) -> None:
+    src = MERGE_TREE_STATE.read_text(encoding="utf-8")
+    body = src[src.index("checks: list[tuple[str, list[str]]] = []"):src.index("failed: list[str]")]
+    order = [body.index(n) for n in ('"vellum-inheritance-ledger"', '"unregistered-tests"',
+                                     '"changed-surface-script-families-drift"', '"agent-capability-manifest"')]
+    assert order == sorted(order), order
+
+
+def case_a_not_checked_merge_tree_is_recorded_and_named_in_the_verdict(fx: Fixture) -> None:
+    hook = (ROOT / ".githooks/pre-push").read_text(encoding="utf-8")
+    five = hook[hook.index("            5) echo"):hook.index("            3) echo")]
+    assert 'prepush_receipt_note skipped merge-tree-script-state' in five and "_prepush_merge_tree_not_checked=1" in five, five
+    four = hook[hook.index("            4)"):hook.index("            5) echo")]
+    assert 'prepush_receipt_note skipped merge-tree-script-state' in four, four
+    final = hook[hook.index('_prepush_mt_verdict=""'):]
+    final = final[:final.index("    exit 0")]
+    assert "gates passed except" in final and "gates clean." in final, final
+
+
 def case_the_check_timeout_scales_with_load(fx: Fixture) -> None:
     """60 s floor, scaled up past one runnable task per core, capped."""
     from unittest import mock
@@ -724,7 +791,7 @@ def main() -> int:
                 failures.append(case.__name__)
                 print(f"FAIL {case.__name__}: {exc}")
     # Control: a suite that collected nothing would pass vacuously.
-    if len(CASES) < 16:
+    if len(CASES) < 21:
         print(f"FAIL collected only {len(CASES)} cases")
         return 1
     print(f"{len(CASES) - len(failures)}/{len(CASES)} passed")

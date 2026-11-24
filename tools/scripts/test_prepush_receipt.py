@@ -182,6 +182,19 @@ prepush_receipt_finish 1
     assert r["gate_host"] is True and r["exit_code"] == 1 and r["outcome"] == "blocked", r
 
 
+def case_a_bound_hit_merge_tree_is_recorded_as_skipped(fx: Receipt) -> None:
+    feat = fx.setup()
+    stub = fx.repo / "tools/scripts/merge_tree_script_state.py"
+    stub.parent.mkdir(parents=True, exist_ok=True)
+    stub.write_text("import sys\nsys.exit(5)\n", encoding="utf-8")
+    res = fx.hook(feat)
+    assert res.returncode == 0, res.stderr
+    assert "merge-tree script-state NOT CHECKED" in res.stderr, res.stderr
+    (r,) = fx.lines()
+    assert any(g.get("gate") == "merge-tree-script-state" and g.get("status") == "skipped"
+               for g in r["gates"]), r["gates"]
+
+
 CASES = [v for k, v in sorted(globals().items()) if k.startswith("case_")]
 
 
