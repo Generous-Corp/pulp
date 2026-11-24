@@ -916,6 +916,16 @@ artifact" warning instead of a failed notarytool submission. `notarize --path`
 likewise rejects a raw `.app` (notarytool needs a `.dmg`/`.pkg`/`.zip`
 container — use `share` for an app).
 
+### Nested code is not re-signed (AUv3 with UI package dylibs)
+
+`pulp ship sign` auto-scans only `VST3`, `CLAP` and `AU` bundles, and
+`pulp ship sign --path` runs one `codesign --force --sign <id> --timestamp
+--options runtime <path>` on the artifact it is given. Neither walks nested code
+inner-out, so the ad-hoc signed dylibs a macOS AUv3 build stages inside
+`<fw>.framework/Versions/A` (Vellum runtime libraries) keep their build-time
+signature. Sign each nested dylib, then the framework, the `.appex` and the
+host `.app`, by hand (see the manual sign recipe below) before notarizing.
+
 ### AUv3 Xcode handoff: `pulp ship auv3-xcodeproj`
 
 ```bash

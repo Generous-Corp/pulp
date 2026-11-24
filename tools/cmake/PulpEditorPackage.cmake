@@ -185,9 +185,6 @@ function(_pulp_stage_ui_package_runtime plugin module)
         set_property(TARGET "${module}" APPEND PROPERTY INSTALL_RPATH "${_origin}")
     endif()
     set_property(TARGET "${module}" PROPERTY PULP_UI_PACKAGE_RUNTIME_LIBRARIES "${_libraries}")
-    # UI package sidecars are runtime dependencies too, so the common
-    # configure-time assertion accepts this staging path.
-    set_property(TARGET "${module}" PROPERTY PULP_RUNTIME_DEPENDENCIES_STAGED TRUE)
 endfunction()
 
 # Copy the UI package runtime libraries staged beside `module` into `dest`, the
