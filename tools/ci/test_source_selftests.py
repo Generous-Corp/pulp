@@ -1543,6 +1543,13 @@ class PrepushTriggerTests(unittest.TestCase):
         self.assertIn("tools/scripts/test_version_bump_surfaces.py", picked)
         self.assertNotIn("tools/scripts/test_gates.py", picked)
 
+    def test_any_file_under_tools_cmake_selects_the_surfaces_suite(self) -> None:
+        # The explicit tools/cmake/** read: a file no Pulp*.cmake glob names.
+        self.assertIn("tools/cmake/**",
+                      self.triggers["tools/scripts/test_version_bump_surfaces.py"])
+        picked = self._selected_keys(["tools/cmake/templates/zz-new.in"])
+        self.assertIn("tools/scripts/test_version_bump_surfaces.py", picked)
+
     def test_an_untouched_path_runs_nothing_extra(self) -> None:
         self.assertEqual(self._selected_keys(["zz-untouched/notes-q7.dat"]), set())
 
@@ -1680,6 +1687,17 @@ class PrepushCapTests(unittest.TestCase):
         self.assertEqual([why for _, why in not_checked], ["stopped by the cap"])
         self.assertLess(elapsed, 10)
 
+    def test_a_slow_name_only_match_is_deferred_and_named(self) -> None:
+        picked = [entry("own", ["{repo}/a.py"], priority=0, seconds=40.0),
+                  entry("named-cheap", ["{repo}/b.py"], priority=1, seconds=2.0),
+                  entry("named-slow", ["{repo}/c.py"], priority=1, seconds=50.0),
+                  entry("locked", ["{repo}/d.py"], priority=0, resource_lock=["x"])]
+        runnable, deferred = prepush.plan(picked)
+        self.assertEqual([e["name"] for e in runnable], ["own", "named-cheap"])
+        self.assertEqual([(e["name"], why) for e, why in deferred], [
+            ("named-slow", "name match only, about 50 s"),
+            ("locked", "needs the machine to itself")])
+
     def test_the_cap_is_never_raised_past_sixty_seconds(self) -> None:
         with mock.patch.dict(os.environ, {"PULP_PREPUSH_FIXTURE_BUDGET": "600"}):
             self.assertEqual(prepush.cap_seconds(None), 60.0)
@@ -1719,6 +1737,13 @@ class PrepushFailureLineTests(unittest.TestCase):
             "✗ fixture test tools/scripts/win32_include_lint.py: "
             "✗ core/x/include/a.hpp:3 includes <windows.h> | repro: "
             "python3 tools/scripts/win32_include_lint.py")
+
+    def test_a_traceback_reports_its_exception_not_the_source_line(self) -> None:
+        out = ("Traceback (most recent call last):\n  File \"t.py\", line 9, in <module>\n"
+               "    raise AssertionError(message)\n"
+               "AssertionError: core/x.hpp is installed but not documented\n")
+        self.assertEqual(prepush.first_failure(out, 1),
+                         "AssertionError: core/x.hpp is installed but not documented")
 
     def test_a_real_failing_suite_reports_its_first_failure(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

@@ -55,6 +55,11 @@ MAX_WORKERS = 4
 GATES_COMMAND = "tools/scripts/gates.sh origin/main"
 # Order hint for a test with no measured time in the triggers file.
 UNKNOWN_COST = 10.0
+# A test the selector reaches only through a name or helper it shares with the
+# change (priority 1) runs when it is cheap; a longer one is left to gates.sh
+# and CI, and printed as NOT CHECKED, so a broad textual match cannot spend
+# the whole cap.
+HEURISTIC_MAX_SECONDS = 10.0
 # Changing one of these changes how every candidate is chosen or run.
 OWN_FILES = (
     "tools/ci/prepush_fixtures.py",
@@ -205,10 +210,25 @@ def select(entries: list[dict], changed: list[str], repo: pathlib.Path,
     def priority(entry: dict) -> tuple[int, float, str]:
         own = source_key(entry, repo) in changed_set
         declared = any(lane.glob_match(g, p) for g in entry.get("reads") or () for p in changed)
-        return (0 if own or declared else 1,
-                float(entry.get("seconds", UNKNOWN_COST)), entry["name"])
+        entry["priority"] = 0 if own or declared else 1
+        return (entry["priority"], float(entry.get("seconds", UNKNOWN_COST)), entry["name"])
 
     return sorted(picked, key=priority)
+
+
+def plan(picked: list[dict]) -> tuple[list[dict], list[tuple[dict, str]]]:
+    """Split a selection into what runs and what is left NOT CHECKED up front."""
+    runnable: list[dict] = []
+    deferred: list[tuple[dict, str]] = []
+    for entry in picked:
+        if needs_whole_machine(entry):
+            deferred.append((entry, "needs the machine to itself"))
+        elif (entry.get("priority", 0) == 1
+              and float(entry.get("seconds", 0.0)) > HEURISTIC_MAX_SECONDS):
+            deferred.append((entry, f"name match only, about {float(entry['seconds']):.0f} s"))
+        else:
+            runnable.append(entry)
+    return runnable, deferred
 
 
 def repro(entry: dict, repo: pathlib.Path) -> str:
@@ -230,10 +250,14 @@ def first_failure(output: str, returncode: int | None) -> str:
     match = _UNITTEST_FAILURE.search(output)
     if match:
         return f"{match.group(1)}: {match.group(2)} ({match.group(3)})"[:200]
+    found = _EXCEPTION_LINE.findall(output)
+    if found and "Traceback (most recent call last)" in output:
+        # A traceback's own last line says what failed; the source lines
+        # above it only show where.
+        return found[-1].strip()[:200]
     match = _MARKED_FAILURE.search(output)
     if match and match.group(0).strip() not in ("FAILED", ""):
         return match.group(0).strip()[:200]
-    found = _EXCEPTION_LINE.findall(output)
     if found:
         return found[-1].strip()[:200]
     lines = [ln.strip() for ln in output.splitlines() if ln.strip()]
@@ -282,7 +306,7 @@ def _run_until(entry: dict, repo: pathlib.Path, python: str, deadline: float,
         try:
             proc = subprocess.Popen(
                 argv, cwd=cwd, env=env, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT, text=True, errors="replace", start_new_session=True)
+                stderr=subprocess.STDOUT, text=True, encoding="utf-8", errors="replace", start_new_session=True)
             try:
                 out, _ = proc.communicate(timeout=remaining)
                 result.update(returncode=proc.returncode, output=out)
@@ -358,13 +382,13 @@ def run_budgeted(entries: list[dict], repo: pathlib.Path, *, python: str = sys.e
 
 def changed_in_range(repo: pathlib.Path, base: str, head: str) -> list[str]:
     out = subprocess.run(["git", "diff", "--name-only", f"{base}...{head}"], cwd=repo,
-                         capture_output=True, text=True, check=True).stdout
+                         capture_output=True, text=True, encoding="utf-8", check=True).stdout
     return [line for line in out.splitlines() if line]
 
 
 def _rev(repo: pathlib.Path, ref: str) -> str:
     return subprocess.run(["git", "rev-parse", "--verify", "--quiet", f"{ref}^{{commit}}"],
-                          cwd=repo, capture_output=True, text=True).stdout.strip()
+                          cwd=repo, capture_output=True, text=True, encoding="utf-8").stdout.strip()
 
 
 def default_jobs() -> int:
@@ -396,6 +420,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--list", action="store_true", help="print the selection; run nothing")
     args = parser.parse_args(argv)
 
+    started = time.monotonic()
     repo = args.repo.resolve()
     workflow = repo / ".github" / "workflows" / "version-skill-check.yml"
     manifest = repo / "tools" / "ci" / "source_selftests.json"
@@ -418,8 +443,7 @@ def main(argv: list[str] | None = None) -> int:
 
     budget = cap_seconds(args.budget)
     jobs = args.jobs or default_jobs()
-    whole_machine = [e for e in picked if needs_whole_machine(e)]
-    runnable = [e for e in picked if not needs_whole_machine(e)]
+    runnable, deferred = plan(picked)
     print(f"[pre-push] fixture tests: {len(picked)} of {len(entries)} reached by "
           f"{len(changed)} changed path(s); cap {budget:g} s, {jobs} worker(s)")
     if args.list:
@@ -427,9 +451,10 @@ def main(argv: list[str] | None = None) -> int:
             print(f"  {entry['name']}")
         return 0
 
-    started = time.monotonic()
-    finished, not_checked = run_budgeted(runnable, repo, budget=budget, workers=jobs)
-    not_checked += [(e, "needs the machine to itself") for e in whole_machine]
+    # The cap counts from the start of this step, selection included.
+    finished, not_checked = run_budgeted(
+        runnable, repo, budget=max(0.0, budget - (time.monotonic() - started)), workers=jobs)
+    not_checked += deferred
     failures = [(e, r) for e, r in finished if r["returncode"] != 0]
     passed = len(finished) - len(failures)
     print(f"[pre-push] fixture tests: {passed} passed, {len(failures)} failed, "
