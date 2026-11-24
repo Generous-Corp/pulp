@@ -1284,12 +1284,9 @@ void Fader::paint(canvas::Canvas& canvas) {
         const float axis_center = Fader::thumb_axis_position(
             track_length, effective_axis_border(vert, true), effective_axis_border(vert, false),
             2.0f * axis_half, vert ? (1.0f - pos) : pos);
-        const float cross_leading =
-            vert ? effective_axis_border(false, true) : effective_axis_border(true, true);
-        const float cross_trailing =
-            vert ? effective_axis_border(false, false) : effective_axis_border(true, false);
-        const float cross_extent = std::max(0.0f, track_width - cross_leading - cross_trailing);
-        const float cross_center = cross_leading + captured_indicator_cross_ * cross_extent;
+        // The captured fraction is measured against the control's full crop
+        // box, so it maps onto the full widget cross extent, not the content box.
+        const float cross_center = captured_indicator_cross_ * track_width;
         const float thumb_x = vert ? cross_center - thumb_w * 0.5f : axis_center - thumb_w * 0.5f;
         const float thumb_y = vert ? axis_center - thumb_h * 0.5f : cross_center - thumb_h * 0.5f;
         draw_captured_raster(canvas, *this, captured_raster_origin_x_, captured_raster_origin_y_,
