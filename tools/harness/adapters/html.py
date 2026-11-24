@@ -64,6 +64,17 @@ NO_OP_MARKERS = (
     "stub",
 )
 
+HTML_SCRIPT_PATHS = (
+    "core/view/js/web-compat-element.js",
+    "core/view/js/web-compat-element-events.js",
+    "core/view/js/web-compat-dom-ops.js",
+    "core/view/js/web-compat-animation.js",
+    "core/view/js/web-compat.js",
+    "core/view/js/web-compat-selector.js",
+    "core/view/js/web-compat-runtime-apis.js",
+    "core/view/js/web-compat-document.js",
+)
+
 
 @register_adapter("html")
 class HtmlAdapter(AdapterBase):
@@ -90,8 +101,9 @@ class HtmlAdapter(AdapterBase):
         # shims moved to web-compat-runtime-apis.js. Both siblings join the
         # union so the prototype/selector evidence regexes still see the full
         # surface after the split.
+        scripts = {path: self._read(path) for path in HTML_SCRIPT_PATHS}
         self._element_js = "\n".join(
-            self._read(p)
+            scripts[p]
             for p in (
                 "core/view/js/web-compat-element.js",
                 "core/view/js/web-compat-element-events.js",
@@ -107,13 +119,13 @@ class HtmlAdapter(AdapterBase):
         # post-init `document.<X> = ...` patch in web-compat.js. Concatenate
         # for the same reason.
         self._document_js = "\n".join(
-            self._read(p)
+            scripts[p]
             for p in (
                 "core/view/js/web-compat-document.js",
                 "core/view/js/web-compat.js",
             )
         )
-        self._dom_ops_js = self._read("core/view/js/web-compat-dom-ops.js")
+        self._dom_ops_js = scripts["core/view/js/web-compat-dom-ops.js"]
         self._bridge_cpp = self._read_bridge_sources()
 
     # ── Oracle + source loading ──────────────────────────────────────
@@ -132,9 +144,12 @@ class HtmlAdapter(AdapterBase):
 
     def _read(self, rel: str) -> str:
         p = self.repo_root / rel
-        if not p.exists():
-            return ""
-        return p.read_text(encoding="utf-8", errors="replace")
+        if not p.is_file():
+            raise ValueError(f"HTML harness script is missing or empty: {rel}")
+        text = p.read_text(encoding="utf-8", errors="replace")
+        if not text.strip():
+            raise ValueError(f"HTML harness script is missing or empty: {rel}")
+        return text
 
     def _read_bridge_sources(self) -> str:
         sources: list[Path] = []

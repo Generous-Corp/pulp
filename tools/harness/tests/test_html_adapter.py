@@ -126,6 +126,14 @@ class HtmlAdapterTests(unittest.TestCase):
         (js_dir / "web-compat.js").write_text(
             "document.addEventListener = function() {};\n"
         )
+        for script in (
+            "web-compat-element-events.js",
+            "web-compat-dom-ops.js",
+            "web-compat-animation.js",
+            "web-compat-selector.js",
+            "web-compat-runtime-apis.js",
+        ):
+            (js_dir / script).write_text(f"// {script}\n")
 
         bridge_dir = self.repo / "core" / "view" / "src"
         bridge_dir.mkdir(parents=True)
@@ -155,6 +163,14 @@ class HtmlAdapterTests(unittest.TestCase):
         self.assertTrue(self.adapter._ensure_native_handles_tag("BUTTON"))
         self.assertFalse(self.adapter._ensure_native_handles_tag(""))
         self.assertFalse(self.adapter._ensure_native_handles_tag("meter"))
+
+    def test_all_configured_scripts_are_present_and_non_empty(self) -> None:
+        self.assertIsInstance(self.adapter, HtmlAdapter)
+
+        missing = self.repo / "core" / "view" / "js" / "web-compat.js"
+        missing.unlink()
+        with self.assertRaisesRegex(ValueError, r"web-compat\.js"):
+            HtmlAdapter(self.repo)
 
     def test_maps_to_helpers_classify_unimplemented_and_noop_markers(self) -> None:
         self.assertTrue(HtmlAdapter._maps_to_marks_unimpl("not wired"))
