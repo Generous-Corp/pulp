@@ -941,7 +941,13 @@ void Fader::paint_modulated_marker(canvas::Canvas& canvas) {
     const auto b = local_bounds();
     const bool vert = orientation_ == Orientation::vertical;
     const float length = vert ? b.height : b.width;
-    const float cross = (vert ? b.width : b.height) * 0.5f;
+    const float cross_lead =
+        vert ? effective_axis_border(false, true) : effective_axis_border(true, true);
+    const float cross_trail =
+        vert ? effective_axis_border(false, false) : effective_axis_border(true, false);
+    const float cross_len = std::max(0.0f, (vert ? b.width : b.height) - cross_lead - cross_trail);
+    const float cross_half_extent = cross_len * 0.5f;
+    const float cross = cross_lead + cross_half_extent;
     const float p = position_for_value();
     // Follow the same border-inset travel as the thumb (zero-extent thumb).
     const float base = Fader::thumb_axis_position(
@@ -953,7 +959,7 @@ void Fader::paint_modulated_marker(canvas::Canvas& canvas) {
     canvas.set_stroke_color(tick);
     canvas.set_line_cap(canvas::LineCap::round);
     canvas.set_line_width(1.5f);
-    const float half = std::min(cross * 0.8f, 6.0f);
+    const float half = std::min(cross_half_extent * 0.8f, 6.0f);
     if (vert)
         canvas.stroke_line(cross - half, base, cross + half, base);
     else
