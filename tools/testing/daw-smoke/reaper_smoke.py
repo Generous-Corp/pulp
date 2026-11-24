@@ -609,9 +609,35 @@ def run_reload_mode(reaper: Path, args: argparse.Namespace) -> int:
         session.cleanup()
 
 
+_OSA_LAST_ERROR = ""
+
+
 def _osa(script: str) -> str:
+    """Run one AppleScript; remember why it failed so a blank answer is explainable."""
+    global _OSA_LAST_ERROR
     r = subprocess.run(["osascript", "-e", script], capture_output=True, text=True)
+    _OSA_LAST_ERROR = r.stderr.strip() if r.returncode != 0 else ""
     return r.stdout.strip()
+
+
+def _why_no_editor_window() -> str:
+    """Say what the window server told us when no floating editor was measurable.
+
+    "No window" has three different causes that the bare INCONCLUSIVE conflated:
+    the window server refused the query (no Accessibility grant, or no GUI
+    session -- locked or asleep display), REAPER has no windows at all, or
+    REAPER has windows and none is the plugin's. Only the last is evidence about
+    the plugin's editor; the first two are about the harness's reach.
+    """
+    names = _osa('tell application "System Events" to tell process "REAPER" '
+                 'to get name of every window')
+    if _OSA_LAST_ERROR:
+        return (f"the window query itself failed ({_OSA_LAST_ERROR[:160]}); this is the "
+                "harness's reach (Accessibility grant / GUI session), not evidence "
+                "about the editor")
+    if not names:
+        return "REAPER exposes no windows to the window server (display asleep or locked?)"
+    return f"REAPER's windows are: {names[:300]}; none matched the plugin"
 
 
 def _floating_editor_bounds(plugin_name: str) -> tuple[int, int, int, int] | None:
@@ -1082,8 +1108,8 @@ def run_editor_open_mode(reaper: Path, args: argparse.Namespace) -> int:
         time.sleep(5)
         bounds = _floating_editor_bounds(args.plugin_name)
         if bounds is None:
-            log("REAPER reported the FX shown, but no floating editor window was measurable — "
-                "INCONCLUSIVE")
+            log("REAPER reported the FX shown, but no floating editor window was measurable "
+                f"({_why_no_editor_window()}) — INCONCLUSIVE")
             return EXIT_INCONCLUSIVE
         first_frame = _editor_rect_in(bounds, session.portable)
         time.sleep(1)

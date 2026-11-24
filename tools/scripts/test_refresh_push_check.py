@@ -693,9 +693,24 @@ def case_a_not_checked_merge_tree_is_recorded_and_named_in_the_verdict(fx: Fixtu
     assert 'prepush_receipt_note skipped merge-tree-script-state' in five and "_prepush_merge_tree_not_checked=1" in five, five
     four = hook[hook.index("            4)"):hook.index("            5) echo")]
     assert 'prepush_receipt_note skipped merge-tree-script-state' in four, four
-    final = hook[hook.index('_prepush_mt_verdict=""'):]
-    final = final[:final.index("    exit 0")]
-    assert "gates passed except" in final and "gates clean." in final, final
+    assert "    _prepush_final_verdict_line\n    exit 0" in hook
+    start = hook.index("_prepush_final_verdict_line() {")
+    func = hook[start:hook.index("\n}\n", start) + 3]
+    def line(**env: str) -> str:
+        script = func + "\n_prepush_final_verdict_line\n"
+        res = subprocess.run(["bash", "-c", script], capture_output=True, text=True,
+                             env={"PATH": os.environ["PATH"], **env})
+        return res.stderr.strip()
+    assert line() == "[pre-push] gates clean."
+    both = line(_prepush_merge_tree_not_checked="1", _prepush_fixtures_not_checked="a, b")
+    assert both.startswith("[pre-push] gates passed except ") and "merge-tree script-state NOT CHECKED" in both \
+        and "fixture tests: a, b NOT CHECKED" in both and "clean" not in both, both
+    triple = line(_prepush_merge_tree_not_checked="1", _prepush_fixtures_not_checked="a",
+                  _prepush_diff_cover_refused="1")
+    assert "diff coverage: NOT CHECKED" in triple and "merge-tree script-state NOT CHECKED" in triple \
+        and "fixture tests: a NOT CHECKED" in triple and triple.startswith("[pre-push] gates passed except"), triple
+    only_mt = line(_prepush_merge_tree_not_checked="1")
+    assert "merge-tree script-state NOT CHECKED" in only_mt and "gates clean" not in only_mt, only_mt
 
 
 def case_the_check_timeout_scales_with_load(fx: Fixture) -> None:

@@ -9,6 +9,26 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
      release's bullet block. See docs/guides/versioning.md § Release pipeline
      for the full end-to-end flow. -->
 
+<a id="v12060"></a>
+## [1.206.0] - 2026-11-24
+
+- release/version bump ([#12826](https://github.com/Generous-Corp/pulp/pull/12826))
+- feature/ios auv3 ui package ([#12799](https://github.com/Generous-Corp/pulp/pull/12799))
+- lane/w html harness presence ([#12820](https://github.com/Generous-Corp/pulp/pull/12820))
+
+<a id="v12051"></a>
+## [1.205.1] - 2026-11-24
+
+- release/version bump ([#12825](https://github.com/Generous-Corp/pulp/pull/12825))
+
+<a id="v12050"></a>
+## [1.205.0] - 2026-11-24
+
+- release/version bump ([#12822](https://github.com/Generous-Corp/pulp/pull/12822))
+- lane/w grid wrap regression ([#12821](https://github.com/Generous-Corp/pulp/pull/12821))
+- lane/w scoped font registration ([#12819](https://github.com/Generous-Corp/pulp/pull/12819))
+- revert/gates receipt prepush ([#12817](https://github.com/Generous-Corp/pulp/pull/12817))
+
 <a id="v12040"></a>
 ## [1.204.0] - 2026-11-24
 
@@ -13678,6 +13698,9 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/Generous-Corp/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/Generous-Corp/pulp/pull/2))
 
+[1.206.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.206.0
+[1.205.1]: https://github.com/Generous-Corp/pulp/releases/tag/v1.205.1
+[1.205.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.205.0
 [1.204.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.204.0
 [1.203.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.203.0
 [1.202.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.202.0

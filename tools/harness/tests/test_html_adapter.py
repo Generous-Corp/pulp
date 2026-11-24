@@ -126,6 +126,14 @@ class HtmlAdapterTests(unittest.TestCase):
         (js_dir / "web-compat.js").write_text(
             "document.addEventListener = function() {};\n"
         )
+        for script in (
+            "web-compat-element-events.js",
+            "web-compat-dom-ops.js",
+            "web-compat-animation.js",
+            "web-compat-selector.js",
+            "web-compat-runtime-apis.js",
+        ):
+            (js_dir / script).write_text(f"// {script}\n", encoding="utf-8")
 
         bridge_dir = self.repo / "core" / "view" / "src"
         bridge_dir.mkdir(parents=True)
@@ -155,6 +163,40 @@ class HtmlAdapterTests(unittest.TestCase):
         self.assertTrue(self.adapter._ensure_native_handles_tag("BUTTON"))
         self.assertFalse(self.adapter._ensure_native_handles_tag(""))
         self.assertFalse(self.adapter._ensure_native_handles_tag("meter"))
+
+    def test_all_configured_scripts_are_present_and_non_empty(self) -> None:
+        self.assertIsInstance(self.adapter, HtmlAdapter)
+
+    def test_missing_script_is_reported_as_missing(self) -> None:
+        (self.repo / "core" / "view" / "js" / "web-compat.js").unlink()
+        with self.assertRaisesRegex(ValueError, r"missing: .*web-compat\.js"):
+            HtmlAdapter(self.repo)
+
+    def test_zero_byte_script_is_reported_as_empty(self) -> None:
+        (self.repo / "core" / "view" / "js" / "web-compat-selector.js").write_bytes(b"")
+        with self.assertRaisesRegex(ValueError, r"empty: .*web-compat-selector\.js"):
+            HtmlAdapter(self.repo)
+
+    def test_whitespace_only_script_is_reported_as_empty(self) -> None:
+        (self.repo / "core" / "view" / "js" / "web-compat-animation.js").write_text(
+            " \n\t\n", encoding="utf-8"
+        )
+        with self.assertRaisesRegex(ValueError, r"empty: .*web-compat-animation\.js"):
+            HtmlAdapter(self.repo)
+
+    def test_every_configured_script_path_is_required(self) -> None:
+        from tools.harness.adapters.html import HTML_SCRIPT_PATHS
+
+        for rel in HTML_SCRIPT_PATHS:
+            with self.subTest(script=rel):
+                path = self.repo / rel
+                original = path.read_bytes()
+                path.unlink()
+                try:
+                    with self.assertRaises(ValueError):
+                        HtmlAdapter(self.repo)
+                finally:
+                    path.write_bytes(original)
 
     def test_maps_to_helpers_classify_unimplemented_and_noop_markers(self) -> None:
         self.assertTrue(HtmlAdapter._maps_to_marks_unimpl("not wired"))
