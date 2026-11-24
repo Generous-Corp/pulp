@@ -100,7 +100,8 @@ def entry_sources(entry: dict[str, Any], repo: pathlib.Path) -> list[pathlib.Pat
         files = [pathlib.Path(expand(a, repo)) for a in argv[1:] if "{repo}" in a]
         return [f for f in files if f.is_file()] or [pathlib.Path(expand(argv[0], repo))]
     if argv[:2] == ["-m", "unittest"] and entry.get("cwd"):
-        return [pathlib.Path(expand(entry["cwd"], repo)) / f"{argv[2]}.py"]
+        # `-m unittest mod.Class ...` runs classes of one module: its file.
+        return [pathlib.Path(expand(entry["cwd"], repo)) / f"{argv[2].split('.')[0]}.py"]
     return [pathlib.Path(expand(argv[0], repo))]
 
 
@@ -624,6 +625,32 @@ GENERIC_BASENAMES = frozenset({
 
 _WALKS = re.compile(r"\b(?:r?glob|os\.walk|iterdir|scandir)\(")
 _STRING_LITERAL = re.compile(r"""["']([A-Za-z0-9_][A-Za-z0-9_./-]*)["']""")
+# A path pattern written in the source ("tools/cmake/Pulp*.cmake"): the script
+# reads every file it matches, including one the diff adds.
+_GLOB_LITERAL = re.compile(r"""["']([A-Za-z0-9_.][A-Za-z0-9_./-]*/[A-Za-z0-9_./*?-]*[*?][A-Za-z0-9_./*?-]*)["']""")
+
+
+def glob_match(pattern: str, path: str) -> bool:
+    """``path`` matches a repo glob: ``**`` spans directories, ``*`` and ``?`` do not."""
+    regex = ""
+    i = 0
+    while i < len(pattern):
+        if pattern.startswith("**/", i):
+            regex += "(?:.*/)?"
+            i += 3
+        elif pattern.startswith("**", i):
+            regex += ".*"
+            i += 2
+        elif pattern[i] == "*":
+            regex += "[^/]*"
+            i += 1
+        elif pattern[i] == "?":
+            regex += "[^/]"
+            i += 1
+        else:
+            regex += re.escape(pattern[i])
+            i += 1
+    return re.fullmatch(regex, path) is not None
 
 
 def changed_paths(base: str, repo: pathlib.Path = REPO_ROOT) -> list[str]:
@@ -928,6 +955,11 @@ def select_for_changes(
         if any(path.startswith(tuple(scanned)) for path in changed) if scanned else False:
             selected.append(entry)
             continue
+        # Declared reads (tools/ci/prepush_triggers.json): files a script reaches
+        # through paths it builds at run time, which no rule below can see.
+        if any(glob_match(g, path) for g in entry.get("reads") or () for path in changed):
+            selected.append(entry)
+            continue
         text = ""
         for src in sources:
             try:
@@ -935,6 +967,10 @@ def select_for_changes(
             except OSError:
                 pass
         if any(pattern.search(text) for pattern in word.values()):
+            selected.append(entry)
+            continue
+        globs = set(_GLOB_LITERAL.findall(text))
+        if globs and any(glob_match(g, path) for g in globs for path in changed):
             selected.append(entry)
             continue
         # A script that walks a directory reads files it never names.

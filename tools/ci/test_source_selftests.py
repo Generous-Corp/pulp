@@ -1500,5 +1500,618 @@ class ImpactScopeTests(unittest.TestCase):
             self.assertIn(needle, text)
 
 
+import prepush_fixtures as prepush  # noqa: E402
+
+
+def _sample_path(glob: str) -> str:
+    """One concrete path a repo glob matches."""
+    return (glob.replace("**/", "a/").replace("**", "a/b.txt")
+            .replace("*", "a").replace("?", "a"))
+
+
+class PrepushTriggerTests(unittest.TestCase):
+    """Each declared read in tools/ci/prepush_triggers.json selects its test."""
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        repo = lane.REPO_ROOT
+        cls.repo = repo
+        cls.workflow = repo / ".github" / "workflows" / "version-skill-check.yml"
+        cls.triggers = prepush.load_triggers(prepush.TRIGGERS)
+        cls.entries, _ = prepush.candidates(repo, cls.workflow, lane.MANIFEST, cls.triggers)
+
+    def _selected_keys(self, changed: list[str]) -> set[str]:
+        return {prepush.source_key(e, self.repo)
+                for e in prepush.select(self.entries, changed, self.repo, self.workflow)}
+
+    def test_every_key_names_a_candidate(self) -> None:
+        keys = {prepush.source_key(e, self.repo) for e in self.entries}
+        self.assertEqual(sorted(set(self.triggers) - keys), [])
+
+    def test_each_trigger_selects_its_test(self) -> None:
+        for script, globs in self.triggers.items():
+            for glob in globs:
+                path = _sample_path(glob)
+                with self.subTest(script=script, glob=glob, path=path):
+                    self.assertTrue(lane.glob_match(glob, path))
+                    self.assertIn(script, self._selected_keys([path]))
+
+    def test_a_new_cmake_module_selects_the_surfaces_suite(self) -> None:
+        # test_version_bump_surfaces.py runs inside test_gates.py; the aggregate
+        # is split so its module, not the two-minute aggregate, is selected.
+        picked = self._selected_keys(["tools/cmake/PulpBrandNewModule.cmake"])
+        self.assertIn("tools/scripts/test_version_bump_surfaces.py", picked)
+        self.assertNotIn("tools/scripts/test_gates.py", picked)
+
+    def test_any_file_under_tools_cmake_selects_the_surfaces_suite(self) -> None:
+        # The explicit tools/cmake/** read: a file no Pulp*.cmake glob names.
+        self.assertIn("tools/cmake/**",
+                      self.triggers["tools/scripts/test_version_bump_surfaces.py"])
+        picked = self._selected_keys(["tools/cmake/templates/zz-new.in"])
+        self.assertIn("tools/scripts/test_version_bump_surfaces.py", picked)
+
+    def test_an_untouched_path_runs_nothing_extra(self) -> None:
+        self.assertEqual(self._selected_keys(["zz-untouched/notes-q7.dat"]), set())
+
+    def test_a_trigger_does_not_fire_outside_its_glob(self) -> None:
+        picked = self._selected_keys(["integrations/zz/notes.txt"])
+        self.assertNotIn("tools/scripts/test_version_bump_surfaces.py", picked)
+
+
+class PrepushSelectionRuleTests(unittest.TestCase):
+    """The two selector rules the pre-push step added to select_for_changes."""
+
+    def _tree(self, root: pathlib.Path) -> list[dict]:
+        (root / "tools").mkdir()
+        (root / "tools" / "test_globber.py").write_text(
+            'MODULES = ("tools/cmake/Pulp*.cmake",)\n', encoding="utf-8")
+        (root / "tools" / "test_builder.py").write_text(
+            'P = ROOT / "tools" / "cmake"\n', encoding="utf-8")
+        return [entry("globber", ["{repo}/tools/test_globber.py"]),
+                entry("builder", ["{repo}/tools/test_builder.py"], reads=["tools/cmake/**"])]
+
+    def _names(self, changed: list[str]) -> list[str]:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp)
+            return sorted(e["name"] for e in lane.select_for_changes(self._tree(root), changed, root))
+
+    def test_a_glob_literal_selects_on_a_new_matching_file(self) -> None:
+        self.assertEqual(self._names(["tools/cmake/PulpNew.cmake"]), ["builder", "globber"])
+
+    def test_declared_reads_select_what_the_glob_literal_does_not(self) -> None:
+        self.assertEqual(self._names(["tools/cmake/sub/helper.txt"]), ["builder"])
+
+    def test_control_an_unrelated_path_selects_neither(self) -> None:
+        self.assertEqual(self._names(["core/audio/src/buffer.cpp"]), [])
+
+    def test_glob_match_semantics(self) -> None:
+        self.assertTrue(lane.glob_match("**/*.cmake", "a.cmake"))
+        self.assertTrue(lane.glob_match("**/*.cmake", "x/y/a.cmake"))
+        self.assertTrue(lane.glob_match("core/*/include/**", "core/view/include/p/a.hpp"))
+        self.assertFalse(lane.glob_match("core/*/include/**", "core/view/src/include/a.hpp"))
+        self.assertFalse(lane.glob_match("tools/cmake/Pulp*.cmake", "tools/cmake/sub/Pulp.cmake"))
+
+
+class PrepushAggregateTests(unittest.TestCase):
+    """An aggregate suite is split into the classes it imports, per module."""
+
+    def test_split_keeps_exactly_the_imported_classes(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp).resolve()
+            scripts = root / "tools" / "scripts"
+            scripts.mkdir(parents=True)
+            for name in ("test_alpha", "test_beta"):
+                (scripts / f"{name}.py").write_text("import unittest\n", encoding="utf-8")
+            (scripts / "test_all.py").write_text(
+                "from test_alpha import A  # noqa: E402,F401\n"
+                "from test_beta import (  # noqa: E402,F401\n"
+                "    B1,\n    B2 as Renamed,\n)\n", encoding="utf-8")
+            out = prepush.expand_aggregates(
+                [entry("tools/scripts/test_all.py", ["{repo}/tools/scripts/test_all.py"],
+                       cwd="{repo}")], root)
+        self.assertEqual([e["argv"] for e in out], [
+            ["-m", "unittest", "test_alpha.A"],
+            ["-m", "unittest", "test_beta.B1", "test_beta.B2"],
+        ])
+        self.assertEqual(out[0]["cwd"], "{repo}/tools/scripts")
+
+    def test_a_suite_with_its_own_tests_is_not_split(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp).resolve()
+            (root / "test_a.py").write_text("x = 1\n", encoding="utf-8")
+            (root / "test_b.py").write_text("x = 1\n", encoding="utf-8")
+            (root / "test_own.py").write_text(
+                "from test_a import A\nfrom test_b import B\n"
+                "class T:\n    def test_x(self): pass\n", encoding="utf-8")
+            self.assertEqual(prepush.aggregate_members(root / "test_own.py"), {})
+
+
+class _FakeClock:
+    def __init__(self) -> None:
+        self.now = 0.0
+
+    def __call__(self) -> float:
+        return self.now
+
+
+class PrepushCapTests(unittest.TestCase):
+    """The cap holds, and every test it stops or skips is named."""
+
+    def test_the_cap_stops_and_names_what_it_did_not_run(self) -> None:
+        clock = _FakeClock()
+
+        def runner(item, repo, python, deadline, clk):
+            # Each fake test takes 10 s; one the deadline interrupts reports None.
+            if clk() + 10 > deadline:
+                clock.now = deadline
+                return {"name": item["name"], "returncode": None, "output": "", "seconds": 0}
+            clock.now += 10
+            return {"name": item["name"], "returncode": 0, "output": "", "seconds": 10.0}
+
+        items = [entry(n, ["{repo}/x.py"]) for n in ("a", "b", "c")]
+        finished, not_checked = prepush.run_budgeted(
+            items, pathlib.Path("/"), budget=15, workers=1, clock=clock, runner=runner,
+            stream=io.StringIO())
+        self.assertEqual([e["name"] for e, _ in finished], ["a"])
+        self.assertEqual([(e["name"], why) for e, why in not_checked],
+                         [("b", "stopped by the cap"), ("c", "not started before the cap")])
+        line = prepush.not_checked_line(not_checked, 15, pathlib.Path("/r"))
+        self.assertIn("NOT CHECKED within the 15 s cap (2); CI runs them; to run them now: "
+                      "b (stopped by the cap): python3 x.py; c (", line)
+        # gates.sh skips these suites on a gate host, so it is not the remedy.
+        self.assertNotIn("gates.sh", line)
+
+    def test_a_test_measured_over_what_is_left_is_skipped_not_started(self) -> None:
+        clock = _FakeClock()
+        started = []
+
+        def runner(item, repo, python, deadline, clk):
+            started.append(item["name"])
+            return {"name": item["name"], "returncode": 0, "output": "", "seconds": 1.0}
+
+        items = [entry("slow", ["{repo}/x.py"], seconds=90.0), entry("quick", ["{repo}/y.py"])]
+        _, not_checked = prepush.run_budgeted(
+            items, pathlib.Path("/"), budget=60, workers=1, clock=clock, runner=runner,
+            stream=io.StringIO())
+        self.assertEqual(started, ["quick"])
+        self.assertEqual([e["name"] for e, _ in not_checked], ["slow"])
+
+    def test_a_real_overrunning_test_is_killed_at_the_cap(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp).resolve()
+            (root / "test_sleep.py").write_text("import time\ntime.sleep(30)\n", encoding="utf-8")
+            start = time.monotonic()
+            finished, not_checked = prepush.run_budgeted(
+                [entry("sleep", ["{repo}/test_sleep.py"], cwd="{repo}")], root,
+                budget=1.0, workers=1, stream=io.StringIO())
+            elapsed = time.monotonic() - start
+        self.assertEqual(finished, [])
+        self.assertEqual([why for _, why in not_checked], ["stopped by the cap"])
+        self.assertLess(elapsed, 10)
+
+    def test_a_whole_machine_test_is_deferred_and_named(self) -> None:
+        picked = [entry("own", ["{repo}/a.py"], seconds=40.0),
+                  entry("locked", ["{repo}/d.py"], resource_lock=["x"])]
+        runnable, deferred = prepush.plan(picked)
+        self.assertEqual([e["name"] for e in runnable], ["own"])
+        self.assertEqual([(e["name"], why) for e, why in deferred],
+                         [("locked", "needs the machine to itself")])
+
+    def test_a_test_whose_child_leaves_the_group_cannot_hold_the_cap(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp).resolve()
+            # The grandchild starts its own session (setsid), so the group kill
+            # misses it, and it keeps the inherited output pipe open.
+            (root / "test_escape.py").write_text(
+                "import subprocess, sys, time\n"
+                "subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(25)'],"
+                " start_new_session=True)\n"
+                "time.sleep(25)\n", encoding="utf-8")
+            start = time.monotonic()
+            finished, not_checked = prepush.run_budgeted(
+                [entry("escape", ["{repo}/test_escape.py"], cwd="{repo}")], root,
+                budget=2.0, workers=1, stream=io.StringIO())
+            elapsed = time.monotonic() - start
+        self.assertEqual(finished, [])
+        self.assertEqual([why for _, why in not_checked], ["stopped by the cap"])
+        self.assertLess(elapsed, 2.0 + 2 * prepush.REAP_SECONDS + 1.0)
+
+    def test_selection_that_overruns_the_cap_is_not_checked(self) -> None:
+        def slow(*_args):
+            time.sleep(5)
+            return []
+
+        start = time.monotonic()
+        picked, error = prepush.select_within([], [], pathlib.Path("/"), pathlib.Path("/w"),
+                                              0.2, selector=slow)
+        self.assertEqual((picked, error), (None, None))
+        self.assertLess(time.monotonic() - start, 2)
+        picked, error = prepush.select_within([], [], pathlib.Path("/"), pathlib.Path("/w"),
+                                              5, selector=lambda *a: ["x"])
+        self.assertEqual((picked, error), (["x"], None))
+
+    def test_the_whole_step_ends_inside_its_cap(self) -> None:
+        # End to end: a selected test that would run 30 s, a 3 s cap.
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp).resolve()
+            (root / "tools" / "scripts").mkdir(parents=True)
+            (root / "tools" / "scripts" / "test_sleepy.py").write_text(
+                "import time\ntime.sleep(30)\n", encoding="utf-8")
+            (root / ".github" / "workflows").mkdir(parents=True)
+            (root / ".github" / "workflows" / "version-skill-check.yml").write_text(
+                "jobs:\n  version-skill-check:\n    steps:\n      - name: Gate-script fixture tests\n"
+                "        run: |\n          python3 tools/scripts/test_sleepy.py\n",
+                encoding="utf-8")
+            git = ["git", "-c", "user.name=t", "-c", "user.email=t@t", "-c", "commit.gpgsign=false"]
+            subprocess.run(["git", "init", "-q"], cwd=root, check=True)
+            subprocess.run([*git, "commit", "-q", "--allow-empty", "-m", "base"], cwd=root, check=True)
+            subprocess.run(["git", "add", "-A"], cwd=root, check=True)
+            subprocess.run([*git, "commit", "-q", "-m", "head"], cwd=root, check=True)
+            out = io.StringIO()
+            start = time.monotonic()
+            with contextlib.redirect_stdout(out):
+                rc = prepush.main(["--repo", str(root), "--base", "HEAD~1", "--budget", "3",
+                                   "--triggers", str(root / "none.json")])
+            elapsed = time.monotonic() - start
+        self.assertEqual(rc, prepush.EXIT_NOT_CHECKED)
+        self.assertLess(elapsed, 3.0)
+        self.assertIn("NOT CHECKED within the 3 s cap (1); CI runs them; to run them now: "
+                      "tools/scripts/test_sleepy.py (", out.getvalue())
+
+    def test_the_cap_is_never_raised_past_sixty_seconds(self) -> None:
+        with mock.patch.dict(os.environ, {"PULP_PREPUSH_FIXTURE_BUDGET": "600"}):
+            self.assertEqual(prepush.cap_seconds(None), 60.0)
+            self.assertEqual(prepush.cap_seconds(900), 60.0)
+        with mock.patch.dict(os.environ, {"PULP_PREPUSH_FIXTURE_BUDGET": "20"}):
+            self.assertEqual(prepush.cap_seconds(None), 20.0)
+
+
+class PrepushFailureLineTests(unittest.TestCase):
+    """One line per failure: the check, its first failing item, the repro."""
+
+    UNITTEST_OUT = (
+        "test_ok (test_mod.C.test_ok) ... ok\n"
+        "test_bad (test_mod.C.test_bad) ... FAIL\n\n"
+        "======================================================================\n"
+        "FAIL: test_bad (test_mod.C.test_bad)\n"
+        "----------------------------------------------------------------------\n"
+        "AssertionError: 1 != 2\n\nFAILED (failures=1)\n")
+
+    def test_the_line_names_check_item_and_repro(self) -> None:
+        item = {"name": "tools/scripts/test_mod.py (in test_gates.py)",
+                "argv": ["-m", "unittest", "test_mod.C"], "cwd": "{repo}/tools/scripts"}
+        line = prepush.failure_line(item, {"returncode": 1, "output": self.UNITTEST_OUT},
+                                    pathlib.Path("/r"))
+        self.assertEqual(line, (
+            "✗ fixture test tools/scripts/test_mod.py (in test_gates.py): "
+            "FAIL: test_bad (test_mod.C.test_bad) | repro: "
+            "(cd tools/scripts && python3 -m unittest test_mod.C)"))
+        self.assertNotIn("\n", line)
+
+    def test_a_script_check_names_its_marked_line(self) -> None:
+        item = {"name": "tools/scripts/win32_include_lint.py",
+                "argv": ["{repo}/tools/scripts/win32_include_lint.py"], "cwd": "{repo}"}
+        out = "scanning\n✗ core/x/include/a.hpp:3 includes <windows.h>\n1 violation\n"
+        self.assertEqual(
+            prepush.failure_line(item, {"returncode": 1, "output": out}, pathlib.Path("/r")),
+            "✗ fixture test tools/scripts/win32_include_lint.py: "
+            "✗ core/x/include/a.hpp:3 includes <windows.h> | repro: "
+            "python3 tools/scripts/win32_include_lint.py")
+
+    def test_a_traceback_reports_its_exception_not_the_source_line(self) -> None:
+        out = ("Traceback (most recent call last):\n  File \"t.py\", line 9, in <module>\n"
+               "    raise AssertionError(message)\n"
+               "AssertionError: core/x.hpp is installed but not documented\n")
+        self.assertEqual(prepush.first_failure(out, 1),
+                         "AssertionError: core/x.hpp is installed but not documented")
+
+    def test_a_real_failing_suite_reports_its_first_failure(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp).resolve()
+            (root / "test_real.py").write_text(
+                "import unittest\nclass K(unittest.TestCase):\n"
+                "    def test_one(self):\n        self.assertEqual(1, 2)\n"
+                "unittest.main()\n", encoding="utf-8")
+            item = entry("test_real.py", ["{repo}/test_real.py"], cwd="{repo}")
+            finished, _ = prepush.run_budgeted([item], root, budget=30, workers=1,
+                                               stream=io.StringIO())
+        (_, result), = finished
+        self.assertEqual(result["returncode"], 1)
+        self.assertEqual(prepush.first_failure(result["output"], 1),
+                         "FAIL: test_one (__main__.K.test_one)")
+
+
+
+def _fixture_repo(root: pathlib.Path, base_test: str, head_test: str) -> None:
+    """A two-commit repo whose CI fixture step runs tools/scripts/test_t.py."""
+    (root / "tools" / "scripts").mkdir(parents=True)
+    (root / ".github" / "workflows").mkdir(parents=True)
+    (root / ".github" / "workflows" / "version-skill-check.yml").write_text(
+        "jobs:\n  version-skill-check:\n    steps:\n      - name: Gate-script fixture tests\n"
+        "        run: |\n          python3 tools/scripts/test_t.py\n", encoding="utf-8")
+    git = ["git", "-c", "user.name=t", "-c", "user.email=t@t", "-c", "commit.gpgsign=false"]
+    subprocess.run(["git", "init", "-q"], cwd=root, check=True)
+    test = root / "tools" / "scripts" / "test_t.py"
+    test.write_text(base_test, encoding="utf-8")
+    subprocess.run(["git", "add", "-A"], cwd=root, check=True)
+    subprocess.run([*git, "commit", "-q", "-m", "base"], cwd=root, check=True)
+    test.write_text(head_test, encoding="utf-8")
+    subprocess.run(["git", "add", "-A"], cwd=root, check=True)
+    subprocess.run([*git, "commit", "-q", "-m", "head"], cwd=root, check=True)
+
+
+FAILING = ("import unittest\nclass T(unittest.TestCase):\n"
+           "    def test_red(self):\n        self.assertEqual(1, 2)\nunittest.main()\n")
+PASSING = "import unittest\nclass T(unittest.TestCase):\n    def test_ok(self): pass\nunittest.main()\n"
+
+
+class PrepushOutcomeTests(unittest.TestCase):
+    """Exit codes and lines the hook reads: pass, NOT CHECKED, failure, base-red."""
+
+    def _main(self, base_test: str, head_test: str, *extra: str) -> tuple[int, str]:
+        with tempfile.TemporaryDirectory() as tmp:
+            parent = pathlib.Path(tmp).resolve()
+            root = parent / "repo"
+            root.mkdir()
+            _fixture_repo(root, base_test, head_test)
+            out = io.StringIO()
+            with contextlib.redirect_stdout(out):
+                rc = prepush.main(["--repo", str(root), "--base", "HEAD~1",
+                                   "--triggers", str(root / "none.json"), *extra])
+            # The base checkout is removed in the background after the step.
+            for _ in range(50):
+                if not any(parent.glob(".prepush-fixtures-base-*")):
+                    break
+                time.sleep(0.1)
+            subprocess.run(["git", "worktree", "prune"], cwd=root, check=False)
+        return rc, out.getvalue()
+
+    def test_a_clean_run_exits_zero_and_prints_no_not_checked(self) -> None:
+        rc, out = self._main(PASSING, PASSING + "# edit\n")
+        self.assertEqual(rc, 0)
+        self.assertNotIn("NOT CHECKED", out)
+
+    def test_a_new_failure_blocks_with_the_base_verdict(self) -> None:
+        rc, out = self._main(PASSING, FAILING)
+        self.assertEqual(rc, 1)
+        self.assertIn("✗ fixture test tools/scripts/test_t.py: FAIL: test_red", out)
+        self.assertIn("(base: passes on the base)", out)
+
+    def test_a_failure_red_on_the_base_too_does_not_block(self) -> None:
+        rc, out = self._main(FAILING, FAILING + "# unrelated edit\n")
+        self.assertEqual(rc, 0)
+        self.assertIn("PRE-EXISTING ON BASE, not blocking: tools/scripts/test_t.py", out)
+        self.assertNotIn("✗ fixture test", out)
+
+
+class PrepushBaseCleanupTests(unittest.TestCase):
+    """A base checkout the cap interrupted (left locked) is still removed."""
+
+    def test_an_interrupted_checkout_leaves_no_directory(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            parent = pathlib.Path(tmp).resolve()
+            root = parent / "repo"
+            root.mkdir()
+            subprocess.run(["git", "init", "-q"], cwd=root, check=True)
+            holder = parent / ".prepush-fixtures-base-z"
+            checkout = holder / "base"
+            checkout.mkdir(parents=True)
+            # A slow fake checkout: it and a child in its group keep writing
+            # files until killed, as git's checkout does after the add starts.
+            loop = ("import os, sys, time\n"
+                    "for i in range(10**6):\n"
+                    "    try:\n"
+                    "        os.makedirs(sys.argv[1], exist_ok=True)\n"
+                    "        open(os.path.join(sys.argv[1], sys.argv[2] + str(i)), 'w').close()\n"
+                    "    except OSError:\n"
+                    "        pass\n"
+                    "    time.sleep(0.005)\n")
+            writer = ("import subprocess, sys\n"
+                      f"loop = {loop!r}\n"
+                      "subprocess.Popen([sys.executable, '-c', loop, sys.argv[1], 'c'])\n"
+                      "exec(compile(loop, 'w', 'exec'), {'__name__': 'w'})\n")
+            with self.assertRaises(prepush.BaseCheckoutInterrupted):
+                prepush.add_base_checkout(root, checkout, "HEAD", 0.5,
+                                          command=[sys.executable, "-c", writer, str(checkout), "p"])
+            self.assertTrue(prepush.remove_base_now(root, holder, checkout))
+            time.sleep(0.5)  # nothing still running may recreate it
+            self.assertFalse(holder.exists())
+
+    def test_cleanup_removes_a_locked_base_worktree(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            parent = pathlib.Path(tmp).resolve()
+            root = parent / "repo"
+            root.mkdir()
+            _fixture_repo(root, PASSING, PASSING + "# edit\n")
+            holder = parent / ".prepush-fixtures-base-x"
+            holder.mkdir()
+            checkout = holder / "base"
+            subprocess.run(["git", "worktree", "add", "-q", "--detach", "--lock",
+                            str(checkout), "HEAD~1"], cwd=root, check=True)
+            subprocess.run(["sh", "-c", prepush.BASE_CLEANUP, "_", str(checkout), str(holder)],
+                           cwd=root, check=False)
+            listed = subprocess.run(["git", "worktree", "list"], cwd=root,
+                                    capture_output=True, text=True, encoding="utf-8",
+                                    check=True).stdout
+            self.assertFalse(holder.exists())
+            self.assertNotIn(str(checkout), listed)
+
+    def test_cleanup_removes_a_locked_base_the_add_never_finished(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            parent = pathlib.Path(tmp).resolve()
+            root = parent / "repo"
+            root.mkdir()
+            _fixture_repo(root, PASSING, PASSING + "# edit\n")
+            holder = parent / ".prepush-fixtures-base-y"
+            holder.mkdir()
+            checkout = holder / "base"
+            subprocess.run(["git", "worktree", "add", "-q", "--detach", "--lock",
+                            str(checkout), "HEAD~1"], cwd=root, check=True)
+            (checkout / ".git").unlink()  # as when the cap stops the add early
+            subprocess.run(["sh", "-c", prepush.BASE_CLEANUP, "_", str(checkout), str(holder)],
+                           cwd=root, check=False)
+            listed = subprocess.run(["git", "worktree", "list"], cwd=root,
+                                    capture_output=True, text=True, encoding="utf-8",
+                                    check=True).stdout
+            self.assertFalse(holder.exists())
+            self.assertNotIn(str(checkout), listed)
+
+
+class PrepushDeadlineTests(unittest.TestCase):
+    """One deadline covers setup, selection, the base checkout and its cleanup."""
+
+    SLACK = 1.5
+
+    def _slow_main(self, patched: str, delay: float, budget: str = "1") -> tuple[int, str, float]:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp).resolve() / "repo"
+            root.mkdir()
+            _fixture_repo(root, PASSING, PASSING + "# edit\n")
+            real = getattr(prepush, patched)
+
+            def slow(*args, **kwargs):
+                time.sleep(delay)
+                return real(*args, **kwargs)
+
+            out = io.StringIO()
+            began = time.monotonic()
+            with mock.patch.object(prepush, patched, slow), contextlib.redirect_stdout(out):
+                rc = prepush.main(["--repo", str(root), "--base", "HEAD~1",
+                                   "--triggers", str(root / "none.json"), "--budget", budget])
+            return rc, out.getvalue(), time.monotonic() - began
+
+    def test_slow_diff_discovery_is_not_checked_within_the_cap(self) -> None:
+        rc, out, elapsed = self._slow_main("changed_in_range", 6.0)
+        self.assertEqual(rc, prepush.EXIT_NOT_CHECKED)
+        self.assertIn("NOT CHECKED", out)
+        self.assertLess(elapsed, 1.0 + self.SLACK)
+
+    def test_slow_candidate_construction_is_not_checked_within_the_cap(self) -> None:
+        rc, out, elapsed = self._slow_main("candidates", 6.0)
+        self.assertEqual(rc, prepush.EXIT_NOT_CHECKED)
+        self.assertLess(elapsed, 1.0 + self.SLACK)
+
+    def test_slow_revision_resolution_is_not_checked_within_the_cap(self) -> None:
+        rc, out, elapsed = self._slow_main("_rev", 6.0)
+        self.assertEqual(rc, prepush.EXIT_NOT_CHECKED)
+        self.assertLess(elapsed, 1.0 + self.SLACK)
+
+    def test_slow_git_in_cleanup_stops_at_the_deadline(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            holder = pathlib.Path(tmp).resolve() / "holder"
+            (holder / "base").mkdir(parents=True)
+            seen: list[float] = []
+
+            def slow_git(command, **kwargs):
+                seen.append(kwargs.get("timeout"))
+                time.sleep(min(kwargs.get("timeout") or 6.0, 6.0))
+                raise subprocess.TimeoutExpired(command, kwargs.get("timeout") or 6.0)
+
+            began = time.monotonic()
+            with mock.patch.object(prepush.subprocess, "run", slow_git):
+                gone = prepush.remove_base_now(pathlib.Path(tmp), holder, holder / "base",
+                                               deadline=time.monotonic() + 0.5)
+            self.assertLess(time.monotonic() - began, 0.5 + self.SLACK)
+            self.assertFalse(gone)
+            self.assertTrue(all(t is not None and t <= 0.5 for t in seen))
+
+    def test_slow_tree_removal_stops_at_the_deadline(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            parent = pathlib.Path(tmp).resolve()
+            root = parent / "repo"
+            root.mkdir()
+            subprocess.run(["git", "init", "-q"], cwd=root, check=True)
+            holder = parent / "holder"
+            (holder / "base").mkdir(parents=True)
+
+            def slow_rmtree(*args, **kwargs):
+                time.sleep(6.0)
+
+            began = time.monotonic()
+            with mock.patch.object(prepush.shutil, "rmtree", slow_rmtree):
+                gone = prepush.remove_base_now(root, holder, holder / "base",
+                                               deadline=time.monotonic() + 1.0)
+            self.assertLess(time.monotonic() - began, 1.0 + self.SLACK)
+            self.assertFalse(gone)
+
+    def test_an_interrupted_base_checkout_does_not_hold_the_hook_past_the_cap(self) -> None:
+        def interrupted(repo, checkout, commit, seconds, command=None):
+            raise prepush.BaseCheckoutInterrupted()
+
+        def slow_remove(repo, holder, checkout, *args, **kwargs):
+            time.sleep(0.3)
+            return False
+
+        detached: list[pathlib.Path] = []
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp).resolve() / "repo"
+            root.mkdir()
+            _fixture_repo(root, PASSING, FAILING)
+            entry = {"name": "t", "argv": ["x"]}
+            began = time.monotonic()
+            with mock.patch.object(prepush, "add_base_checkout", interrupted), \
+                    mock.patch.object(prepush, "remove_base_now", slow_remove), \
+                    mock.patch.object(prepush, "_detach_cleanup",
+                                      lambda repo, checkout, holder: detached.append(holder)):
+                verdicts = prepush.base_verdicts([(entry, {})], "HEAD~1", root,
+                                                 time.monotonic() + 2.0, time.monotonic)
+            self.assertLess(time.monotonic() - began, 2.0 + prepush.CAP_RESERVE + self.SLACK)
+            self.assertFalse(verdicts["t"][0])
+            self.assertEqual(len(detached), 1)  # leftovers go to a detached cleanup
+
+
+class PrepushNameMatchTests(unittest.TestCase):
+    """Only own-script, import and declared-read matches run before a push."""
+
+    def test_a_test_that_only_names_the_changed_file_is_not_selected(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp).resolve()
+            (root / "tools").mkdir()
+            (root / "tools" / "test_names.py").write_text(
+                'NOTE = "see .githooks/pre-push"\n', encoding="utf-8")
+            (root / "tools" / "test_declares.py").write_text("x = 1\n", encoding="utf-8")
+            subprocess.run(["git", "init", "-q"], cwd=root, check=True)
+            items = [entry("names", ["{repo}/tools/test_names.py"]),
+                     entry("declares", ["{repo}/tools/test_declares.py"],
+                           reads=[".githooks/**"])]
+            # The shared selector still reaches both; the pre-push step keeps one.
+            self.assertEqual(len(lane.select_for_changes(items, [".githooks/pre-push"], root)), 2)
+            kept = prepush.select(items, [".githooks/pre-push"], root, root / "wf.yml")
+        self.assertEqual([e["name"] for e in kept], ["declares"])
+
+    def test_a_lane_change_runs_everything_with_direct_matches_first(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp).resolve()
+            (root / "tools").mkdir()
+            for name in ("test_cheap.py", "test_declares.py"):
+                (root / "tools" / name).write_text("x = 1\n", encoding="utf-8")
+            subprocess.run(["git", "init", "-q"], cwd=root, check=True)
+            items = [entry("cheap", ["{repo}/tools/test_cheap.py"], seconds=0.1),
+                     entry("declares", ["{repo}/tools/test_declares.py"], seconds=30.0,
+                           reads=[".shipyard/**"])]
+            kept = prepush.select(items, ["tools/ci/source_selftests.py", ".shipyard/x.toml"],
+                                  root, root / "wf.yml")
+        self.assertEqual([e["name"] for e in kept], ["declares", "cheap"])
+
+
+class PrepushHookWiringTests(unittest.TestCase):
+    """The hook records NOT CHECKED as such and repeats it in its verdict."""
+
+    HOOK = lane.REPO_ROOT / ".githooks" / "pre-push"
+
+    def test_exit_three_is_noted_and_named_in_the_verdict(self) -> None:
+        text = self.HOOK.read_text(encoding="utf-8")
+        block = text[text.index('PREPUSH_FIXTURES="'):text.index("# Screenshot-sync.")]
+        self.assertIn("prepush_receipt_note skipped fixture-tests", block)
+        self.assertRegex(block, r"\n\s+3\)\n")
+        self.assertIn('"$_prepush_source_update_mode" = "no-source"', block)
+        verdict = text[text.index("_prepush_fixtures_verdict=\"\""):]
+        self.assertIn("gates passed except $_prepush_fixtures_verdict", verdict)
+        # "gates clean" is never printed beside a fixture NOT CHECKED.
+        for line in verdict[:verdict.index("exit 0")].splitlines():
+            if "gates clean" in line:
+                self.assertNotIn("_prepush_fixtures_verdict", line)
+
+
 if __name__ == "__main__":
     unittest.main()
