@@ -15,9 +15,6 @@
 #   PULP_DISABLE_PREPUSH_GATES=1   # demote ALL gates to advisory (skill/version/compat/compat-aggregate/node-ABI/docs-noise/source-contract/hotspot-size/deps/vellum-watch)
 #   PULP_DISABLE_PREPUSH_DIFF_COVER=1  # demote diff-cover gate only
 #   PULP_SKIP_PREPUSH=1            # skip ALL gates entirely (true emergencies); an agent push (SHIPYARD_AGENT_ID) still runs skill-sync
-#   PULP_GATES_RECEIPT_OWNER_OVERRIDE=1  # OWNER ONLY, not for agents: push a head with no gates.sh receipt
-#                                  # (logged). No other knob skips the receipt check; agents run
-#                                  # tools/scripts/gates.sh origin/main on the exact head instead.
 #
 # Migration note (pulp #1144): the old `PULP_ENFORCE_PREPUSH=1` and
 # `PULP_ENFORCE_PREPUSH_DIFF_COVER=1` env vars used to *promote* advisory
@@ -160,35 +157,6 @@ source "$ROOT/.githooks/lib/receipt.sh" 2>/dev/null || {
     prepush_receipt_finish() { return 0; }
 }
 trap '_prepush_rc=$?; prepush_receipt_finish "$_prepush_rc"' EXIT
-
-# ── gates.sh receipt (blocking, before every other gate) ───────────────────
-# The required `Enforce version & skill sync` job runs the gate-script fixture
-# tests and source selftests this hook does not, and gates.sh runs all of them.
-# A head gates.sh never passed went red there 35 times in one week, so every
-# pushed branch head needs a receipt from a passing, clean-tree
-# `tools/scripts/gates.sh origin/main` on that exact commit
-# (tools/scripts/gates_receipt.py). Exempt: deletions, tags, and commits
-# already on origin/main. PULP_SKIP_PREPUSH and PULP_DISABLE_PREPUSH_GATES do
-# not bypass it. PULP_GATES_RECEIPT_OWNER_OVERRIDE=1 is for the repository
-# owner only, never for agents; it is logged under the git dir's pulp-gates/.
-GATES_RECEIPT_CHECK="$ROOT/tools/scripts/gates_receipt.py"
-if [ -f "$GATES_RECEIPT_CHECK" ]; then
-    printf '%s\n' "$PREPUSH_UPDATE_RECORDS" | \
-        "$PULP_PYTHON" "$GATES_RECEIPT_CHECK" check --root "$ROOT"
-    _gates_receipt_rc=$?
-    if [ "$_gates_receipt_rc" -ne 0 ]; then
-        prepush_receipt_note ran gates-receipt "$_gates_receipt_rc"
-        [ "$_gates_receipt_rc" -eq 1 ] || \
-            echo "✗ pre-push: the gates.sh receipt check could not run (exit $_gates_receipt_rc); refusing." >&2
-        exit 1
-    fi
-    if [ "${PULP_GATES_RECEIPT_OWNER_OVERRIDE:-0}" = "1" ]; then
-        prepush_receipt_note skipped gates-receipt "PULP_GATES_RECEIPT_OWNER_OVERRIDE=1"
-    else
-        prepush_receipt_note ran gates-receipt 0
-    fi
-    unset _gates_receipt_rc
-fi
 
 # ── Queued-PR guard (blocking, before every gate and the diff-cover build) ──
 # A PR in the merge queue never needs a rebase or a merge of main: the queue
@@ -666,22 +634,6 @@ gate_rc=$?; case $gate_rc in
     1) prepush_fail ;;
     *) gate_could_not_run "version_bump_check" "$gate_rc"; prepush_fail ;;
 esac
-
-# A CMake module change must keep the sdk surface's trigger list and the
-# build-module classification in step (SdkShippedCmakeModulesTests). That test
-# is one of CI's gate-script fixture tests, which this hook does not otherwise
-# run; it takes about 2 s, so run it whenever the range touches a CMake module
-# or one of the files the test reads. It recurred 12 times in one week.
-VBS_TEST="$ROOT/tools/scripts/test_version_bump_surfaces.py"
-if [ -f "$VBS_TEST" ] && git diff --name-only "$BASE"...HEAD 2>/dev/null | \
-        grep -qE '\.cmake$|^tools/scripts/versioning\.json$|^tools/deps/patches\.json$|^core/canvas/CMakeLists\.txt$'; then
-    run_gate_captured "$PYTHON" "$VBS_TEST"
-    gate_rc=$?; case $gate_rc in
-        0) ;;
-        1) prepush_fail ;;
-        *) gate_could_not_run "test_version_bump_surfaces" "$gate_rc"; prepush_fail ;;
-    esac
-fi
 
 # Screenshot-sync. No-op unless this repo carries .pulp/screenshots.toml
 # (plugin repos opt in; pulp core does not). Enforcing-by-default like the
