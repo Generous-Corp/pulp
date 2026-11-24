@@ -1655,9 +1655,11 @@ class PrepushCapTests(unittest.TestCase):
         self.assertEqual([e["name"] for e, _ in finished], ["a"])
         self.assertEqual([(e["name"], why) for e, why in not_checked],
                          [("b", "stopped by the cap"), ("c", "not started before the cap")])
-        line = prepush.not_checked_line(not_checked, 15)
-        self.assertIn("NOT CHECKED within the 15 s cap (2): b (stopped by the cap), c (", line)
-        self.assertIn("tools/scripts/gates.sh origin/main", line)
+        line = prepush.not_checked_line(not_checked, 15, pathlib.Path("/r"))
+        self.assertIn("NOT CHECKED within the 15 s cap (2); CI runs them; to run them now: "
+                      "b (stopped by the cap): python3 x.py; c (", line)
+        # gates.sh skips these suites on a gate host, so it is not the remedy.
+        self.assertNotIn("gates.sh", line)
 
     def test_a_test_measured_over_what_is_left_is_skipped_not_started(self) -> None:
         clock = _FakeClock()
@@ -1687,16 +1689,32 @@ class PrepushCapTests(unittest.TestCase):
         self.assertEqual([why for _, why in not_checked], ["stopped by the cap"])
         self.assertLess(elapsed, 10)
 
-    def test_a_slow_name_only_match_is_deferred_and_named(self) -> None:
-        picked = [entry("own", ["{repo}/a.py"], priority=0, seconds=40.0),
-                  entry("named-cheap", ["{repo}/b.py"], priority=1, seconds=2.0),
-                  entry("named-slow", ["{repo}/c.py"], priority=1, seconds=50.0),
-                  entry("locked", ["{repo}/d.py"], priority=0, resource_lock=["x"])]
+    def test_a_whole_machine_test_is_deferred_and_named(self) -> None:
+        picked = [entry("own", ["{repo}/a.py"], seconds=40.0),
+                  entry("locked", ["{repo}/d.py"], resource_lock=["x"])]
         runnable, deferred = prepush.plan(picked)
-        self.assertEqual([e["name"] for e in runnable], ["own", "named-cheap"])
-        self.assertEqual([(e["name"], why) for e, why in deferred], [
-            ("named-slow", "name match only, about 50 s"),
-            ("locked", "needs the machine to itself")])
+        self.assertEqual([e["name"] for e in runnable], ["own"])
+        self.assertEqual([(e["name"], why) for e, why in deferred],
+                         [("locked", "needs the machine to itself")])
+
+    def test_a_test_whose_child_leaves_the_group_cannot_hold_the_cap(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp).resolve()
+            # The grandchild starts its own session (setsid), so the group kill
+            # misses it, and it keeps the inherited output pipe open.
+            (root / "test_escape.py").write_text(
+                "import subprocess, sys, time\n"
+                "subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(25)'],"
+                " start_new_session=True)\n"
+                "time.sleep(25)\n", encoding="utf-8")
+            start = time.monotonic()
+            finished, not_checked = prepush.run_budgeted(
+                [entry("escape", ["{repo}/test_escape.py"], cwd="{repo}")], root,
+                budget=2.0, workers=1, stream=io.StringIO())
+            elapsed = time.monotonic() - start
+        self.assertEqual(finished, [])
+        self.assertEqual([why for _, why in not_checked], ["stopped by the cap"])
+        self.assertLess(elapsed, 2.0 + 2 * prepush.REAP_SECONDS + 1.0)
 
     def test_selection_that_overruns_the_cap_is_not_checked(self) -> None:
         def slow(*_args):
@@ -1735,9 +1753,10 @@ class PrepushCapTests(unittest.TestCase):
                 rc = prepush.main(["--repo", str(root), "--base", "HEAD~1", "--budget", "3",
                                    "--triggers", str(root / "none.json")])
             elapsed = time.monotonic() - start
-        self.assertEqual(rc, 0)
+        self.assertEqual(rc, prepush.EXIT_NOT_CHECKED)
         self.assertLess(elapsed, 3.0)
-        self.assertIn("NOT CHECKED within the 3 s cap (1): tools/scripts/test_sleepy.py", out.getvalue())
+        self.assertIn("NOT CHECKED within the 3 s cap (1); CI runs them; to run them now: "
+                      "tools/scripts/test_sleepy.py (", out.getvalue())
 
     def test_the_cap_is_never_raised_past_sixty_seconds(self) -> None:
         with mock.patch.dict(os.environ, {"PULP_PREPUSH_FIXTURE_BUDGET": "600"}):
@@ -1800,6 +1819,118 @@ class PrepushFailureLineTests(unittest.TestCase):
         self.assertEqual(result["returncode"], 1)
         self.assertEqual(prepush.first_failure(result["output"], 1),
                          "FAIL: test_one (__main__.K.test_one)")
+
+
+
+def _fixture_repo(root: pathlib.Path, base_test: str, head_test: str) -> None:
+    """A two-commit repo whose CI fixture step runs tools/scripts/test_t.py."""
+    (root / "tools" / "scripts").mkdir(parents=True)
+    (root / ".github" / "workflows").mkdir(parents=True)
+    (root / ".github" / "workflows" / "version-skill-check.yml").write_text(
+        "jobs:\n  version-skill-check:\n    steps:\n      - name: Gate-script fixture tests\n"
+        "        run: |\n          python3 tools/scripts/test_t.py\n", encoding="utf-8")
+    git = ["git", "-c", "user.name=t", "-c", "user.email=t@t", "-c", "commit.gpgsign=false"]
+    subprocess.run(["git", "init", "-q"], cwd=root, check=True)
+    test = root / "tools" / "scripts" / "test_t.py"
+    test.write_text(base_test, encoding="utf-8")
+    subprocess.run(["git", "add", "-A"], cwd=root, check=True)
+    subprocess.run([*git, "commit", "-q", "-m", "base"], cwd=root, check=True)
+    test.write_text(head_test, encoding="utf-8")
+    subprocess.run(["git", "add", "-A"], cwd=root, check=True)
+    subprocess.run([*git, "commit", "-q", "-m", "head"], cwd=root, check=True)
+
+
+FAILING = ("import unittest\nclass T(unittest.TestCase):\n"
+           "    def test_red(self):\n        self.assertEqual(1, 2)\nunittest.main()\n")
+PASSING = "import unittest\nclass T(unittest.TestCase):\n    def test_ok(self): pass\nunittest.main()\n"
+
+
+class PrepushOutcomeTests(unittest.TestCase):
+    """Exit codes and lines the hook reads: pass, NOT CHECKED, failure, base-red."""
+
+    def _main(self, base_test: str, head_test: str, *extra: str) -> tuple[int, str]:
+        with tempfile.TemporaryDirectory() as tmp:
+            parent = pathlib.Path(tmp).resolve()
+            root = parent / "repo"
+            root.mkdir()
+            _fixture_repo(root, base_test, head_test)
+            out = io.StringIO()
+            with contextlib.redirect_stdout(out):
+                rc = prepush.main(["--repo", str(root), "--base", "HEAD~1",
+                                   "--triggers", str(root / "none.json"), *extra])
+            # The base checkout is removed in the background after the step.
+            for _ in range(50):
+                if not any(parent.glob(".prepush-fixtures-base-*")):
+                    break
+                time.sleep(0.1)
+            subprocess.run(["git", "worktree", "prune"], cwd=root, check=False)
+        return rc, out.getvalue()
+
+    def test_a_clean_run_exits_zero_and_prints_no_not_checked(self) -> None:
+        rc, out = self._main(PASSING, PASSING + "# edit\n")
+        self.assertEqual(rc, 0)
+        self.assertNotIn("NOT CHECKED", out)
+
+    def test_a_new_failure_blocks_with_the_base_verdict(self) -> None:
+        rc, out = self._main(PASSING, FAILING)
+        self.assertEqual(rc, 1)
+        self.assertIn("✗ fixture test tools/scripts/test_t.py: FAIL: test_red", out)
+        self.assertIn("(base: passes on the base)", out)
+
+    def test_a_failure_red_on_the_base_too_does_not_block(self) -> None:
+        rc, out = self._main(FAILING, FAILING + "# unrelated edit\n")
+        self.assertEqual(rc, 0)
+        self.assertIn("PRE-EXISTING ON BASE, not blocking: tools/scripts/test_t.py", out)
+        self.assertNotIn("✗ fixture test", out)
+
+
+class PrepushNameMatchTests(unittest.TestCase):
+    """Only own-script, import and declared-read matches run before a push."""
+
+    def test_a_test_that_only_names_the_changed_file_is_not_selected(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp).resolve()
+            (root / "tools").mkdir()
+            (root / "tools" / "test_names.py").write_text(
+                'NOTE = "see .githooks/pre-push"\n', encoding="utf-8")
+            (root / "tools" / "test_declares.py").write_text("x = 1\n", encoding="utf-8")
+            subprocess.run(["git", "init", "-q"], cwd=root, check=True)
+            items = [entry("names", ["{repo}/tools/test_names.py"]),
+                     entry("declares", ["{repo}/tools/test_declares.py"],
+                           reads=[".githooks/**"])]
+            # The shared selector still reaches both; the pre-push step keeps one.
+            self.assertEqual(len(lane.select_for_changes(items, [".githooks/pre-push"], root)), 2)
+            kept = prepush.select(items, [".githooks/pre-push"], root, root / "wf.yml")
+        self.assertEqual([e["name"] for e in kept], ["declares"])
+
+    def test_a_lane_change_runs_everything_with_direct_matches_first(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp).resolve()
+            (root / "tools").mkdir()
+            for name in ("test_cheap.py", "test_declares.py"):
+                (root / "tools" / name).write_text("x = 1\n", encoding="utf-8")
+            subprocess.run(["git", "init", "-q"], cwd=root, check=True)
+            items = [entry("cheap", ["{repo}/tools/test_cheap.py"], seconds=0.1),
+                     entry("declares", ["{repo}/tools/test_declares.py"], seconds=30.0,
+                           reads=[".shipyard/**"])]
+            kept = prepush.select(items, ["tools/ci/source_selftests.py", ".shipyard/x.toml"],
+                                  root, root / "wf.yml")
+        self.assertEqual([e["name"] for e in kept], ["declares", "cheap"])
+
+
+class PrepushHookWiringTests(unittest.TestCase):
+    """The hook records NOT CHECKED as such and repeats it in its verdict."""
+
+    HOOK = lane.REPO_ROOT / ".githooks" / "pre-push"
+
+    def test_exit_three_is_noted_and_named_in_the_verdict(self) -> None:
+        text = self.HOOK.read_text(encoding="utf-8")
+        block = text[text.index('PREPUSH_FIXTURES="'):text.index("# Screenshot-sync.")]
+        self.assertIn("prepush_receipt_note skipped fixture-tests", block)
+        self.assertRegex(block, r"\n\s+3\)\n")
+        self.assertIn('"$_prepush_source_update_mode" = "no-source"', block)
+        verdict = text[text.index("_prepush_fixtures_verdict=\"\""):]
+        self.assertIn("gates passed except $_prepush_fixtures_verdict", verdict)
 
 
 if __name__ == "__main__":

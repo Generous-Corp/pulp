@@ -18,13 +18,17 @@ minutes), so this step runs the ones a diff can break:
 * Tests run in priority order (a test whose own script or declared reads the
   range touches first) on a few workers until the cap. A test that the cap
   stops or never starts is reported as NOT CHECKED with the command that runs
-  it; it is never reported as a pass. A cap hit does not refuse the push.
+  it (exit 3); it is never reported as a pass. A cap hit does not refuse the push.
+* A failing test is re-run on the merge base inside what is left of the cap;
+  one that fails there too is reported PRE-EXISTING ON BASE and does not
+  refuse, as gates.sh does.
 
 Plain Python only: no CMake configure, no compile, no receipt. It reads the
 working tree, so it judges a push of HEAD.
 
-Exit status: 0 nothing failed (some may be NOT CHECKED), 1 a test failed,
-2 the step could not run.
+Exit status: 0 every selected test ran and none failed (pre-existing base
+failures aside), 1 a test failed, 2 the step could not run, 3 nothing failed
+but some selected test was NOT CHECKED.
 """
 
 from __future__ import annotations
@@ -52,17 +56,15 @@ TRIGGERS = HERE / "prepush_triggers.json"
 FIXTURE_STEP = "Gate-script fixture tests"
 BUDGET_SECONDS = 60.0
 MAX_WORKERS = 4
-GATES_COMMAND = "tools/scripts/gates.sh origin/main"
 # Order hint for a test with no measured time in the triggers file.
 UNKNOWN_COST = 10.0
 # Seconds kept back from the test runs for killing an overrunning test and
 # printing the report, so the step as a whole ends inside the cap.
 CAP_RESERVE = 2.0
-# A test the selector reaches only through a name or helper it shares with the
-# change (priority 1) runs when it is cheap; a longer one is left to gates.sh
-# and CI, and printed as NOT CHECKED, so a broad textual match cannot spend
-# the whole cap.
-HEURISTIC_MAX_SECONDS = 10.0
+# How long a killed test gets to release its output before it is abandoned.
+REAP_SECONDS = 1.0
+# Exit status when nothing failed but some selected test did not run.
+EXIT_NOT_CHECKED = 3
 # Changing one of these changes how every candidate is chosen or run.
 OWN_FILES = (
     "tools/ci/prepush_fixtures.py",
@@ -197,10 +199,14 @@ def select(entries: list[dict], changed: list[str], repo: pathlib.Path,
            workflow: pathlib.Path) -> list[dict]:
     """The entries the range reaches, highest priority first.
 
-    Priority 0: the range changes the test's own script or a declared read.
-    Priority 1: any other reason ``select_for_changes`` gives. Within a
-    priority, the cheaper test first (measured seconds in the triggers file),
-    so a cap hit costs the fewest tests.
+    Kept: a test whose own script, a module it imports (directly or through
+    repo helpers) or a declared read the range changes, and every test when
+    the range changes the lane itself. A test ``select_for_changes`` reaches
+    only by a shared name, a walked directory or a glob it writes is left to
+    CI: on a two-file change those were 27 of 34 selections and about 13 s,
+    and none of the fixture reds this step was measured on needed one.
+    Cheapest first (measured seconds in the triggers file), so a cap hit
+    costs the fewest tests.
     """
     try:
         workflow_rel = workflow.resolve().relative_to(repo.resolve()).as_posix()
@@ -208,15 +214,29 @@ def select(entries: list[dict], changed: list[str], repo: pathlib.Path,
         workflow_rel = ""
     lane_files = tuple(lane.LANE_FILES) + OWN_FILES + ((workflow_rel,) if workflow_rel else ())
     picked = lane.select_for_changes(entries, changed, repo, lane_files)
+    whole_lane = any(path in lane_files for path in changed)
     changed_set = set(changed)
+    changed_py = {(repo / p).resolve() for p in changed if p.endswith(".py")}
+    closure = lane._ImportClosure(repo) if changed_py and not whole_lane else None
 
-    def priority(entry: dict) -> tuple[int, float, str]:
-        own = source_key(entry, repo) in changed_set
-        declared = any(lane.glob_match(g, p) for g in entry.get("reads") or () for p in changed)
-        entry["priority"] = 0 if own or declared else 1
-        return (entry["priority"], float(entry.get("seconds", UNKNOWN_COST)), entry["name"])
+    if whole_lane:
+        # Every candidate runs, but those the range reaches directly go first
+        # so a cap hit cannot bury them under hundreds of cheap unrelated ones.
+        closure = lane._ImportClosure(repo) if changed_py else None
 
-    return sorted(picked, key=priority)
+    def direct(entry: dict) -> bool:
+        if source_key(entry, repo) in changed_set:
+            return True
+        if any(lane.glob_match(g, p) for g in entry.get("reads") or () for p in changed):
+            return True
+        return closure is not None and any(
+            closure.of(src) & changed_py
+            for src in lane.entry_sources(entry, repo) if src.suffix == ".py")
+
+    tiers = {e["name"]: 0 if direct(e) else 1 for e in picked}
+    kept = [e for e in picked if whole_lane or tiers[e["name"]] == 0]
+    return sorted(kept, key=lambda e: (tiers[e["name"]], float(e.get("seconds", UNKNOWN_COST)),
+                                       e["name"]))
 
 
 def select_within(entries: list[dict], changed: list[str], repo: pathlib.Path,
@@ -248,9 +268,6 @@ def plan(picked: list[dict]) -> tuple[list[dict], list[tuple[dict, str]]]:
     for entry in picked:
         if needs_whole_machine(entry):
             deferred.append((entry, "needs the machine to itself"))
-        elif (entry.get("priority", 0) == 1
-              and float(entry.get("seconds", 0.0)) > HEURISTIC_MAX_SECONDS):
-            deferred.append((entry, f"name match only, about {float(entry['seconds']):.0f} s"))
         else:
             runnable.append(entry)
     return runnable, deferred
@@ -295,10 +312,16 @@ def failure_line(entry: dict, result: dict, repo: pathlib.Path) -> str:
             f" | repro: {repro(entry, repo)}")
 
 
-def not_checked_line(not_checked: list[tuple[dict, str]], budget: float) -> str:
-    names = ", ".join(f"{e['name']} ({why})" for e, why in not_checked)
+def not_checked_line(not_checked: list[tuple[dict, str]], budget: float,
+                     repo: pathlib.Path) -> str:
+    """One line naming each test that did not run and the command that runs it.
+
+    gates.sh does not run these suites on a gate host, so the remedy is each
+    test's own command.
+    """
+    names = "; ".join(f"{e['name']} ({why}): {repro(e, repo)}" for e, why in not_checked)
     return (f"[pre-push] fixture tests NOT CHECKED within the {budget:g} s cap "
-            f"({len(not_checked)}): {names}. CI runs them; to run them now: {GATES_COMMAND}")
+            f"({len(not_checked)}); CI runs them; to run them now: {names}")
 
 
 def needs_whole_machine(entry: dict) -> bool:
@@ -336,12 +359,7 @@ def _run_until(entry: dict, repo: pathlib.Path, python: str, deadline: float,
                 out, _ = proc.communicate(timeout=remaining)
                 result.update(returncode=proc.returncode, output=out)
             except subprocess.TimeoutExpired:
-                try:
-                    os.killpg(proc.pid, signal.SIGKILL)
-                except OSError:
-                    proc.kill()
-                out, _ = proc.communicate()
-                result.update(returncode=None, output=out or "")
+                result.update(returncode=None, output=_reap(proc))
         except OSError as exc:
             result.update(returncode=2, output=f"could not start: {exc}\n")
         finally:
@@ -351,6 +369,37 @@ def _run_until(entry: dict, repo: pathlib.Path, python: str, deadline: float,
         if result["returncode"] in (0, None):
             break
     return result
+
+
+def _reap(proc: subprocess.Popen) -> str:
+    """Kill a test's process group and collect what it printed, in bounded time.
+
+    A descendant that started its own session survives the group kill and can
+    hold the output pipe open; after REAP_SECONDS the pipe is closed and the
+    step moves on rather than waiting for it.
+    """
+    try:
+        os.killpg(proc.pid, signal.SIGKILL)
+    except OSError:
+        try:
+            proc.kill()
+        except OSError:
+            pass
+    try:
+        out, _ = proc.communicate(timeout=REAP_SECONDS)
+        return out or ""
+    except subprocess.TimeoutExpired:
+        for stream in (proc.stdout, proc.stderr):
+            try:
+                if stream is not None:
+                    stream.close()
+            except OSError:
+                pass
+        try:
+            proc.wait(timeout=REAP_SECONDS)
+        except subprocess.TimeoutExpired:
+            pass
+        return "(output abandoned: a process the test started kept it open past the cap)\n"
 
 
 def run_budgeted(entries: list[dict], repo: pathlib.Path, *, python: str = sys.executable,
@@ -405,6 +454,54 @@ def run_budgeted(entries: list[dict], repo: pathlib.Path, *, python: str = sys.e
     return finished, not_checked
 
 
+def base_verdicts(failures: list[tuple[dict, dict]], base: str, repo: pathlib.Path,
+                  deadline: float, clock: Callable[[], float],
+                  python: str = sys.executable) -> dict[str, tuple[bool, str]]:
+    """Whether each failure also happens on the merge base, inside the cap.
+
+    The same judgement gates.sh prints as PRE-EXISTING ON BASE
+    (``source_selftests.base_verdict``): a red main must not refuse every push
+    that reaches the red test. A failure the cap leaves no time to compare
+    keeps blocking, and says so.
+    """
+    verdicts = {e["name"]: (False, "the base could not be checked within the cap")
+                for e, _ in failures}
+    if deadline - clock() <= 1:
+        return verdicts
+    holder = None
+    checkout = None
+    try:
+        merge_base = subprocess.run(
+            ["git", "merge-base", base, "HEAD"], cwd=repo, capture_output=True, text=True,
+            encoding="utf-8", check=True, timeout=max(0.5, deadline - clock())).stdout.strip()
+        holder = pathlib.Path(tempfile.mkdtemp(prefix=".prepush-fixtures-base-", dir=repo.parent))
+        checkout = holder / "base"
+        subprocess.run(["git", "worktree", "add", "--quiet", "--detach", str(checkout), merge_base],
+                       cwd=repo, capture_output=True, text=True, encoding="utf-8", check=True,
+                       timeout=max(0.5, deadline - clock()))
+        for entry, result in failures:
+            if not all(src.is_file() for src in lane.entry_sources(entry, checkout)):
+                verdicts[entry["name"]] = lane.base_verdict(result, None)
+                continue
+            if deadline - clock() <= 0:
+                break
+            on_base = _run_until(entry, checkout, python, deadline, clock)
+            verdicts[entry["name"]] = lane.base_verdict(result, on_base, str(repo), str(checkout))
+    except (OSError, subprocess.SubprocessError) as exc:
+        for name, (explained, _) in verdicts.items():
+            if not explained:
+                verdicts[name] = (False, f"the base could not be checked ({exc.__class__.__name__})")
+    finally:
+        if holder is not None:
+            # Removing a full checkout takes seconds; do it after the step ends.
+            cleanup = ([f'git worktree remove --force "$1" 2>/dev/null; rm -r -f "$2"']
+                       if checkout is not None else ['rm -r -f "$2"'])
+            subprocess.Popen(["sh", "-c", cleanup[0], "_", str(checkout or holder), str(holder)],
+                             cwd=repo, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                             stderr=subprocess.DEVNULL, start_new_session=True)
+    return verdicts
+
+
 def changed_in_range(repo: pathlib.Path, base: str, head: str) -> list[str]:
     out = subprocess.run(["git", "diff", "--name-only", f"{base}...{head}"], cwd=repo,
                          capture_output=True, text=True, encoding="utf-8", check=True).stdout
@@ -453,14 +550,15 @@ def main(argv: list[str] | None = None) -> int:
     try:
         head = _rev(repo, args.head)
         if head and head != _rev(repo, "HEAD") and not args.list:
-            print(f"[pre-push] fixture tests: NOT CHECKED, the pushed commit {head[:12]} is not "
-                  f"HEAD and this step reads the working tree. Run {GATES_COMMAND} on it.")
-            return 0
+            print(f"[pre-push] fixture tests NOT CHECKED (all): the pushed commit {head[:12]} is "
+                  "not HEAD and this step reads the working tree. Check it out and run "
+                  f"python3 tools/ci/prepush_fixtures.py --base {args.base}")
+            return EXIT_NOT_CHECKED
         changed = changed_in_range(repo, args.base, args.head)
         triggers = load_triggers(triggers_path) if triggers_path.is_file() else {}
         costs = load_costs(triggers_path) if triggers_path.is_file() else {}
         entries, hook_owned = candidates(repo, workflow, manifest, triggers, costs)
-    except (OSError, ValueError, subprocess.CalledProcessError, lane.ManifestError) as exc:
+    except Exception as exc:  # any failure to choose is "could not run", never a test failure
         print(f"✗ fixture tests: could not select ({exc}) | repro: "
               f"python3 tools/ci/prepush_fixtures.py --base {args.base}")
         return 2
@@ -476,9 +574,10 @@ def main(argv: list[str] | None = None) -> int:
               f"python3 tools/ci/prepush_fixtures.py --base {args.base}")
         return 2
     if picked is None:
-        print(f"[pre-push] fixture tests NOT CHECKED: choosing them did not finish within the "
-              f"{budget:g} s cap (a loaded host). CI runs them; to run them now: {GATES_COMMAND}")
-        return 0
+        print(f"[pre-push] fixture tests NOT CHECKED (all): choosing them did not finish within "
+              f"the {budget:g} s cap (a loaded host). CI runs them; to choose and run them "
+              f"now: python3 tools/ci/prepush_fixtures.py --base {args.base}")
+        return EXIT_NOT_CHECKED
     jobs = args.jobs or default_jobs()
     runnable, deferred = plan(picked)
     print(f"[pre-push] fixture tests: {len(picked)} of {len(entries)} reached by "
@@ -494,18 +593,37 @@ def main(argv: list[str] | None = None) -> int:
         workers=jobs)
     not_checked += deferred
     failures = [(e, r) for e, r in finished if r["returncode"] != 0]
-    passed = len(finished) - len(failures)
+    pre_existing: list[tuple[dict, dict, str]] = []
+    if failures:
+        verdicts = base_verdicts(failures, args.base, repo,
+                                 started + budget - CAP_RESERVE, time.monotonic)
+        still = []
+        for entry, result in failures:
+            explained, why = verdicts.get(entry["name"], (False, "base not checked"))
+            if explained:
+                pre_existing.append((entry, result, why))
+            else:
+                result["base_note"] = why
+                still.append((entry, result))
+        failures = still
+    passed = len(finished) - len(failures) - len(pre_existing)
     print(f"[pre-push] fixture tests: {passed} passed, {len(failures)} failed, "
-          f"{len(not_checked)} not checked in {time.monotonic() - started:.1f} s")
+          f"{len(pre_existing)} pre-existing on base, {len(not_checked)} not checked "
+          f"in {time.monotonic() - started:.1f} s")
     for entry, result in failures:
-        print(failure_line(entry, result, repo))
+        print(failure_line(entry, result, repo) + f" (base: {result['base_note']})")
+    for entry, result, why in pre_existing:
+        print(f"[pre-push] fixture test PRE-EXISTING ON BASE, not blocking: {entry['name']}: "
+              f"{first_failure(result.get('output', ''), result.get('returncode'))} ({why})")
     if not_checked:
-        print(not_checked_line(not_checked, budget))
+        print(not_checked_line(not_checked, budget, repo))
     for entry, result in failures:
         tail = result.get("output", "").splitlines()[-40:]
         print(f"--- {entry['name']} (last {len(tail)} lines) ---")
         print("\n".join(tail))
-    return 1 if failures else 0
+    if failures:
+        return 1
+    return EXIT_NOT_CHECKED if not_checked else 0
 
 
 if __name__ == "__main__":

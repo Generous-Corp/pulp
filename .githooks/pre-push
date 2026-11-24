@@ -504,7 +504,8 @@ fi
 # The push sends HEAD's commit. The text-encoding, docs-noise, format, conflict-
 # marker and compat-aggregate gates read that commit's blobs, but three still
 # read the working tree (source contracts, single-backend guard, negative-
-# capability check), so an uncommitted edit to a tracked file can make them
+# capability check, and the fixture-test step, which also sees untracked
+# files), so an uncommitted edit to a tracked file can make them
 # judge content the push does not send, in either direction. They are named
 # here so a dirty tree is never a silent pass.
 _prepush_dirty="$(git diff --name-only --ignore-submodules HEAD 2>/dev/null | head -n 20)"
@@ -641,14 +642,24 @@ esac
 # step's own list, split per module, selected by source_selftests.py's
 # selector plus tools/ci/prepush_triggers.json), under a hard 60 s cap. Plain
 # Python, no configure or compile, so gate hosts run it too. A test the cap
-# stops is printed as NOT CHECKED with the gates.sh command, never as a pass.
+# stops exits 3: NOT CHECKED with each test's own command, recorded in the
+# receipt and repeated in the final verdict, never a pass. A failure that also
+# fails on the merge base is reported PRE-EXISTING ON BASE and does not block.
 PREPUSH_FIXTURES="$ROOT/tools/ci/prepush_fixtures.py"
-if [ -f "$PREPUSH_FIXTURES" ]; then
+_prepush_fixtures_not_checked=""
+if [ "$_prepush_source_update_mode" = "no-source" ]; then
+    echo "[pre-push] fixture tests: skipped, the push carries no source tree (tags or deletions)." >&2
+elif [ -f "$PREPUSH_FIXTURES" ]; then
     run_gate_captured "$PYTHON" "$PREPUSH_FIXTURES" --base "$BASE" \
         --head "${_prepush_pushed_head_sha:-HEAD}"
     gate_rc=$?; case $gate_rc in
         0) ;;
         1) prepush_fail ;;
+        3)
+            _prepush_fixtures_not_checked="$(grep -m1 -oE 'NOT CHECKED[^(]*\((all|[0-9]+)\)' "$_prepush_last_gate_log" 2>/dev/null | grep -oE '(all|[0-9]+)\)$' | tr -d ')')"
+            [ -n "$_prepush_fixtures_not_checked" ] || _prepush_fixtures_not_checked="some"
+            prepush_receipt_note skipped fixture-tests "$_prepush_fixtures_not_checked not checked"
+            ;;
         *) gate_could_not_run "prepush_fixtures" "$gate_rc"; prepush_fail ;;
     esac
 fi
@@ -1335,9 +1346,15 @@ fi
 
 if [ "$fail" = "0" ] && [ "$diff_cover_failed" = "0" ] && [ "$compat_flip_failed" = "0" ]; then
     prepush_claim_check_final
+    _prepush_fixtures_verdict=""
+    if [ -n "$_prepush_fixtures_not_checked" ]; then
+        _prepush_fixtures_verdict="fixture tests: $_prepush_fixtures_not_checked NOT CHECKED (commands above)"
+    fi
     if [ "$_prepush_diff_cover_refused" = "1" ]; then
         # A refused lane is not a pass; say so in the verdict itself.
-        echo "[pre-push] gates clean except diff coverage: NOT CHECKED (gate host; run tools/scripts/local_diff_cover.sh on a TARTCI_ROLE=light host such as m1, or a disposable VM)." >&2
+        echo "[pre-push] gates clean except diff coverage: NOT CHECKED (gate host; run tools/scripts/local_diff_cover.sh on a TARTCI_ROLE=light host such as m1, or a disposable VM)${_prepush_fixtures_verdict:+; $_prepush_fixtures_verdict}." >&2
+    elif [ -n "$_prepush_fixtures_verdict" ]; then
+        echo "[pre-push] gates passed except $_prepush_fixtures_verdict." >&2
     else
         echo "[pre-push] gates clean." >&2
     fi
