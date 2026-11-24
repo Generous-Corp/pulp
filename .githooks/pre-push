@@ -667,19 +667,21 @@ gate_rc=$?; case $gate_rc in
     *) gate_could_not_run "version_bump_check" "$gate_rc"; prepush_fail ;;
 esac
 
-# A CMake module change must keep the sdk surface's trigger list and the
-# build-module classification in step (SdkShippedCmakeModulesTests). That test
-# is one of CI's gate-script fixture tests, which this hook does not otherwise
-# run; it takes about 2 s, so run it whenever the range touches a CMake module
-# or one of the files the test reads. It recurred 12 times in one week.
-VBS_TEST="$ROOT/tools/scripts/test_version_bump_surfaces.py"
-if [ -f "$VBS_TEST" ] && git diff --name-only "$BASE"...HEAD 2>/dev/null | \
-        grep -qE '\.cmake$|^tools/scripts/versioning\.json$|^tools/deps/patches\.json$|^core/canvas/CMakeLists\.txt$'; then
-    run_gate_captured "$PYTHON" "$VBS_TEST"
+# Gate-script fixture tests and source-only selftests the pushed range can
+# reach. CI runs every one of them in `Enforce version & skill sync`; this hook
+# runs the ones the diff can break (tools/ci/prepush_fixtures.py: the CI
+# step's own list, split per module, selected by source_selftests.py's
+# selector plus tools/ci/prepush_triggers.json), under a hard 60 s cap. Plain
+# Python, no configure or compile, so gate hosts run it too. A test the cap
+# stops is printed as NOT CHECKED with the gates.sh command, never as a pass.
+PREPUSH_FIXTURES="$ROOT/tools/ci/prepush_fixtures.py"
+if [ -f "$PREPUSH_FIXTURES" ]; then
+    run_gate_captured "$PYTHON" "$PREPUSH_FIXTURES" --base "$BASE" \
+        --head "${_prepush_pushed_head_sha:-HEAD}"
     gate_rc=$?; case $gate_rc in
         0) ;;
         1) prepush_fail ;;
-        *) gate_could_not_run "test_version_bump_surfaces" "$gate_rc"; prepush_fail ;;
+        *) gate_could_not_run "prepush_fixtures" "$gate_rc"; prepush_fail ;;
     esac
 fi
 

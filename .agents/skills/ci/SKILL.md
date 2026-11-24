@@ -2500,6 +2500,32 @@ failure is the last tool line before `Process completed with exit code 1`.
 Exit codes: 0 nothing owed · 10 event owed · 11 inventory stale · 20 no
 verdict · 2 `--write-event` refused. Both callers block on 10 and 11 only.
 
+### Fixture tests the pre-push hook runs: the ones the range reaches, capped at 60 s
+
+The hook runs `tools/ci/prepush_fixtures.py --base <base>`: the commands of
+the workflow's "Gate-script fixture tests" step and the source-only selftests
+in `tools/ci/source_selftests.json`, limited to those the pushed range can
+break. An aggregate suite such as `test_gates.py` (about two minutes) is split
+into the classes it imports, one candidate per module, so a CMake module
+change runs `test_version_bump_surfaces.py` (about 2 s) instead of the whole
+aggregate. Selection is `select_for_changes` in `source_selftests.py` (the
+selector `gates.sh --changed-from` uses), which also selects a test whose
+source writes a glob the change matches (`"tools/cmake/Pulp*.cmake"`), plus
+the declared reads in `tools/ci/prepush_triggers.json` for paths a test builds
+at run time. Add a declared read only from what the test's code scans, globs
+or loads.
+
+The step holds a hard 60 s wall-clock cap (`PULP_PREPUSH_FIXTURE_BUDGET` can
+lower it, never raise it) on at most 4 workers. Tests run with the ones whose
+own script or declared read changed first, cheapest first (the `seconds` map in
+the triggers file is only an order hint). A test the cap stops, or one measured
+longer than what is left, is printed as NOT CHECKED with
+`tools/scripts/gates.sh origin/main`; a cap hit does not refuse the push. A
+failure prints one line: `✗ fixture test <name>: <first failing item> |
+repro: <command>`. It is plain Python, with no configure, compile or receipt,
+so gate hosts run it too. Exit codes: 0 nothing failed, 1 a test failed, 2
+could not run.
+
 ### `gates.sh` and the pre-push hook are two lists, not one
 
 `gates.sh` describes itself as running the gates `.githooks/pre-push` runs, and

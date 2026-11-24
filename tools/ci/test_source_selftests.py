@@ -1500,5 +1500,241 @@ class ImpactScopeTests(unittest.TestCase):
             self.assertIn(needle, text)
 
 
+import prepush_fixtures as prepush  # noqa: E402
+
+
+def _sample_path(glob: str) -> str:
+    """One concrete path a repo glob matches."""
+    return (glob.replace("**/", "a/").replace("**", "a/b.txt")
+            .replace("*", "a").replace("?", "a"))
+
+
+class PrepushTriggerTests(unittest.TestCase):
+    """Each declared read in tools/ci/prepush_triggers.json selects its test."""
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        repo = lane.REPO_ROOT
+        cls.repo = repo
+        cls.workflow = repo / ".github" / "workflows" / "version-skill-check.yml"
+        cls.triggers = prepush.load_triggers(prepush.TRIGGERS)
+        cls.entries, _ = prepush.candidates(repo, cls.workflow, lane.MANIFEST, cls.triggers)
+
+    def _selected_keys(self, changed: list[str]) -> set[str]:
+        return {prepush.source_key(e, self.repo)
+                for e in prepush.select(self.entries, changed, self.repo, self.workflow)}
+
+    def test_every_key_names_a_candidate(self) -> None:
+        keys = {prepush.source_key(e, self.repo) for e in self.entries}
+        self.assertEqual(sorted(set(self.triggers) - keys), [])
+
+    def test_each_trigger_selects_its_test(self) -> None:
+        for script, globs in self.triggers.items():
+            for glob in globs:
+                path = _sample_path(glob)
+                with self.subTest(script=script, glob=glob, path=path):
+                    self.assertTrue(lane.glob_match(glob, path))
+                    self.assertIn(script, self._selected_keys([path]))
+
+    def test_a_new_cmake_module_selects_the_surfaces_suite(self) -> None:
+        # test_version_bump_surfaces.py runs inside test_gates.py; the aggregate
+        # is split so its module, not the two-minute aggregate, is selected.
+        picked = self._selected_keys(["tools/cmake/PulpBrandNewModule.cmake"])
+        self.assertIn("tools/scripts/test_version_bump_surfaces.py", picked)
+        self.assertNotIn("tools/scripts/test_gates.py", picked)
+
+    def test_an_untouched_path_runs_nothing_extra(self) -> None:
+        self.assertEqual(self._selected_keys(["zz-untouched/notes-q7.dat"]), set())
+
+    def test_a_trigger_does_not_fire_outside_its_glob(self) -> None:
+        picked = self._selected_keys(["integrations/zz/notes.txt"])
+        self.assertNotIn("tools/scripts/test_version_bump_surfaces.py", picked)
+
+
+class PrepushSelectionRuleTests(unittest.TestCase):
+    """The two selector rules the pre-push step added to select_for_changes."""
+
+    def _tree(self, root: pathlib.Path) -> list[dict]:
+        (root / "tools").mkdir()
+        (root / "tools" / "test_globber.py").write_text(
+            'MODULES = ("tools/cmake/Pulp*.cmake",)\n', encoding="utf-8")
+        (root / "tools" / "test_builder.py").write_text(
+            'P = ROOT / "tools" / "cmake"\n', encoding="utf-8")
+        return [entry("globber", ["{repo}/tools/test_globber.py"]),
+                entry("builder", ["{repo}/tools/test_builder.py"], reads=["tools/cmake/**"])]
+
+    def _names(self, changed: list[str]) -> list[str]:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp)
+            return sorted(e["name"] for e in lane.select_for_changes(self._tree(root), changed, root))
+
+    def test_a_glob_literal_selects_on_a_new_matching_file(self) -> None:
+        self.assertEqual(self._names(["tools/cmake/PulpNew.cmake"]), ["builder", "globber"])
+
+    def test_declared_reads_select_what_the_glob_literal_does_not(self) -> None:
+        self.assertEqual(self._names(["tools/cmake/sub/helper.txt"]), ["builder"])
+
+    def test_control_an_unrelated_path_selects_neither(self) -> None:
+        self.assertEqual(self._names(["core/audio/src/buffer.cpp"]), [])
+
+    def test_glob_match_semantics(self) -> None:
+        self.assertTrue(lane.glob_match("**/*.cmake", "a.cmake"))
+        self.assertTrue(lane.glob_match("**/*.cmake", "x/y/a.cmake"))
+        self.assertTrue(lane.glob_match("core/*/include/**", "core/view/include/p/a.hpp"))
+        self.assertFalse(lane.glob_match("core/*/include/**", "core/view/src/include/a.hpp"))
+        self.assertFalse(lane.glob_match("tools/cmake/Pulp*.cmake", "tools/cmake/sub/Pulp.cmake"))
+
+
+class PrepushAggregateTests(unittest.TestCase):
+    """An aggregate suite is split into the classes it imports, per module."""
+
+    def test_split_keeps_exactly_the_imported_classes(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp).resolve()
+            scripts = root / "tools" / "scripts"
+            scripts.mkdir(parents=True)
+            for name in ("test_alpha", "test_beta"):
+                (scripts / f"{name}.py").write_text("import unittest\n", encoding="utf-8")
+            (scripts / "test_all.py").write_text(
+                "from test_alpha import A  # noqa: E402,F401\n"
+                "from test_beta import (  # noqa: E402,F401\n"
+                "    B1,\n    B2 as Renamed,\n)\n", encoding="utf-8")
+            out = prepush.expand_aggregates(
+                [entry("tools/scripts/test_all.py", ["{repo}/tools/scripts/test_all.py"],
+                       cwd="{repo}")], root)
+        self.assertEqual([e["argv"] for e in out], [
+            ["-m", "unittest", "test_alpha.A"],
+            ["-m", "unittest", "test_beta.B1", "test_beta.B2"],
+        ])
+        self.assertEqual(out[0]["cwd"], "{repo}/tools/scripts")
+
+    def test_a_suite_with_its_own_tests_is_not_split(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp).resolve()
+            (root / "test_a.py").write_text("x = 1\n", encoding="utf-8")
+            (root / "test_b.py").write_text("x = 1\n", encoding="utf-8")
+            (root / "test_own.py").write_text(
+                "from test_a import A\nfrom test_b import B\n"
+                "class T:\n    def test_x(self): pass\n", encoding="utf-8")
+            self.assertEqual(prepush.aggregate_members(root / "test_own.py"), {})
+
+
+class _FakeClock:
+    def __init__(self) -> None:
+        self.now = 0.0
+
+    def __call__(self) -> float:
+        return self.now
+
+
+class PrepushCapTests(unittest.TestCase):
+    """The cap holds, and every test it stops or skips is named."""
+
+    def test_the_cap_stops_and_names_what_it_did_not_run(self) -> None:
+        clock = _FakeClock()
+
+        def runner(item, repo, python, deadline, clk):
+            # Each fake test takes 10 s; one the deadline interrupts reports None.
+            if clk() + 10 > deadline:
+                clock.now = deadline
+                return {"name": item["name"], "returncode": None, "output": "", "seconds": 0}
+            clock.now += 10
+            return {"name": item["name"], "returncode": 0, "output": "", "seconds": 10.0}
+
+        items = [entry(n, ["{repo}/x.py"]) for n in ("a", "b", "c")]
+        finished, not_checked = prepush.run_budgeted(
+            items, pathlib.Path("/"), budget=15, workers=1, clock=clock, runner=runner,
+            stream=io.StringIO())
+        self.assertEqual([e["name"] for e, _ in finished], ["a"])
+        self.assertEqual([(e["name"], why) for e, why in not_checked],
+                         [("b", "stopped by the cap"), ("c", "not started before the cap")])
+        line = prepush.not_checked_line(not_checked, 15)
+        self.assertIn("NOT CHECKED within the 15 s cap (2): b (stopped by the cap), c (", line)
+        self.assertIn("tools/scripts/gates.sh origin/main", line)
+
+    def test_a_test_measured_over_what_is_left_is_skipped_not_started(self) -> None:
+        clock = _FakeClock()
+        started = []
+
+        def runner(item, repo, python, deadline, clk):
+            started.append(item["name"])
+            return {"name": item["name"], "returncode": 0, "output": "", "seconds": 1.0}
+
+        items = [entry("slow", ["{repo}/x.py"], seconds=90.0), entry("quick", ["{repo}/y.py"])]
+        _, not_checked = prepush.run_budgeted(
+            items, pathlib.Path("/"), budget=60, workers=1, clock=clock, runner=runner,
+            stream=io.StringIO())
+        self.assertEqual(started, ["quick"])
+        self.assertEqual([e["name"] for e, _ in not_checked], ["slow"])
+
+    def test_a_real_overrunning_test_is_killed_at_the_cap(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp).resolve()
+            (root / "test_sleep.py").write_text("import time\ntime.sleep(30)\n", encoding="utf-8")
+            start = time.monotonic()
+            finished, not_checked = prepush.run_budgeted(
+                [entry("sleep", ["{repo}/test_sleep.py"], cwd="{repo}")], root,
+                budget=1.0, workers=1, stream=io.StringIO())
+            elapsed = time.monotonic() - start
+        self.assertEqual(finished, [])
+        self.assertEqual([why for _, why in not_checked], ["stopped by the cap"])
+        self.assertLess(elapsed, 10)
+
+    def test_the_cap_is_never_raised_past_sixty_seconds(self) -> None:
+        with mock.patch.dict(os.environ, {"PULP_PREPUSH_FIXTURE_BUDGET": "600"}):
+            self.assertEqual(prepush.cap_seconds(None), 60.0)
+            self.assertEqual(prepush.cap_seconds(900), 60.0)
+        with mock.patch.dict(os.environ, {"PULP_PREPUSH_FIXTURE_BUDGET": "20"}):
+            self.assertEqual(prepush.cap_seconds(None), 20.0)
+
+
+class PrepushFailureLineTests(unittest.TestCase):
+    """One line per failure: the check, its first failing item, the repro."""
+
+    UNITTEST_OUT = (
+        "test_ok (test_mod.C.test_ok) ... ok\n"
+        "test_bad (test_mod.C.test_bad) ... FAIL\n\n"
+        "======================================================================\n"
+        "FAIL: test_bad (test_mod.C.test_bad)\n"
+        "----------------------------------------------------------------------\n"
+        "AssertionError: 1 != 2\n\nFAILED (failures=1)\n")
+
+    def test_the_line_names_check_item_and_repro(self) -> None:
+        item = {"name": "tools/scripts/test_mod.py (in test_gates.py)",
+                "argv": ["-m", "unittest", "test_mod.C"], "cwd": "{repo}/tools/scripts"}
+        line = prepush.failure_line(item, {"returncode": 1, "output": self.UNITTEST_OUT},
+                                    pathlib.Path("/r"))
+        self.assertEqual(line, (
+            "✗ fixture test tools/scripts/test_mod.py (in test_gates.py): "
+            "FAIL: test_bad (test_mod.C.test_bad) | repro: "
+            "(cd tools/scripts && python3 -m unittest test_mod.C)"))
+        self.assertNotIn("\n", line)
+
+    def test_a_script_check_names_its_marked_line(self) -> None:
+        item = {"name": "tools/scripts/win32_include_lint.py",
+                "argv": ["{repo}/tools/scripts/win32_include_lint.py"], "cwd": "{repo}"}
+        out = "scanning\n✗ core/x/include/a.hpp:3 includes <windows.h>\n1 violation\n"
+        self.assertEqual(
+            prepush.failure_line(item, {"returncode": 1, "output": out}, pathlib.Path("/r")),
+            "✗ fixture test tools/scripts/win32_include_lint.py: "
+            "✗ core/x/include/a.hpp:3 includes <windows.h> | repro: "
+            "python3 tools/scripts/win32_include_lint.py")
+
+    def test_a_real_failing_suite_reports_its_first_failure(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp).resolve()
+            (root / "test_real.py").write_text(
+                "import unittest\nclass K(unittest.TestCase):\n"
+                "    def test_one(self):\n        self.assertEqual(1, 2)\n"
+                "unittest.main()\n", encoding="utf-8")
+            item = entry("test_real.py", ["{repo}/test_real.py"], cwd="{repo}")
+            finished, _ = prepush.run_budgeted([item], root, budget=30, workers=1,
+                                               stream=io.StringIO())
+        (_, result), = finished
+        self.assertEqual(result["returncode"], 1)
+        self.assertEqual(prepush.first_failure(result["output"], 1),
+                         "FAIL: test_one (__main__.K.test_one)")
+
+
 if __name__ == "__main__":
     unittest.main()
