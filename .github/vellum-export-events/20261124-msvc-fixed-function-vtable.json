@@ -7,6 +7,6 @@
   "paths": [
     "core/runtime/include/pulp/runtime/fixed_function.hpp"
   ],
-  "vellum_inherits": true,
-  "rationale": "FixedFunction vtable uses static member functions instead of lambdas so MSVC 14.52 compiles it; behaviour is unchanged, so the next re-export should carry it."
+  "vellum_inherits": false,
+  "rationale": "Pulp-only MSVC portability edit to FixedFunction; Vellum's framework copy is frozen, so any equivalent change is made there separately."
 }
