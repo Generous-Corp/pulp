@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: MIT
 #include "observer_script_lane.hpp"
+#include "sealed_font_files.hpp"
 
 #include <pulp/state/store.hpp>
 #include <pulp/view/design_codegen.hpp>
@@ -14,6 +15,7 @@ struct ObservedScript::State {
     pulp::view::View host;
     pulp::view::ScriptEngine engine;
     pulp::state::StateStore store;
+    SealedFontFiles fonts;
     std::unique_ptr<pulp::view::WidgetBridge> bridge;
 };
 
@@ -29,6 +31,8 @@ std::unique_ptr<ObservedScript> ObservedScript::run(const pulp::view::DesignIR& 
     state->bridge =
         std::make_unique<pulp::view::WidgetBridge>(state->engine, state->host, state->store);
     state->bridge->set_script_base_dir(asset_directory);
+    state->fonts = read_sealed_font_files(ir, asset_directory);
+    state->bridge->set_embedded_assets(state->fonts.assets);
     state->bridge->load_script(pulp::view::generate_pulp_js(ir, pulp::view::CodeGenOptions{}));
     // The program names its views with bridge ids ("div4") and binds each to
     // its source anchor with setAnchor(). The native materializer names a view

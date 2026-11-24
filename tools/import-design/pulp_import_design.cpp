@@ -23,6 +23,7 @@
 #include "browser_import_session.hpp"
 #include "browser_probe_cache.hpp"
 #include "browser_capture_limits.hpp"
+#include "sealed_font_files.hpp"
 #include "node_runtime.hpp"
 #include "import_design_cli_help.hpp"
 #include "import_document_refusals.hpp"
@@ -3855,6 +3856,11 @@ int main(int argc, char* argv[]) {
         render_root.flex().direction = FlexDirection::column;
         StateStore render_store;
         ScriptEngine render_engine;
+        // Fonts beside the script are sealed into a shipped panel and register
+        // without any path lookup; seal the same files here so the validation
+        // render resolves them the way the plug-in will.
+        const auto sealed_fonts =
+            pulp::import_design::read_sealed_font_files(ir, fs::path(output_file).parent_path());
         WidgetBridge render_bridge(render_engine, render_root, render_store);
         // The generated JS references its assets relative to the output file.
         render_bridge.set_script_base_dir(fs::path(output_file).parent_path());
@@ -3863,6 +3869,7 @@ int main(int argc, char* argv[]) {
         // import on the developer's machine, so the raw-path opt-in is safe
         // here; a hosted editor keeps the default refusal.
         render_bridge.set_allow_unreviewed_file_paths(true);
+        render_bridge.set_embedded_assets(sealed_fonts.assets);
         try {
             render_bridge.load_script(js);
         } catch (const std::exception& e) {

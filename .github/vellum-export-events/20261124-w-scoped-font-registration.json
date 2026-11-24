@@ -1,0 +1,20 @@
+{
+  "schema_version": 1,
+  "event_id": "20261124-w-scoped-font-registration",
+  "kind": "exported-path-change",
+  "created_at": "2026-11-24T09:52:19Z",
+  "receipt_export_id": "20261107-f0ac0a4ff392",
+  "paths": [
+    "core/view/include/pulp/view/design_codegen.hpp",
+    "core/view/include/pulp/view/font_container.hpp",
+    "core/view/include/pulp/view/scripted_ui.hpp",
+    "core/view/src/design_codegen.cpp",
+    "core/view/src/design_import_native_fonts.cpp",
+    "core/view/src/scripted_ui.cpp",
+    "core/view/src/widget_bridge.cpp",
+    "core/view/src/widget_bridge/registrars.hpp",
+    "core/view/src/widget_bridge/storage_assets_api.cpp"
+  ],
+  "vellum_inherits": false,
+  "rationale": "registerEmbeddedFont registers only bytes sealed into a panel under their script-relative name, under an empty capability grant; codegen emits it for fonts localized beside the script and keeps the Filesystem-gated registerFont only for absolute-path fonts; both bridge font paths share one size- and signature-checked helper that never reads a path and refuses a family another owner registered; a path-backed ScriptedUI session seals the font files beside its script the way the build embeds them. Vellum's framework transfer is in effect, so this Pulp edit is not re-exported; the matching change is planned for Vellum's framework/ and made there first."
+}

@@ -246,6 +246,29 @@ the CSS family. A face that can't be read or fails its manifest hash is
 skipped with `font-asset-unavailable`, and that family keeps resolving to host
 faces.
 
+Generated JS registers a face that the export pass localized beside the script
+(`assets/<sha256>.ttf`) with `registerEmbeddedFont(family, 'assets/<sha256>.ttf', ...)`.
+That is the name a UI_SCRIPT build embeds the file under. The call needs no
+capability, so a shipped panel registers its fonts under an empty grant. It
+never takes the manifest `asset_id`: no embedded file is named `pulp-page-font-...`.
+Only a face reachable solely by an absolute path still emits the
+Filesystem-gated `registerFont`, and any `registerFont` in the script makes
+`infer_capabilities_from_js` request Filesystem. So a headless tool that runs
+generated JS (`--validate`'s render, `pulp-design-ir-observe`,
+`pulp-design-import-bench`) must seal the files beside the script into its
+bridge with `read_sealed_font_files` (`tools/import-design/sealed_font_files.hpp`).
+Putting `registerFont` back into the script instead would make the panel ask
+for Filesystem. `sealed_font_asset_name()` is the single rule for that name.
+A path-backed or hot-reloading `ScriptedUiSession` does the same host-side: it
+seals the font files beside its script (symlinks that leave the directory are
+skipped). Both bridge font calls check the sealed bytes' size and signature
+(`view::register_font_container`) and never fall back to a path. A WOFF2 the
+decoder rejects is refused, never handed to the platform font manager. A panel
+may not rebind a family that host code or another panel's storage identity
+registered first; `registerEmbeddedFont` returns false and logs why. Font
+registration is process-global, so a test that probes it must use a family
+name no other case registers.
+
 ### Imported text looks heavier than Chromium: check font smoothing first
 
 Pulp's default glyph raster on macOS is Chromium's `-webkit-font-smoothing:
