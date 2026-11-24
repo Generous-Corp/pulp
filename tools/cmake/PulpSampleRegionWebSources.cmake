@@ -22,6 +22,8 @@ function(pulp_sample_region_web_sources ROOT OUT)
         "${ROOT}/core/host/src/signal_graph_process.cpp"
         "${ROOT}/core/host/src/trigger_graph.cpp"
         "${ROOT}/core/host/src/signal_graph_compile_nodes.cpp"
+        # SignalGraph::assemble_runtime_, called by signal_graph_prepare.cpp.
+        "${ROOT}/core/host/src/signal_graph_compile_runtime.cpp"
         "${ROOT}/core/host/src/signal_graph_compile_routed.cpp"
         "${ROOT}/core/host/src/signal_graph_prepare.cpp"
         "${ROOT}/core/host/src/signal_graph_diagnostics.cpp"

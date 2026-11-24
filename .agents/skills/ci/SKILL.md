@@ -49,6 +49,8 @@ on a real PR. Do them in order.
    it build-free; its families prediction can still fail.
    The skipped lanes are listed as NOT CHECKED, so the verdict reads "not a full
    pass" rather than "safe to push". The cheap gates still run.
+   When a gate fails, the final summary names every failed gate in a comma-separated
+   `gates: failed:` line before the remediation advice.
    Two lanes read their commands from the CI jobs themselves, so a step added
    there reaches `gates.sh` with no edit: the required `Enforce version & skill
    sync` job's `python3 <script>` commands that `gates.sh` has no block for
@@ -5567,6 +5569,15 @@ Same idea applies to the self-hosted golden images: bake with the flags CI actua
 uses, or the golden warms a cache the real jobs never touch.
 
 ## GitHub workflow gotchas
+
+- **An integration that is off by default is absent from the release SDK
+  unless the release leg turns it on.** `PULP_ENABLE_PULP_VELLUM` defaults
+  OFF, and only `vellum-sdk-consumer.yml` set it, so released SDKs carried no
+  `Pulp::vellum` and every `--ui vellum` project failed at configure. The
+  darwin-arm64 leg of `release-cli.yml` now fetches the `pulp.lock` Vellum SDK,
+  verifies its digest, builds the bridge, and fails the release through
+  `tools/scripts/check_vellum_sdk_staging.py` if the staged SDK lacks it. A
+  consumer-lane green says nothing about what the release ships.
 
 - **A pre-push gate that reads the working tree can pass a commit it never
   saw.** The push sends HEAD's commit; a file fixed on disk but not committed

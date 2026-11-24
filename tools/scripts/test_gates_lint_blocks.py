@@ -2,7 +2,7 @@
 """Each lint block in gates.sh must turn the lint's failure into a gate failure.
 
 Two branches adding lint blocks at the same spot in gates.sh merge into a
-splice that can drop one block's `fail=1 / fi / fi`. This runs every
+splice that can drop one block's `gate_fail / fi / fi`. This runs every
 `if [ -f "$X" ]; then ... "$PYTHON" "$X" ...` block on its own under bash,
 with a stand-in interpreter that fails and one that passes, and asserts the
 block sets `fail=1` exactly when the lint fails.
@@ -38,11 +38,11 @@ def lint_blocks(text: str) -> dict[str, str]:
             j += 1
         body = "\n".join(lines[i:j + 1])
         # The plain shape: every *_LINT, and any block that runs
-        # `if ! "$PYTHON" "$VAR" ...; then fail=1`. Blocks with their own
+        # `if ! "$PYTHON" "$VAR" ...; then gate_fail ...`. Blocks with their own
         # exit-code mapping or skip conditions, and advisory blocks, are not
         # this shape and are left to their own tests.
         enforcing = var.endswith("_LINT") or (
-            f'if ! "$PYTHON" "${var}"' in body and "fail=1" in body)
+            f'if ! "$PYTHON" "${var}"' in body and "gate_fail" in body)
         if f'"$PYTHON" "${var}"' in body and enforcing:
             blocks[var] = body
         i = j + 1
@@ -54,7 +54,7 @@ def run_block(block: str, var: str, interpreter: str) -> str:
         lint = pathlib.Path(directory) / "lint.py"
         lint.write_text("", encoding="utf-8")
         script = (
-            f'fail=0\nROOT="{directory}"\nBASE=HEAD\nPYTHON="{interpreter}"\n'
+            f'fail=0\nfailed_gates=()\ngate_fail() {{ fail=1; failed_gates+=("$1"); }}\nROOT="{directory}"\nBASE=HEAD\nPYTHON="{interpreter}"\n'
             f'{var}="{lint}"\n{block}\necho "fail=$fail"\n'
         )
         result = subprocess.run(["bash", "-c", script], capture_output=True,
@@ -87,7 +87,8 @@ class LintBlockTests(unittest.TestCase):
     def test_a_dropped_fail_assignment_is_caught(self) -> None:
         # Negative control: a block whose fail=1 went missing in a merge must
         # not read as a gate failure.
-        block = self.blocks["SAFE_PATH_LINT"].replace("        fail=1\n", "        :\n", 1)
+        block = self.blocks["SAFE_PATH_LINT"].replace(
+            '        gate_fail "safe-path guard lint"\n', "        :\n", 1)
         self.assertEqual(run_block(block, "SAFE_PATH_LINT", "false"), "fail=0")
 
 

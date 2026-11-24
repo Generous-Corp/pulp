@@ -782,7 +782,8 @@ class GatesWiringTests(unittest.TestCase):
             self.not_checked = ""
             # gates.sh sets gate_host_builds_skipped before this block (1 on a
             # tartci gate host, which refuses these suites).
-            script = (f'ROOT={str(root)!r}\nPYTHON={sys.executable!r}\nBASE=origin/main\nfail=0\n'
+            script = (f'ROOT={str(root)!r}\nPYTHON={sys.executable!r}\nBASE=origin/main\nfail=0\nfailed_gates=()\n'
+                      'gate_fail() { fail=1; failed_gates+=("$1"); }\n'
                       f'gate_host_builds_skipped={gate_host}\n'
                       f'not_checked_log={str(log)!r}\n: > "$not_checked_log"\n'
                       + self._block() + '\necho "fail=$fail"\n')

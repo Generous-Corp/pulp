@@ -31,7 +31,7 @@ def main() -> int:
     # controls below.
     gates = GATES.read_text(encoding="utf-8")
     missing_guard = 'if [ ! -f "$VELLUM_BOUNDARY" ]; then'
-    if missing_guard not in gates or 'fail=1' not in gates.split(missing_guard, 1)[1].split('fi', 1)[0]:
+    if missing_guard not in gates or 'gate_fail' not in gates.split(missing_guard, 1)[1].split('fi', 1)[0]:
         print("gates.sh does not fail closed when the Vellum boundary linter is missing",
               file=sys.stderr)
         return 1

@@ -106,8 +106,11 @@ class PlanTests(unittest.TestCase):
 
     def test_every_configure_in_release_cli_is_replayed(self):
         job = load_yaml(rcm.RELEASE_WORKFLOW)["jobs"][rcm.JOB]
+        # Only a configure of the repository root is a Pulp configure. A step
+        # may also configure a throwaway consumer project (the Vellum SDK
+        # consumer smoke) that needs the built SDK and is not a configure input.
         configuring = [rcm.step_key(s) for s in job["steps"]
-                       if re.search(r"^\s*cmake\s+-S\s", s.get("run", ""), re.M)]
+                       if re.search(r"^\s*cmake\s+-S\s+\.\s", s.get("run", ""), re.M)]
         self.assertTrue(configuring)
         for name in configuring:
             self.assertIn(name, rcm.REPLAYED_STEPS)

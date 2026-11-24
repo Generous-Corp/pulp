@@ -431,7 +431,7 @@ class PinFreshnessTests(unittest.TestCase):
         gates_block = re.search(
             r'if \[ -f "\$GHP" \].*?\nfi', gates, re.DOTALL)
         self.assertIsNotNone(gates_block, "gates.sh no longer runs the freshness gate")
-        self.assertIn("fail=1", gates_block.group(0))
+        self.assertIn("gate_fail", gates_block.group(0))
         self.assertRegex(
             gates_block.group(0), r'if ! "\$PYTHON" "\$GHP"',
             "gates.sh no longer fails on every non-zero exit")

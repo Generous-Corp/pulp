@@ -62,9 +62,9 @@ def branch(block: str, code: str) -> str:
     return m.group(1) if m else ""
 
 
-# A failing arm either sets fail=1 directly or goes through prepush_fail, which
-# sets it and names the gate.
-_FAILS = re.compile(r"\bfail=1\b|\bprepush_fail\b")
+# A failing arm either sets fail=1 directly or goes through the caller's helper,
+# which sets it and, for gates.sh, names the gate.
+_FAILS = re.compile(r"\bfail=1\b|\b(?:prepush_fail|gate_fail)\b")
 
 
 def check_shell_caller(path: Path, anchor: str, label: str) -> None:
@@ -104,6 +104,7 @@ def run_block(block: str, stub_exit: int, env_value: str | None) -> int:
         script = ("fail=0\nBASE=origin/main\n"
                   'run_gate_captured() { "$@"; }\n'
                   'prepush_fail() { fail=1; }\n'
+                  'gate_fail() { fail=1; }\n'
                   f'FMT="{stub}"\n{block}\necho "fail=$fail"\n')
         env = {k: v for k, v in os.environ.items() if k != "PULP_ENFORCE_PREPUSH_FORMAT"}
         if env_value is not None:
