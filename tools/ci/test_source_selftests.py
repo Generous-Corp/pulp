@@ -1957,6 +1957,109 @@ class PrepushBaseCleanupTests(unittest.TestCase):
             self.assertNotIn(str(checkout), listed)
 
 
+class PrepushDeadlineTests(unittest.TestCase):
+    """One deadline covers setup, selection, the base checkout and its cleanup."""
+
+    SLACK = 1.5
+
+    def _slow_main(self, patched: str, delay: float, budget: str = "1") -> tuple[int, str, float]:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp).resolve() / "repo"
+            root.mkdir()
+            _fixture_repo(root, PASSING, PASSING + "# edit\n")
+            real = getattr(prepush, patched)
+
+            def slow(*args, **kwargs):
+                time.sleep(delay)
+                return real(*args, **kwargs)
+
+            out = io.StringIO()
+            began = time.monotonic()
+            with mock.patch.object(prepush, patched, slow), contextlib.redirect_stdout(out):
+                rc = prepush.main(["--repo", str(root), "--base", "HEAD~1",
+                                   "--triggers", str(root / "none.json"), "--budget", budget])
+            return rc, out.getvalue(), time.monotonic() - began
+
+    def test_slow_diff_discovery_is_not_checked_within_the_cap(self) -> None:
+        rc, out, elapsed = self._slow_main("changed_in_range", 6.0)
+        self.assertEqual(rc, prepush.EXIT_NOT_CHECKED)
+        self.assertIn("NOT CHECKED", out)
+        self.assertLess(elapsed, 1.0 + self.SLACK)
+
+    def test_slow_candidate_construction_is_not_checked_within_the_cap(self) -> None:
+        rc, out, elapsed = self._slow_main("candidates", 6.0)
+        self.assertEqual(rc, prepush.EXIT_NOT_CHECKED)
+        self.assertLess(elapsed, 1.0 + self.SLACK)
+
+    def test_slow_revision_resolution_is_not_checked_within_the_cap(self) -> None:
+        rc, out, elapsed = self._slow_main("_rev", 6.0)
+        self.assertEqual(rc, prepush.EXIT_NOT_CHECKED)
+        self.assertLess(elapsed, 1.0 + self.SLACK)
+
+    def test_slow_git_in_cleanup_stops_at_the_deadline(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            holder = pathlib.Path(tmp).resolve() / "holder"
+            (holder / "base").mkdir(parents=True)
+            seen: list[float] = []
+
+            def slow_git(command, **kwargs):
+                seen.append(kwargs.get("timeout"))
+                time.sleep(min(kwargs.get("timeout") or 6.0, 6.0))
+                raise subprocess.TimeoutExpired(command, kwargs.get("timeout") or 6.0)
+
+            began = time.monotonic()
+            with mock.patch.object(prepush.subprocess, "run", slow_git):
+                gone = prepush.remove_base_now(pathlib.Path(tmp), holder, holder / "base",
+                                               deadline=time.monotonic() + 0.5)
+            self.assertLess(time.monotonic() - began, 0.5 + self.SLACK)
+            self.assertFalse(gone)
+            self.assertTrue(all(t is not None and t <= 0.5 for t in seen))
+
+    def test_slow_tree_removal_stops_at_the_deadline(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            parent = pathlib.Path(tmp).resolve()
+            root = parent / "repo"
+            root.mkdir()
+            subprocess.run(["git", "init", "-q"], cwd=root, check=True)
+            holder = parent / "holder"
+            (holder / "base").mkdir(parents=True)
+
+            def slow_rmtree(*args, **kwargs):
+                time.sleep(6.0)
+
+            began = time.monotonic()
+            with mock.patch.object(prepush.shutil, "rmtree", slow_rmtree):
+                gone = prepush.remove_base_now(root, holder, holder / "base",
+                                               deadline=time.monotonic() + 1.0)
+            self.assertLess(time.monotonic() - began, 1.0 + self.SLACK)
+            self.assertFalse(gone)
+
+    def test_an_interrupted_base_checkout_does_not_hold_the_hook_past_the_cap(self) -> None:
+        def interrupted(repo, checkout, commit, seconds, command=None):
+            raise prepush.BaseCheckoutInterrupted()
+
+        def slow_remove(repo, holder, checkout, *args, **kwargs):
+            time.sleep(0.3)
+            return False
+
+        detached: list[pathlib.Path] = []
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp).resolve() / "repo"
+            root.mkdir()
+            _fixture_repo(root, PASSING, FAILING)
+            entry = {"name": "t", "argv": ["x"]}
+            began = time.monotonic()
+            with mock.patch.object(prepush, "add_base_checkout", interrupted), \
+                    mock.patch.object(prepush, "remove_base_now", slow_remove), \
+                    mock.patch.object(prepush, "_detach_cleanup",
+                                      lambda repo, checkout, holder: detached.append(holder)):
+                verdicts = prepush.base_verdicts([(entry, {})], "HEAD~1", root,
+                                                 time.monotonic() + 2.0, time.monotonic)
+            self.assertLess(time.monotonic() - began, 2.0 + prepush.CAP_RESERVE + self.SLACK)
+            self.assertFalse(verdicts["t"][0])
+            self.assertEqual(len(detached), 1)  # leftovers go to a detached cleanup
+
+
 class PrepushNameMatchTests(unittest.TestCase):
     """Only own-script, import and declared-read matches run before a push."""
 

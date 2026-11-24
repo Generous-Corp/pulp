@@ -240,17 +240,17 @@ def select(entries: list[dict], changed: list[str], repo: pathlib.Path,
                                        e["name"]))
 
 
-def select_within(entries: list[dict], changed: list[str], repo: pathlib.Path,
-                  workflow: pathlib.Path, seconds: float,
-                  selector: Callable[..., list[dict]] | None = None,
-                  ) -> tuple[list[dict] | None, BaseException | None]:
-    """``select`` bounded by ``seconds``: (None, None) when it does not finish."""
-    selector = selector or select
+def run_bounded(fn: Callable[[], Any], seconds: float) -> tuple[Any, BaseException | None, bool]:
+    """``fn()`` on a daemon thread, waited on for at most ``seconds``.
+
+    Returns (value, error, finished); a call that does not finish is left
+    running (the process exits without waiting for it).
+    """
     box: dict[str, Any] = {}
 
     def work() -> None:
         try:
-            box["picked"] = selector(entries, changed, repo, workflow)
+            box["value"] = fn()
         except Exception as exc:  # reported as could-not-run by the caller
             box["error"] = exc
 
@@ -258,8 +258,18 @@ def select_within(entries: list[dict], changed: list[str], repo: pathlib.Path,
     thread.start()
     thread.join(max(0.0, seconds))
     if thread.is_alive():
-        return None, None
-    return box.get("picked"), box.get("error")
+        return None, None, False
+    return box.get("value"), box.get("error"), True
+
+
+def select_within(entries: list[dict], changed: list[str], repo: pathlib.Path,
+                  workflow: pathlib.Path, seconds: float,
+                  selector: Callable[..., list[dict]] | None = None,
+                  ) -> tuple[list[dict] | None, BaseException | None]:
+    """``select`` bounded by ``seconds``: (None, None) when it does not finish."""
+    selector = selector or select
+    picked, error, _ = run_bounded(lambda: selector(entries, changed, repo, workflow), seconds)
+    return picked, error
 
 
 def plan(picked: list[dict]) -> tuple[list[dict], list[tuple[dict, str]]]:
@@ -494,19 +504,49 @@ def add_base_checkout(repo: pathlib.Path, checkout: pathlib.Path, commit: str,
 
 
 def remove_base_now(repo: pathlib.Path, holder: pathlib.Path, checkout: pathlib.Path,
-                    sleep: Callable[[float], None] = time.sleep) -> bool:
-    """Remove an interrupted base checkout before the step ends; True when gone."""
+                    sleep: Callable[[float], None] = time.sleep,
+                    deadline: float | None = None,
+                    clock: Callable[[], float] = time.monotonic) -> bool:
+    """Remove an interrupted base checkout before ``deadline``; True when gone.
+
+    Every operation is bounded by what is left of the deadline. When it runs
+    out first, this returns False and the caller hands the rest to a detached
+    cleanup, so the removal never holds the hook past its cap.
+    """
+    def left(ceiling: float = 10.0) -> float:
+        return ceiling if deadline is None else min(ceiling, deadline - clock())
+
     for command in (["git", "worktree", "unlock", str(checkout)],
                     ["git", "worktree", "remove", "--force", "--force", str(checkout)]):
-        subprocess.run(command, cwd=repo, capture_output=True, check=False, timeout=10)
-    for attempt in range(REMOVE_TRIES):
-        shutil.rmtree(holder, ignore_errors=True)
-        if not holder.exists():
-            break
-        sleep(REMOVE_PAUSE)
-    subprocess.run(["git", "worktree", "prune"], cwd=repo, capture_output=True, check=False,
-                   timeout=10)
+        if left() <= 0:
+            return not holder.exists()
+        try:
+            subprocess.run(command, cwd=repo, capture_output=True, check=False, timeout=left())
+        except subprocess.TimeoutExpired:
+            return not holder.exists()
+
+    def remove_tree() -> None:
+        for _ in range(REMOVE_TRIES):
+            shutil.rmtree(holder, ignore_errors=True)
+            if not holder.exists() or left() <= 0:
+                break
+            sleep(REMOVE_PAUSE)
+
+    run_bounded(remove_tree, left(float("inf")) if deadline is not None else 3600.0)
+    if left() > 0:
+        try:
+            subprocess.run(["git", "worktree", "prune"], cwd=repo, capture_output=True,
+                           check=False, timeout=left())
+        except subprocess.TimeoutExpired:
+            pass
     return not holder.exists()
+
+
+def _detach_cleanup(repo: pathlib.Path, checkout: pathlib.Path, holder: pathlib.Path) -> None:
+    """Remove a base checkout in a process that outlives this one."""
+    subprocess.Popen(["sh", "-c", BASE_CLEANUP, "_", str(checkout), str(holder)],
+                     cwd=repo, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                     stderr=subprocess.DEVNULL, start_new_session=True)
 
 
 def base_verdicts(failures: list[tuple[dict, dict]], base: str, repo: pathlib.Path,
@@ -541,12 +581,11 @@ def base_verdicts(failures: list[tuple[dict, dict]], base: str, repo: pathlib.Pa
             on_base = _run_until(entry, checkout, python, deadline, clock)
             verdicts[entry["name"]] = lane.base_verdict(result, on_base, str(repo), str(checkout))
     except BaseCheckoutInterrupted:
-        # The checkout is partial and small: remove it now, so nothing is left
-        # in the shared worktrees root.
-        if holder is not None and not remove_base_now(repo, holder, checkout):
-            print(f"[pre-push] fixture tests: could not remove the interrupted base checkout "
-                  f"{holder}; remove it by hand.")
-        holder = None
+        # The checkout is partial and small: remove it now so nothing is left
+        # in the shared worktrees root, but only inside the cap's reserve; what
+        # that cannot finish is handed to a detached cleanup (the finally).
+        if holder is not None and remove_base_now(repo, holder, checkout, deadline=deadline + CAP_RESERVE):
+            holder = None
     except (OSError, subprocess.SubprocessError) as exc:
         for name, (explained, _) in verdicts.items():
             if not explained:
@@ -554,9 +593,7 @@ def base_verdicts(failures: list[tuple[dict, dict]], base: str, repo: pathlib.Pa
     finally:
         if holder is not None:
             # Removing a full checkout takes seconds; do it after the step ends.
-            subprocess.Popen(["sh", "-c", BASE_CLEANUP, "_", str(checkout or holder), str(holder)],
-                             cwd=repo, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
-                             stderr=subprocess.DEVNULL, start_new_session=True)
+            _detach_cleanup(repo, checkout or holder, holder)
     return verdicts
 
 
@@ -605,37 +642,38 @@ def main(argv: list[str] | None = None) -> int:
     workflow = repo / ".github" / "workflows" / "version-skill-check.yml"
     manifest = repo / "tools" / "ci" / "source_selftests.json"
     triggers_path = args.triggers or (repo / "tools" / "ci" / "prepush_triggers.json")
-    try:
+    budget = cap_seconds(args.budget)
+
+    def choose() -> dict[str, Any]:
         head = _rev(repo, args.head)
         if head and head != _rev(repo, "HEAD") and not args.list:
-            print(f"[pre-push] fixture tests NOT CHECKED (all): the pushed commit {head[:12]} is "
-                  "not HEAD and this step reads the working tree. Check it out and run "
-                  f"python3 tools/ci/prepush_fixtures.py --base {args.base}")
-            return EXIT_NOT_CHECKED
+            return {"not_head": head}
         changed = changed_in_range(repo, args.base, args.head)
         triggers = load_triggers(triggers_path) if triggers_path.is_file() else {}
         costs = load_costs(triggers_path) if triggers_path.is_file() else {}
-        entries, hook_owned = candidates(repo, workflow, manifest, triggers, costs)
-    except Exception as exc:  # any failure to choose is "could not run", never a test failure
-        print(f"✗ fixture tests: could not select ({exc}) | repro: "
-              f"python3 tools/ci/prepush_fixtures.py --base {args.base}")
-        return 2
+        entries, _hook_owned = candidates(repo, workflow, manifest, triggers, costs)
+        picked = select(entries, changed, repo, workflow)
+        return {"changed": changed, "entries": entries, "picked": picked}
 
-    budget = cap_seconds(args.budget)
-    # Selection reads every candidate's source and the import graph; on a cold
-    # cache under heavy load that alone has taken over a minute, so it runs
-    # inside the cap too.
-    picked, error = select_within(entries, changed, repo, workflow,
-                                  budget - (time.monotonic() - started))
+    # Resolving the revisions, reading the diff, building the candidates and
+    # selecting among them all run inside the cap: on a cold cache under heavy
+    # load the selection alone has taken over a minute.
+    chosen, error, finished_choosing = run_bounded(choose, budget - (time.monotonic() - started))
     if error is not None:
         print(f"✗ fixture tests: could not select ({error}) | repro: "
               f"python3 tools/ci/prepush_fixtures.py --base {args.base}")
         return 2
-    if picked is None:
+    if not finished_choosing:
         print(f"[pre-push] fixture tests NOT CHECKED (all): choosing them did not finish within "
               f"the {budget:g} s cap (a loaded host). CI runs them; to choose and run them "
               f"now: python3 tools/ci/prepush_fixtures.py --base {args.base}")
         return EXIT_NOT_CHECKED
+    if "not_head" in chosen:
+        print(f"[pre-push] fixture tests NOT CHECKED (all): the pushed commit {chosen['not_head'][:12]} "
+              "is not HEAD and this step reads the working tree. Check it out and run "
+              f"python3 tools/ci/prepush_fixtures.py --base {args.base}")
+        return EXIT_NOT_CHECKED
+    changed, entries, picked = chosen["changed"], chosen["entries"], chosen["picked"]
     jobs = args.jobs or default_jobs()
     runnable, deferred = plan(picked)
     print(f"[pre-push] fixture tests: {len(picked)} of {len(entries)} reached by "
