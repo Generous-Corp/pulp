@@ -1570,12 +1570,13 @@ TEST_CASE("web compat lowers a multi-row grid of fixed cards onto grid rows",
     bridge.load_script(js);
     host.layout_children();
 
-    const auto find_anchor = [](auto&& self, View& view,
-                                std::string_view anchor) -> View* {
-        if (view.anchor_id() == anchor) return &view;
+    const auto find_anchor = [](auto&& self, View& view, std::string_view anchor) -> View* {
+        if (view.anchor_id() == anchor)
+            return &view;
         for (size_t i = 0; i < view.child_count(); ++i)
             if (auto* child = view.child_at(i))
-                if (auto* found = self(self, *child, anchor)) return found;
+                if (auto* found = self(self, *child, anchor))
+                    return found;
         return nullptr;
     };
     View* controls = find_anchor(find_anchor, host, "controls");
