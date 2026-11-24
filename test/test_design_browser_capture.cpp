@@ -1,5 +1,7 @@
+#include "../core/view/src/design_ir_helpers.hpp"
 #include "test_design_import_shared.hpp"
 #include <pulp/view/widgets.hpp>
+#include <tuple>
 
 TEST_CASE("captured fader thumb travel stays inside the content box",
           "[view][widgets][fader][geometry]") {
@@ -34,6 +36,46 @@ TEST_CASE("persisted browser faders retain split indicator asset metadata",
     CHECK(attrs.at("fader_indicator_asset_path") == indicator.string());
     CHECK(attrs.at("fader_indicator_natural_w") == "18");
     CHECK(attrs.at("fader_indicator_natural_h") == "10");
+}
+
+TEST_CASE("manifest AssetIds materialize split fader art paths and natural sizes",
+          "[view][import][ir-v1][fader][assets]") {
+    IRAssetManifest manifest;
+    const std::vector<std::tuple<const char*, const char*, int, int>> specs = {
+        {"body-1", "art/body.png", 40, 120}, {"ind-1", "art/ind.png", 18, 10}};
+    for (const auto& [id, path, w, h] : specs) {
+        IRAssetRef asset;
+        asset.asset_id = id;
+        asset.local_path = path;
+        asset.width = w;
+        asset.height = h;
+        manifest.assets.push_back(std::move(asset));
+    }
+
+    IRNode fader;
+    fader.type = "frame";
+    fader.audio_widget = AudioWidgetType::fader;
+    // Only the persisted identities: no path or natural-size attributes.
+    fader.attributes["fader_body_asset_pathAssetId"] = "body-1";
+    fader.attributes["fader_indicator_asset_pathAssetId"] = "ind-1";
+    materialize_manifest_image_uris(fader, manifest);
+
+    CHECK(fader.attributes.at("fader_body_asset_path") == "file://art/body.png");
+    CHECK(fader.attributes.at("fader_indicator_asset_path") == "file://art/ind.png");
+    CHECK(fader.attributes.at("fader_body_natural_w") == "40");
+    CHECK(fader.attributes.at("fader_body_natural_h") == "120");
+    CHECK(fader.attributes.at("fader_indicator_natural_w") == "18");
+    CHECK(fader.attributes.at("fader_indicator_natural_h") == "10");
+
+    // An authored natural size is never overwritten by the manifest's.
+    IRNode authored;
+    authored.type = "frame";
+    authored.audio_widget = AudioWidgetType::fader;
+    authored.attributes["fader_indicator_asset_pathAssetId"] = "ind-1";
+    authored.attributes["fader_indicator_natural_w"] = "99";
+    materialize_manifest_image_uris(authored, manifest);
+    CHECK(authored.attributes.at("fader_indicator_natural_w") == "99");
+    CHECK(authored.attributes.at("fader_indicator_natural_h") == "10");
 }
 
 TEST_CASE("DesignIR round-trips faithful browser capture backing distinctly from SVG",

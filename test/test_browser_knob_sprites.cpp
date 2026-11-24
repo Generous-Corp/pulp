@@ -862,6 +862,40 @@ TEST_CASE("a declared fader hoists its authored thumb and keeps live chrome",
     CHECK(web_js.find("maliciousCall") == std::string::npos);
 }
 
+TEST_CASE("manifest-materialized file:// fader art loads as bare filesystem paths",
+          "[import-design][browser-capture][fader][indicator][assets]") {
+    TempDirectory temp;
+    const auto panel = synthetic_fader_panel();
+    const auto capture = temp.root / "browser.png";
+    write_png(capture, panel);
+
+    DesignIR ir;
+    ir.source = pulp::view::DesignSource::html;
+    ir.root.type = "frame";
+    ir.root.stable_anchor_id = "root";
+    ir.root.style.width = static_cast<float>(kPanelWidth) * 0.5f;
+    ir.root.style.height = static_cast<float>(kPanelHeight) * 0.5f;
+    ir.root.children.push_back(declared_fader());
+
+    std::string error;
+    REQUIRE(pulp::import_design::apply_browser_capture_control_sprites(
+                ir, capture, temp.root / "sprites", &error) == 1);
+
+    // materialize_manifest_image_uris hands the sprite loader file:// URIs; the
+    // loader must receive the bare path (captured_art_path strips the scheme).
+    auto& node = ir.root.children.front();
+    for (const char* key : {"fader_body_asset_path", "fader_indicator_asset_path"}) {
+        const auto bare = fs::path(node.attributes.at(key)).generic_string();
+        node.attributes[key] = "file://" + bare;
+    }
+
+    auto root = pulp::view::build_native_view_tree(ir, {}, {});
+    REQUIRE(root != nullptr);
+    auto* fader = dynamic_cast<pulp::view::Fader*>(root->child_at(0));
+    REQUIRE(fader != nullptr);
+    CHECK(fader->has_captured_indicator_art());
+}
+
 TEST_CASE("a hollow fader thumb preserves its authored outline color",
           "[import-design][browser-capture][fader][indicator][color]") {
     TempDirectory temp;
