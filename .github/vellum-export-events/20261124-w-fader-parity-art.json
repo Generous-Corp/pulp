@@ -6,6 +6,5 @@
   "receipt_export_id": "20261107-f0ac0a4ff392",
   "paths": ["core/view/include/pulp/view/widgets.hpp", "core/view/src/design_ir_helpers.hpp", "core/view/src/design_ir_json.cpp", "core/view/src/widgets.cpp"],
   "vellum_inherits": true,
-  "rationale": "The Pulp renderer and DesignIR persistence changes are intended for the next Vellum authored-fader re-export. Vellum should consume the captured indicator metadata and content-box travel in its authored fader seam.",
-  "authority_effect": "none"
+  "rationale": "The Pulp renderer and DesignIR persistence changes are intended for the next Vellum authored-fader re-export. Vellum should consume the captured indicator metadata and content-box travel in its authored fader seam."
 }
