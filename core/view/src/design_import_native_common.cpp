@@ -2082,11 +2082,6 @@ bool apply_designed_body_skin(View& control, const IRNode& node) {
 
 std::string captured_art_path(
     std::string path, const NativeMaterializeOptions& options) {
-    // Manifest-materialized assets arrive as file:// URIs; the sprite loader
-    // wants a bare filesystem path.
-    constexpr std::string_view kFileScheme = "file://";
-    if (path.rfind(kFileScheme, 0) == 0)
-        path.erase(0, kFileScheme.size());
     std::filesystem::path resolved{std::move(path)};
     if (resolved.is_relative() && !options.asset_base_directory.empty())
         resolved = options.asset_base_directory / resolved;
@@ -2170,33 +2165,66 @@ void apply_durable_fader_indicator(Fader& fader, const IRNode& node) {
             fader.set_skin_thumb_color(*color);
 }
 
-void apply_captured_art_fader_skin(
-    Fader& fader, const IRNode& node,
-    const NativeMaterializeOptions& options) {
-    const auto body_path = attr(node, "fader_body_asset_path");
-    const auto indicator_path = attr(node, "fader_indicator_asset_path");
-    if (!body_path || !indicator_path) return;
+// Captured fader art: the importer-scratch path when present, otherwise the
+// persisted `<key>AssetId` resolved through the manifest's contained resolver
+// (a persisted DesignIR carries only the identity, never a scratch path).
+struct FaderArt {
+    std::string path;
+    float natural_w = 0.0f;
+    float natural_h = 0.0f;
+};
 
-    const float body_w = attr_float(node, "fader_body_natural_w").value_or(0.0f);
-    const float body_h = attr_float(node, "fader_body_natural_h").value_or(0.0f);
-    const float indicator_w =
-        attr_float(node, "fader_indicator_natural_w").value_or(0.0f);
-    const float indicator_h =
-        attr_float(node, "fader_indicator_natural_h").value_or(0.0f);
+std::optional<FaderArt> fader_art(const IRNode& node, const IRAssetManifest& manifest,
+                                  const NativeMaterializeOptions& options, const std::string& key,
+                                  const std::string& natural_prefix) {
+    FaderArt art;
+    art.natural_w = attr_float(node, natural_prefix + "_w").value_or(0.0f);
+    art.natural_h = attr_float(node, natural_prefix + "_h").value_or(0.0f);
+    if (const auto path = attr(node, key); path && !path->empty()) {
+        art.path = captured_art_path(*path, options);
+        return art;
+    }
+    const auto id = attr(node, key + "AssetId");
+    if (!id)
+        return std::nullopt;
+    const auto* asset = manifest.resolve(*id);
+    if (asset == nullptr)
+        return std::nullopt;
+    const auto file = resolve_asset_file(*asset, options.asset_base_directory);
+    if (!file)
+        return std::nullopt;
+    art.path = file->string();
+    if (art.natural_w <= 0.0f && asset->width)
+        art.natural_w = static_cast<float>(*asset->width);
+    if (art.natural_h <= 0.0f && asset->height)
+        art.natural_h = static_cast<float>(*asset->height);
+    return art;
+}
+
+void apply_captured_art_fader_skin(Fader& fader, const IRNode& node,
+                                   const IRAssetManifest& manifest,
+                                   const NativeMaterializeOptions& options) {
+    const auto body_art =
+        fader_art(node, manifest, options, "fader_body_asset_path", "fader_body_natural");
+    const auto indicator_art =
+        fader_art(node, manifest, options, "fader_indicator_asset_path", "fader_indicator_natural");
+    if (!body_art || !indicator_art)
+        return;
+
+    const float body_w = body_art->natural_w;
+    const float body_h = body_art->natural_h;
+    const float indicator_w = indicator_art->natural_w;
+    const float indicator_h = indicator_art->natural_h;
     if (body_w <= 0.0f || body_h <= 0.0f ||
         indicator_w <= 0.0f || indicator_h <= 0.0f)
         return;
 
     auto body = std::make_shared<SpriteStrip>();
-    body->load_from_file(captured_art_path(*body_path, options),
-                         static_cast<int>(body_w),
-                         static_cast<int>(body_h), 1,
+    body->load_from_file(body_art->path, static_cast<int>(body_w), static_cast<int>(body_h), 1,
                          SpriteStrip::Orientation::vertical);
     auto indicator = std::make_shared<SpriteStrip>();
-    indicator->load_from_file(captured_art_path(*indicator_path, options),
-                              static_cast<int>(indicator_w),
-                              static_cast<int>(indicator_h), 1,
-                              SpriteStrip::Orientation::vertical);
+    indicator->load_from_file(indicator_art->path, static_cast<int>(indicator_w),
+                              static_cast<int>(indicator_h), 1, SpriteStrip::Orientation::vertical);
     if (!body->loaded() || !indicator->loaded()) return;
     fader.set_captured_art(
         std::move(body), std::move(indicator),
@@ -2436,7 +2464,7 @@ std::unique_ptr<View> make_widget(const IRNode& node,
             if (semantics.fader_thumb_corner_radius)
                 fader->set_thumb_corner_radius(*semantics.fader_thumb_corner_radius);
             if (options.preview_mode) fader->set_render_style(WidgetRenderStyle::minimal);
-            apply_captured_art_fader_skin(*fader, node, options);
+            apply_captured_art_fader_skin(*fader, node, manifest, options);
             // Same contract the knob case takes above: a design that painted its
             // own track owns the body, and the widget contributes only the value
             // layer. Without it a designed fader drew a stock track, fill and
