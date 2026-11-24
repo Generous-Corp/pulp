@@ -4,7 +4,13 @@
   "created_at": "2026-11-24T09:29:07Z",
   "kind": "exported-path-change",
   "receipt_export_id": "20261107-f0ac0a4ff392",
-  "paths": ["core/view/include/pulp/view/widgets.hpp", "core/view/src/design_ir_helpers.hpp", "core/view/src/design_import_native_common.cpp", "core/view/src/design_ir_json.cpp", "core/view/src/widgets.cpp"],
+  "paths": [
+    "core/view/include/pulp/view/widgets.hpp",
+    "core/view/src/design_import_native_common.cpp",
+    "core/view/src/design_ir_helpers.hpp",
+    "core/view/src/design_ir_json.cpp",
+    "core/view/src/widgets.cpp"
+  ],
   "vellum_inherits": false,
   "rationale": "Vellum's framework transfer is in effect for these paths, so this is a Pulp-only edit. Vellum consumes the captured indicator metadata and content-box travel through its own framework/ change in its authored fader seam, not through a re-export."
 }
