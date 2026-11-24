@@ -1352,7 +1352,11 @@ if [ "$fail" = "0" ] && [ "$diff_cover_failed" = "0" ] && [ "$compat_flip_failed
     fi
     if [ "$_prepush_diff_cover_refused" = "1" ]; then
         # A refused lane is not a pass; say so in the verdict itself.
-        echo "[pre-push] gates clean except diff coverage: NOT CHECKED (gate host; run tools/scripts/local_diff_cover.sh on a TARTCI_ROLE=light host such as m1, or a disposable VM)${_prepush_fixtures_verdict:+; $_prepush_fixtures_verdict}." >&2
+        if [ -n "$_prepush_fixtures_verdict" ]; then
+            echo "[pre-push] gates passed except diff coverage: NOT CHECKED (gate host; run tools/scripts/local_diff_cover.sh on a TARTCI_ROLE=light host such as m1, or a disposable VM); $_prepush_fixtures_verdict." >&2
+        else
+            echo "[pre-push] gates clean except diff coverage: NOT CHECKED (gate host; run tools/scripts/local_diff_cover.sh on a TARTCI_ROLE=light host such as m1, or a disposable VM)." >&2
+        fi
     elif [ -n "$_prepush_fixtures_verdict" ]; then
         echo "[pre-push] gates passed except $_prepush_fixtures_verdict." >&2
     else

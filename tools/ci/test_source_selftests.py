@@ -1931,6 +1931,10 @@ class PrepushHookWiringTests(unittest.TestCase):
         self.assertIn('"$_prepush_source_update_mode" = "no-source"', block)
         verdict = text[text.index("_prepush_fixtures_verdict=\"\""):]
         self.assertIn("gates passed except $_prepush_fixtures_verdict", verdict)
+        # "gates clean" is never printed beside a fixture NOT CHECKED.
+        for line in verdict[:verdict.index("exit 0")].splitlines():
+            if "gates clean" in line:
+                self.assertNotIn("_prepush_fixtures_verdict", line)
 
 
 if __name__ == "__main__":
