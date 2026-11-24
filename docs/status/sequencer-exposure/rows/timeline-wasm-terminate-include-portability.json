@@ -1,7 +1,7 @@
 {
   "id": "timeline-wasm-terminate-include-portability",
   "title": "Timeline source includes the standard exception declaration required by headless WASM builds",
-  "classification": "ci_test_only",
+  "classification": "engine_internal",
   "delivery_state": "pending",
   "claim_id": "timeline-wasm-terminate-include-20261124",
   "owned_paths": [
