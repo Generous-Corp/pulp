@@ -678,7 +678,8 @@ if [ -f "$VBS_TEST" ] && git diff --name-only "$BASE"...HEAD 2>/dev/null | \
     run_gate_captured "$PYTHON" "$VBS_TEST"
     gate_rc=$?; case $gate_rc in
         0) ;;
-        *) prepush_fail ;;
+        1) prepush_fail ;;
+        *) gate_could_not_run "test_version_bump_surfaces" "$gate_rc"; prepush_fail ;;
     esac
 fi
 
