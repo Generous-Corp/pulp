@@ -40,6 +40,8 @@ class InteractionRouter final {
             const auto cancelled = tracker_.reset();
             for (const auto& cancel : cancelled.events_view())
                 (void)fan_out(cancel);
+            // The reset cancelled everything; the rest of this batch is stale.
+            break;
         }
         return delivered;
     }

@@ -18,6 +18,11 @@ namespace pulp::vellum {
 /// fields for hold, velocity, or confidence, so hold is delivered as a drag
 /// tick and those values are not represented in the Vellum event.
 ///
+/// A newer epoch does not clear the adapter's pointer sessions by itself. It
+/// relies on the cancels that `runtime::InteractionTracker` emits for every
+/// live object at an epoch change, so a source that bypasses the tracker must
+/// send those cancels itself or its old sessions stay open.
+///
 /// deliver() returns true only when at least one event was routed.
 class InteractionAdapter final {
   public:

@@ -120,6 +120,65 @@ TEST_CASE("interaction tracker cancels held objects on restart and timeout",
     CHECK(tracker.active_count() == 0);
 }
 
+TEST_CASE("full interaction tracker delivers the press that starts a new epoch",
+          "[runtime][interaction-event][interaction-router]") {
+    constexpr std::size_t kObjects = 64;
+    auto press = InteractionEvent{.source_id = 4,
+                                  .epoch = 1,
+                                  .sequence = 0,
+                                  .phase = InteractionPhase::press,
+                                  .x = .5f,
+                                  .y = .5f,
+                                  .confidence = 1.0f};
+
+    InteractionTracker<kObjects> tracker;
+    InteractionTracker<kObjects>::Result result;
+    for (std::uint32_t id = 0; id < kObjects; ++id) {
+        press.sequence = id + 1;
+        press.object_id = id;
+        REQUIRE(tracker.submit(press, result) == InteractionVerdict::accepted);
+    }
+    REQUIRE(tracker.active_count() == kObjects);
+
+    auto restart = press;
+    restart.epoch = 2;
+    restart.sequence = 1;
+    restart.object_id = 1000;
+    REQUIRE(tracker.submit(restart, result) == InteractionVerdict::accepted);
+    const auto events = result.events_view();
+    REQUIRE(events.size() == kObjects + 1);
+    for (std::size_t i = 0; i < kObjects; ++i)
+        CHECK(events[i].phase == InteractionPhase::cancel);
+    CHECK(events.back().phase == InteractionPhase::press);
+    CHECK(events.back().object_id == 1000);
+    CHECK(tracker.active_count() == 1);
+
+    // The default router size has the same bound; the press must reach both consumers.
+    InteractionRouter<256> router;
+    for (std::uint32_t id = 0; id < kObjects; ++id) {
+        press.sequence = id + 1;
+        press.object_id = id;
+        REQUIRE(router.publish(press));
+    }
+    REQUIRE(router.publish(restart));
+    InteractionEvent observed{};
+    for (int consumer = 0; consumer < 2; ++consumer) {
+        std::size_t presses = 0, cancels = 0;
+        bool saw_restart = false;
+        while (consumer == 0 ? router.try_pop_ui(observed) : router.try_pop_audio(observed)) {
+            if (observed.phase == InteractionPhase::press) {
+                ++presses;
+                saw_restart = saw_restart || observed.object_id == 1000;
+            } else if (observed.phase == InteractionPhase::cancel) {
+                ++cancels;
+            }
+        }
+        CHECK(presses == kObjects + 1);
+        CHECK(cancels == kObjects);
+        CHECK(saw_restart);
+    }
+}
+
 TEST_CASE("interaction tracker cancels every object on a restart terminal event",
           "[runtime][interaction-event]") {
     InteractionTracker<2> tracker;
