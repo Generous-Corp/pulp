@@ -118,14 +118,13 @@ struct PulpPluginEditorFactoryRegistrar {
 } // namespace
 " @ONLY)
 
-    # An AUv3 extension loads its editor from a framework inside a container
-    # app, and nothing stages UI package libraries there yet. Refuse instead
-    # of shipping an extension whose editor cannot load.
+    # iOS AUv3 is a flat extension bundle and needs its own runtime staging.
+    # macOS AUv3 stages package libraries beside its framework binary.
     get_target_property(_runtime_libraries "${ui}" PULP_EDITOR_RUNTIME_LIBRARIES)
-    if(_runtime_libraries AND (TARGET "${target}_AUv3" OR TARGET "${target}_AUv3Framework"))
+    if(_runtime_libraries AND PULP_IOS AND TARGET "${target}_AUv3")
         message(FATAL_ERROR
             "pulp_add_plugin(${target}): UI package '${ui}' needs runtime libraries "
-            "(${_runtime_libraries}), which the AUv3 format cannot carry yet; drop AUv3 "
+            "(${_runtime_libraries}), which iOS AUv3 cannot carry yet; drop AUv3 "
             "from FORMATS for this plug-in")
     endif()
 
@@ -186,6 +185,9 @@ function(_pulp_stage_ui_package_runtime plugin module)
         set_property(TARGET "${module}" APPEND PROPERTY INSTALL_RPATH "${_origin}")
     endif()
     set_property(TARGET "${module}" PROPERTY PULP_UI_PACKAGE_RUNTIME_LIBRARIES "${_libraries}")
+    # UI package sidecars are runtime dependencies too, so the common
+    # configure-time assertion accepts this staging path.
+    set_property(TARGET "${module}" PROPERTY PULP_RUNTIME_DEPENDENCIES_STAGED TRUE)
 endfunction()
 
 # Copy the UI package runtime libraries staged beside `module` into `dest`, the

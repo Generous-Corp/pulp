@@ -152,7 +152,25 @@ function(_pulp_add_auv3_macos_framework target name bundle_id version auv3_entry
     # installed-SDK builds, and the old `if(COMMAND ...)` guard is what let
     # a missing definition silently skip staging entirely.
     pulp_stage_runtime_dependencies(${fw_target})
+    _pulp_stage_ui_package_runtime(${target} ${fw_target})
     pulp_assert_runtime_dependencies_staged(${fw_target})
+
+    # Sign package dylibs before the framework is signed by the outer bundle
+    # step. Nested code must be signed from the inside out.
+    set(_ui_package "${PULP_${target}_UI_PACKAGE}")
+    if(_ui_package AND TARGET "${_ui_package}")
+        get_target_property(_ui_runtime_libraries "${_ui_package}" PULP_EDITOR_RUNTIME_LIBRARIES)
+        if(_ui_runtime_libraries)
+            find_program(_pulp_codesign codesign REQUIRED)
+            foreach(_ui_runtime_library IN LISTS _ui_runtime_libraries)
+                add_custom_command(TARGET ${fw_target} POST_BUILD
+                    COMMAND "${_pulp_codesign}" --force --sign -
+                        "$<TARGET_FILE_DIR:${fw_target}>/$<TARGET_FILE_NAME:${_ui_runtime_library}>"
+                    COMMENT "Signing $<TARGET_FILE_NAME:${_ui_runtime_library}> inside ${fw_target}"
+                    VERBATIM)
+            endforeach()
+        endif()
+    endif()
     _pulp_attach_plugin_runtime_manifest(${target} ${fw_target})
     _pulp_attach_control_shipping(${target} ${fw_target} AUv3Framework)
 endfunction()
