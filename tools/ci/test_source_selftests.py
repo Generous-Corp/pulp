@@ -1698,6 +1698,20 @@ class PrepushCapTests(unittest.TestCase):
             ("named-slow", "name match only, about 50 s"),
             ("locked", "needs the machine to itself")])
 
+    def test_selection_that_overruns_the_cap_is_not_checked(self) -> None:
+        def slow(*_args):
+            time.sleep(5)
+            return []
+
+        start = time.monotonic()
+        picked, error = prepush.select_within([], [], pathlib.Path("/"), pathlib.Path("/w"),
+                                              0.2, selector=slow)
+        self.assertEqual((picked, error), (None, None))
+        self.assertLess(time.monotonic() - start, 2)
+        picked, error = prepush.select_within([], [], pathlib.Path("/"), pathlib.Path("/w"),
+                                              5, selector=lambda *a: ["x"])
+        self.assertEqual((picked, error), (["x"], None))
+
     def test_the_cap_is_never_raised_past_sixty_seconds(self) -> None:
         with mock.patch.dict(os.environ, {"PULP_PREPUSH_FIXTURE_BUDGET": "600"}):
             self.assertEqual(prepush.cap_seconds(None), 60.0)

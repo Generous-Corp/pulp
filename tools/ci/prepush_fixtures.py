@@ -216,6 +216,28 @@ def select(entries: list[dict], changed: list[str], repo: pathlib.Path,
     return sorted(picked, key=priority)
 
 
+def select_within(entries: list[dict], changed: list[str], repo: pathlib.Path,
+                  workflow: pathlib.Path, seconds: float,
+                  selector: Callable[..., list[dict]] | None = None,
+                  ) -> tuple[list[dict] | None, BaseException | None]:
+    """``select`` bounded by ``seconds``: (None, None) when it does not finish."""
+    selector = selector or select
+    box: dict[str, Any] = {}
+
+    def work() -> None:
+        try:
+            box["picked"] = selector(entries, changed, repo, workflow)
+        except Exception as exc:  # reported as could-not-run by the caller
+            box["error"] = exc
+
+    thread = threading.Thread(target=work, daemon=True)
+    thread.start()
+    thread.join(max(0.0, seconds))
+    if thread.is_alive():
+        return None, None
+    return box.get("picked"), box.get("error")
+
+
 def plan(picked: list[dict]) -> tuple[list[dict], list[tuple[dict, str]]]:
     """Split a selection into what runs and what is left NOT CHECKED up front."""
     runnable: list[dict] = []
@@ -435,13 +457,25 @@ def main(argv: list[str] | None = None) -> int:
         triggers = load_triggers(triggers_path) if triggers_path.is_file() else {}
         costs = load_costs(triggers_path) if triggers_path.is_file() else {}
         entries, hook_owned = candidates(repo, workflow, manifest, triggers, costs)
-        picked = select(entries, changed, repo, workflow)
     except (OSError, ValueError, subprocess.CalledProcessError, lane.ManifestError) as exc:
         print(f"✗ fixture tests: could not select ({exc}) | repro: "
               f"python3 tools/ci/prepush_fixtures.py --base {args.base}")
         return 2
 
     budget = cap_seconds(args.budget)
+    # Selection reads every candidate's source and the import graph; on a cold
+    # cache under heavy load that alone has taken over a minute, so it runs
+    # inside the cap too.
+    picked, error = select_within(entries, changed, repo, workflow,
+                                  budget - (time.monotonic() - started))
+    if error is not None:
+        print(f"✗ fixture tests: could not select ({error}) | repro: "
+              f"python3 tools/ci/prepush_fixtures.py --base {args.base}")
+        return 2
+    if picked is None:
+        print(f"[pre-push] fixture tests NOT CHECKED: choosing them did not finish within the "
+              f"{budget:g} s cap (a loaded host). CI runs them; to run them now: {GATES_COMMAND}")
+        return 0
     jobs = args.jobs or default_jobs()
     runnable, deferred = plan(picked)
     print(f"[pre-push] fixture tests: {len(picked)} of {len(entries)} reached by "
