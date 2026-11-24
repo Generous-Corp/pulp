@@ -7,6 +7,6 @@
   "paths": [
     "core/view/src/design_codegen.cpp"
   ],
-  "vellum_inherits": true,
-  "rationale": "Vellum mirrors the same web-compat generate_node in framework/core/view/src/design_codegen.cpp and Forge's Designer link lowers through it, so the next re-export should carry the wrapped-row lowering for multi-column row-flow grids."
+  "vellum_inherits": false,
+  "rationale": "Pulp-only edit to the web-compat generate_node grid lowering. Vellum's framework transfer is in effect, so Vellum takes the same change directly in framework/core/view/src/design_codegen.cpp, where the emitter block is identical."
 }
