@@ -1075,6 +1075,55 @@ TEST_CASE("a static browser fader keeps authored track and ticks while its thumb
               pulp::canvas::DrawCommand::Type::fill_rounded_rect) > 0);
 }
 
+TEST_CASE("a captured fader indicator travels the padded content box and keeps its crop-box cross position",
+          "[import-design][fader][indicator][geometry]") {
+    TempDirectory temp;
+    auto solid = [](int w, int h) {
+        ImportPngImage image;
+        image.width = w;
+        image.height = h;
+        image.rgba.assign(static_cast<std::size_t>(w) * h * 4, 200);
+        return image;
+    };
+    write_png(temp.root / "body.png", solid(100, 40));
+    write_png(temp.root / "ind.png", solid(10, 16));
+    auto load = [&](const char* name, int w, int h) {
+        auto strip = std::make_shared<pulp::view::SpriteStrip>();
+        REQUIRE(strip->load_from_file((temp.root / name).string(), w, h, 1,
+                                      pulp::view::SpriteStrip::Orientation::vertical));
+        return strip;
+    };
+
+    pulp::view::Fader fader;
+    fader.set_orientation(pulp::view::Fader::Orientation::horizontal);
+    fader.set_bounds({0.0f, 0.0f, 100.0f, 40.0f});
+    fader.set_border_width(4.0f);
+    fader.flex().padding = 0.0f;
+    fader.flex().padding_left = 6.0f;
+    fader.flex().padding_right = 2.0f;
+    fader.set_captured_art(load("body.png", 100, 40), load("ind.png", 10, 16), 0.25f, 0.0f, 0.0f,
+                           100.0f, 40.0f, false);
+
+    auto indicator_origin = [&](float value) {
+        fader.set_value(value);
+        pulp::canvas::RecordingCanvas canvas;
+        fader.paint(canvas);
+        std::vector<pulp::canvas::DrawCommand> images;
+        for (const auto& command : canvas.commands())
+            if (command.type == pulp::canvas::DrawCommand::Type::draw_image)
+                images.push_back(command);
+        REQUIRE_FALSE(images.empty());
+        return std::pair{images.back().f[0], images.back().f[1]};
+    };
+    // Content box runs 10..94 (border 4 plus padding 6 / 2): a 10px thumb's
+    // left edge spans 10..84 along the value axis.
+    CHECK(indicator_origin(0.0f).first == Catch::Approx(10.0f));
+    CHECK(indicator_origin(1.0f).first == Catch::Approx(84.0f));
+    // The captured cross fraction is relative to the full crop box: 0.25 * 40
+    // is 10, so the 16px indicator's top edge is 2, whatever the border is.
+    CHECK(indicator_origin(0.5f).second == Catch::Approx(2.0f));
+}
+
 TEST_CASE("static capture preserves an opaque thumb and isolates a rounded thumb",
           "[import-design][browser-capture][fader][indicator][static-frame]") {
     auto checker = [] {
