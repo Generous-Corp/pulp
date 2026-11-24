@@ -39,6 +39,7 @@ import json
 import os
 import pathlib
 import re
+import shutil
 import signal
 import subprocess
 import sys
@@ -459,9 +460,53 @@ def run_budgeted(entries: list[dict], repo: pathlib.Path, *, python: str = sys.e
 # --force removes a locked worktree. If the add was stopped before it wrote
 # the checkout's .git file, remove refuses; unlocking first lets the prune
 # drop the record once the directory is gone.
+# The rm is retried: a file written as the removal starts makes it fail once.
 BASE_CLEANUP = ('git worktree unlock "$1" 2>/dev/null; '
                 'git worktree remove --force --force "$1" 2>/dev/null; '
-                'rm -r -f "$2"; git worktree prune 2>/dev/null')
+                'for _ in 1 2 3 4 5; do rm -r -f "$2" 2>/dev/null; [ -e "$2" ] || break; '
+                'sleep 0.4; done; git worktree prune 2>/dev/null')
+REMOVE_TRIES = 5
+REMOVE_PAUSE = 0.4
+
+
+class BaseCheckoutInterrupted(Exception):
+    """The cap ran out while the base checkout was being written."""
+
+
+def add_base_checkout(repo: pathlib.Path, checkout: pathlib.Path, commit: str,
+                      seconds: float, command: list[str] | None = None) -> None:
+    """``git worktree add`` in its own process group, killed whole on the cap.
+
+    Killing only git leaves the checkout it started still writing files, and
+    a removal that runs meanwhile loses the race and leaves the directory.
+    """
+    argv = command or ["git", "worktree", "add", "--quiet", "--detach", str(checkout), commit]
+    proc = subprocess.Popen(argv, cwd=repo, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                            stderr=subprocess.PIPE, start_new_session=True)
+    try:
+        _, err = proc.communicate(timeout=max(0.1, seconds))
+    except subprocess.TimeoutExpired:
+        _reap(proc)
+        raise BaseCheckoutInterrupted() from None
+    if proc.returncode != 0:
+        raise subprocess.CalledProcessError(proc.returncode, argv,
+                                            stderr=(err or b"").decode("utf-8", "replace"))
+
+
+def remove_base_now(repo: pathlib.Path, holder: pathlib.Path, checkout: pathlib.Path,
+                    sleep: Callable[[float], None] = time.sleep) -> bool:
+    """Remove an interrupted base checkout before the step ends; True when gone."""
+    for command in (["git", "worktree", "unlock", str(checkout)],
+                    ["git", "worktree", "remove", "--force", "--force", str(checkout)]):
+        subprocess.run(command, cwd=repo, capture_output=True, check=False, timeout=10)
+    for attempt in range(REMOVE_TRIES):
+        shutil.rmtree(holder, ignore_errors=True)
+        if not holder.exists():
+            break
+        sleep(REMOVE_PAUSE)
+    subprocess.run(["git", "worktree", "prune"], cwd=repo, capture_output=True, check=False,
+                   timeout=10)
+    return not holder.exists()
 
 
 def base_verdicts(failures: list[tuple[dict, dict]], base: str, repo: pathlib.Path,
@@ -486,9 +531,7 @@ def base_verdicts(failures: list[tuple[dict, dict]], base: str, repo: pathlib.Pa
             encoding="utf-8", check=True, timeout=max(0.5, deadline - clock())).stdout.strip()
         holder = pathlib.Path(tempfile.mkdtemp(prefix=".prepush-fixtures-base-", dir=repo.parent))
         checkout = holder / "base"
-        subprocess.run(["git", "worktree", "add", "--quiet", "--detach", str(checkout), merge_base],
-                       cwd=repo, capture_output=True, text=True, encoding="utf-8", check=True,
-                       timeout=max(0.5, deadline - clock()))
+        add_base_checkout(repo, checkout, merge_base, deadline - clock())
         for entry, result in failures:
             if not all(src.is_file() for src in lane.entry_sources(entry, checkout)):
                 verdicts[entry["name"]] = lane.base_verdict(result, None)
@@ -497,6 +540,13 @@ def base_verdicts(failures: list[tuple[dict, dict]], base: str, repo: pathlib.Pa
                 break
             on_base = _run_until(entry, checkout, python, deadline, clock)
             verdicts[entry["name"]] = lane.base_verdict(result, on_base, str(repo), str(checkout))
+    except BaseCheckoutInterrupted:
+        # The checkout is partial and small: remove it now, so nothing is left
+        # in the shared worktrees root.
+        if holder is not None and not remove_base_now(repo, holder, checkout):
+            print(f"[pre-push] fixture tests: could not remove the interrupted base checkout "
+                  f"{holder}; remove it by hand.")
+        holder = None
     except (OSError, subprocess.SubprocessError) as exc:
         for name, (explained, _) in verdicts.items():
             if not explained:

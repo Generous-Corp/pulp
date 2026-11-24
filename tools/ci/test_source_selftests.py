@@ -1887,6 +1887,36 @@ class PrepushOutcomeTests(unittest.TestCase):
 class PrepushBaseCleanupTests(unittest.TestCase):
     """A base checkout the cap interrupted (left locked) is still removed."""
 
+    def test_an_interrupted_checkout_leaves_no_directory(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            parent = pathlib.Path(tmp).resolve()
+            root = parent / "repo"
+            root.mkdir()
+            subprocess.run(["git", "init", "-q"], cwd=root, check=True)
+            holder = parent / ".prepush-fixtures-base-z"
+            checkout = holder / "base"
+            checkout.mkdir(parents=True)
+            # A slow fake checkout: it and a child in its group keep writing
+            # files until killed, as git's checkout does after the add starts.
+            loop = ("import os, sys, time\n"
+                    "for i in range(10**6):\n"
+                    "    try:\n"
+                    "        os.makedirs(sys.argv[1], exist_ok=True)\n"
+                    "        open(os.path.join(sys.argv[1], sys.argv[2] + str(i)), 'w').close()\n"
+                    "    except OSError:\n"
+                    "        pass\n"
+                    "    time.sleep(0.005)\n")
+            writer = ("import subprocess, sys\n"
+                      f"loop = {loop!r}\n"
+                      "subprocess.Popen([sys.executable, '-c', loop, sys.argv[1], 'c'])\n"
+                      "exec(compile(loop, 'w', 'exec'), {'__name__': 'w'})\n")
+            with self.assertRaises(prepush.BaseCheckoutInterrupted):
+                prepush.add_base_checkout(root, checkout, "HEAD", 0.5,
+                                          command=[sys.executable, "-c", writer, str(checkout), "p"])
+            self.assertTrue(prepush.remove_base_now(root, holder, checkout))
+            time.sleep(0.5)  # nothing still running may recreate it
+            self.assertFalse(holder.exists())
+
     def test_cleanup_removes_a_locked_base_worktree(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             parent = pathlib.Path(tmp).resolve()
