@@ -5,6 +5,10 @@ The author refreshes a branch with ``git merge origin/main``.  This helper lets
 the local gates inspect that same hypothetical tree before the merge exists,
 so generated script manifests cannot silently validate only the old branch.
 Compiled/build checks intentionally do not run here.
+
+``--overall-bound`` caps checkout and checker execution against a shared elapsed
+budget. Git metadata operations (including merge-tree/commit-tree and pruning)
+and cleanup are outside that enforcement; this is not a whole-command deadline.
 """
 from __future__ import annotations
 
@@ -125,21 +129,24 @@ def _run(cmd: list[str], cwd: Path, env: dict[str, str], timeout: float | None =
 
 def add_worktree(root: Path, path: Path, commit: str,
                  timeout: float | None) -> subprocess.CompletedProcess[str] | None:
-    """`git worktree add --detach`, in its own process group so a timeout can
-    kill the whole group (git and the checkout it spawned). None on timeout."""
+    """`git worktree add --detach`, with group teardown on timeout/cancellation.
+    Reap before the caller removes the worktree. None on timeout."""
     proc = subprocess.Popen(
         ["git", "-C", str(root), "worktree", "add", "--detach", str(path), commit],
         text=True, encoding="utf-8", stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
         stderr=subprocess.PIPE, start_new_session=True)
     try:
         out, err = proc.communicate(timeout=timeout)
-    except subprocess.TimeoutExpired:
+    except BaseException as exc:
+        # Cancellation must unwind through here before outer worktree cleanup.
         try:
             os.killpg(proc.pid, signal.SIGKILL)
         except (ProcessLookupError, PermissionError):
             pass
         proc.communicate()
-        return None
+        if isinstance(exc, subprocess.TimeoutExpired):
+            return None
+        raise
     return subprocess.CompletedProcess(proc.args, proc.returncode, out, err)
 
 
@@ -197,8 +204,9 @@ def main(argv: list[str] | None = None) -> int:
                     help="run the agent-capability manifest check only when base...head touches "
                          "its inputs (the pre-push hook passes this; gates.sh always runs it)")
     ap.add_argument("--overall-bound", type=float, default=0.0, metavar="SECONDS",
-                    help="stop after this many seconds in total and exit "
-                         f"{BOUND_EXCEEDED} (not checked, advisory); 0 means no bound")
+                    help="cap checkout and checker execution with this shared elapsed budget "
+                         f"and exit {BOUND_EXCEEDED} (not checked, advisory); "
+                         "metadata operations and cleanup are not bounded; 0 means no bound")
     args = ap.parse_args(argv)
     deadline = time.monotonic() + args.overall_bound if args.overall_bound > 0 else None
     root = args.repo_root.resolve()
@@ -240,7 +248,7 @@ def main(argv: list[str] | None = None) -> int:
             shutil.rmtree(tmp, ignore_errors=True)
 
     def on_signal(signum: int, _frame: object) -> None:
-        cleanup()
+        # add_worktree tears down its child before the finally block cleans up.
         raise SystemExit(128 + signum)
 
     old_handlers = {s: signal.signal(s, on_signal) for s in (signal.SIGINT, signal.SIGTERM, signal.SIGHUP)}

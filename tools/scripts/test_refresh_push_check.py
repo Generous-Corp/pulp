@@ -669,6 +669,62 @@ def case_the_overall_bound_during_the_add_exits_not_checked_and_cleans_up(fx: Fi
     assert not list(fx.repo.parent.glob("pulp-merge-tree-*")), list(fx.repo.parent.glob("pulp-merge-tree-*"))
 
 
+
+def case_cancellation_reaps_checkout_before_removing_its_worktree(fx: Fixture) -> None:
+    """Deliver real signals inside add's communicate and observe teardown order."""
+    import signal
+    from unittest import mock
+
+    fx.setup()
+    real_popen = subprocess.Popen
+    real_remove = merge_tree_state.remove_worktree
+    for signum in (signal.SIGINT, signal.SIGTERM):
+        children = []
+        events = []
+
+        def popen(*args, **kwargs):
+            proc = real_popen(*args, **kwargs)
+            if "worktree" in proc.args and "add" in proc.args:
+                children.append(proc)
+                communicate = proc.communicate
+
+                def cancel_once(*a, **kw):
+                    proc.communicate = communicate
+                    os.kill(os.getpid(), signum)
+                    raise AssertionError("signal did not interrupt checkout")
+
+                proc.communicate = cancel_once
+            return proc
+
+        def remove(root, path):
+            events.append("cleanup")
+            assert children and children[-1].returncode is not None, "cleanup preceded checkout reap"
+            real_remove(root, path)
+
+        try:
+            with mock.patch.object(subprocess, "Popen", side_effect=popen), \
+                 mock.patch.object(merge_tree_state, "remove_worktree", side_effect=remove):
+                try:
+                    merge_tree_state.main(["--repo-root", str(fx.repo)])
+                except SystemExit as exc:
+                    assert exc.code == 128 + signum, exc.code
+                else:
+                    raise AssertionError("cancellation was swallowed")
+            assert events == ["cleanup"], events
+            assert fx.git("worktree", "list", "--porcelain").count("worktree ") == 1
+            assert not list(fx.tmp.glob("pulp-merge-tree-*"))
+        finally:
+            # Also reap on the deliberately broken control implementation.
+            for proc in children:
+                try:
+                    os.killpg(proc.pid, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
+                proc.communicate()
+            for path in fx.tmp.glob("pulp-merge-tree-*"):
+                real_remove(fx.repo, path)
+
+
 def case_the_capability_check_runs_only_when_the_range_touches_its_inputs(fx: Fixture) -> None:
     fx.setup()
     base = fx.git("rev-parse", "origin/main")

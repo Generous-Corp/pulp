@@ -519,8 +519,9 @@ unset _prepush_dirty
 # receives the exact pushed source object captured above.
 MERGE_TREE_SCRIPT_STATE="$ROOT/tools/scripts/merge_tree_script_state.py"
 MERGE_TREE_BASE="${PULP_PREPUSH_BASE:-origin/main}"
-# Overall time bound for the check, in seconds (0 = unbounded). Past it the
-# check is NOT CHECKED and advisory; CI builds the same merged tree.
+# Shared elapsed budget for checkout and checkers (0 = unbounded). Git metadata
+# operations and cleanup are not bounded. Exhaustion is NOT CHECKED and advisory;
+# CI builds the same merged tree.
 MERGE_TREE_BOUND="${PULP_PREPUSH_MERGE_TREE_BOUND:-30}"
 # Set to 1 when the check ran to a clean pass: it already ran the static
 # changed-surface families check on the merged tree (see below).
