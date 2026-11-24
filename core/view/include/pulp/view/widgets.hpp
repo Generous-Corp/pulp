@@ -1503,12 +1503,23 @@ public:
                std::clamp(normalized_position, 0.0f, 1.0f) * usable;
     }
 
+    /// Distance from the widget's edge to its content box on one side: the
+    /// border plus the padding, the box a browser range thumb travels inside.
     float effective_axis_border(bool vertical, bool leading) const {
-        if (vertical)
-            return leading ? (has_border_top_set() ? border_top_width() : border_width())
-                           : (has_border_bottom_set() ? border_bottom_width() : border_width());
-        return leading ? (has_border_left_set() ? border_left_width() : border_width())
-                       : (has_border_right_set() ? border_right_width() : border_width());
+        const auto& f = flex();
+        auto side_padding = [&](float side) { return side >= 0.0f ? side : f.padding; };
+        float border;
+        float padding;
+        if (vertical) {
+            border = leading ? (has_border_top_set() ? border_top_width() : border_width())
+                             : (has_border_bottom_set() ? border_bottom_width() : border_width());
+            padding = side_padding(leading ? f.padding_top : f.padding_bottom);
+        } else {
+            border = leading ? (has_border_left_set() ? border_left_width() : border_width())
+                             : (has_border_right_set() ? border_right_width() : border_width());
+            padding = side_padding(leading ? f.padding_left : f.padding_right);
+        }
+        return border + std::max(0.0f, padding);
     }
 
     // Custom body shader comes from CustomShaderHost.

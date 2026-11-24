@@ -10,6 +10,16 @@ TEST_CASE("captured fader thumb travel stays inside the content box",
     CHECK(Fader::thumb_axis_position(100.0f, 1.0f, 1.0f, 10.0f, 0.5f) == Catch::Approx(50.0f));
 }
 
+TEST_CASE("fader content box insets by border plus padding", "[view][widgets][fader][geometry]") {
+    Fader fader;
+    fader.set_border_width(3.0f);
+    fader.flex().padding = 2.0f;
+    fader.flex().padding_left = 5.0f;
+    CHECK(fader.effective_axis_border(false, true) == Catch::Approx(8.0f));
+    CHECK(fader.effective_axis_border(false, false) == Catch::Approx(5.0f));
+    CHECK(fader.effective_axis_border(true, true) == Catch::Approx(5.0f));
+}
+
 TEST_CASE("persisted browser faders retain split indicator asset metadata",
           "[view][import][ir-v1][fader][assets]") {
     const auto temp = pulp::test::make_unique_temp_dir("fader-persist");
@@ -42,7 +52,7 @@ TEST_CASE("manifest AssetIds materialize split fader art paths and natural sizes
           "[view][import][ir-v1][fader][assets]") {
     IRAssetManifest manifest;
     const std::vector<std::tuple<const char*, const char*, int, int>> specs = {
-        {"body-1", "art/body.png", 40, 120}, {"ind-1", "art/ind.png", 18, 10}};
+        {"body-1", "/art/body.png", 40, 120}, {"ind-1", "/art/ind.png", 18, 10}};
     for (const auto& [id, path, w, h] : specs) {
         IRAssetRef asset;
         asset.asset_id = id;
@@ -60,8 +70,8 @@ TEST_CASE("manifest AssetIds materialize split fader art paths and natural sizes
     fader.attributes["fader_indicator_asset_pathAssetId"] = "ind-1";
     materialize_manifest_image_uris(fader, manifest);
 
-    CHECK(fader.attributes.at("fader_body_asset_path") == "file://art/body.png");
-    CHECK(fader.attributes.at("fader_indicator_asset_path") == "file://art/ind.png");
+    CHECK(fader.attributes.at("fader_body_asset_path") == "file:///art/body.png");
+    CHECK(fader.attributes.at("fader_indicator_asset_path") == "file:///art/ind.png");
     CHECK(fader.attributes.at("fader_body_natural_w") == "40");
     CHECK(fader.attributes.at("fader_body_natural_h") == "120");
     CHECK(fader.attributes.at("fader_indicator_natural_w") == "18");
