@@ -3,9 +3,9 @@
 
 TEST_CASE("captured fader thumb travel stays inside the content box",
           "[view][widgets][fader][geometry]") {
-    CHECK(Fader::thumb_axis_position(100.0f, 1.0f, 1.0f, 10.0f, 0.0f) == Approx(6.0f));
-    CHECK(Fader::thumb_axis_position(100.0f, 1.0f, 1.0f, 10.0f, 1.0f) == Approx(94.0f));
-    CHECK(Fader::thumb_axis_position(100.0f, 1.0f, 1.0f, 10.0f, 0.5f) == Approx(50.0f));
+    CHECK(Fader::thumb_axis_position(100.0f, 1.0f, 1.0f, 10.0f, 0.0f) == Catch::Approx(6.0f));
+    CHECK(Fader::thumb_axis_position(100.0f, 1.0f, 1.0f, 10.0f, 1.0f) == Catch::Approx(94.0f));
+    CHECK(Fader::thumb_axis_position(100.0f, 1.0f, 1.0f, 10.0f, 0.5f) == Catch::Approx(50.0f));
 }
 
 TEST_CASE("persisted browser faders retain split indicator asset metadata",
