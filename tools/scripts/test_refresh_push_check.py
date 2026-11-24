@@ -698,7 +698,7 @@ def case_a_not_checked_merge_tree_is_recorded_and_named_in_the_verdict(fx: Fixtu
     func = hook[start:hook.index("\n}\n", start) + 3]
     def line(**env: str) -> str:
         script = func + "\n_prepush_final_verdict_line\n"
-        res = subprocess.run(["bash", "-c", script], capture_output=True, text=True,
+        res = subprocess.run(["bash", "-c", script], capture_output=True, text=True, encoding="utf-8",
                              env={"PATH": os.environ["PATH"], **env})
         return res.stderr.strip()
     assert line() == "[pre-push] gates clean."
