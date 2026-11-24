@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "event_id": "20261124-w-grid-wrap-regression",
+  "kind": "exported-path-change",
+  "created_at": "2026-11-24T14:32:32Z",
+  "receipt_export_id": "20261107-f0ac0a4ff392",
+  "paths": [
+    "core/view/src/design_codegen.cpp"
+  ],
+  "vellum_inherits": false,
+  "rationale": "Pulp-only edit to the web-compat generate_node grid lowering. Vellum's framework transfer is in effect, so Vellum takes the same change directly in framework/core/view/src/design_codegen.cpp, where the emitter block is identical."
+}

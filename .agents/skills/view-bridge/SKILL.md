@@ -4152,3 +4152,11 @@ an editor-bearing plug-in with a heavy constructor pays that on every host scan.
 `PULP_CLAP_PLUGIN_WITH_DESCRIPTOR` / `PULP_CLAP_BUNDLE_PLUGIN_WITH_DESCRIPTOR`
 answer descriptor queries from a function, so the Processor (and its editor
 state) is built only at `create_plugin`/`init`. See the `clap` skill.
+
+## Capturing a shipped editor from outside the bundle
+
+A built plug-in exports only `clap_entry`, so `clap_adapter::contract_gui_session()`
+is not reachable from a host that dlopens it. The opt-in CLAP extension
+`pulp.editor-automation/1` (`PULP_EDITOR_AUTOMATION_EXTENSION`, default OFF)
+forwards `capture_png` to the open session's `EditorAutomation`; it is a test
+seam and absent from release plug-ins. See the `clap` skill.

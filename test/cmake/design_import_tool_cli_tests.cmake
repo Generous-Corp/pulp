@@ -201,6 +201,17 @@ pulp_test_data(pulp-test-browser-capture-import NO_DEFINE
         test_browser_capture_svg_render.cpp
     PATHS "test/fixtures/browser-capture-*"
         test/fixtures/import-differential/18-keyed-list-panel.identity.json)
+# The sealed-font case registers a real face and evaluates the UI_SCRIPT embed
+# rule from PulpUiAssets.cmake in a throwaway configure of the system CMake.
+pulp_test_data(pulp-test-browser-capture-import
+    SOURCES test_browser_capture_fonts.cpp
+    PATHS external/fonts/Jost-Regular.ttf tools/cmake/PulpUiAssets.cmake)
+set_property(SOURCE test_browser_capture_fonts.cpp APPEND PROPERTY
+    COMPILE_DEFINITIONS "PULP_CMAKE_COMMAND=\"${CMAKE_COMMAND}\"")
+# It also launches the capture launcher fixture this tree builds. The importer
+# name its CLI and intake cases use is a path under a temp tree, never run.
+pulp_test_spawns(pulp-test-browser-capture-import pulp-browser-capture-launcher-fixture)
+pulp_test_spawns(pulp-test-browser-capture-import NOT_RUN pulp-import-design)
 target_include_directories(pulp-test-browser-capture-import PRIVATE
     ${CMAKE_SOURCE_DIR}
     ${CMAKE_SOURCE_DIR}/external/miniz)

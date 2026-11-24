@@ -14,7 +14,7 @@ functions:
 
   - name: pulp_add_plugin
     status: usable
-    summary: Create plugin targets for multiple formats from a single declaration.
+    summary: Create plugin targets for multiple formats from a single declaration, including macOS AUv3 framework staging for UI package runtime libraries.
     required:
       - FORMATS
     optional:

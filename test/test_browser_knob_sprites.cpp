@@ -862,6 +862,68 @@ TEST_CASE("a declared fader hoists its authored thumb and keeps live chrome",
     CHECK(web_js.find("maliciousCall") == std::string::npos);
 }
 
+TEST_CASE("a persisted fader carrying only asset identities still loads its art",
+          "[import-design][browser-capture][fader][indicator][assets]") {
+    TempDirectory temp;
+    const auto panel = synthetic_fader_panel();
+    const auto capture = temp.root / "browser.png";
+    write_png(capture, panel);
+
+    DesignIR ir;
+    ir.source = pulp::view::DesignSource::html;
+    ir.root.type = "frame";
+    ir.root.stable_anchor_id = "root";
+    ir.root.style.width = static_cast<float>(kPanelWidth) * 0.5f;
+    ir.root.style.height = static_cast<float>(kPanelHeight) * 0.5f;
+    ir.root.children.push_back(declared_fader());
+
+    std::string error;
+    REQUIRE(pulp::import_design::apply_browser_capture_control_sprites(
+                ir, capture, temp.root / "sprites", &error) == 1);
+
+    // Persisted shape: scratch paths gone, identities in the manifest only.
+    auto& node = ir.root.children.front();
+    pulp::view::IRAssetManifest manifest;
+    int n = 0;
+    for (const char* key : {"fader_body_asset_path", "fader_indicator_asset_path"}) {
+        pulp::view::IRAssetRef asset;
+        asset.asset_id = std::string("fader-art-") + std::to_string(n++);
+        asset.local_path = fs::relative(node.attributes.at(key), temp.root).generic_string();
+        node.attributes.erase(key);
+        node.attributes[std::string(key) + "AssetId"] = asset.asset_id;
+        manifest.assets.push_back(std::move(asset));
+    }
+
+    auto root =
+        pulp::view::build_native_view_tree(ir, manifest, {.asset_base_directory = temp.root});
+    REQUIRE(root != nullptr);
+    auto* fader = dynamic_cast<pulp::view::Fader*>(root->child_at(0));
+    REQUIRE(fader != nullptr);
+    CHECK(fader->has_captured_indicator_art());
+
+    // A stale scratch path left beside a valid identity does not shadow it.
+    for (const char* key : {"fader_body_asset_path", "fader_indicator_asset_path"})
+        node.attributes[key] = (temp.root / "gone" / "missing.png").string();
+    auto stale =
+        pulp::view::build_native_view_tree(ir, manifest, {.asset_base_directory = temp.root});
+    REQUIRE(stale != nullptr);
+    auto* stale_fader = dynamic_cast<pulp::view::Fader*>(stale->child_at(0));
+    REQUIRE(stale_fader != nullptr);
+    CHECK(stale_fader->has_captured_indicator_art());
+    for (const char* key : {"fader_body_asset_path", "fader_indicator_asset_path"})
+        node.attributes.erase(key);
+
+    // An identity whose path escapes the document directory never loads.
+    fs::copy_file(temp.root / *manifest.assets[1].local_path, temp.root / "escape.png");
+    manifest.assets[1].local_path = "../escape.png";
+    auto escaped = pulp::view::build_native_view_tree(
+        ir, manifest, {.asset_base_directory = temp.root / "sprites"});
+    REQUIRE(escaped != nullptr);
+    auto* escaped_fader = dynamic_cast<pulp::view::Fader*>(escaped->child_at(0));
+    REQUIRE(escaped_fader != nullptr);
+    CHECK_FALSE(escaped_fader->has_captured_indicator_art());
+}
+
 TEST_CASE("a hollow fader thumb preserves its authored outline color",
           "[import-design][browser-capture][fader][indicator][color]") {
     TempDirectory temp;

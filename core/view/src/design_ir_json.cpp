@@ -553,14 +553,25 @@ static IRLayout parse_ir_layout(const choc::value::ValueView& obj) {
 static std::optional<IRConfidence> parse_confidence(const std::string& value);
 
 bool is_asset_reference_key(std::string_view key) {
-    static constexpr const char* kAssetKeys[] = {
-        "src", "href", "image", "imageSrc", "source", "backgroundImage",
-        "background-image", "fontUrl", "fontURL", "asset", "url"
-    };
+    static constexpr const char* kAssetKeys[] = {"src",
+                                                 "href",
+                                                 "image",
+                                                 "imageSrc",
+                                                 "source",
+                                                 "backgroundImage",
+                                                 "background-image",
+                                                 "fontUrl",
+                                                 "fontURL",
+                                                 "asset",
+                                                 "url",
+                                                 "fader_body_asset_path",
+                                                 "fader_indicator_asset_path"};
     for (const char* asset_key : kAssetKeys) {
-        if (key == asset_key) return true;
+        if (key == asset_key)
+            return true;
     }
-    if (key.rfind("htmlAsset", 0) == 0) return true;
+    if (key.rfind("htmlAsset", 0) == 0)
+        return true;
     return false;
 }
 

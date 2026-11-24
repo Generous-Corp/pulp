@@ -13,73 +13,79 @@ namespace pulp::vellum {
 
 /// Routes bounded runtime interactions into one Vellum editor root.
 ///
-/// Object IDs are kept as independent pointer sessions. Events older than the
-/// current epoch are ignored, and a newer epoch closes the previous sessions.
-/// The adapter owns only fixed-capacity storage. Vellum's event type has no
+/// Object IDs are kept as independent pointer sessions. The adapter owns only
+/// fixed-capacity storage. Vellum's event type has no
 /// fields for hold, velocity, or confidence, so hold is delivered as a drag
 /// tick and those values are not represented in the Vellum event.
 ///
-/// A batch is bound to the source of its first event: events from any other
-/// source in the same batch are dropped without routing. deliver() returns true
-/// only when at least one event was routed, so a false result can be a
-/// legitimately dropped batch (stale epoch, other source, or a pointer that is
-/// not active) and is not an error.
+/// A newer epoch does not clear the adapter's pointer sessions by itself. It
+/// relies on the cancels that `runtime::InteractionTracker` emits for every
+/// live object at an epoch change, so a source that bypasses the tracker must
+/// send those cancels itself or its old sessions stay open.
+///
+/// deliver() returns true only when at least one event was routed.
 class InteractionAdapter final {
   public:
     static constexpr std::size_t kMaxPointers = 64;
+
+    void set_view_metrics(float width, float height, float backing_scale = 1.0f) noexcept {
+        view_width_ = width;
+        view_height_ = height;
+        backing_scale_ = backing_scale;
+    }
 
     template <std::size_t Capacity>
     bool deliver(::vellum::view::View& root,
                  const runtime::InteractionBatch<Capacity>& batch) noexcept {
         static_assert(Capacity <= kMaxPointers);
-        std::array<std::size_t, kMaxPointers> order{};
-        std::size_t ordered = 0;
-        bool delivered = false;
-        if (batch.count == 0)
+        const auto events = batch.events_view();
+        if (events.empty())
             return false;
-        const auto batch_source = batch.events[0].source_id;
-        std::uint32_t batch_epoch = batch.events[0].epoch;
-        for (std::size_t i = 1; i < batch.count; ++i) {
-            if (batch.events[i].source_id == batch_source && batch.events[i].epoch > batch_epoch)
-                batch_epoch = batch.events[i].epoch;
-        }
-        if (!has_source_ || source_id_ != batch_source || !has_epoch_ || batch_epoch > epoch_) {
-            source_id_ = batch_source;
-            has_source_ = true;
-            epoch_ = batch_epoch;
-            has_epoch_ = true;
-            for (auto& pointer : pointers_)
-                pointer = {};
-        }
-
-        for (std::size_t i = 0; i < batch.count; ++i) {
-            const auto& event = batch.events[i];
-            if (event.source_id != source_id_ || event.epoch != epoch_)
-                continue;
-            std::size_t position = ordered;
-            while (position > 0 && batch.events[order[position - 1]].sequence > event.sequence) {
-                order[position] = order[position - 1];
-                --position;
+        // Events arrive in the tracker's order, so the epoch is followed event
+        // by event: a batch may end one epoch (its cancels) and start the next.
+        // Another source, and a non-cancel event from an older epoch, are stale.
+        // A caller may hand over a batch out of order. Order it by (epoch,
+        // sequence) with a stable insertion sort, so events with equal keys,
+        // such as a tracker cancel followed by the press that caused it, keep
+        // their relative order.
+        std::array<runtime::InteractionEvent, Capacity> ordered{};
+        std::size_t count = 0;
+        for (const auto& event : events) {
+            std::size_t at = count;
+            while (at > 0 && (ordered[at - 1].epoch > event.epoch ||
+                              (ordered[at - 1].epoch == event.epoch &&
+                               ordered[at - 1].sequence > event.sequence))) {
+                ordered[at] = ordered[at - 1];
+                --at;
             }
-            order[position] = i;
-            ++ordered;
+            ordered[at] = event;
+            ++count;
         }
-
-        for (std::size_t i = 0; i < ordered; ++i) {
-            const auto& event = batch.events[order[i]];
-            if (route(root, event))
-                delivered = true;
+        bool delivered = false;
+        for (std::size_t i = 0; i < count; ++i) {
+            const auto& event = ordered[i];
+            if (!has_source_) {
+                source_id_ = event.source_id;
+                epoch_ = event.epoch;
+                has_source_ = true;
+            }
+            if (event.source_id != source_id_)
+                continue;
+            if (event.epoch < epoch_ && event.phase != runtime::InteractionPhase::cancel)
+                continue;
+            if (event.epoch > epoch_)
+                epoch_ = event.epoch;
+            delivered = route(root, event) || delivered;
         }
         return delivered;
     }
 
     void reset() noexcept {
-        source_id_ = 0;
-        has_source_ = false;
-        epoch_ = 0;
-        has_epoch_ = false;
         for (auto& pointer : pointers_)
             pointer = {};
+        source_id_ = 0;
+        epoch_ = 0;
+        has_source_ = false;
     }
 
   private:
@@ -119,11 +125,14 @@ class InteractionAdapter final {
         }
 
         const auto pointer_id = static_cast<int>(slot);
-        const ::vellum::view::Point point{event.x, event.y};
+        const ::vellum::view::Point point{event.x * view_width_ * backing_scale_,
+                                          event.y * view_height_ * backing_scale_};
         const ::vellum::view::PointerAttributes attributes{
             .type = ::vellum::view::PointerType::touch, .pressure = 0.5f, .pointer_id = pointer_id};
 
         switch (event.phase) {
+        case InteractionPhase::invalid:
+            return false;
         case InteractionPhase::press:
             return ::vellum::view::deliver_mouse_down(
                 root, &root, point, 0, 1, true, ::vellum::view::MouseButton::left, {}, attributes);
@@ -150,7 +159,9 @@ class InteractionAdapter final {
     std::uint32_t source_id_ = 0;
     std::uint32_t epoch_ = 0;
     bool has_source_ = false;
-    bool has_epoch_ = false;
+    float view_width_ = 1.0f;
+    float view_height_ = 1.0f;
+    float backing_scale_ = 1.0f;
 };
 
 } // namespace pulp::vellum

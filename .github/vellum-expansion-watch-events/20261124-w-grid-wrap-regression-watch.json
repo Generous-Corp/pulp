@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20261124-w-grid-wrap-regression-watch",
+  "created_at": "2026-11-24T14:32:32Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "design-ir-contract",
+    "design-source-ingest",
+    "render-assets-and-backends"
+  ],
+  "rationale": "The web-compat DesignIR emitter (generate_node in core/view/src/design_codegen.cpp) lowers a display:grid node with more than one column track and row auto-flow to a wrapped flex row instead of an unwrapped one; the web-compat runtime is flex-only, and authored heights pin flex-shrink to 0, so fixed-width cells overflowed. Single-column and column-flow grids emit exactly what they did before. Covered by a live-bounds Catch2 fixture in test_design_import_codegen_layout_text.cpp. No design-import, Chromium, rendering, or packaging authority moves.",
+  "tests": [
+    "ctest --test-dir build -R pulp-test-design-import-codegen-layout-text",
+    "python3 tools/scripts/vellum_expansion_watch_check.py --base <merge-base origin/main HEAD> --head <HEAD>",
+    "vellum-expansion-watch"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}

@@ -54,6 +54,30 @@ if(NOT _install_result EQUAL 0)
         "SDK staging failed (${_install_result})\n${_install_output}\n${_install_error}")
 endif()
 
+# A WebView-enabled SDK exports the whole-archive backend edge under the
+# installed `Pulp::` namespace. The lower-case in-tree alias does not exist in a
+# consumer's package, so leaking it breaks find_package(Pulp) at generate time.
+if(PULP_PARENT_BUILD_WEBVIEW)
+    file(GLOB _installed_targets LIST_DIRECTORIES false
+        "${_prefix}/lib/cmake/Pulp/PulpTargets*.cmake")
+    set(_installed_targets_text "")
+    foreach(_tf IN LISTS _installed_targets)
+        file(READ "${_tf}" _tf_text)
+        string(APPEND _installed_targets_text "${_tf_text}")
+    endforeach()
+    if(NOT _installed_targets_text MATCHES "Pulp::view-webview-backend")
+        message(FATAL_ERROR
+            "WebView SDK does not export Pulp::view-webview-backend in "
+            "${_prefix}/lib/cmake/Pulp/PulpTargets*.cmake")
+    endif()
+    if(_installed_targets_text MATCHES "pulp::view-webview-backend")
+        message(FATAL_ERROR
+            "Installed PulpTargets*.cmake references the in-tree alias "
+            "pulp::view-webview-backend; the install interface must use "
+            "Pulp::view-webview-backend.")
+    endif()
+endif()
+
 # The verifier script must ride along with the module that resolves it, or a
 # consumer can stage sidecars but never check them.
 if(NOT EXISTS "${_prefix}/lib/cmake/Pulp/PulpVerifyRuntimeStaging.cmake")

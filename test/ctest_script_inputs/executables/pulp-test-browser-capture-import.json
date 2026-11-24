@@ -5,6 +5,7 @@
   "detected_sources": [
    "test/test_browser_capture_backdrop_filter.cpp",
    "test/test_browser_capture_font_smoothing.cpp",
+   "test/test_browser_capture_fonts.cpp",
    "test/test_browser_capture_gradient_border.cpp",
    "test/test_browser_capture_group_opacity.cpp",
    "test/test_browser_capture_ir.cpp",
@@ -14,13 +15,19 @@
    "test/test_browser_capture_tree.cpp"
   ],
   "inputs": [
+   "external/fonts/Jost-Regular.ttf",
    "test/fixtures/browser-capture-*",
-   "test/fixtures/import-differential/18-keyed-list-panel.identity.json"
+   "test/fixtures/import-differential/18-keyed-list-panel.identity.json",
+   "tools/cmake/PulpUiAssets.cmake"
   ],
   "kind": "compiled",
+  "runtime_targets": [
+   "pulp-browser-capture-launcher-fixture"
+  ],
   "sources": [
    "test/test_browser_capture_backdrop_filter.cpp",
    "test/test_browser_capture_font_smoothing.cpp",
+   "test/test_browser_capture_fonts.cpp",
    "test/test_browser_capture_gradient_border.cpp",
    "test/test_browser_capture_group_opacity.cpp",
    "test/test_browser_capture_ir.cpp",
@@ -29,6 +36,10 @@
    "test/test_browser_capture_text_metrics.cpp",
    "test/test_browser_capture_tree.cpp"
   ],
+  "spawning_sources": [
+   "test/test_browser_capture_fonts.cpp"
+  ],
+  "spawns": "declared",
   "undeclared_sources": []
  },
  "scanned": true

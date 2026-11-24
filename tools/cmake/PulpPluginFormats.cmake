@@ -424,6 +424,11 @@ function(_pulp_add_clap target name bundle_id version manufacturer category)
         _pulp_apply_view_mac_objc_suffix(${target}_CLAP)
         _pulp_dev_shared_ui_attach(${target} ${target}_CLAP _pulp_dev_shared)
     endif()
+    # Opt-in test-automation CLAP extension (pulp.editor-automation/1); the code
+    # is compiled out of the plug-in unless the consumer turns this on.
+    if(PULP_EDITOR_AUTOMATION_EXTENSION)
+        target_compile_definitions(${target}_CLAP PRIVATE PULP_EDITOR_AUTOMATION_EXTENSION=1)
+    endif()
     _pulp_apply_ui_script_definition(${target}_CLAP "${PULP_${target}_UI_SCRIPT}")
     _pulp_apply_macho_exports(${target}_CLAP "${target}_CLAP"
         "_clap_entry")

@@ -44,7 +44,9 @@ static_assert(offsetof(InteractionEvent, strength) == 40);
 static_assert(offsetof(InteractionEvent, confidence) == 44);
 
 template <std::size_t Capacity = 16> struct InteractionBatch {
-    static_assert(Capacity >= 1 && Capacity <= 64);
+    // The upper bound is the range of `count`. A tracker for 64 objects needs
+    // 65 entries: one cancel per live object plus the event that caused them.
+    static_assert(Capacity >= 1 && Capacity <= UINT8_MAX);
     std::array<InteractionEvent, Capacity> events{};
     std::uint8_t count = 0;
 
@@ -103,7 +105,9 @@ enum class InteractionVerdict : std::uint8_t {
 
 template <std::size_t MaxObjects = 16> class InteractionTracker {
   public:
-    static_assert(MaxObjects >= 1 && MaxObjects < 64);
+    static_assert(MaxObjects >= 1 && MaxObjects <= 64);
+    // An epoch change can cancel every live object and then add the new event,
+    // so a result must hold MaxObjects + 1 entries or that event is lost.
     using Result = InteractionBatch<MaxObjects + 1>;
 
     InteractionVerdict submit(const InteractionEvent& event, Result& output) noexcept {
