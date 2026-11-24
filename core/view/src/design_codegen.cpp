@@ -640,10 +640,17 @@ static void generate_node(std::ostringstream& ss, const IRNode& node,
     ss << ind << "const " << var << " = document.createElement('" << tag << "');\n";
 
     // Apply layout styles for container nodes
+    // The web-compat runtime lays out flex only, so a row-flow grid with
+    // several column tracks is approximated by wrapped flex rows. Lowered as a
+    // plain flex row, its fixed cells overflow instead of forming rows.
+    const auto& L = node.layout;
+    const bool grid_rows = L.display && *L.display == "grid" && L.grid_template_columns &&
+                           GridStyle::parse_template(*L.grid_template_columns).size() > 1 &&
+                           (!L.grid_auto_flow || L.grid_auto_flow->rfind("row", 0) == 0);
     if (!node.children.empty() || node.type == "frame") {
         ss << ind << var << ".style.display = 'flex';\n";
         ss << ind << var << ".style.flexDirection = '"
-           << (node.layout.direction == LayoutDirection::row ? "row" : "column") << "';\n";
+           << (grid_rows || L.direction == LayoutDirection::row ? "row" : "column") << "';\n";
 
         if (node.layout.gap > 0)
             ss << ind << var << ".style.gap = '" << format_px(node.layout.gap) << "';\n";
@@ -669,7 +676,7 @@ static void generate_node(std::ostringstream& ss, const IRNode& node,
             ss << ind << var << ".style.justifyContent = '" << align_to_css(node.layout.justify) << "';\n";
         if (node.layout.align != LayoutAlign::stretch)
             ss << ind << var << ".style.alignItems = '" << align_to_css(node.layout.align) << "';\n";
-        if (node.layout.wrap)
+        if (grid_rows || node.layout.wrap)
             ss << ind << var << ".style.flexWrap = 'wrap';\n";
 
         // Sizing
