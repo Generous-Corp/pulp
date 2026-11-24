@@ -1819,6 +1819,19 @@ Both view controllers consult `Processor::editor_factory()` in
 an AUv3 built with `pulp_add_plugin(... UI <package>)` has its package's editor
 (an RmlUi or native-surface editor included). The module still links the view
 stack for the ViewBridge path, and the iOS path is compile-checked only.
+On macOS, `PULP_EDITOR_RUNTIME_LIBRARIES` from the UI package are copied beside
+`${target}_AUv3Framework` and given an `@loader_path` rpath. The nested dylibs
+are ad-hoc signed before the containing framework is signed. iOS AUv3 keeps its
+flat-extension layout and rejects a UI package that declares runtime libraries
+until a dedicated iOS staging path exists. A package with no runtime libraries
+uses the ordinary AUv3 path unchanged.
+CMake also adds those shared libraries to the `.appex` stub's link line, so the
+stub gets an extra rpath into `<fw>.framework/Versions/A`; without it dyld cannot
+resolve the stub's own `@rpath/libvellum-*.dylib` references. The build leaves
+the dylibs ad-hoc signed, and `pulp ship sign` does not re-sign them with a real
+identity (it runs a single `codesign --force` on the path it is given, with no
+inner-out walk), so a distribution build must sign the nested dylibs, the
+framework, the `.appex` and the host `.app` in that order before notarizing.
 `_pulp_warn_ui_package_formats` (`tools/cmake/PulpEditorPackage.cmake`) does not
 name AUv3, because `AUv3` is in `_PULP_CONTRACT_EDITOR_FORMATS`; it still names
 the formats whose adapters serve no contract editor (LV2, AAX).

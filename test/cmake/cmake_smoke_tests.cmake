@@ -465,6 +465,7 @@ add_test(NAME cmake-installed-sdk-runtime-staging
         -DPULP_SOURCE_DIR=${CMAKE_SOURCE_DIR}
         -DPULP_PARENT_BUILD_TYPE=$<CONFIG>
         "-DPULP_PARENT_SANITIZER=${PULP_SANITIZER}"
+        "-DPULP_PARENT_BUILD_WEBVIEW=${PULP_BUILD_WEBVIEW}"
         "-DPULP_PARENT_CXX_FLAGS=${CMAKE_CXX_FLAGS}"
         "-DPULP_PARENT_C_FLAGS=${CMAKE_C_FLAGS}"
         "-DPULP_PARENT_OBJCXX_FLAGS=${CMAKE_OBJCXX_FLAGS}"
@@ -481,6 +482,18 @@ add_test(NAME cmake-installed-sdk-runtime-staging
 set_tests_properties(cmake-installed-sdk-runtime-staging PROPERTIES
     LABELS "cmake;sdk;skia;windows;runtime;slow"
     TIMEOUT 1800)
+
+# The WebView backend edge in the installed export must use the `Pulp::`
+# namespace. The export file is generated at configure time, so this check
+# needs no build and runs whenever the composition has WebView enabled.
+if(PULP_BUILD_WEBVIEW)
+    add_test(NAME cmake-view-webview-backend-export-namespace
+        COMMAND ${CMAKE_COMMAND}
+            -DPULP_BUILD_DIR=${CMAKE_BINARY_DIR}
+            -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/test_view_webview_backend_export_namespace.cmake)
+    set_tests_properties(cmake-view-webview-backend-export-namespace PROPERTIES
+        LABELS "cmake;sdk;install")
+endif()
 
 # Installed GPU-audio SDK consumer: compile a minimal CLAP plugin against the
 # exported transport and custom GpuAudioNode contract.
