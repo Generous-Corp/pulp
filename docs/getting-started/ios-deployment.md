@@ -62,6 +62,26 @@ pulp_add_ios_host_app(PulpSineSynth_HostApp
 )
 ```
 
+### An editor from a UI package
+
+`pulp_add_ios_auv3(... UI <package>)` gives the extension an editor from a UI
+package, the way `pulp_add_plugin(... UI <package>)` does for the macOS formats.
+The editor opens through the editor-host contract in `PulpAUViewController`'s
+contract view. With a Vellum package the editor attaches to a `UIView` through
+`pulp::vellum::Editor`.
+
+```cmake
+pulp_add_vellum_editor_package(MySynth_VellumEditor
+    VIEW_HEADER "my_view.hpp" VIEW_TYPE mysynth::MyView)
+pulp_add_ios_auv3(NAME MySynth ... UI MySynth_VellumEditor)
+```
+
+It needs a UI package built for iOS. If the Vellum SDK on the prefix path has no
+iOS slice, configure stops with a message saying so; the extension is never
+built without the editor you asked for. A package that needs shared runtime
+libraries is refused too, because an app extension cannot load loose libraries.
+Without `UI`, the extension is built exactly as before.
+
 The helper:
 
 - Creates `${target}` as a SwiftUI iOS `.app` bundle from

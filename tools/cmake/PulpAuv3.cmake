@@ -614,7 +614,7 @@ endfunction()
 function(pulp_add_ios_auv3)
     cmake_parse_arguments(AUV3
         "ACCEPTS_MIDI"
-        "NAME;BUNDLE_ID;MANUFACTURER;MANUFACTURER_CODE;SUBTYPE_CODE;AU_TYPE;VERSION"
+        "NAME;BUNDLE_ID;MANUFACTURER;MANUFACTURER_CODE;SUBTYPE_CODE;AU_TYPE;VERSION;UI"
         "SOURCES"
         ${ARGN}
     )
@@ -653,6 +653,26 @@ function(pulp_add_ios_auv3)
     endif()
 
     set(target "${AUV3_NAME}")
+
+    # UI <package>: the extension's editor comes from a UI package through the
+    # editor-host contract (PulpEditorPackage.cmake), the way pulp_add_plugin's
+    # UI keyword supplies it to the macOS formats. Checked before any target is
+    # created so a refusal leaves nothing half-built, and so an extension is
+    # never silently built editorless when a UI was asked for.
+    set(PULP_${target}_UI_PACKAGE "" CACHE INTERNAL "")
+    if(AUV3_UI AND NOT AUV3_UI STREQUAL "none")
+        _pulp_resolve_ui_package("pulp_add_ios_auv3(${AUV3_NAME})" "${AUV3_UI}"
+            _auv3_ui_function _auv3_ui_header)
+        get_target_property(_auv3_ui_runtime "${AUV3_UI}" PULP_EDITOR_RUNTIME_LIBRARIES)
+        if(_auv3_ui_runtime)
+            message(FATAL_ERROR
+                "pulp_add_ios_auv3(${AUV3_NAME}): UI package '${AUV3_UI}' needs shared "
+                "runtime libraries (${_auv3_ui_runtime}). An iOS app extension cannot load "
+                "loose shared libraries; the package must be built from static libraries "
+                "for iOS.")
+        endif()
+        set(PULP_${target}_UI_PACKAGE "${AUV3_UI}" CACHE INTERNAL "")
+    endif()
 
     # The iOS-only helper bypasses pulp_add_plugin(), so establish the same
     # production shipping declaration before _pulp_add_auv3() attaches its
@@ -697,6 +717,14 @@ function(pulp_add_ios_auv3)
 
     if(TARGET ${target}_AUv3)
         target_link_libraries(${target}_AUv3 PRIVATE ${target}_Core)
+    endif()
+    if(PULP_${target}_UI_PACKAGE)
+        if(NOT TARGET ${target}_AUv3)
+            message(FATAL_ERROR
+                "pulp_add_ios_auv3(${AUV3_NAME}): UI ${AUV3_UI} was given but no AUv3 "
+                "extension target was created for it")
+        endif()
+        _pulp_attach_ui_package(${target} "${PULP_${target}_UI_PACKAGE}")
     endif()
     set(PULP_${target}_SOURCE_GIT_SHA "" CACHE INTERNAL "")
     set(PULP_${target}_SOURCE_GIT_DIRTY "" CACHE INTERNAL "")

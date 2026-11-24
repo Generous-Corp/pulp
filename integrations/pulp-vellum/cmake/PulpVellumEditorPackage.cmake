@@ -48,6 +48,12 @@ function(pulp_add_vellum_editor_package package)
     if(NOT _vellum_pkg_VIEW_HEADER OR NOT _vellum_pkg_VIEW_TYPE)
         message(FATAL_ERROR "${package}: VIEW_HEADER and VIEW_TYPE are required")
     endif()
+    if(NOT TARGET Vellum::MirrorView_core AND (PULP_IOS OR CMAKE_SYSTEM_NAME STREQUAL "iOS"))
+        message(FATAL_ERROR "${package}: this configure targets iOS, and the Vellum SDK "
+            "on the prefix path has no iOS slice (Vellum::MirrorView_core is absent). "
+            "An iOS AUv3 with a Vellum editor needs a Vellum SDK built for iOS; it will "
+            "not be built without an editor.")
+    endif()
     if(NOT TARGET Vellum::MirrorView_core)
         message(FATAL_ERROR "${package}: pulp_add_vellum_editor_package needs "
             "Vellum::MirrorView_core, which this Vellum SDK does not provide "

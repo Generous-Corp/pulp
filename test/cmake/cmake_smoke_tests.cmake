@@ -279,6 +279,15 @@ add_test(NAME cmake-ios-auv3-control-shipping
         -DPULP_SOURCE_DIR=${CMAKE_SOURCE_DIR}
         -DFIXTURE_DIR=${CMAKE_CURRENT_BINARY_DIR}/ios-auv3-control-shipping
         -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/test_ios_auv3_control_shipping.cmake)
+
+# pulp_add_ios_auv3(... UI <package>): attaches the package, refuses a missing
+# package, shared runtime libraries and a Vellum SDK without an iOS slice, and
+# leaves the extension unchanged when UI is absent.
+add_test(NAME cmake-ios-auv3-ui-package
+    COMMAND ${CMAKE_COMMAND}
+        -DPULP_SOURCE_DIR=${CMAKE_SOURCE_DIR}
+        -DFIXTURE_DIR=${CMAKE_CURRENT_BINARY_DIR}/ios-auv3-ui-package
+        -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/test_ios_auv3_ui_package.cmake)
 set_tests_properties(cmake-ios-auv3-control-shipping PROPERTIES
     LABELS "cmake;ios;auv3;control"
     TIMEOUT 30)
