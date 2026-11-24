@@ -117,6 +117,29 @@ inline void materialize_manifest_image_uris(
             }
         }
     }
+    if (node.audio_widget == AudioWidgetType::fader) {
+        for (const char* key : {"fader_body_asset_path", "fader_indicator_asset_path"}) {
+            if (node.attributes.contains(key))
+                continue;
+            const auto id = node.attributes.find(std::string(key) + "AssetId");
+            if (id == node.attributes.end())
+                continue;
+            if (const auto* asset = manifest.resolve(id->second)) {
+                const auto uri = asset_uri(*asset);
+                if (!uri.empty())
+                    node.attributes[key] = uri;
+                const bool indicator = std::string(key).find("indicator") != std::string::npos;
+                const char* w_key =
+                    indicator ? "fader_indicator_natural_w" : "fader_body_natural_w";
+                const char* h_key =
+                    indicator ? "fader_indicator_natural_h" : "fader_body_natural_h";
+                if (!node.attributes.contains(w_key) && asset->width)
+                    node.attributes[w_key] = std::to_string(*asset->width);
+                if (!node.attributes.contains(h_key) && asset->height)
+                    node.attributes[h_key] = std::to_string(*asset->height);
+            }
+        }
+    }
     for (auto& child : node.children)
         materialize_manifest_image_uris(child, manifest);
     for (auto& frame : node.alternate_frames)

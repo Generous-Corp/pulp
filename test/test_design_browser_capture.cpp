@@ -1,4 +1,40 @@
 #include "test_design_import_shared.hpp"
+#include <pulp/view/widgets.hpp>
+
+TEST_CASE("captured fader thumb travel stays inside the content box",
+          "[view][widgets][fader][geometry]") {
+    CHECK(Fader::thumb_axis_position(100.0f, 1.0f, 1.0f, 10.0f, 0.0f) == Approx(6.0f));
+    CHECK(Fader::thumb_axis_position(100.0f, 1.0f, 1.0f, 10.0f, 1.0f) == Approx(94.0f));
+    CHECK(Fader::thumb_axis_position(100.0f, 1.0f, 1.0f, 10.0f, 0.5f) == Approx(50.0f));
+}
+
+TEST_CASE("persisted browser faders retain split indicator asset metadata",
+          "[view][import][ir-v1][fader][assets]") {
+    const auto temp = pulp::test::make_unique_temp_dir("fader-persist");
+    const auto indicator = temp / "fader-indicator.png";
+    {
+        std::ofstream out(indicator, std::ios::binary);
+        REQUIRE(out.good());
+        out << "captured-indicator";
+    }
+    DesignIR ir;
+    ir.root.type = "frame";
+    IRNode fader;
+    fader.type = "frame";
+    fader.audio_widget = AudioWidgetType::fader;
+    fader.attributes["fader_indicator_asset_path"] = indicator.string();
+    fader.attributes["fader_indicator_natural_w"] = "18";
+    fader.attributes["fader_indicator_natural_h"] = "10";
+    ir.root.children.push_back(std::move(fader));
+    refresh_design_ir_asset_manifest(ir, {.base_directory = temp});
+    REQUIRE(ir.asset_manifest.assets.size() == 1);
+    REQUIRE(ir.root.children.front().attributes.count("fader_indicator_asset_pathAssetId") == 1);
+    const auto reparsed = parse_design_ir_json(serialize_design_ir(ir));
+    const auto& attrs = reparsed.root.children.front().attributes;
+    CHECK(attrs.at("fader_indicator_asset_path") == indicator.string());
+    CHECK(attrs.at("fader_indicator_natural_w") == "18");
+    CHECK(attrs.at("fader_indicator_natural_h") == "10");
+}
 
 TEST_CASE("DesignIR round-trips faithful browser capture backing distinctly from SVG",
           "[view][import][ir-v1][faithful-capture]") {

@@ -992,8 +992,9 @@ void Fader::paint_stock_thumb(canvas::Canvas& canvas, float pos, canvas::Color t
         const float thumb_h =
             std::max(1.0f, (thumb_height_ > 0.0f ? thumb_height_ : default_h) * scale);
         const float axis_half = (vert ? thumb_h : thumb_w) * 0.5f;
-        const float usable = std::max(0.0f, track_length - 2.0f * axis_half);
-        const float axis_center = axis_half + (vert ? (1.0f - pos) : pos) * usable;
+        const float axis_center = Fader::thumb_axis_position(
+            track_length, effective_axis_border(vert, true), effective_axis_border(vert, false),
+            2.0f * axis_half, vert ? (1.0f - pos) : pos);
         // Skinned slab defaults to a generously rounded corner when none
         // was provided (the captured thumb is a pill).
         const float skin_radius = std::min(thumb_w, thumb_h) * 0.5f;
@@ -1267,28 +1268,29 @@ void Fader::paint(canvas::Canvas& canvas) {
         const float scale_x = body_w > 0.0f ? b.width / body_w : 0.0f;
         const float scale_y = body_h > 0.0f ? b.height / body_h : 0.0f;
         const float thumb_w = std::max(
-            1.0f, static_cast<float>(captured_indicator_->frame_width()) *
-                      scale_x * hover_scale);
+            1.0f, static_cast<float>(captured_indicator_->frame_width()) * scale_x * hover_scale);
         const float thumb_h = std::max(
-            1.0f, static_cast<float>(captured_indicator_->frame_height()) *
-                      scale_y * hover_scale);
+            1.0f, static_cast<float>(captured_indicator_->frame_height()) * scale_y * hover_scale);
         const float axis_half = (vert ? thumb_h : thumb_w) * 0.5f;
-        const float usable = std::max(0.0f, track_length - 2.0f * axis_half);
-        const float axis_center =
-            axis_half + (vert ? (1.0f - pos) : pos) * usable;
-        const float cross_center = captured_indicator_cross_ * track_width;
-        const float thumb_x = vert ? cross_center - thumb_w * 0.5f
-                                   : axis_center - thumb_w * 0.5f;
-        const float thumb_y = vert ? axis_center - thumb_h * 0.5f
-                                   : cross_center - thumb_h * 0.5f;
-        draw_captured_raster(canvas, *this, captured_raster_origin_x_,
-                             captured_raster_origin_y_, captured_raster_scale_, [&] {
-            canvas.draw_image_from_file_rect(
-                captured_indicator_->path(), 0.0f, 0.0f,
-                static_cast<float>(captured_indicator_->frame_width()),
-                static_cast<float>(captured_indicator_->frame_height()),
-                thumb_x, thumb_y, thumb_w, thumb_h);
-        });
+        const float axis_center = Fader::thumb_axis_position(
+            track_length, effective_axis_border(vert, true), effective_axis_border(vert, false),
+            2.0f * axis_half, vert ? (1.0f - pos) : pos);
+        const float cross_leading =
+            vert ? effective_axis_border(false, true) : effective_axis_border(true, true);
+        const float cross_trailing =
+            vert ? effective_axis_border(false, false) : effective_axis_border(true, false);
+        const float cross_extent = std::max(0.0f, track_width - cross_leading - cross_trailing);
+        const float cross_center = cross_leading + captured_indicator_cross_ * cross_extent;
+        const float thumb_x = vert ? cross_center - thumb_w * 0.5f : axis_center - thumb_w * 0.5f;
+        const float thumb_y = vert ? axis_center - thumb_h * 0.5f : cross_center - thumb_h * 0.5f;
+        draw_captured_raster(canvas, *this, captured_raster_origin_x_, captured_raster_origin_y_,
+                             captured_raster_scale_, [&] {
+                                 canvas.draw_image_from_file_rect(
+                                     captured_indicator_->path(), 0.0f, 0.0f,
+                                     static_cast<float>(captured_indicator_->frame_width()),
+                                     static_cast<float>(captured_indicator_->frame_height()),
+                                     thumb_x, thumb_y, thumb_w, thumb_h);
+                             });
     }
 
     if (has_modulated_)
