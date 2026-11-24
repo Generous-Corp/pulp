@@ -241,6 +241,8 @@ IrLiveFixture::IrLiveFixture(const std::filesystem::path& ir_path,
     // cannot alias.
     codegen.root_variable = bundle.empty() ? "root" : "__pulp_design_ir_root__";
     bridge_->set_script_base_dir(loaded_.base_dir);
+    sealed_fonts_ = pulp::import_design::read_sealed_font_files(ir, loaded_.base_dir);
+    bridge_->set_embedded_assets(sealed_fonts_.assets);
     bridge_->load_script(generate_pulp_js(ir, codegen));
     const std::string settle = "if (typeof __pulpRuntimeSettle__ === 'function') "
                                "__pulpRuntimeSettle__(" +

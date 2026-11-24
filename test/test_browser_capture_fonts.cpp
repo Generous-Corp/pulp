@@ -2,14 +2,28 @@
 
 #include "support/unique_temp_dir.hpp"
 #include "tools/import-design/browser_capture_fonts.hpp"
+#include "tools/import-design/sealed_font_files.hpp"
+#include "tools/import-design/sprite_skins.hpp"
+
+#include <pulp/canvas/bundled_fonts.hpp>
+#include <pulp/state/store.hpp>
+#include <pulp/view/design_codegen.hpp>
+#include <pulp/view/reload_autocaps.hpp>
+#include <pulp/view/reload_capabilities.hpp>
+#include <pulp/view/script_engine.hpp>
+#include <pulp/view/view.hpp>
+#include <pulp/view/widget_bridge.hpp>
 
 #include <pulp/runtime/base64.hpp>
 #include <pulp/runtime/crypto.hpp>
 #include <pulp/view/design_ir_io.hpp>
 
+#include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <iterator>
+#include <sstream>
+#include <utility>
 #include <string>
 #include <vector>
 
@@ -327,4 +341,133 @@ TEST_CASE("a bundle's Blob font bytes that are not a native font fail the import
     CHECK_FALSE(attach_page_font_faces(ir, record, scratch.path / "fonts", warnings, error));
     CHECK(error.find("is not a TrueType, OpenType or WOFF2 file") != std::string::npos);
     CHECK(ir.font_family_assets.empty());
+}
+
+namespace {
+
+// The files a pulp_add_plugin(UI_SCRIPT) build embeds beside `script`, as the
+// `relative|absolute` pairs PulpUiAssets.cmake computes. The real CMake rule is
+// evaluated in a throwaway configure so the embedded names under test are the
+// ones a shipped plug-in carries, not a reimplementation of them.
+std::vector<std::pair<std::string, fs::path>> ui_script_embed_pairs(const fs::path& script,
+                                                                    const fs::path& scratch) {
+    const auto project = scratch / "embed-rule";
+    fs::create_directories(project);
+    const auto pairs_file = scratch / "embed-pairs.txt";
+    std::ofstream(project / "CMakeLists.txt", std::ios::binary)
+        << "cmake_minimum_required(VERSION 3.24)\nproject(sealed_font_embed_rule NONE)\n"
+        << "include(\"" << PULP_SOURCE_DIR << "/tools/cmake/PulpUiAssets.cmake\")\n"
+        << "_pulp_ui_embed_sibling_files(_pairs \"" << script.generic_string() << "\" \"\")\n"
+        << "file(WRITE \"" << pairs_file.generic_string() << "\" \"${_pairs}\")\n";
+    const std::string command = std::string("\"") + PULP_CMAKE_COMMAND + "\" -S \"" +
+                                project.string() + "\" -B \"" + (project / "build").string() +
+                                "\" > \"" + (scratch / "embed-rule.log").string() + "\" 2>&1";
+#ifdef _WIN32
+    // cmd.exe drops the first and last quote of a line that starts with one.
+    REQUIRE(std::system(("\"" + command + "\"").c_str()) == 0);
+#else
+    REQUIRE(std::system(command.c_str()) == 0);
+#endif
+    std::vector<std::pair<std::string, fs::path>> pairs;
+    std::stringstream all(read_file(pairs_file));
+    for (std::string entry; std::getline(all, entry, ';');) {
+        const auto bar = entry.find('|');
+        REQUIRE(bar != std::string::npos);
+        pairs.emplace_back(entry.substr(0, bar), fs::path(entry.substr(bar + 1)));
+    }
+    return pairs;
+}
+
+} // namespace
+
+TEST_CASE("a captured page font registers in a shipped panel under an empty grant",
+          "[import-design][browser-capture][font-assets][security]") {
+    const auto jost = read_file(fs::path(PULP_SOURCE_DIR) / "external/fonts/Jost-Regular.ttf");
+    REQUIRE_FALSE(jost.empty());
+    const auto digest = pulp::runtime::sha256_hex(std::string_view(jost));
+    const std::string family =
+        "Sealed Capture " +
+        pulp::test::make_unique_temp_dir("pulp-sealed-family").filename().string();
+
+    ScratchDir scratch;
+    const auto record = scratch.path / "font-faces.json";
+    std::ofstream(record, std::ios::binary)
+        << R"JSON({"schema":"pulp-browser-capture-font-faces-v1","faces":[{"family":")JSON"
+        << family
+        << R"JSON(","weight":"400 700","style":"normal","unicode_range":"","format":"truetype",
+            "source":"pulp-capture:///fonts/Jost-Regular.ttf","sha256":")JSON"
+        << digest << R"JSON("}],"assets":[{"sha256":")JSON" << digest
+        << R"JSON(","mime_type":"font/ttf","data_base64":")JSON"
+        << pulp::runtime::base64_encode(reinterpret_cast<const uint8_t*>(jost.data()), jost.size())
+        << R"JSON("}]})JSON";
+
+    // Capture, then the export pass that copies the face beside the script.
+    DesignIR ir;
+    ir.root.type = "frame";
+    ir.root.style.font_family = family;
+    std::vector<std::string> warnings;
+    std::string error;
+    REQUIRE(
+        attach_page_font_faces(ir, record, scratch.path / "capture" / "fonts", warnings, error));
+    const auto script = scratch.path / "plugin" / "ui" / "ui.js";
+    fs::create_directories(script.parent_path());
+    REQUIRE(pulp::import_design::localize_ir_assets(ir, script.string(), &error));
+    INFO(error);
+
+    const auto js = generate_pulp_js(ir);
+    std::ofstream(script, std::ios::binary) << js;
+    // The shipped script asks for no capability at all.
+    CHECK(infer_capability_names_from_js(js).empty());
+
+    // Seal the files exactly as the plug-in build does, then remove them from
+    // disk: a face that registers now came from sealed bytes, not a path.
+    std::vector<std::string> sealed_bytes;
+    std::vector<WidgetBridge::EmbeddedAsset> embedded;
+    const auto pairs = ui_script_embed_pairs(script, scratch.path);
+    REQUIRE_FALSE(pairs.empty());
+    sealed_bytes.reserve(pairs.size());
+    for (const auto& [name, path] : pairs)
+        sealed_bytes.push_back(read_file(path));
+    for (std::size_t i = 0; i < pairs.size(); ++i)
+        embedded.push_back({pairs[i].first,
+                            reinterpret_cast<const unsigned char*>(sealed_bytes[i].data()),
+                            sealed_bytes[i].size()});
+    fs::remove_all(script.parent_path() / "assets");
+    REQUIRE_FALSE(pulp::canvas::is_font_registered(family));
+
+    pulp::view::ScriptEngine engine;
+    View root;
+    pulp::state::StateStore store;
+    WidgetBridge bridge(engine, root, store, nullptr, pulp::view::CapabilitySet{});
+    bridge.set_embedded_assets(embedded);
+    REQUIRE(engine.evaluate("typeof registerFont").toString() == "undefined");
+    bridge.load_script(js);
+    CHECK(pulp::canvas::is_font_registered(family));
+}
+
+TEST_CASE("a tool seals only font files that resolve inside the script directory",
+          "[import-design][font-assets][security]") {
+    ScratchDir scratch;
+    const auto script_dir = scratch.path / "panel";
+    fs::create_directories(script_dir / "assets");
+    fs::create_directories(scratch.path / "outside");
+    const auto jost = fs::path(PULP_SOURCE_DIR) / "external/fonts/Jost-Regular.ttf";
+    fs::copy_file(jost, script_dir / "assets" / "inside.ttf");
+    fs::copy_file(jost, scratch.path / "outside" / "elsewhere.ttf");
+    std::error_code ec;
+    fs::create_symlink(scratch.path / "outside" / "elsewhere.ttf",
+                       script_dir / "assets" / "escape.ttf", ec);
+    if (ec)
+        SKIP("this host cannot create a symlink: " + ec.message());
+
+    DesignIR ir;
+    for (const char* name : {"assets/inside.ttf", "assets/escape.ttf"}) {
+        IRFontAsset face;
+        face.family = name;
+        face.resolved_path = name;
+        ir.font_family_assets.push_back(face);
+    }
+    const auto sealed = pulp::import_design::read_sealed_font_files(ir, script_dir);
+    REQUIRE(sealed.assets.size() == 1);
+    CHECK(sealed.assets[0].name == "assets/inside.ttf");
 }

@@ -5368,9 +5368,11 @@ TEST_CASE("generated JS registers a captured face with its declared weight range
     CodeGenOptions opts;
     opts.mode = CodeGenMode::bridge_native_js;
     const auto range = generate_pulp_js(ir_with_face("Probe", "/fonts/Jost.ttf", 400, 700), opts);
-    CHECK(range.find("registerFont('Probe', '/fonts/Jost.ttf', 400, 700);") != std::string::npos);
+    CHECK(range.find("typeof registerFont === 'function') registerFont('Probe', '/fonts/Jost.ttf', "
+                     "400, 700);") != std::string::npos);
     const auto single = generate_pulp_js(ir_with_face("Probe", "/fonts/Jost.ttf", 400, 0), opts);
-    CHECK(single.find("registerFont('Probe', '/fonts/Jost.ttf', 400, 400);") != std::string::npos);
+    CHECK(single.find("typeof registerFont === 'function') registerFont('Probe', "
+                      "'/fonts/Jost.ttf', 400, 400);") != std::string::npos);
 }
 
 TEST_CASE("registerFont declares a range only for a registered face and valid weights",

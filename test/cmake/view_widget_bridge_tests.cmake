@@ -882,6 +882,8 @@ endif()
 pulp_add_test_suite(pulp-test-widget-bridge-capabilities GROUP pulp-test-group-view-widgets
     LIBRARIES ${_pulp_widget_bridge_test_libs}
     COMPILE_DEFINITIONS PULP_BRIDGE_EXEC_ENABLED=${_pulp_bridge_exec_enabled})
+pulp_test_data(pulp-test-widget-bridge-capabilities
+    PATHS external/fonts/Jost-Regular.ttf packages/pulp-web-player/src/theme/inter.woff2)
 
 # Ship-safety for the shell exec bridge. The registrar body lives in
 # platform_services_api.cpp beside always-present registrars, so gating only the

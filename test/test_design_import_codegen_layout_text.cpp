@@ -2,6 +2,7 @@
 #include <pulp/canvas/font_resolver.hpp>
 #include <pulp/view/widgets.hpp>
 #include <pulp/view/pointer_dispatch.hpp>
+#include <set>
 
 // Yoga-constrained audio widgets, container padding, multi-line text and font
 // lowering, knob tapers, and the web-compat parameter-gesture path.
@@ -1487,6 +1488,130 @@ TEST_CASE("web compat preserves authored frame heights in a shrinking host",
     REQUIRE(js.find("root.style.flexShrink = '0'") != std::string::npos);
     REQUIRE(js.find("Body0.style.height = '760px'") != std::string::npos);
     REQUIRE(js.find("Body0.style.flexShrink = '0'") != std::string::npos);
+}
+
+TEST_CASE("web compat lowers a multi-row grid of fixed cards onto grid rows",
+          "[view][import][web-compat][grid]") {
+    // Four 156px tracks with an 18px gap fill a 678px content box exactly, so
+    // six fixed-height, non-shrinking cards need two rows. Lowered as a single
+    // flex row, the last cards land past the right edge of the grid.
+    constexpr float kCardWidth = 156.0f;
+    constexpr float kCardHeight = 146.0f;
+    constexpr float kGap = 18.0f;
+    constexpr float kPad = 27.0f;
+    constexpr float kContentWidth = kCardWidth * 4.0f + kGap * 3.0f;
+
+    DesignIR ir;
+    ir.root.type = "frame";
+    ir.root.name = "Panel";
+    ir.root.stable_anchor_id = "panel";
+    ir.root.style.width = kContentWidth + kPad * 2.0f;
+    ir.root.style.height = 420.0f;
+    ir.root.layout.display = "flex";
+    ir.root.layout.direction = LayoutDirection::column;
+    ir.root.layout.padding_top = kPad;
+    ir.root.layout.padding_right = kPad;
+    ir.root.layout.padding_bottom = kPad;
+    ir.root.layout.padding_left = kPad;
+
+    IRNode grid;
+    grid.type = "frame";
+    grid.name = "Controls";
+    grid.stable_anchor_id = "controls";
+    grid.style.height = kCardHeight * 2.0f + kGap;
+    grid.layout.display = "grid";
+    grid.layout.direction = LayoutDirection::row;
+    grid.layout.gap = kGap;
+    grid.layout.grid_template_columns = "156px 156px 156px 156px";
+    grid.layout.grid_auto_flow = "row";
+    for (int i = 0; i < 6; ++i) {
+        IRNode card;
+        card.type = "frame";
+        card.name = "Card";
+        card.stable_anchor_id = "card." + std::to_string(i);
+        card.style.width = kCardWidth;
+        card.style.height = kCardHeight;
+        card.layout.flex_shrink = 0.0f;
+        card.layout.display = "flex";
+        card.layout.align = LayoutAlign::center;
+        card.layout.gap = 8.0f;
+        card.layout.padding_top = 14.0f;
+        card.layout.padding_bottom = 12.0f;
+        card.layout.padding_left = 10.0f;
+        card.layout.padding_right = 10.0f;
+        IRNode label;
+        label.type = "text";
+        label.name = "Label";
+        label.text_content = "Macro";
+        label.style.font_size = 12.0f;
+        card.children.push_back(label);
+        IRNode dial;
+        dial.type = "frame";
+        dial.name = "Dial";
+        dial.style.width = 62.0f;
+        dial.style.height = 62.0f;
+        card.children.push_back(dial);
+        grid.children.push_back(card);
+    }
+    ir.root.children.push_back(grid);
+
+    CodeGenOptions opts;
+    opts.mode = CodeGenMode::web_compat;
+    opts.include_comments = false;
+    opts.include_tokens = false;
+    const auto js = generate_pulp_js(ir, opts);
+    INFO(js);
+
+    ScriptEngine engine;
+    View host;
+    host.set_bounds({0, 0, 1600, 1200});
+    pulp::state::StateStore store;
+    WidgetBridge bridge(engine, host, store);
+    bridge.load_script(js);
+    host.layout_children();
+
+    const auto find_anchor = [](auto&& self, View& view, std::string_view anchor) -> View* {
+        if (view.anchor_id() == anchor)
+            return &view;
+        for (size_t i = 0; i < view.child_count(); ++i)
+            if (auto* child = view.child_at(i))
+                if (auto* found = self(self, *child, anchor))
+                    return found;
+        return nullptr;
+    };
+    View* controls = find_anchor(find_anchor, host, "controls");
+    REQUIRE(controls != nullptr);
+    REQUIRE(controls->child_count() == 6);
+    CHECK(controls->bounds().width == Catch::Approx(kContentWidth).margin(0.5f));
+
+    std::set<int> rows;
+    for (size_t i = 0; i < controls->child_count(); ++i) {
+        const View* card = controls->child_at(i);
+        REQUIRE(card != nullptr);
+        const auto b = card->bounds();
+        CAPTURE(i, b.x, b.y, b.width, b.height);
+        CHECK(b.width == Catch::Approx(kCardWidth).margin(0.5f));
+        CHECK(b.x >= -0.5f);
+        CHECK(b.x + b.width <= controls->bounds().width + 0.5f);
+        CHECK(b.y + b.height <= controls->bounds().height + 0.5f);
+        const size_t column = i % 4;
+        const size_t row = i / 4;
+        CHECK(b.x == Catch::Approx(column * (kCardWidth + kGap)).margin(0.5f));
+        CHECK(b.y == Catch::Approx(row * (kCardHeight + kGap)).margin(0.5f));
+        rows.insert(static_cast<int>(b.y + 0.5f));
+    }
+    CHECK(rows.size() == 2);
+
+    // A grid with a single implicit column keeps stacking its children.
+    DesignIR single;
+    single.root.type = "frame";
+    single.root.name = "Stack";
+    single.root.layout.display = "grid";
+    single.root.layout.grid_template_columns = "1fr";
+    single.root.children.push_back(ir.root.children[0].children[0]);
+    const auto single_js = generate_pulp_js(single, opts);
+    CHECK(single_js.find("root.style.flexDirection = 'column'") != std::string::npos);
+    CHECK(single_js.find("root.style.flexWrap") == std::string::npos);
 }
 
 TEST_CASE("generate_pulp_js web compat emits extended style and layout properties",
