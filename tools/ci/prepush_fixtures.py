@@ -454,6 +454,16 @@ def run_budgeted(entries: list[dict], repo: pathlib.Path, *, python: str = sys.e
     return finished, not_checked
 
 
+# Removes a base checkout, including one whose `git worktree add` the cap
+# interrupted: git leaves that one locked ("initializing"), and only a second
+# --force removes a locked worktree. If the add was stopped before it wrote
+# the checkout's .git file, remove refuses; unlocking first lets the prune
+# drop the record once the directory is gone.
+BASE_CLEANUP = ('git worktree unlock "$1" 2>/dev/null; '
+                'git worktree remove --force --force "$1" 2>/dev/null; '
+                'rm -r -f "$2"; git worktree prune 2>/dev/null')
+
+
 def base_verdicts(failures: list[tuple[dict, dict]], base: str, repo: pathlib.Path,
                   deadline: float, clock: Callable[[], float],
                   python: str = sys.executable) -> dict[str, tuple[bool, str]]:
@@ -494,9 +504,7 @@ def base_verdicts(failures: list[tuple[dict, dict]], base: str, repo: pathlib.Pa
     finally:
         if holder is not None:
             # Removing a full checkout takes seconds; do it after the step ends.
-            cleanup = ([f'git worktree remove --force "$1" 2>/dev/null; rm -r -f "$2"']
-                       if checkout is not None else ['rm -r -f "$2"'])
-            subprocess.Popen(["sh", "-c", cleanup[0], "_", str(checkout or holder), str(holder)],
+            subprocess.Popen(["sh", "-c", BASE_CLEANUP, "_", str(checkout or holder), str(holder)],
                              cwd=repo, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
                              stderr=subprocess.DEVNULL, start_new_session=True)
     return verdicts

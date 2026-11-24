@@ -1884,6 +1884,49 @@ class PrepushOutcomeTests(unittest.TestCase):
         self.assertNotIn("✗ fixture test", out)
 
 
+class PrepushBaseCleanupTests(unittest.TestCase):
+    """A base checkout the cap interrupted (left locked) is still removed."""
+
+    def test_cleanup_removes_a_locked_base_worktree(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            parent = pathlib.Path(tmp).resolve()
+            root = parent / "repo"
+            root.mkdir()
+            _fixture_repo(root, PASSING, PASSING + "# edit\n")
+            holder = parent / ".prepush-fixtures-base-x"
+            holder.mkdir()
+            checkout = holder / "base"
+            subprocess.run(["git", "worktree", "add", "-q", "--detach", "--lock",
+                            str(checkout), "HEAD~1"], cwd=root, check=True)
+            subprocess.run(["sh", "-c", prepush.BASE_CLEANUP, "_", str(checkout), str(holder)],
+                           cwd=root, check=False)
+            listed = subprocess.run(["git", "worktree", "list"], cwd=root,
+                                    capture_output=True, text=True, encoding="utf-8",
+                                    check=True).stdout
+            self.assertFalse(holder.exists())
+            self.assertNotIn(str(checkout), listed)
+
+    def test_cleanup_removes_a_locked_base_the_add_never_finished(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            parent = pathlib.Path(tmp).resolve()
+            root = parent / "repo"
+            root.mkdir()
+            _fixture_repo(root, PASSING, PASSING + "# edit\n")
+            holder = parent / ".prepush-fixtures-base-y"
+            holder.mkdir()
+            checkout = holder / "base"
+            subprocess.run(["git", "worktree", "add", "-q", "--detach", "--lock",
+                            str(checkout), "HEAD~1"], cwd=root, check=True)
+            (checkout / ".git").unlink()  # as when the cap stops the add early
+            subprocess.run(["sh", "-c", prepush.BASE_CLEANUP, "_", str(checkout), str(holder)],
+                           cwd=root, check=False)
+            listed = subprocess.run(["git", "worktree", "list"], cwd=root,
+                                    capture_output=True, text=True, encoding="utf-8",
+                                    check=True).stdout
+            self.assertFalse(holder.exists())
+            self.assertNotIn(str(checkout), listed)
+
+
 class PrepushNameMatchTests(unittest.TestCase):
     """Only own-script, import and declared-read matches run before a push."""
 
