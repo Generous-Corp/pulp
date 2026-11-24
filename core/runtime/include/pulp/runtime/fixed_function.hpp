@@ -151,8 +151,7 @@ class FixedFunction<R(Args...), Capacity, Alignment> {
 
     // Named static functions (not lambdas): MSVC rejects lambda-to-function-
     // pointer conversion inside a constexpr variable-template initialiser.
-    template <typename D>
-    static R invoke_impl(void* target, Args&&... args) {
+    template <typename D> static R invoke_impl(void* target, Args&&... args) {
         D& callable = *static_cast<D*>(target);
         if constexpr (std::is_void_v<R>) {
             callable(std::forward<Args>(args)...);
@@ -161,14 +160,12 @@ class FixedFunction<R(Args...), Capacity, Alignment> {
         }
     }
 
-    template <typename D>
-    static void relocate_impl(void* dst, void* src) noexcept {
+    template <typename D> static void relocate_impl(void* dst, void* src) noexcept {
         ::new (dst) D(std::move(*static_cast<D*>(src)));
         std::destroy_at(static_cast<D*>(src));
     }
 
-    template <typename D>
-    static void destroy_impl(void* target) noexcept {
+    template <typename D> static void destroy_impl(void* target) noexcept {
         std::destroy_at(static_cast<D*>(target));
     }
 
