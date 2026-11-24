@@ -48,9 +48,9 @@ NSSize pulp_auv3_initial_editor_size() {
 // reads. Hosts usually bind the audio unit before they load the view, so its
 // processor's declared editor size is known here; publishing a placeholder
 // first would make the host open a small window and then grow it.
-NSSize pulp_auv3_initial_editor_size(AUAudioUnit *audioUnit) {
+NSSize pulp_auv3_initial_editor_size(AUAudioUnit* audioUnit) {
     if ([audioUnit respondsToSelector:@selector(pulpProcessor)]) {
-        if (auto *processor = [(PulpAudioUnit *)audioUnit pulpProcessor]) {
+        if (auto* processor = [(PulpAudioUnit*)audioUnit pulpProcessor]) {
             const auto hints = processor->view_size();
             if (hints.preferred_width > 0 && hints.preferred_height > 0) {
                 return NSMakeSize(static_cast<CGFloat>(hints.preferred_width),

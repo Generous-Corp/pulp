@@ -127,12 +127,13 @@ class Editor final : public format::Editor, public format::EditorAttachDiagnosti
         ::vellum::view::PluginViewHost::Options options;
         options.size = {size_.width, size_.height};
         options.use_gpu = true;
-        if constexpr (requires(const ViewType& view) {
-                          { view.editor_defers_presentation() } -> std::convertible_to<bool>;
-                      } && requires(::vellum::view::PluginViewHost::Options& o) {
-                          o.defer_presentation = true;
-                      }) {
-            defers_presentation_ = static_cast<const ViewType&>(*root_).editor_defers_presentation();
+        if constexpr (
+            requires(const ViewType& view) {
+                { view.editor_defers_presentation() } -> std::convertible_to<bool>;
+            } &&
+            requires(::vellum::view::PluginViewHost::Options& o) { o.defer_presentation = true; }) {
+            defers_presentation_ =
+                static_cast<const ViewType&>(*root_).editor_defers_presentation();
             options.defer_presentation = defers_presentation_;
         }
         // The plug-in's declared editor colour is what the host shows before

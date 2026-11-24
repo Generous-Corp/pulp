@@ -152,8 +152,12 @@ TEST_CASE("an AU v3 controller bound before its view loads opens at the editor's
     reset_contract_recording();
     g_has_factory = true;
     struct EditorSizeScope {
-        EditorSizeScope() { g_editor_size = {720, 540}; }
-        ~EditorSizeScope() { g_editor_size = {400, 300}; }
+        EditorSizeScope() {
+            g_editor_size = {720, 540};
+        }
+        ~EditorSizeScope() {
+            g_editor_size = {400, 300};
+        }
     } editor_size_scope;
     pulp::test_support::contract_config().initial_size = {720, 540, 1.0};
     ScopedFactoryRegistration registration(create_processor);

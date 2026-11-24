@@ -1327,13 +1327,13 @@ template <typename Root> struct PresentationFixture {
     std::unique_ptr<pulp::format::Editor> editor;
 
     PresentationFixture() {
-        PluginViewHost::set_factory([this](::vellum::view::View&,
-                                           const PluginViewHost::Options& options) {
-            deferred = options.defer_presentation;
-            auto stub = std::make_unique<StubHost>(options.size);
-            host = stub.get();
-            return stub;
-        });
+        PluginViewHost::set_factory(
+            [this](::vellum::view::View&, const PluginViewHost::Options& options) {
+                deferred = options.defer_presentation;
+                auto stub = std::make_unique<StubHost>(options.size);
+                host = stub.get();
+                return stub;
+            });
         pulp::vellum::EditorFactory<Root> factory;
         editor = factory.create(processor, context, pulp::format::EditorRole::editor);
         REQUIRE(host != nullptr);
