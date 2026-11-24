@@ -2180,25 +2180,25 @@ std::optional<FaderArt> fader_art(const IRNode& node, const IRAssetManifest& man
     FaderArt art;
     art.natural_w = attr_float(node, natural_prefix + "_w").value_or(0.0f);
     art.natural_h = attr_float(node, natural_prefix + "_h").value_or(0.0f);
+    // The manifest identity wins: a stale scratch/absolute path must not
+    // shadow the contained, relocatable asset the manifest can resolve.
+    if (const auto id = attr(node, key + "AssetId")) {
+        if (const auto* asset = manifest.resolve(*id)) {
+            if (const auto file = resolve_asset_file(*asset, options.asset_base_directory)) {
+                art.path = file->string();
+                if (art.natural_w <= 0.0f && asset->width)
+                    art.natural_w = static_cast<float>(*asset->width);
+                if (art.natural_h <= 0.0f && asset->height)
+                    art.natural_h = static_cast<float>(*asset->height);
+                return art;
+            }
+        }
+    }
     if (const auto path = attr(node, key); path && !path->empty()) {
         art.path = captured_art_path(*path, options);
         return art;
     }
-    const auto id = attr(node, key + "AssetId");
-    if (!id)
-        return std::nullopt;
-    const auto* asset = manifest.resolve(*id);
-    if (asset == nullptr)
-        return std::nullopt;
-    const auto file = resolve_asset_file(*asset, options.asset_base_directory);
-    if (!file)
-        return std::nullopt;
-    art.path = file->string();
-    if (art.natural_w <= 0.0f && asset->width)
-        art.natural_w = static_cast<float>(*asset->width);
-    if (art.natural_h <= 0.0f && asset->height)
-        art.natural_h = static_cast<float>(*asset->height);
-    return art;
+    return std::nullopt;
 }
 
 void apply_captured_art_fader_skin(Fader& fader, const IRNode& node,

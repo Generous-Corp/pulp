@@ -901,6 +901,18 @@ TEST_CASE("a persisted fader carrying only asset identities still loads its art"
     REQUIRE(fader != nullptr);
     CHECK(fader->has_captured_indicator_art());
 
+    // A stale scratch path left beside a valid identity does not shadow it.
+    for (const char* key : {"fader_body_asset_path", "fader_indicator_asset_path"})
+        node.attributes[key] = (temp.root / "gone" / "missing.png").string();
+    auto stale =
+        pulp::view::build_native_view_tree(ir, manifest, {.asset_base_directory = temp.root});
+    REQUIRE(stale != nullptr);
+    auto* stale_fader = dynamic_cast<pulp::view::Fader*>(stale->child_at(0));
+    REQUIRE(stale_fader != nullptr);
+    CHECK(stale_fader->has_captured_indicator_art());
+    for (const char* key : {"fader_body_asset_path", "fader_indicator_asset_path"})
+        node.attributes.erase(key);
+
     // An identity whose path escapes the document directory never loads.
     fs::copy_file(temp.root / *manifest.assets[1].local_path, temp.root / "escape.png");
     manifest.assets[1].local_path = "../escape.png";
