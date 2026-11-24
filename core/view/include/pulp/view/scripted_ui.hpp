@@ -359,6 +359,11 @@ private:
     std::string theme_source_;
     std::string script_name_;
     std::vector<WidgetBridge::EmbeddedAsset> embedded_assets_;
+    // Font files read from beside a path-backed script, sealed into each
+    // bridge the way a UI_SCRIPT build embeds them.
+    struct DiskFontCache;
+    std::shared_ptr<DiskFontCache> disk_fonts_;
+    std::vector<WidgetBridge::EmbeddedAsset> sealed_assets_for(const std::filesystem::path& script);
     std::string storage_identity_;
     std::string last_good_code_;
     std::filesystem::path last_good_script_path_;

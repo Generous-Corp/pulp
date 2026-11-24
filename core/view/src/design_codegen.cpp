@@ -21,6 +21,7 @@
 #include <pulp/view/input_events.hpp>
 #include <pulp/canvas/font_resolver.hpp>
 #include <pulp/canvas/text_utf8.hpp>
+#include <pulp/runtime/safe_relative_path.hpp>
 
 #include "design_import_internal.hpp"
 #include "design_import_native_common.hpp"
@@ -33,6 +34,7 @@
 #include <cmath>
 #include <cstdlib>
 #include <cstdio>
+#include <filesystem>
 #include <functional>
 #include <sstream>
 #include <unordered_map>
@@ -3050,6 +3052,25 @@ static void generate_native_node(std::ostringstream& ss, const IRNode& node,
 
 // ── Public code generation ──────────────────────────────────────────────
 
+std::string sealed_font_asset_name(const DesignIR& ir, const IRFontAsset& face) {
+    const auto script_relative = [](const std::string& candidate) -> std::string {
+        if (candidate.empty() || candidate.find("://") != std::string::npos)
+            return {};
+        const std::filesystem::path raw(candidate);
+        for (const auto& part : raw)
+            if (part == "..")
+                return {};
+        const auto normal = raw.lexically_normal();
+        if (!pulp::runtime::is_safe_relative_path(normal))
+            return {};
+        return normal.generic_string();
+    };
+    if (const auto* asset = ir.asset_manifest.resolve(face.asset_id); asset && asset->local_path)
+        if (auto name = script_relative(*asset->local_path); !name.empty())
+            return name;
+    return script_relative(face.resolved_path);
+}
+
 std::string generate_pulp_js(const DesignIR& ir, const CodeGenOptions& opts) {
     std::ostringstream ss;
 
@@ -3104,19 +3125,34 @@ std::string generate_pulp_js(const DesignIR& ir, const CodeGenOptions& opts) {
     ss << "if (typeof setSubpixelLayout === 'function') setSubpixelLayout('', true);\n"
        << "if (typeof setCapturedFrameRoot === 'function') setCapturedFrameRoot('', true);\n\n";
 
-    // Register bundled fonts, with each @font-face rule's declared weight range,
-    // BEFORE any setFontFamily, so a family resolves to the shipped face rather
-    // than a same-named system font. resolved_path is the absolute file the CLI's
-    // asset-resolution pass stamped; entries that did not resolve are skipped.
+    // Register bundled fonts before any setFontFamily, so a family resolves to
+    // the shipped face rather than a same-named system font, with each
+    // @font-face rule's declared weight range. A face that sits beside the
+    // script (the path the export pass localizes it to) is sealed into a
+    // shipped panel, so it registers by that name with registerEmbeddedFont,
+    // which needs no capability grant. Only a face reachable solely by an
+    // absolute path falls back to the Filesystem-gated registerFont; emitting
+    // that call for a sealed face would make the panel declare Filesystem.
     if (!ir.font_family_assets.empty()) {
         bool any = false;
         for (const auto& fa : ir.font_family_assets) {
-            if (fa.family.empty() || fa.resolved_path.empty()) continue;
+            if (fa.family.empty())
+                continue;
+            const auto sealed = sealed_font_asset_name(ir, fa);
+            if (sealed.empty() && fa.resolved_path.empty())
+                continue;
             if (!any && opts.include_comments) ss << "// Bundled fonts\n";
             any = true;
-            ss << "registerFont('" << js_single_quote_escape(fa.family) << "', '"
-               << js_single_quote_escape(fa.resolved_path) << "', " << fa.weight << ", "
-               << (fa.weight_max > 0 ? fa.weight_max : fa.weight) << ");\n";
+            const auto weight_max = fa.weight_max > 0 ? fa.weight_max : fa.weight;
+            const auto call = [&](const char* fn, const std::string& name) {
+                ss << "if (typeof " << fn << " === 'function') " << fn << "('"
+                   << js_single_quote_escape(fa.family) << "', '" << js_single_quote_escape(name)
+                   << "', " << fa.weight << ", " << weight_max << ");\n";
+            };
+            if (!sealed.empty())
+                call("registerEmbeddedFont", sealed);
+            else
+                call("registerFont", fa.resolved_path);
         }
         if (any) ss << "\n";
     }

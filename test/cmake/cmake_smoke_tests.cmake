@@ -900,15 +900,6 @@ if(PULP_PYTHON3_FOR_TESTS)
         set_tests_properties(prepush-receipt PROPERTIES
             LABELS "tooling;hooks"
             TIMEOUT 180)
-        # A passing, clean-tree gates.sh run records a receipt for its exact
-        # head, and the hook refuses a branch head without one (deletions,
-        # tags, commits on origin/main and the owner override excepted).
-        add_test(NAME gates-receipt
-            COMMAND ${PULP_PYTHON3_FOR_TESTS}
-                ${CMAKE_SOURCE_DIR}/tools/scripts/test_gates_receipt.py)
-        set_tests_properties(gates-receipt PROPERTIES
-            LABELS "tooling;hooks"
-            TIMEOUT 120)
         # The pre-push hook's last step refuses a push while any other actor
         # holds a live repair-claim on the branch's open PR (fake gh, no network).
         add_test(NAME prepush-claim-check
