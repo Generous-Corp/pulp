@@ -280,6 +280,7 @@
       "pulp/format/bus_role.hpp",
       "pulp/format/clap_adapter.hpp",
       "pulp/format/clap_contract_gui.hpp",
+      "pulp/format/clap_editor_automation.hpp",
       "pulp/format/clap_entry.hpp",
       "pulp/format/contract_editor_session.hpp",
       "pulp/format/descriptor_agreement.hpp",
