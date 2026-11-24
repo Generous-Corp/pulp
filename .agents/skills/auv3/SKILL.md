@@ -409,6 +409,14 @@ the extension's loaded `AUAudioUnit` once KVO fires on `self.audioUnit`. Extensi
 `NSExtensionMain`-style Info.plist — see `docs/guides/ios-auv3-guidance.md`
 and the `ios` skill for the extension target wiring.
 
+`pulp_add_ios_auv3(... UI <package>)` attaches a UI package to the extension
+(`_pulp_attach_ui_package`, as `pulp_add_plugin` does), so `editor_factory()` is
+set and `PulpAUViewController` opens the contract view. It refuses at configure
+when the package is not a target, when it needs shared runtime libraries, or
+(for Vellum) when the Vellum SDK has no iOS slice; it never builds an editorless
+extension for a UI that was asked for. `test/cmake/test_ios_auv3_ui_package.cmake`
+covers each case and that omitting `UI` changes nothing.
+
 ### iOS AUv3 spawn-chain gotchas
 
 iOS AUv3 was historically "scaffolded but never actually loaded" — the
