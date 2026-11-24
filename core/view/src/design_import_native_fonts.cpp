@@ -16,6 +16,7 @@
 #include "design_import_native_common.hpp"
 
 #include <pulp/canvas/bundled_fonts.hpp>
+#include <pulp/view/font_container.hpp>
 #include <pulp/canvas/font_resolver.hpp>
 #include <pulp/runtime/crypto.hpp>
 
@@ -54,20 +55,6 @@ struct Segment {
     std::string alias;
 };
 
-// A shipped font larger than this is not read: no real face is near it, and
-// the bytes are copied whole into the registry.
-constexpr std::uintmax_t kMaxShippedFontBytes = 32u * 1024u * 1024u;
-
-// TrueType (0x00010000 or 'true'), OpenType ('OTTO') or WOFF2 ('wOF2'): the
-// containers the platform font managers and the WOFF2 decoder accept.
-bool has_font_signature(const std::vector<std::uint8_t>& bytes) {
-    if (bytes.size() < 4)
-        return false;
-    const std::string_view tag(reinterpret_cast<const char*>(bytes.data()), 4);
-    return tag == std::string_view("\0\1\0\0", 4) || tag == "true" || tag == "OTTO" ||
-           tag == "wOF2";
-}
-
 std::optional<std::vector<std::uint8_t>> read_font(const IRFontAsset& face,
                                                    const IRAssetManifest& manifest,
                                                    const NativeMaterializeOptions& options) {
@@ -80,7 +67,7 @@ std::optional<std::vector<std::uint8_t>> read_font(const IRFontAsset& face,
         resolved = options.asset_base_directory / resolved;
     std::error_code ec;
     const auto size = std::filesystem::file_size(resolved, ec);
-    if (ec || size == 0 || size > kMaxShippedFontBytes)
+    if (ec || size == 0 || size > pulp::view::kMaxShippedFontBytes)
         return std::nullopt;
     std::ifstream in(resolved, std::ios::binary);
     if (!in)
@@ -89,7 +76,7 @@ std::optional<std::vector<std::uint8_t>> read_font(const IRFontAsset& face,
                                     std::istreambuf_iterator<char>()};
     // A file that no longer holds the bytes the manifest recorded is not the
     // face the design was captured with.
-    if (!has_font_signature(bytes) ||
+    if (!pulp::view::has_font_container_signature(bytes.data(), bytes.size()) ||
         (asset && !asset->content_hash.empty() &&
          pulp::runtime::sha256_hex(bytes.data(), bytes.size()) != asset->content_hash))
         return std::nullopt;
@@ -97,10 +84,7 @@ std::optional<std::vector<std::uint8_t>> read_font(const IRFontAsset& face,
 }
 
 bool register_face(const std::vector<std::uint8_t>& bytes, const std::string& family) {
-    const bool woff2 = bytes[0] == 'w' && bytes[1] == 'O' && bytes[2] == 'F' && bytes[3] == '2';
-    if (woff2 && pulp::canvas::register_font_woff2(bytes.data(), bytes.size(), family))
-        return true;
-    return pulp::canvas::register_font(bytes.data(), bytes.size(), family);
+    return pulp::view::register_font_container(bytes.data(), bytes.size(), family);
 }
 
 void rewrite_stack(std::optional<std::string>& stack,

@@ -301,6 +301,7 @@ SIGNATURE_OVERRIDES: dict[str, str] = {
     "readClipboard": "() => string",
     "registerContextMenu": "(id: string, callbackName: string) => void",
     "registerDrop": "(id: string) => void",
+    "registerEmbeddedFont": "(family: string, assetName: string, weightMin?: number, weightMax?: number) => boolean",
     "registerFont": "(family: string, path: string, weightMin?: number, weightMax?: number) => boolean",
     "registerGesture": "(id: string) => void",
     "registerHover": "(id: string) => void",

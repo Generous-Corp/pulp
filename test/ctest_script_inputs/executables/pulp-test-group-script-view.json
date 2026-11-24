@@ -2,10 +2,15 @@
  "name": "pulp-test-group-script-view",
  "record": {
   "data": "declared",
-  "detected_sources": [],
-  "inputs": [],
+  "detected_sources": [
+   "test/test_scripted_ui_embedded.cpp"
+  ],
+  "inputs": [
+   "external/fonts/Jost-Regular.ttf"
+  ],
   "kind": "compiled",
   "sources": [
+   "test/test_scripted_ui_embedded.cpp",
    "test/test_threejs_resources.cpp"
   ],
   "undeclared_sources": []

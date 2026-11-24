@@ -16,6 +16,8 @@
 // absent even for a UI granted every capability.
 #include <catch2/catch_test_macros.hpp>
 
+#include <pulp/canvas/bundled_fonts.hpp>
+#include <pulp/view/font_container.hpp>
 #include <pulp/view/asset_manager.hpp>
 #include <pulp/view/canvas_widget.hpp>
 #ifndef PULP_BRIDGE_EXEC_ENABLED
@@ -33,10 +35,12 @@
 
 #include "support/unique_temp_dir.hpp"
 
+#include <algorithm>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <iterator>
+#include <memory>
 #include <optional>
 #include <string>
 #include <vector>
@@ -61,6 +65,184 @@ TEST_CASE("empty capabilities → effectful JS functions are absent",
     CapabilitySet none;  // consumer default = most restrictive
     REQUIRE(typeof_global(none, "exec") == "undefined");
     REQUIRE(typeof_global(none, "setImageSource") == "undefined");
+}
+
+namespace {
+
+std::vector<unsigned char> read_jost_regular() {
+    std::ifstream input(std::string(PULP_SOURCE_DIR) + "/external/fonts/Jost-Regular.ttf",
+                        std::ios::binary);
+    REQUIRE(input.good());
+    std::vector<unsigned char> bytes((std::istreambuf_iterator<char>(input)), {});
+    REQUIRE_FALSE(bytes.empty());
+    return bytes;
+}
+
+// Font registration is process-global and this suite shares one process with
+// other cases, so every probe uses a family name nothing else registers.
+std::string sealed_probe_family(const std::string& label) {
+    return "SealedProbe-" + label + "-" +
+           pulp::test::make_unique_temp_dir("pulp-sealed-family").filename().string();
+}
+
+bool register_embedded(ScriptEngine& engine, const std::string& family, const std::string& name) {
+    return engine.evaluate("registerEmbeddedFont('" + family + "', '" + name + "', 400, 700)")
+        .getWithDefault<bool>(true);
+}
+
+} // namespace
+
+TEST_CASE("empty capabilities register only sealed embedded fonts",
+          "[view][bridge][capabilities][fonts][security]") {
+    const auto bytes = read_jost_regular();
+    // Bytes that carry a font signature but do not parse, and a container
+    // over the shipped-font limit: neither may reach the registry.
+    std::vector<unsigned char> malformed{'O', 'T', 'T', 'O', 'n', 'o', 't',
+                                         ' ', 'a', ' ', 'f', 'o', 'n', 't'};
+    std::vector<unsigned char> oversized(pulp::view::kMaxShippedFontBytes + 1, 0);
+    std::copy(bytes.begin(), bytes.end(), oversized.begin());
+    static const char text[] = "plain text, not a font";
+
+    const auto script_dir = pulp::test::make_unique_temp_dir("pulp-sealed-font-script");
+    std::filesystem::create_directories(script_dir / "assets");
+    // A real font beside the script that the panel did not seal.
+    std::filesystem::copy_file(std::string(PULP_SOURCE_DIR) + "/external/fonts/Jost-Regular.ttf",
+                               script_dir / "assets" / "unsealed.ttf");
+    std::filesystem::copy_file(std::string(PULP_SOURCE_DIR) + "/external/fonts/Jost-Regular.ttf",
+                               script_dir / "userfont-1");
+
+    ScriptEngine engine;
+    View root;
+    StateStore store;
+    WidgetBridge bridge(engine, root, store, nullptr, CapabilitySet{});
+    bridge.set_script_base_dir(script_dir);
+    bridge.set_embedded_assets({
+        WidgetBridge::EmbeddedAsset{"assets/sealed.ttf", bytes.data(), bytes.size()},
+        WidgetBridge::EmbeddedAsset{"assets/malformed.ttf", malformed.data(), malformed.size()},
+        WidgetBridge::EmbeddedAsset{"assets/oversized.ttf", oversized.data(), oversized.size()},
+        WidgetBridge::EmbeddedAsset{"assets/text.ttf", reinterpret_cast<const unsigned char*>(text),
+                                    sizeof(text) - 1},
+    });
+    REQUIRE(engine.evaluate("typeof registerEmbeddedFont").toString() == "function");
+    REQUIRE(engine.evaluate("typeof registerFont").toString() == "undefined");
+
+    const auto sealed = sealed_probe_family("sealed");
+    REQUIRE(register_embedded(engine, sealed, "assets/sealed.ttf"));
+    REQUIRE(pulp::canvas::is_font_registered(sealed));
+    const auto dotted = sealed_probe_family("dotted");
+    REQUIRE(register_embedded(engine, dotted, "./assets/sealed.ttf"));
+    REQUIRE(pulp::canvas::is_font_registered(dotted));
+
+    // Nothing outside the sealed set resolves: not a real font on disk beside
+    // the script, not a climb out of it, an absolute path or a file:// URL.
+    const auto refused = [&](const std::string& label, const std::string& name) {
+        const auto family = sealed_probe_family(label);
+        INFO(name);
+        CHECK_FALSE(register_embedded(engine, family, name));
+        CHECK_FALSE(pulp::canvas::is_font_registered(family));
+    };
+    const auto disk_font = (script_dir / "assets" / "unsealed.ttf").generic_string();
+    refused("unsealed", "assets/unsealed.ttf");
+    refused("bare", "userfont-1");
+    refused("climb", "../userfont-1");
+    refused("climb-sealed", "assets/../../assets/sealed.ttf");
+    refused("hosts", "/etc/hosts");
+    refused("absolute", disk_font);
+    refused("file-url", "file://" + disk_font);
+    refused("file-relative", "file://assets/sealed.ttf");
+    // Sealed bytes that are not a usable font never reach the font parser's
+    // success path.
+    refused("malformed", "assets/malformed.ttf");
+    refused("oversized", "assets/oversized.ttf");
+    refused("text", "assets/text.ttf");
+
+    std::error_code ec;
+    std::filesystem::remove_all(script_dir, ec);
+}
+
+TEST_CASE("sealed WOFF2 registers only through the WOFF2 decoder",
+          "[view][bridge][capabilities][fonts][security]") {
+    REQUIRE(pulp::canvas::woff2_decoder_available());
+    std::ifstream input(std::string(PULP_SOURCE_DIR) +
+                            "/packages/pulp-web-player/src/theme/inter.woff2",
+                        std::ios::binary);
+    REQUIRE(input.good());
+    const std::vector<unsigned char> woff2((std::istreambuf_iterator<char>(input)), {});
+    REQUIRE(woff2.size() > 48);
+    const auto declaring = [&](std::uint32_t sfnt_size) {
+        auto bytes = woff2;
+        bytes[16] = static_cast<unsigned char>(sfnt_size >> 24);
+        bytes[17] = static_cast<unsigned char>(sfnt_size >> 16);
+        bytes[18] = static_cast<unsigned char>(sfnt_size >> 8);
+        bytes[19] = static_cast<unsigned char>(sfnt_size);
+        return bytes;
+    };
+    // A decompression bomb declares a face far over the decoder's bound; a
+    // malformed container declares none or is cut short.
+    const auto bomb = declaring(512u * 1024u * 1024u);
+    const auto undeclared = declaring(0);
+    const std::vector<unsigned char> truncated(woff2.begin(), woff2.begin() + woff2.size() / 2);
+
+    const auto script_dir = pulp::test::make_unique_temp_dir("pulp-sealed-woff2");
+    ScriptEngine engine;
+    View root;
+    StateStore store;
+    WidgetBridge bridge(engine, root, store, nullptr, CapabilitySet{});
+    bridge.set_script_base_dir(script_dir);
+    bridge.set_embedded_assets({
+        WidgetBridge::EmbeddedAsset{"assets/inter.woff2", woff2.data(), woff2.size()},
+        WidgetBridge::EmbeddedAsset{"assets/bomb.woff2", bomb.data(), bomb.size()},
+        WidgetBridge::EmbeddedAsset{"assets/undeclared.woff2", undeclared.data(),
+                                    undeclared.size()},
+        WidgetBridge::EmbeddedAsset{"assets/truncated.woff2", truncated.data(), truncated.size()},
+    });
+
+    const auto decoded = sealed_probe_family("woff2");
+    REQUIRE(register_embedded(engine, decoded, "assets/inter.woff2"));
+    REQUIRE(pulp::canvas::is_font_registered(decoded));
+    for (const char* name :
+         {"assets/bomb.woff2", "assets/undeclared.woff2", "assets/truncated.woff2"}) {
+        const auto family = sealed_probe_family("woff2-refused");
+        INFO(name);
+        CHECK_FALSE(register_embedded(engine, family, name));
+        CHECK_FALSE(pulp::canvas::is_font_registered(family));
+    }
+    std::error_code ec;
+    std::filesystem::remove_all(script_dir, ec);
+}
+
+TEST_CASE("a panel cannot rebind a family another owner registered",
+          "[view][bridge][capabilities][fonts][security]") {
+    const auto bytes = read_jost_regular();
+    const auto make_bridge = [&](ScriptEngine& engine, View& root, StateStore& store,
+                                 const std::string& identity) {
+        auto bridge = std::make_unique<WidgetBridge>(engine, root, store, nullptr, CapabilitySet{});
+        bridge->set_storage_identity(identity);
+        bridge->set_embedded_assets(
+            {WidgetBridge::EmbeddedAsset{"assets/face.ttf", bytes.data(), bytes.size()}});
+        return bridge;
+    };
+    const auto first_owner = sealed_probe_family("owner-a");
+    const auto second_owner = sealed_probe_family("owner-b");
+    ScriptEngine engine_a, engine_b, engine_a2;
+    View root_a, root_b, root_a2;
+    StateStore store_a, store_b, store_a2;
+    auto bridge_a = make_bridge(engine_a, root_a, store_a, first_owner);
+    auto bridge_b = make_bridge(engine_b, root_b, store_b, second_owner);
+    auto bridge_a2 = make_bridge(engine_a2, root_a2, store_a2, first_owner);
+
+    const auto family = sealed_probe_family("shared");
+    REQUIRE(register_embedded(engine_a, family, "assets/face.ttf"));
+    // Another panel may not take the family over.
+    CHECK_FALSE(register_embedded(engine_b, family, "assets/face.ttf"));
+    // The owning panel adds faces, and another instance of it shares them.
+    CHECK(register_embedded(engine_a, family, "assets/face.ttf"));
+    CHECK(register_embedded(engine_a2, family, "assets/face.ttf"));
+
+    // A family host code registered is not a panel's to rebind either.
+    const auto host_family = sealed_probe_family("host");
+    REQUIRE(pulp::canvas::register_font(bytes.data(), bytes.size(), host_family));
+    CHECK_FALSE(register_embedded(engine_a, host_family, "assets/face.ttf"));
 }
 
 TEST_CASE("all() capabilities → effectful JS functions are present (dev-unenforced)",

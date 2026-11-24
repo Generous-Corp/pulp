@@ -3,16 +3,20 @@
  "record": {
   "data": "declared",
   "detected_sources": [
+   "test/test_widget_bridge_capabilities.cpp",
    "test/test_widget_bridge_style_reset.cpp"
   ],
   "inputs": [
+   "external/fonts/Jost-Regular.ttf",
    "packages/pulp-react/test/fixtures/style-reset-toggle.json",
+   "packages/pulp-web-player/src/theme/inter.woff2",
    "tools/bridge/generated_editor_bridge.ts"
   ],
   "kind": "compiled",
   "runtime_targets": [],
   "sources": [
    "test/test_editor_bridge.cpp",
+   "test/test_widget_bridge_capabilities.cpp",
    "test/test_widget_bridge_style_reset.cpp"
   ],
   "spawning_sources": [

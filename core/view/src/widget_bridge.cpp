@@ -1276,6 +1276,8 @@ void WidgetBridge::register_api() {
         {ReloadCapability::Filesystem, &BridgeRegistrars::register_asset_loading_api},
         {std::nullopt, &BridgeRegistrars::register_drop_event_api},
         {ReloadCapability::Filesystem, &BridgeRegistrars::register_font_assets_api},
+        // Embedded font bytes are sealed panel assets and do not read paths.
+        {std::nullopt, &BridgeRegistrars::register_embedded_font_api},
         {std::nullopt, &BridgeRegistrars::register_shader_canvas_api},
         {std::nullopt, &BridgeRegistrars::register_gpu_api},
     };

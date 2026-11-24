@@ -2,6 +2,8 @@
 #include <catch2/catch_test_macros.hpp>
 #include <filesystem>
 #include <fstream>
+#include <pulp/canvas/bundled_fonts.hpp>
+#include <pulp/view/reload_capabilities.hpp>
 #include <pulp/view/scripted_ui.hpp>
 #include <pulp/view/widgets.hpp>
 #include <string>
@@ -356,4 +358,51 @@ TEST_CASE("a file-backed session keeps its directory as the storage identity",
             session.bridge()->script_base_dir().generic_string());
     REQUIRE_FALSE(session.bridge()->storage_identity().empty());
     fs::remove_all(temp_dir);
+}
+
+TEST_CASE("a path-backed session seals the fonts beside its script",
+          "[view][scripted-ui][fonts][security]") {
+    const auto dir = pulp::test::make_unique_temp_dir("pulp-scripted-ui-sealed-font");
+    const auto outside = pulp::test::make_unique_temp_dir("pulp-scripted-ui-outside-font");
+    const fs::path jost = fs::path(PULP_SOURCE_DIR) / "external/fonts/Jost-Regular.ttf";
+    fs::create_directories(dir / "assets");
+    fs::copy_file(jost, dir / "assets" / "face.ttf");
+    fs::copy_file(jost, outside / "elsewhere.ttf");
+    std::error_code ec;
+    // Creating a symlink can need a privilege (Windows); the escape check
+    // then has nothing to probe.
+    fs::create_symlink(outside / "elsewhere.ttf", dir / "assets" / "escape.ttf", ec);
+    const bool linked = !ec;
+
+    // Font registration is process-global: names nothing else registers.
+    const auto sealed = "PathSealed-" + dir.filename().string();
+    const auto escaped = "PathEscaped-" + dir.filename().string();
+    write_text(dir / "ui.js", "registerEmbeddedFont('" + sealed +
+                                  "', 'assets/face.ttf', 400, 400);\n"
+                                  "registerEmbeddedFont('" +
+                                  escaped +
+                                  "', 'assets/escape.ttf', 400, 400);\n"
+                                  "createLabel('status', typeof registerFont, '');\n");
+
+    View root;
+    root.set_bounds({0, 0, 320, 240});
+    StateStore store;
+    ScriptedUiSession session(root, store,
+                              {.script_path = dir / "ui.js",
+                               .enable_hot_reload = false,
+                               .enable_theme_reload = false,
+                               .granted_capabilities = CapabilitySet{}});
+    REQUIRE_FALSE(session.uses_embedded_source());
+    std::string error;
+    REQUIRE(session.load(&error));
+    INFO(error);
+    // No Filesystem grant, no registerFont: the face came from sealed bytes.
+    REQUIRE(label_text(session, "status") == "undefined");
+    CHECK(pulp::canvas::is_font_registered(sealed));
+    // A symlink beside the script that leaves its directory is not sealed.
+    if (linked)
+        CHECK_FALSE(pulp::canvas::is_font_registered(escaped));
+
+    fs::remove_all(dir, ec);
+    fs::remove_all(outside, ec);
 }
