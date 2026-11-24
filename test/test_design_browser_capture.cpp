@@ -10,8 +10,7 @@ TEST_CASE("captured fader thumb travel stays inside the content box",
     CHECK(Fader::thumb_axis_position(100.0f, 1.0f, 1.0f, 10.0f, 0.5f) == Catch::Approx(50.0f));
 }
 
-TEST_CASE("fader content box insets by border plus padding",
-          "[view][widgets][fader][geometry]") {
+TEST_CASE("fader content box insets by border plus padding", "[view][widgets][fader][geometry]") {
     Fader fader;
     fader.set_border_width(3.0f);
     fader.flex().padding = 2.0f;

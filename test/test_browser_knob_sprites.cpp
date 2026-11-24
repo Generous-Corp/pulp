@@ -1075,7 +1075,8 @@ TEST_CASE("a static browser fader keeps authored track and ticks while its thumb
               pulp::canvas::DrawCommand::Type::fill_rounded_rect) > 0);
 }
 
-TEST_CASE("a captured fader indicator travels the padded content box and keeps its crop-box cross position",
+TEST_CASE("a captured fader indicator travels the padded content box and keeps its crop-box cross "
+          "position",
           "[import-design][fader][indicator][geometry]") {
     TempDirectory temp;
     auto solid = [](int w, int h) {
