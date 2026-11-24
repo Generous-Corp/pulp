@@ -761,7 +761,7 @@ def case_both_capability_triggers_cover_manifest_data_and_helpers(fx: Fixture) -
         head = fx.commit(path, "fixture\n", "change one capability input")
         expected = path != "docs/readme.txt"
         assert merge_tree_state._touches_capability_inputs(fx.repo, base, head) is expected, path
-        result = subprocess.run(["grep", "-qE", pattern], input=path + "\n", text=True)
+        result = subprocess.run(["grep", "-qE", pattern], input=path + "\n", text=True, encoding="utf-8")
         assert result.returncode == (0 if expected else 1), path
 
 
