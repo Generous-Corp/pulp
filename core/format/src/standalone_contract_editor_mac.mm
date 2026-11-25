@@ -255,6 +255,9 @@ bool run_standalone_contract_editor(Processor& processor, state::StateStore& sto
     PulpStandaloneContractView* content = nil;
 
     ContractEditorSession::HostHooks hooks;
+    // Keys reach the content view from AppKit, after its key-equivalent pass
+    // has already shown them to the editor's own view.
+    hooks.keys_after_native_pass = true;
     hooks.request_resize = [&content](const EditorSize& size) {
         if (content == nil)
             return false;
