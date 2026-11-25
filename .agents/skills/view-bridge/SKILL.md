@@ -314,6 +314,15 @@ error. Things that are easy to get wrong:
   bootstrap once per plug-in image, keyed by the bundle id, before the first
   `create()`. Without it the host comes back null ("Dawn proc table
   unavailable"), which reads like a GPU failure but is a missing bootstrap.
+- Content-first presentation is opt-in per root view. A root that returns
+  true from `editor_defers_presentation()` makes `pulp::vellum::Editor` pass
+  `PluginViewHost::Options::defer_presentation`, so the host keeps the native
+  layer at the editor colour and presents nothing. The editor calls
+  `resume_presentation()` at attach when the root has no
+  `editor_content_ready()`, otherwise on the first idle where it is true, and
+  after `editor_presentation_timeout()` (500 ms default, checked from idle,
+  never at attach) at the latest. It resumes once per editor: Vellum's host
+  cannot defer again, so a re-attach presents at once.
 
 ### The editor-host acceptance test is one command
 
@@ -2488,8 +2497,9 @@ Per-format wiring:
   `host->set_design_viewport(...)`.
 - **macOS AUv3** — no CLAP/VST3-style drag constraint callback.
   `PulpAUMacViewController` must create its initial root view at the
-  compile-time design size when `PULP_PLUGIN_DESIGN_W/H` are available,
-  then call `host->set_design_viewport(...)` after `ViewBridge` opens.
+  bound processor's `editor_size()` when the unit is bound before the view
+  loads, else at the compile-time design size when `PULP_PLUGIN_DESIGN_W/H`
+  are available, then call `host->set_design_viewport(...)` after `ViewBridge` opens.
   `supportedViewConfigurations:` should return aspect-correct host
   configs first, but only if they are large enough for the design;
   wrong-aspect "large enough" configs are fallbacks. Undersized fixed-
