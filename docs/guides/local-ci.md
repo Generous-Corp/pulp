@@ -1193,6 +1193,7 @@ Git for Windows defaults to `core.autocrlf=true`. The Windows job in
 Without it every text file arrives with CRLF line endings, and tests that diff a
 committed artifact against a regenerated one (the timeline schema drift checks)
 or compare a pinned digest fail on bytes nobody committed.
+
 ### Hosted Windows budget and compiler cache
 
 On a GitHub-hosted `windows-latest` runner (4 vCPUs, no remote ccache storage) a
