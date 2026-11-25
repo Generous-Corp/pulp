@@ -297,18 +297,6 @@ stopped compiling and no Pulp check noticed.
   retained Pulp view components against Vellum main's view layer and renders
   them offscreen. PRs touching `integrations/pulp-vellum-components/**` run the
   lane.
-- **Scripted editor route.** The configure also builds the scripted editor
-  bridge (`pulp-test-vellum-scripted-wiring`) and `pulp-ui-script-vellum-fixture`:
-  the `UI_SCRIPT` fixture plug-in declared with `UI_ENGINE vellum` as VST3, CLAP,
-  AU v2 and Standalone. Its `ui-script-vellum-route-*` tests read each image's
-  symbol table and fail if it carries `pulp::view` code, the format
-  `ViewBridge` or the legacy scripted editor builder, or lacks the Vellum
-  editor factory; the plain fixture is the control that the census sees that
-  stack. Nothing is launched.
-- **Every executable the filter runs is built.** The build step names each
-  target behind a `pulp-vellum*` test. An unbuilt `add_test` executable fails as
-  missing, and an unbuilt `catch_discover_tests` executable adds no tests and
-  fails nothing, so a target left off the list loses its tests silently.
 - **Vellum-backed UI target names.** The `pulp-vellum` filter also runs
   `cmake-vellum-ui-compat-real` and `cmake-vellum-ui-compat-wrong-version`. In a
   configure that found Vellum they get that label and `REQUIRE_VELLUM`, so they

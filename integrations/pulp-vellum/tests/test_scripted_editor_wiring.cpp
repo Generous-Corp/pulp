@@ -84,6 +84,7 @@ struct RecordingSession {
     static inline std::vector<::vellum::render::GpuSurface*> attachments;
     static inline std::optional<::vellum::view::ScriptedUiOptions> options;
     static inline std::string host_kind;
+    static inline bool load_succeeds = true;
     RecordingSession(::vellum::view::View&, ::vellum::value::ParamModel&,
                      ::vellum::view::ScriptedUiOptions opened_with) {
         options = std::move(opened_with);
@@ -91,8 +92,10 @@ struct RecordingSession {
     void set_host_kind(const char* kind) {
         host_kind = kind;
     }
-    bool load(std::string*) {
-        return true;
+    bool load(std::string* error) {
+        if (!load_succeeds && error)
+            *error = "no such script";
+        return load_succeeds;
     }
     const char* script_label() const {
         return "recording session";
@@ -381,4 +384,31 @@ TEST_CASE("Scripted root opens the editor its own bundle entry registered",
     const auto other_options = open_scripted_root(other, pulp::format::EditorHostKind::plugin);
     CHECK(other_options.script_source == reinterpret_cast<const char*>(kEmbeddedScript));
     CHECK(other_options.storage_identity == "test.vellum.other/main.js");
+}
+
+TEST_CASE("A scripted editor whose script does not load opens no editor",
+          "[pulp-vellum][scripted-wiring][editor-open]") {
+    FactoryReset reset;
+    pulp::state::StateStore store;
+    pulp::format::StateStoreParamPort port(store);
+    Context context(port);
+    Processor processor;
+    int hosts_created = 0;
+    ::vellum::view::PluginViewHost::set_factory(
+        [&](::vellum::view::View&, const ::vellum::view::PluginViewHost::Options&) {
+            ++hosts_created;
+            return std::make_unique<RecordingHost>();
+        });
+    using Root = pulp::vellum::detail::ScriptedEditorRoot<RecordingSession>;
+    pulp::vellum::EditorFactory<Root> factory;
+
+    RecordingSession::load_succeeds = false;
+    auto failed = factory.create(processor, context, pulp::format::EditorRole::editor);
+    RecordingSession::load_succeeds = true;
+    CHECK(failed == nullptr);
+    CHECK(hosts_created == 0);
+
+    auto opened = factory.create(processor, context, pulp::format::EditorRole::editor);
+    CHECK(opened != nullptr);
+    CHECK(hosts_created == 1);
 }

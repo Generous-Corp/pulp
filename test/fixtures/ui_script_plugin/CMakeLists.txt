@@ -95,6 +95,18 @@ if(TARGET pulp-vellum-scripted AND CMAKE_NM)
         list(APPEND _vellum_route_targets PulpUiScriptFixture_CLAP)
     endif()
     add_custom_target(pulp-ui-script-vellum-fixture DEPENDS ${_vellum_route_targets})
+    # The census reads built plug-in images, which no labelled test executable
+    # links, so a lane that builds only its test executables would hand the
+    # census a missing file. Build them first, on a governed share of the host.
+    add_test(NAME ui-script-vellum-route-build
+        COMMAND "${PROJECT_SOURCE_DIR}/tools/ci/governed-build.sh"
+            ${CMAKE_COMMAND} --build "${CMAKE_BINARY_DIR}" --target pulp-ui-script-vellum-fixture)
+    set_tests_properties(ui-script-vellum-route-build PROPERTIES
+        LABELS "pulp-vellum;format;scripted-ui" TIMEOUT 1800
+        FIXTURES_SETUP ui-script-vellum-route)
+    get_property(_vellum_route_tests DIRECTORY PROPERTY TESTS)
+    list(FILTER _vellum_route_tests INCLUDE REGEX "^ui-script-vellum-route-(vst3|clap|au|standalone|control)$")
+    set_tests_properties(${_vellum_route_tests} PROPERTIES FIXTURES_REQUIRED ui-script-vellum-route)
 endif()
 
 add_executable(pulp-ui-script-editor-probe editor_probe.mm)

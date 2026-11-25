@@ -13968,10 +13968,3 @@ main's SDK. A new optional Vellum integration package needs its option, its
 `pulp-test-*` target and a `paths:` entry added there, or no lane compiles it
 against main. The tests' ctest label should start with `pulp-vellum` so the
 lane's `-L pulp-vellum` filter runs them.
-
-The build step must name every executable behind those tests, not just one per
-package. `-L pulp-vellum` is a regex, so it also selects tests whose executables
-the step never built: a plain `add_test` one then fails as "not found", while a
-`catch_discover_tests` one contributes zero tests and fails nothing. Compare
-`ctest -L pulp-vellum -N` after building only the listed targets with the count
-after building them all; a difference is a target missing from the list.
