@@ -174,11 +174,12 @@ def remove_worktree(root: Path, path: Path) -> None:
     git_quiet("worktree", "prune", "--expire", "now")
 
 
-# Include helper scripts conservatively: the manifest imports shared schema
-# and Git-history utilities as well as the agent_capability_* modules.
+# Include the manifest's shared helper imports as well as its
+# agent_capability_* modules. Keep this selector in sync with the hook and
+# gates.sh so all push surfaces make the same relevance decision.
 # The hook's equivalent selector is covered by the same fixture matrix.
 CAPABILITY_INPUTS = re.compile(
-    r"^(core/[^/]+/include/|tools/scripts/|tools/agent-capabilities/|docs/status/agent-capabilit"
+    r"^(core/[^/]+/include/|tools/scripts/agent_capability_|tools/scripts/(json_schema_lite|gate_common)\.py$|tools/agent-capabilities/|docs/status/agent-capabilit"
     r"|tools/dsp_vocabulary\.py$|docs/status/forge-catalog\.json$|test/test_agent_capability_compile\.cpp$)")
 
 

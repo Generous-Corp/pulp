@@ -799,6 +799,27 @@ def case_a_not_checked_merge_tree_is_recorded_and_named_in_the_verdict(fx: Fixtu
     assert "merge-tree script-state NOT CHECKED" in only_mt and "gates clean" not in only_mt, only_mt
 
 
+def case_advisory_merge_tree_outcomes_are_recorded_in_the_verdict(fx: Fixture) -> None:
+    """An advisory error must not be reported as a fully clean push."""
+    hook = (ROOT / ".githooks/pre-push").read_text(encoding="utf-8")
+    c0 = hook.index('case "$_merge_tree_rc" in')
+    case = hook[c0:hook.index("\n        esac", c0) + len("\n        esac")]
+    start = hook.index("_prepush_final_verdict_line() {")
+    func = hook[start:hook.index("\n}\n", start) + 3]
+    for rc in (2, 3, 9):
+        script = f"""
+prepush_receipt_note() {{ :; }}
+MERGE_TREE_BASE=origin/main
+_merge_tree_rc={rc}; _prepush_merge_tree_not_checked=0
+{case}
+{func}
+_prepush_final_verdict_line
+"""
+        res = subprocess.run(["bash", "-c", script], capture_output=True, text=True, encoding="utf-8")
+        assert "merge-tree script-state NOT CHECKED" in res.stderr, (rc, res.stderr)
+        assert "gates clean." not in res.stderr, (rc, res.stderr)
+
+
 def _families_fast_path_run(fx: Fixture, merge_tree_rc: int, families_rc: int = 0, allow: str = "0"):
     """Run the hook's real merge-tree exit handling and then its real families
     step, with stubbed gates. Returns (families_ran, prepush_failed, exited_early)."""

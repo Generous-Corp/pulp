@@ -545,7 +545,9 @@ elif [ -f "$MERGE_TREE_SCRIPT_STATE" ]; then
         case "$_merge_tree_rc" in
             0) _merge_tree_clean=1 ;;
             1) exit 1 ;;
-            2) echo "[pre-push] merge-tree script-state internal error (2); advisory, run it on a healthy host." >&2 ;;
+            2) echo "[pre-push] merge-tree script-state internal error (2); advisory, run it on a healthy host." >&2
+               prepush_receipt_note skipped merge-tree-script-state "internal error (2); result was not checked"
+               _prepush_merge_tree_not_checked=1 ;;
             4)
                 # A check timed out or could not start: nothing was judged, so
                 # the push is not allowed to pass as if it had been.
@@ -561,8 +563,12 @@ elif [ -f "$MERGE_TREE_SCRIPT_STATE" ]; then
             5) echo "[pre-push] merge-tree script-state NOT CHECKED: the ${MERGE_TREE_BOUND}s bound ran out (above). ADVISORY, not a pass; CI builds the same merged tree. Raise PULP_PREPUSH_MERGE_TREE_BOUND (0 = unbounded) to wait for it." >&2
                prepush_receipt_note skipped merge-tree-script-state "${MERGE_TREE_BOUND}s bound ran out"
                _prepush_merge_tree_not_checked=1 ;;
-            3) echo "[pre-push] merge-tree script-state: branch conflicts with $MERGE_TREE_BASE; advisory (GitHub will report DIRTY)." >&2 ;;
-            *) echo "[pre-push] merge-tree script-state internal error ($_merge_tree_rc); advisory." >&2 ;;
+            3) echo "[pre-push] merge-tree script-state: branch conflicts with $MERGE_TREE_BASE; advisory (GitHub will report DIRTY)." >&2
+               prepush_receipt_note skipped merge-tree-script-state "branch conflicts with $MERGE_TREE_BASE; result was not checked"
+               _prepush_merge_tree_not_checked=1 ;;
+            *) echo "[pre-push] merge-tree script-state internal error ($_merge_tree_rc); advisory." >&2
+               prepush_receipt_note skipped merge-tree-script-state "internal error ($_merge_tree_rc); result was not checked"
+               _prepush_merge_tree_not_checked=1 ;;
         esac
     fi
 fi
@@ -1222,7 +1228,7 @@ if [ -f "$CAPABILITY_CONTRACT" ]; then
     capability_base="$(git rev-parse --verify --quiet "$BASE^{commit}" || true)"
     if [ -z "$capability_base" ]; then
         echo "[pre-push] agent-capability contract: SKIPPED — base '$BASE' does not resolve. A skip is not a pass." >&2
-    elif git diff --name-only "$capability_base"...HEAD 2>/dev/null | grep -qE '^(core/[^/]+/include/|tools/scripts/|tools/agent-capabilities/|docs/status/agent-capabilit|tools/dsp_vocabulary\.py$|docs/status/forge-catalog\.json$|test/test_agent_capability_compile\.cpp$)'; then
+    elif git diff --name-only "$capability_base"...HEAD 2>/dev/null | grep -qE '^(core/[^/]+/include/|tools/scripts/agent_capability_|tools/scripts/(json_schema_lite|gate_common)\.py$|tools/agent-capabilities/|docs/status/agent-capabilit|tools/dsp_vocabulary\.py$|docs/status/forge-catalog\.json$|test/test_agent_capability_compile\.cpp$)'; then
         run_gate_captured env PULP_AGENT_CAPABILITY_BASE_REF="$capability_base" \
             "$PYTHON" "$CAPABILITY_CONTRACT" --check
         gate_rc=$?; case $gate_rc in
