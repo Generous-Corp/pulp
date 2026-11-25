@@ -237,8 +237,7 @@ TEST_CASE("midi learn session: begin from the menu, bind from a controller, conf
     CHECK(target.state(kCut).phase == Phase::mapped);
 }
 
-TEST_CASE("midi learn session: Escape cancels only a listening learn",
-          "[midi-learn][session]") {
+TEST_CASE("midi learn session: Escape cancels only a listening learn", "[midi-learn][session]") {
     state::MidiLearnEngine engine;
     std::uint64_t now = 0;
     vc::MidiLearnSession session(engine, [&] { return now; });
@@ -260,8 +259,7 @@ TEST_CASE("midi learn session: Escape cancels only a listening learn",
     CHECK(target.state(kCut).phase == Phase::idle);
 }
 
-TEST_CASE("midi learn session: without an editor a clear still works",
-          "[midi-learn][session]") {
+TEST_CASE("midi learn session: without an editor a clear still works", "[midi-learn][session]") {
     state::StateStore store;
     populate(store);
     state::MidiLearnEngine engine;
@@ -559,7 +557,8 @@ TEST_CASE("midi learn overlay: pixels show the outline, chip and dot for each ph
     overlay->flex().preferred_width = 80;
     overlay->flex().preferred_height = 40;
 
-    const auto accent = overlay->resolve_color("accent.primary", ::vellum::canvas::Color::rgba8(100, 150, 255));
+    const auto accent =
+        overlay->resolve_color("accent.primary", ::vellum::canvas::Color::rgba8(100, 150, 255));
     const int ar = static_cast<int>(accent.r * 255.0f + 0.5f);
     const int ag = static_cast<int>(accent.g * 255.0f + 0.5f);
     const int ab = static_cast<int>(accent.b * 255.0f + 0.5f);
@@ -576,7 +575,7 @@ TEST_CASE("midi learn overlay: pixels show the outline, chip and dot for each ph
     const auto listening = render(root, 120, 80);
     CHECK(near(listening.at(60, 24), ar, ag, ab, 25));
     CHECK(near(listening.at(60, 23), ar, ag, ab, 25));
-    CHECK(near(listening.at(60, 40), bg_px.r, bg_px.g, bg_px.b, 3)); // interior untouched
+    CHECK(near(listening.at(60, 40), bg_px.r, bg_px.g, bg_px.b, 3));       // interior untouched
     CHECK_FALSE(near(listening.at(24, 14), bg_px.r, bg_px.g, bg_px.b, 3)); // chip body
 
     // Mapped and settled: just the corner dot, no outline and no chip.
