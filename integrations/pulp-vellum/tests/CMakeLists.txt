@@ -78,6 +78,14 @@ if(PULP_BUILD_TESTS AND TARGET Catch2::Catch2WithMain)
         set_tests_properties(pulp-vellum-editor-bootstrap-failure PROPERTIES
             LABELS pulp-vellum-editor)
 
+        # A VST3 host opening a Vellum editor through the view-free contract
+        # view. The cases define make_plug_view() themselves, so the
+        # create_view() path's view layer is never linked.
+        if(PULP_HAS_VST3)
+            target_compile_definitions(pulp-test-pulp-vellum-editor PRIVATE
+                PULP_TEST_VELLUM_VST3=1)
+        endif()
+
         add_executable(pulp-test-pulp-vellum-about-notices
             ${PULP_ROOT_DIR}/test/test_pulp_vellum_about_notices.cpp)
         target_link_libraries(pulp-test-pulp-vellum-about-notices PRIVATE

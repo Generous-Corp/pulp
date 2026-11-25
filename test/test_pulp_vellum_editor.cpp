@@ -1451,3 +1451,381 @@ TEST_CASE("A Vellum root that does not opt in keeps immediate presentation",
     CHECK(f.host->resume_presentation_calls == 0);
     CHECK(f.host->presentation_allowed());
 }
+
+// ── A VST3 host opening a Vellum editor ─────────────────────────────────────
+//
+// PulpVst3Processor::createView() returns the view-free ContractPlugView,
+// which drives a pulp::vellum::Editor and the Vellum PluginViewHost it owns.
+// Each case stands in for the DAW and calls the IPlugView methods a host
+// calls, then checks what the Vellum root and its host saw. Rendering stays
+// offscreen: the parent is another Vellum host's native view, never shown.
+
+#if defined(PULP_TEST_VELLUM_VST3)
+
+#include <pulp/format/vst3_adapter.hpp>
+#include <pulp/format/vst3_contract_view.hpp>
+
+#include <pluginterfaces/base/keycodes.h>
+#include <pluginterfaces/vst/ivsthostapplication.h>
+#include <public.sdk/source/common/pluginview.h>
+
+#include <vellum/view/text_editor.hpp>
+
+#include <cstdlib>
+#include <string>
+
+using pulp::format::vst3::ContractPlugView;
+using pulp::format::vst3::PulpVst3Processor;
+
+namespace vst3_cases {
+
+using PluginViewHost = ::vellum::view::PluginViewHost;
+
+/// What the root saw, reset by each case.
+struct Vst3RootLog {
+    int opens = 0;
+    int closes = 0;
+    ::vellum::view::View* root = nullptr;
+    ::vellum::view::TextEditor* field = nullptr;
+};
+Vst3RootLog g_vst3_root;
+
+/// An aspect-locked root with one text field.
+class Vst3FieldView final : public ::vellum::view::View {
+  public:
+    explicit Vst3FieldView(pulp::vellum::EditorEnv&) {
+        auto field = std::make_unique<::vellum::view::TextEditor>();
+        g_vst3_root.field = field.get();
+        add_child(std::move(field));
+        g_vst3_root.root = this;
+    }
+    ~Vst3FieldView() override {
+        g_vst3_root.root = nullptr;
+        g_vst3_root.field = nullptr;
+    }
+
+    pulp::format::ViewSize editor_view_size() const {
+        return {.preferred_width = 400,
+                .preferred_height = 300,
+                .min_width = 200,
+                .min_height = 150,
+                .max_width = 800,
+                .max_height = 600,
+                .aspect_ratio = 4.0 / 3.0};
+    }
+    void editor_opened() {
+        ++g_vst3_root.opens;
+    }
+    void editor_closing() {
+        ++g_vst3_root.closes;
+    }
+};
+
+class Vst3FieldProcessor final : public pulp::format::Processor {
+  public:
+    pulp::format::PluginDescriptor descriptor() const override {
+        pulp::format::PluginDescriptor d;
+        d.name = "Vellum VST3 Editor";
+        d.manufacturer = "Pulp";
+        d.bundle_id = "dev.pulp.test.vst3-vellum-editor";
+        d.version = "1.0.0";
+        d.input_buses = {{"Audio In", 2}};
+        d.output_buses = {{"Audio Out", 2}};
+        return d;
+    }
+    void define_parameters(pulp::state::StateStore& store) override {
+        pulp::state::ParamInfo info;
+        info.id = 1;
+        info.name = "Gain";
+        info.range = {0.0f, 1.0f, 0.5f};
+        store.add_parameter(info);
+    }
+    void prepare(const pulp::format::PrepareContext&) override {}
+    void process(pulp::audio::BufferView<float>& out, const pulp::audio::BufferView<const float>&,
+                 pulp::midi::MidiBuffer&, pulp::midi::MidiBuffer&,
+                 const pulp::format::ProcessContext&) override {
+        out.clear();
+    }
+    pulp::format::EditorFactory* editor_factory() override {
+        return pulp::vellum::editor_factory<Vst3FieldView>();
+    }
+};
+
+std::unique_ptr<pulp::format::Processor> create_vst3_field_processor() {
+    return std::make_unique<Vst3FieldProcessor>();
+}
+
+class Vst3HostApp final : public Steinberg::Vst::IHostApplication {
+  public:
+    Steinberg::tresult PLUGIN_API getName(Steinberg::Vst::String128 name) override {
+        name[0] = 0;
+        return Steinberg::kResultTrue;
+    }
+    Steinberg::tresult PLUGIN_API createInstance(Steinberg::TUID, Steinberg::TUID,
+                                                 void** obj) override {
+        if (obj)
+            *obj = nullptr;
+        return Steinberg::kNotImplemented;
+    }
+    Steinberg::tresult PLUGIN_API queryInterface(const Steinberg::TUID iid, void** obj) override {
+        if (Steinberg::FUnknownPrivate::iidEqual(iid, Steinberg::Vst::IHostApplication::iid) ||
+            Steinberg::FUnknownPrivate::iidEqual(iid, Steinberg::FUnknown::iid)) {
+            *obj = static_cast<Steinberg::Vst::IHostApplication*>(this);
+            return Steinberg::kResultTrue;
+        }
+        *obj = nullptr;
+        return Steinberg::kNoInterface;
+    }
+    Steinberg::uint32 PLUGIN_API addRef() override {
+        return 1;
+    }
+    Steinberg::uint32 PLUGIN_API release() override {
+        return 1;
+    }
+};
+
+// Unset an environment variable for one scope, then put back what was there.
+class Vst3ScopedEnvUnset {
+  public:
+    explicit Vst3ScopedEnvUnset(const char* name) : name_(name) {
+        if (const char* prev = std::getenv(name))
+            prev_ = std::string(prev);
+        ::unsetenv(name_.c_str());
+    }
+    ~Vst3ScopedEnvUnset() {
+        if (prev_)
+            ::setenv(name_.c_str(), prev_->c_str(), 1);
+    }
+
+  private:
+    std::string name_;
+    std::optional<std::string> prev_;
+};
+
+// createView() refuses editors in CI and headless environments; these cases
+// open one offscreen.
+struct Vst3EditorEnvironment {
+    Vst3ScopedEnvUnset disable_editor{"PULP_DISABLE_PLUGIN_EDITOR"};
+    Vst3ScopedEnvUnset headless{"PULP_HEADLESS"};
+    Vst3ScopedEnvUnset test_mode{"PULP_TEST_MODE"};
+    Vst3ScopedEnvUnset ci{"CI"};
+};
+
+// Clears any host factory a case registers, even when an assertion stops it.
+struct Vst3FactoryReset {
+    ~Vst3FactoryReset() {
+        PluginViewHost::clear_factory();
+    }
+};
+
+// Both focus slots are process-global; leave them clear between cases.
+struct Vst3FocusReset {
+    Vst3FocusReset() {
+        ::vellum::view::View::focused_input_ = nullptr;
+        ::vellum::view::View::active_overlay_ = nullptr;
+    }
+    ~Vst3FocusReset() {
+        ::vellum::view::View::focused_input_ = nullptr;
+        ::vellum::view::View::active_overlay_ = nullptr;
+    }
+};
+
+// A host whose native view never accepts a parent.
+class Vst3RefusingHost final : public PluginViewHost {
+  public:
+    explicit Vst3RefusingHost(Size size) : size_(size) {}
+    ::vellum::view::NativeViewHandle native_handle() override {
+        return this;
+    }
+    void attach_to_parent(::vellum::view::NativeViewHandle) override {}
+    bool is_attached() const noexcept override {
+        return false;
+    }
+    void detach() override {
+        ++detaches;
+    }
+    void repaint() override {}
+    void set_size(uint32_t width, uint32_t height) override {
+        size_ = {width, height};
+    }
+    Size get_size() const override {
+        return size_;
+    }
+
+    int detaches = 0;
+
+  private:
+    Size size_;
+};
+
+/// The adapter, its host-side objects and the offscreen parent view.
+struct Vst3Fixture {
+    Vst3EditorEnvironment env;
+    Vst3FocusReset focus;
+    Vst3HostApp host_app;
+    PulpVst3Processor processor{create_vst3_field_processor};
+    ::vellum::view::View parent_root;
+    std::unique_ptr<PluginViewHost> parent;
+
+    Vst3Fixture() {
+        g_vst3_root = {};
+        REQUIRE(processor.initialize(&host_app) == Steinberg::kResultOk);
+    }
+    ~Vst3Fixture() {
+        processor.terminate();
+    }
+
+    // A second Vellum host stands in for the DAW's NSView.
+    void* native_parent() {
+        if (!parent) {
+            parent = PluginViewHost::create(parent_root, PluginViewHost::Size{800, 600});
+            REQUIRE(parent != nullptr);
+        }
+        return parent->native_handle();
+    }
+
+    ContractPlugView* create_view() {
+        auto* raw = processor.createView(Steinberg::Vst::ViewType::kEditor);
+        REQUIRE(raw != nullptr);
+        auto* view = dynamic_cast<ContractPlugView*>(raw);
+        REQUIRE(view != nullptr);
+        return view;
+    }
+};
+
+Steinberg::tresult press(ContractPlugView& view, Steinberg::char16 key, Steinberg::int16 code,
+                         Steinberg::int16 modifiers = 0) {
+    return view.onKeyDown(key, code, modifiers);
+}
+
+} // namespace vst3_cases
+
+using namespace vst3_cases;
+
+namespace pulp::format::vst3 {
+
+// The create_view() path is not part of this test; a processor here always
+// supplies an editor factory, so this is never reached.
+Steinberg::IPlugView* make_plug_view(Processor&, state::StateStore&, runtime::AliveToken::Handle) {
+    FAIL("a Vellum editor never takes the create_view() path");
+    return nullptr;
+}
+
+} // namespace pulp::format::vst3
+
+TEST_CASE("A VST3 host opens, sizes and closes a Vellum editor",
+          "[pulp-vellum][vst3][editor-host]") {
+#if !defined(__APPLE__)
+    SKIP("Vellum's SDK ships its GPU plug-in view host on macOS only");
+#endif
+    Vst3Fixture fx;
+    auto* view = fx.create_view();
+    REQUIRE(g_vst3_root.root != nullptr);
+    auto* host = g_vst3_root.root->plugin_view_host();
+    REQUIRE(host != nullptr);
+
+    // Before attach: the root's declared preferred size.
+    Steinberg::ViewRect rect;
+    REQUIRE(view->getSize(&rect) == Steinberg::kResultTrue);
+    CHECK(rect.getWidth() == 400);
+    CHECK(rect.getHeight() == 300);
+
+    REQUIRE(view->attached(fx.native_parent(), Steinberg::kPlatformTypeNSView) ==
+            Steinberg::kResultTrue);
+    CHECK(g_vst3_root.opens == 1);
+    CHECK(host->is_attached());
+
+    // The declared hints drive resize negotiation: 4:3 inside [min, max].
+    REQUIRE(view->canResize() == Steinberg::kResultTrue);
+    Steinberg::ViewRect proposed(0, 0, 1000, 1000);
+    REQUIRE(view->checkSizeConstraint(&proposed) == Steinberg::kResultTrue);
+    CHECK(proposed.getWidth() == 800);
+    CHECK(proposed.getHeight() == 600);
+    Steinberg::ViewRect resized(0, 0, 640, 480);
+    REQUIRE(view->onSize(&resized) == Steinberg::kResultTrue);
+    REQUIRE(view->getSize(&rect) == Steinberg::kResultTrue);
+    CHECK(rect.getWidth() == 640);
+    CHECK(rect.getHeight() == 480);
+    CHECK(host->get_size().width == 640);
+    CHECK(host->get_size().height == 480);
+
+    REQUIRE(view->removed() == Steinberg::kResultTrue);
+    CHECK(g_vst3_root.closes == 1);
+    CHECK_FALSE(host->is_attached());
+    view->release();
+}
+
+TEST_CASE("A VST3 host's Space reaches a focused Vellum text field and nothing else",
+          "[pulp-vellum][vst3][editor-host][keys]") {
+#if !defined(__APPLE__)
+    SKIP("Vellum's SDK ships its GPU plug-in view host on macOS only");
+#endif
+    Vst3Fixture fx;
+    auto* view = fx.create_view();
+    REQUIRE(view->attached(fx.native_parent(), Steinberg::kPlatformTypeNSView) ==
+            Steinberg::kResultTrue);
+    REQUIRE(g_vst3_root.field != nullptr);
+
+    // Nothing focused: Space stays the host's transport key.
+    CHECK(press(*view, u' ', Steinberg::KEY_SPACE) == Steinberg::kResultFalse);
+    CHECK(g_vst3_root.field->get_text().empty());
+
+    g_vst3_root.field->claim_input_focus();
+    // A focused field takes Space as text, and the host does not also act on it.
+    CHECK(press(*view, u' ', Steinberg::KEY_SPACE) == Steinberg::kResultTrue);
+    CHECK(g_vst3_root.field->get_text() == " ");
+    CHECK(press(*view, u' ', Steinberg::KEY_SPACE, Steinberg::kShiftKey) == Steinberg::kResultTrue);
+    CHECK(g_vst3_root.field->get_text() == "  ");
+    // The release, a Command chord and any other key stay with the host or
+    // the native view's own key path.
+    CHECK(view->onKeyUp(u' ', Steinberg::KEY_SPACE, 0) == Steinberg::kResultFalse);
+    CHECK(press(*view, u' ', Steinberg::KEY_SPACE, Steinberg::kCommandKey) ==
+          Steinberg::kResultFalse);
+    CHECK(press(*view, u'a', 0) == Steinberg::kResultFalse);
+    CHECK(g_vst3_root.field->get_text() == "  ");
+
+    REQUIRE(view->removed() == Steinberg::kResultTrue);
+    view->release();
+}
+
+TEST_CASE("A VST3 host gets no Vellum editor when the view host cannot be created",
+          "[pulp-vellum][vst3][editor-host][negative]") {
+    Vst3FactoryReset reset;
+    PluginViewHost::set_factory(
+        [](::vellum::view::View&,
+           const PluginViewHost::Options&) -> std::unique_ptr<PluginViewHost> { return nullptr; });
+    Vst3Fixture fx;
+    auto* view = fx.create_view();
+    int parent_stand_in = 0;
+    CHECK(view->attached(&parent_stand_in, Steinberg::kPlatformTypeNSView) ==
+          Steinberg::kResultFalse);
+    CHECK(g_vst3_root.opens == 0);
+    view->removed();
+    CHECK(g_vst3_root.closes == 0);
+    view->release();
+}
+
+TEST_CASE("A VST3 host whose parent refuses the Vellum view never opens the editor",
+          "[pulp-vellum][vst3][editor-host][negative]") {
+    Vst3FactoryReset reset;
+    Vst3RefusingHost* made = nullptr;
+    PluginViewHost::set_factory(
+        [&made](::vellum::view::View&, const PluginViewHost::Options& options) {
+            auto host = std::make_unique<Vst3RefusingHost>(options.size);
+            made = host.get();
+            return std::unique_ptr<PluginViewHost>(std::move(host));
+        });
+    Vst3Fixture fx;
+    auto* view = fx.create_view();
+    REQUIRE(made != nullptr);
+    int parent_stand_in = 0;
+    CHECK(view->attached(&parent_stand_in, Steinberg::kPlatformTypeNSView) ==
+          Steinberg::kResultFalse);
+    CHECK(g_vst3_root.opens == 0);
+    // Nothing opened, so nothing closes; a later removed() is not a second close.
+    view->removed();
+    CHECK(g_vst3_root.closes == 0);
+    view->release();
+}
+
+#endif // PULP_TEST_VELLUM_VST3
