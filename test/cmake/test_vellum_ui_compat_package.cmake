@@ -29,10 +29,26 @@
 #                 executable per name and runs each.
 #   wrong-version a real Vellum whose version is not the one recorded: it is
 #                 not found, the config warns, and the consumer refuses.
+#   gpu-guard     stand-ins: a binary that links a Vellum-backed name and
+#                 Pulp's static gpu_runtime (Pulp::gpu-device, Pulp::gpu-audio,
+#                 Pulp::host, VellumGpuRuntime::Device), directly, through a
+#                 static library's private link, through a subdirectory or
+#                 through an alias, is refused at configure; either side alone,
+#                 a static library alone and an SDK that builds Pulp's own UI
+#                 configure.
+#   gpu-owner-real a real Vellum SDK and a real VellumGpuRuntime package: the
+#                 Vellum-backed consumer's executable defines no gpu_runtime::
+#                 or wgpu symbol (the provider owns them), a control that links
+#                 the provider and the static device directly, bypassing the
+#                 Pulp names, defines both (two owners, which nm can see), and
+#                 the same pair through the Pulp names is refused.
 #
 # real and wrong-version need VELLUM_DIR (the directory holding
 # VellumConfig.cmake). Without it they print SKIP, unless REQUIRE_VELLUM is on,
 # when they fail: the lane that registers them with a Vellum SDK must run them.
+# gpu-owner-real also needs GPU_RUNTIME_DIR (the directory holding
+# VellumGpuRuntimeConfig.cmake) and GPU_RUNTIME_SKIA_DIR (the locked Skia/Dawn
+# build it checks Dawn against), and skips without them.
 if(NOT DEFINED PULP_SOURCE_DIR OR NOT DEFINED FIXTURE_DIR OR NOT DEFINED SCENARIO)
     message(FATAL_ERROR "PULP_SOURCE_DIR, FIXTURE_DIR and SCENARIO are required")
 endif()
@@ -274,6 +290,224 @@ elseif(SCENARIO STREQUAL "no-bridge")
     _expect("${_out}" "COMPAT=\\[\\]" "no names")
     _expect("${_out}" "VELLUM_FOUND=\\[\\]" "Vellum never searched")
     _expect("${_out}" "T\\[view\\]=\\[ABSENT\\]" "no view target")
+
+elseif(SCENARIO STREQUAL "gpu-guard")
+    # Shaped like the installed SDK: Pulp::gpu-audio reaches the device through
+    # $<LINK_ONLY:...> as well as through Pulp::gpu-device, and Pulp::host
+    # through Pulp::gpu-audio.
+    set(_gpu
+        "if(NOT TARGET VellumGpuRuntime::Device)\n"
+        "  add_library(VellumGpuRuntime::Device INTERFACE IMPORTED)\n"
+        "  add_library(Pulp::gpu-device INTERFACE IMPORTED)\n"
+        "  set_property(TARGET Pulp::gpu-device PROPERTY INTERFACE_LINK_LIBRARIES VellumGpuRuntime::Device)\n"
+        "  add_library(Pulp::gpu-audio INTERFACE IMPORTED)\n"
+        "  set_property(TARGET Pulp::gpu-audio PROPERTY INTERFACE_LINK_LIBRARIES \"$<LINK_ONLY:VellumGpuRuntime::Device>\" Pulp::gpu-device)\n"
+        "  add_library(Pulp::host INTERFACE IMPORTED)\n"
+        "  set_property(TARGET Pulp::host PROPERTY INTERFACE_LINK_LIBRARIES Pulp::gpu-audio)\n"
+        "endif()\n")
+    string(JOIN "" _gpu ${_gpu})
+    _pulp_own(_own view-core view canvas render view-native design-import)
+    set(_refusal "links two GPU device layers")
+    # name|ui flag|consumer body|expected (pass, or the "through" pair)
+    foreach(_case
+            "direct|ON|add_executable(app main.cpp)\ntarget_link_libraries(app PRIVATE Pulp::view Pulp::gpu-device)|from Pulp::gpu-device, and .* from Pulp::view\\."
+            "private-static|ON|add_library(engine STATIC main.cpp)\ntarget_link_libraries(engine PRIVATE Pulp::gpu-device)\nadd_executable(app main.cpp)\ntarget_link_libraries(app PRIVATE engine Pulp::render)|from Pulp::gpu-device \\(through engine\\), and .* from Pulp::render\\."
+            "host-module|ON|add_library(plug MODULE main.cpp)\ntarget_link_libraries(plug PRIVATE Pulp::host Pulp::canvas)|from Pulp::gpu-audio \\(through Pulp::host\\), and .* from Pulp::canvas\\."
+            "device|ON|add_library(lib SHARED main.cpp)\ntarget_link_libraries(lib PRIVATE VellumGpuRuntime::Device Vellum::MirrorView_core)|from VellumGpuRuntime::Device, and .* from Vellum::MirrorView_core\\."
+            "alias|ON|add_executable(app main.cpp)\ntarget_link_libraries(app PRIVATE pulp::design-import Pulp::gpu-audio)|from Pulp::gpu-audio, and .* from pulp::design-import\\."
+            "subdirectory|ON|add_subdirectory(sub)|from Pulp::gpu-device, and .* from Pulp::view-native\\."
+            "view-only|ON|add_executable(app main.cpp)\ntarget_link_libraries(app PRIVATE Pulp::view Pulp::render)|pass"
+            "gpu-only|ON|add_executable(app main.cpp)\ntarget_link_libraries(app PRIVATE Pulp::gpu-device Pulp::host)|pass"
+            "static-library|ON|add_library(engine STATIC main.cpp)\ntarget_link_libraries(engine PUBLIC Pulp::view Pulp::gpu-device)|pass"
+            "pulp-ui|OFF|add_executable(app main.cpp)\ntarget_link_libraries(app PRIVATE Pulp::view Pulp::gpu-device)|pass")
+        string(REPLACE "|" ";" _parts "${_case}")
+        list(GET _parts 0 _name)
+        list(GET _parts 1 _ui)
+        list(GET _parts 2 _body)
+        list(GET _parts 3 _want)
+        set(_root "${FIXTURE_DIR}/gpu-guard/${_name}")
+        set(_prelude "${_vellum_standins}${_gpu}")
+        if(_ui STREQUAL "OFF")
+            set(_prelude "${_vellum_standins}${_gpu}${_own}")
+        endif()
+        _write_prefix("${_root}/prefix" ON ${_ui} "" "${_prelude}")
+        file(MAKE_DIRECTORY "${_root}/src/sub")
+        file(WRITE "${_root}/src/main.cpp" "int main() { return 0; }\n")
+        file(WRITE "${_root}/src/sub/CMakeLists.txt"
+            "add_executable(nested ../main.cpp)\ntarget_link_libraries(nested PRIVATE Pulp::view-native Pulp::gpu-device)\n")
+        file(WRITE "${_root}/src/CMakeLists.txt"
+            "cmake_minimum_required(VERSION 3.24)\n"
+            "project(VellumGpuGuard CXX)\n"
+            "find_package(Pulp CONFIG REQUIRED)\n"
+            "message(STATUS \"COMPAT=[\${PULP_SDK_VELLUM_UI_COMPAT_TARGETS}]\")\n"
+            "${_body}\n")
+        execute_process(COMMAND ${_clean_env} "${CMAKE_COMMAND}" -S "${_root}/src" -B "${_root}/build"
+                -DPulp_DIR=${_root}/prefix/lib/cmake/Pulp ${_isolation}
+            RESULT_VARIABLE _rc OUTPUT_VARIABLE _out ERROR_VARIABLE _err)
+        string(REGEX REPLACE "[ \n]+" " " _flat "${_out}${_err}")
+        if(_ui STREQUAL "ON")
+            _expect("${_flat}" "COMPAT=\\[canvas;render;design-import;view-native;view\\]" "${_name}: Vellum-backed names")
+        else()
+            _expect("${_flat}" "COMPAT=\\[\\]" "${_name}: Pulp's own UI")
+        endif()
+        if(_want STREQUAL "pass")
+            if(NOT _rc EQUAL 0)
+                message(FATAL_ERROR "gpu-guard ${_name}: configure failed:\n${_out}${_err}")
+            endif()
+        else()
+            if(_rc EQUAL 0)
+                message(FATAL_ERROR "gpu-guard ${_name}: configured with two GPU device layers:\n${_out}${_err}")
+            endif()
+            _expect("${_flat}" "${_refusal}: Pulp's static gpu_runtime \\(VellumGpuRuntime::Device and its Dawn\\) ${_want}" "${_name}: the refusal naming both sides")
+        endif()
+        message(STATUS "gpu-guard ${_name}: ${_want}")
+    endforeach()
+
+elseif(SCENARIO STREQUAL "gpu-owner-real")
+    foreach(_input VELLUM_DIR GPU_RUNTIME_DIR GPU_RUNTIME_SKIA_DIR)
+        if(NOT ${_input} OR NOT EXISTS "${${_input}}")
+            message(STATUS "SKIP: gpu-owner-real needs ${_input} (VELLUM_DIR, GPU_RUNTIME_DIR, GPU_RUNTIME_SKIA_DIR)")
+            return()
+        endif()
+    endforeach()
+    find_program(_nm nm)
+    if(NOT _nm)
+        message(STATUS "SKIP: gpu-owner-real needs nm")
+        return()
+    endif()
+    file(STRINGS "${VELLUM_DIR}/VellumConfigVersion.cmake" _version_line
+        REGEX "^set\\(PACKAGE_VERSION \"[^\"]+\"\\)")
+    if(NOT _version_line MATCHES "\"([^\"]+)\"")
+        message(FATAL_ERROR "gpu-owner-real: cannot read the version from ${VELLUM_DIR}")
+    endif()
+    set(_version "${CMAKE_MATCH_1}")
+    set(_root "${FIXTURE_DIR}/gpu-owner-real")
+    file(REMOVE_RECURSE "${_root}")
+    # The prelude loads the real gpu-runtime package and shapes Pulp::gpu-device
+    # as the installed SDK exports it.
+    set(_prelude
+        "set(GPU_RUNTIME_SKIA_DIR \"${GPU_RUNTIME_SKIA_DIR}\")\n"
+        "find_package(VellumGpuRuntime CONFIG REQUIRED PATHS \"${GPU_RUNTIME_DIR}\" NO_DEFAULT_PATH)\n"
+        "if(NOT TARGET Pulp::gpu-device)\n"
+        "  add_library(Pulp::gpu-device INTERFACE IMPORTED)\n"
+        "  set_property(TARGET Pulp::gpu-device PROPERTY INTERFACE_LINK_LIBRARIES VellumGpuRuntime::Device)\n"
+        "endif()\n")
+    string(JOIN "" _prelude ${_prelude})
+    _write_prefix("${_root}/prefix" ON ON "${_version}" "${_prelude}")
+    get_filename_component(_vellum_sdk "${VELLUM_DIR}/../../.." ABSOLUTE)
+    file(MAKE_DIRECTORY "${_root}/prefix/share/pulp/vellum-sdk/0.0.0")
+    file(CREATE_LINK "${_vellum_sdk}" "${_root}/prefix/share/pulp/vellum-sdk/0.0.0/sdk" SYMBOLIC)
+    # The probe references both halves of the device layer: a gpu_runtime::
+    # entry point and the wgpu C API.
+    file(MAKE_DIRECTORY "${_root}/src")
+    file(WRITE "${_root}/src/main.cpp"
+        "#include <gpu_runtime/gpu_surface.hpp>\n"
+        "#include <cstdio>\n"
+        "extern \"C\" void wgpuAdapterAddRef(void*);\n"
+        "int main(int argc, char**) {\n"
+        "    if (argc > 99) { auto s = gpu_runtime::GpuSurface::create_dawn(); wgpuAdapterAddRef(s.get()); }\n"
+        "    std::puts(\"linked\");\n"
+        "    return 0;\n"
+        "}\n")
+    set(_generator)
+    find_program(_ninja ninja)
+    if(_ninja)
+        set(_generator -G Ninja)
+    endif()
+    set(_jobs 4)
+    if(DEFINED ENV{CMAKE_BUILD_PARALLEL_LEVEL})
+        set(_jobs "$ENV{CMAKE_BUILD_PARALLEL_LEVEL}")
+    endif()
+    # Builds <name> from a CMakeLists body; sets <name>_rc and <name>_log.
+    function(_gpu_project name body)
+        set(_src "${_root}/${name}")
+        file(MAKE_DIRECTORY "${_src}")
+        file(WRITE "${_src}/CMakeLists.txt"
+            "cmake_minimum_required(VERSION 3.24)\nproject(${name} CXX)\n${body}\n")
+        execute_process(COMMAND ${_clean_env} "${CMAKE_COMMAND}" ${_generator} -S "${_src}"
+                -B "${_src}/build" -DCMAKE_BUILD_TYPE=Release
+                -DPulp_DIR=${_root}/prefix/lib/cmake/Pulp ${_isolation}
+            RESULT_VARIABLE _rc OUTPUT_VARIABLE _out ERROR_VARIABLE _err)
+        if(_rc EQUAL 0)
+            execute_process(COMMAND "${CMAKE_COMMAND}" --build "${_src}/build" -j ${_jobs}
+                RESULT_VARIABLE _rc OUTPUT_VARIABLE _bout ERROR_VARIABLE _berr)
+            string(APPEND _out "${_bout}${_berr}")
+        endif()
+        set(${name}_rc "${_rc}" PARENT_SCOPE)
+        set(${name}_log "${_out}${_err}" PARENT_SCOPE)
+    endfunction()
+    # Counts the gpu_runtime:: and wgpu symbols `file` defines.
+    function(_gpu_owned file out_runtime out_wgpu)
+        if(NOT EXISTS "${file}")
+            message(FATAL_ERROR "gpu-owner-real: ${file} was not built")
+        endif()
+        execute_process(COMMAND "${_nm}" -U -C "${file}"
+            RESULT_VARIABLE _rc OUTPUT_VARIABLE _syms ERROR_VARIABLE _err)
+        if(NOT _rc EQUAL 0)
+            message(FATAL_ERROR "gpu-owner-real: nm failed on ${file}: ${_err}")
+        endif()
+        string(REGEX MATCHALL "\n[0-9a-f]+ [A-Za-z] gpu_runtime::" _runtime "\n${_syms}")
+        string(REGEX MATCHALL "\n[0-9a-f]+ [A-Za-z] _?wgpu[A-Z]" _wgpu "\n${_syms}")
+        list(LENGTH _runtime _n_runtime)
+        list(LENGTH _wgpu _n_wgpu)
+        set(${out_runtime} ${_n_runtime} PARENT_SCOPE)
+        set(${out_wgpu} ${_n_wgpu} PARENT_SCOPE)
+    endfunction()
+
+    # The Vellum-backed path: the device layer comes from the provider.
+    _gpu_project(vellum_only
+        "find_package(Pulp CONFIG REQUIRED)\nadd_executable(app ../src/main.cpp)\ntarget_link_libraries(app PRIVATE Pulp::render VellumGpuRuntime::DeviceApi)")
+    if(NOT vellum_only_rc EQUAL 0)
+        message(FATAL_ERROR "gpu-owner-real: the Vellum-backed consumer failed:\n${vellum_only_log}")
+    endif()
+    # The control: the provider and the static device, linked directly.
+    string(CONCAT _raw_body
+        "set(GPU_RUNTIME_SKIA_DIR \"${GPU_RUNTIME_SKIA_DIR}\")\n"
+        "find_package(VellumGpuRuntime CONFIG REQUIRED PATHS \"${GPU_RUNTIME_DIR}\" NO_DEFAULT_PATH)\n"
+        "find_package(Vellum CONFIG REQUIRED PATHS \"${VELLUM_DIR}\" NO_DEFAULT_PATH)\n"
+        "add_executable(app ../src/main.cpp)\n"
+        "target_link_libraries(app PRIVATE VellumGpuRuntime::Device Vellum::MirrorRender_2d)")
+    _gpu_project(raw_both "${_raw_body}")
+    if(NOT raw_both_rc EQUAL 0)
+        message(FATAL_ERROR "gpu-owner-real: the control failed to build:\n${raw_both_log}")
+    endif()
+    # The same pair through the Pulp names.
+    _gpu_project(pulp_both
+        "find_package(Pulp CONFIG REQUIRED)\nadd_executable(app ../src/main.cpp)\ntarget_link_libraries(app PRIVATE Pulp::render Pulp::gpu-device)")
+    string(REGEX REPLACE "[ \n]+" " " _flat "${pulp_both_log}")
+    if(pulp_both_rc EQUAL 0)
+        message(FATAL_ERROR "gpu-owner-real: Pulp::render with Pulp::gpu-device configured:\n${pulp_both_log}")
+    endif()
+    _expect("${_flat}" "app links two GPU device layers" "the refusal for the Pulp-named pair")
+
+    file(GLOB _provider "${_vellum_sdk}/lib/libvellum-skia-dawn-provider-*.dylib"
+        "${_vellum_sdk}/lib/libvellum-skia-dawn-provider-*.so")
+    list(LENGTH _provider _n_provider)
+    if(NOT _n_provider EQUAL 1)
+        message(FATAL_ERROR "gpu-owner-real: expected one provider library under ${_vellum_sdk}/lib, found '${_provider}'")
+    endif()
+    _gpu_owned("${_provider}" _provider_runtime _provider_wgpu)
+    _gpu_owned("${_root}/vellum_only/build/app" _vellum_runtime _vellum_wgpu)
+    _gpu_owned("${_root}/raw_both/build/app" _raw_runtime _raw_wgpu)
+    message(STATUS "gpu-owner-real: provider defines gpu_runtime=${_provider_runtime} wgpu=${_provider_wgpu}")
+    message(STATUS "gpu-owner-real: Vellum-backed app defines gpu_runtime=${_vellum_runtime} wgpu=${_vellum_wgpu}")
+    message(STATUS "gpu-owner-real: control app defines gpu_runtime=${_raw_runtime} wgpu=${_raw_wgpu}")
+    if(_provider_runtime EQUAL 0 OR _provider_wgpu EQUAL 0)
+        message(FATAL_ERROR "gpu-owner-real: the provider defines no gpu_runtime:: or wgpu symbol; nm reads nothing here")
+    endif()
+    if(_raw_runtime EQUAL 0 OR _raw_wgpu EQUAL 0)
+        message(FATAL_ERROR "gpu-owner-real: the control defines no gpu_runtime:: or wgpu symbol, so nm cannot see a second owner")
+    endif()
+    # The app must still reference both halves, so that zero defined means
+    # resolved from the provider rather than never linked.
+    execute_process(COMMAND "${_nm}" -u -C "${_root}/vellum_only/build/app" OUTPUT_VARIABLE _undefined)
+    if(NOT _undefined MATCHES "gpu_runtime::GpuSurface::create_dawn" OR NOT _undefined MATCHES "_?wgpuAdapterAddRef")
+        message(FATAL_ERROR "gpu-owner-real: the Vellum-backed app does not reference the device layer:\n${_undefined}")
+    endif()
+    if(NOT _vellum_runtime EQUAL 0 OR NOT _vellum_wgpu EQUAL 0)
+        message(FATAL_ERROR "gpu-owner-real: the Vellum-backed app defines its own gpu_runtime::/wgpu symbols beside the provider's")
+    endif()
+    message(STATUS "gpu-owner-real: one owner on the Vellum-backed path, two on the control, Pulp-named pair refused")
 
 elseif(SCENARIO STREQUAL "no-vellum" OR SCENARIO STREQUAL "real" OR SCENARIO STREQUAL "wrong-version")
     set(_root "${FIXTURE_DIR}/${SCENARIO}")

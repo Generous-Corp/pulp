@@ -1713,7 +1713,7 @@ set_tests_properties(cmake-canvas-fontconfig-link PROPERTIES
 # must not skip; elsewhere they report SKIP.
 foreach(_vellum_ui_compat_scenario
         wiring shape pulp-ui partial-ui view-core missing twice no-bridge
-        no-vellum real wrong-version)
+        no-vellum real wrong-version gpu-guard gpu-owner-real)
     set(_vellum_ui_compat_test "cmake-vellum-ui-compat-${_vellum_ui_compat_scenario}")
     set(_vellum_ui_compat_args "")
     set(_vellum_ui_compat_labels "cmake;sdk")
@@ -1721,6 +1721,14 @@ foreach(_vellum_ui_compat_scenario
         if(Vellum_DIR)
             set(_vellum_ui_compat_args -DVELLUM_DIR=${Vellum_DIR} -DREQUIRE_VELLUM=ON)
             set(_vellum_ui_compat_labels "cmake;sdk;pulp-vellum")
+        endif()
+    elseif(_vellum_ui_compat_scenario STREQUAL "gpu-owner-real")
+        # Needs an installed gpu-runtime package beside the Vellum SDK; a build
+        # that fetches gpu-runtime from source has none and reports SKIP.
+        if(Vellum_DIR AND PULP_GPU_RUNTIME_PREFIX)
+            set(_vellum_ui_compat_args -DVELLUM_DIR=${Vellum_DIR}
+                -DGPU_RUNTIME_DIR=${PULP_GPU_RUNTIME_PREFIX}
+                -DGPU_RUNTIME_SKIA_DIR=${SKIA_DIR})
         endif()
     endif()
     add_test(NAME ${_vellum_ui_compat_test}
@@ -1732,7 +1740,7 @@ foreach(_vellum_ui_compat_scenario
             -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/test_vellum_ui_compat_package.cmake)
     set_tests_properties(${_vellum_ui_compat_test} PROPERTIES
         LABELS "${_vellum_ui_compat_labels}"
-        SKIP_REGULAR_EXPRESSION "SKIP: no installed Vellum SDK")
+        SKIP_REGULAR_EXPRESSION "SKIP: (no installed Vellum SDK|gpu-owner-real needs)")
 endforeach()
 unset(_vellum_ui_compat_scenario)
 unset(_vellum_ui_compat_test)
