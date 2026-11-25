@@ -25,6 +25,8 @@
 #              in pulp mode and skipped in vellum mode.
 #   bytecode   pulp_add_js_bytecode() builds its generator against Pulp::view in
 #              pulp mode and is refused in vellum mode.
+#   auto-ui    UI_ENGINE vellum without UI_SCRIPT selects the generated Vellum
+#              parameter editor package in both modes.
 if(NOT DEFINED PULP_SOURCE_DIR OR NOT DEFINED FIXTURE_DIR OR NOT DEFINED SCENARIO)
     message(FATAL_ERROR "PULP_SOURCE_DIR, FIXTURE_DIR and SCENARIO are required")
 endif()
@@ -201,6 +203,27 @@ elseif(SCENARIO STREQUAL "bytecode")
     _expect_text("generator=[present]" "the generator built against Pulp::view")
     _expect_refused(vellum bytecode "${_call}"
         "pulp_add_js_bytecode(Pscripts): this Pulp SDK serves Pulp::view from Vellum")
+
+elseif(SCENARIO STREQUAL "auto-ui")
+    # UI_ENGINE vellum without UI_SCRIPT selects the generated parameter
+    # editor on Vellum views, a UI package, so the plug-in links no Pulp view
+    # layer in either mode.
+    set(_vellum
+        "if(NOT TARGET Vellum::MirrorView_core)\n"
+        "  add_library(Vellum::MirrorView_core INTERFACE IMPORTED)\n"
+        "endif()\n"
+        "add_library(Pulp::vellum INTERFACE IMPORTED)\n"
+        "include(\"${PULP_SOURCE_DIR}/integrations/pulp-vellum/cmake/PulpVellumEditorPackage.cmake\")\n")
+    string(JOIN "" _vellum ${_vellum})
+    set(_call "pulp_add_plugin(Pauto BUNDLE_ID dev.pulp.auto UI_ENGINE vellum)\nget_target_property(_f \${PULP_Pauto_UI_PACKAGE} PULP_EDITOR_FACTORY_FUNCTION)\nmessage(STATUS \"no-editor=[\${PULP_Pauto_NO_EDITOR}] package=[\${PULP_Pauto_UI_PACKAGE}] factory=[\${_f}]\")")
+    foreach(_mode pulp vellum)
+        _expect_pass(${_mode} auto "${_vellum}${_call}")
+        _expect_text("no-editor=[TRUE] package=[pulp-vellum-auto-ui-package] factory=[pulp::vellum::auto_ui_editor_factory]"
+            "the generated Vellum editor in ${_mode} mode")
+        _expect_refused(${_mode} noeditor
+            "${_vellum}pulp_add_plugin(Pnone BUNDLE_ID dev.pulp.none UI_ENGINE vellum NO_EDITOR)"
+            "UI_ENGINE vellum cannot be combined with UI or NO_EDITOR")
+    endforeach()
 
 else()
     message(FATAL_ERROR "unknown SCENARIO '${SCENARIO}'")
