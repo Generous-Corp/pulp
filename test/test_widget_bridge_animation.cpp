@@ -1041,6 +1041,37 @@ TEST_CASE("WidgetBridge runs the after-dispatch hook once the outermost batch re
     CHECK(engine.evaluate("batches").getWithDefault<int>(-1) == 1);
 }
 
+TEST_CASE("WidgetBridge refuses a dispatch nested past the depth cap and reports it",
+          "[view][bridge][event-batch]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script(kCountingBatchHook);
+    bridge.load_script(R"(
+        var runs = 0;
+        var errors_before = __pulpDispatchErrorCount__;
+        on('w1', 'click', function () {
+            runs += 1;
+            __dispatch__('w1', 'click', {});
+        });
+    )");
+
+    // A handler that re-dispatches its own event would otherwise recurse until
+    // the engine's stack check (absent under MSVC) stops it.
+    dispatch_event(engine, "w1", "click", "{}");
+
+    CHECK(engine.evaluate("runs").getWithDefault<int>(-1) ==
+          engine.evaluate("__pulpMaxDispatchDepth__").getWithDefault<int>(-2));
+    CHECK(engine.evaluate("__pulpDispatchErrorCount__ - errors_before").getWithDefault<int>(-1) ==
+          1);
+    CHECK(engine.evaluate("__pulpLastDispatchError__.indexOf('dispatch nested more than') >= 0")
+              .getWithDefault<bool>(false));
+    CHECK(engine.evaluate("__pulpDispatchDepth__").getWithDefault<int>(-1) == 0);
+}
+
 TEST_CASE("WidgetBridge after-dispatch value write does not dispatch the change again",
           "[view][bridge][event-batch]") {
     ScriptEngine engine;
