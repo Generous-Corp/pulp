@@ -4039,6 +4039,13 @@ Shape, if you are extending it:
   no window and no AppKit, so both are unit-tested directly
   (`test/test_standalone_key_sequence.cpp`). Only the delivery is
   platform-specific (`standalone_key_driver_mac.mm`, stub elsewhere).
+- Those headers are view-free on purpose: the contract standalone
+  (`pulp::standalone-contract`, the app a `UI <package>` plug-in ships) links
+  them and compiles with no view include root. A step names its key with
+  `detail::SequenceKey` and `kSequenceMod*`, which carry `view::KeyCode` and
+  `view::Modifier`'s values; do not reach for `pulp/view/input_events.hpp`
+  there again, because that build fails on it and
+  `format_header_view_boundary.py` flags it.
 - Delivery goes through `WindowHost::native_content_view_handle()` — the public
   `void*` NSView seam — so the driver lives entirely in `core/format` and needs
   no edit to `core/view/platform/mac/window_host_mac.mm`. It also needs no
