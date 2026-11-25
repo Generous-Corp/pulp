@@ -97,6 +97,16 @@ on a real PR. Do them in order.
      the neutral device layer, not a Vellum edge: it depends on neither repo,
      and its target names do not match the check. Its source half is
      `include_boundary.py --boundary core-vellum`.
+   - **legacy platform hosts guard** — `legacy_platform_hosts_guard.py` fails
+     when code outside `integrations/legacy-platform-hosts/` includes a
+     quarantined Windows, Linux, iOS, Android or web host header (by its
+     `pulp/view/...` spelling or a path into the host directory), names a host
+     file or directory in a CMake argument, or links a target a quarantine
+     CMake file defines. The host directories count at both their original
+     `core/` paths and their quarantine paths. Today's edges are allowlisted
+     per (file, platform, kind) with an exact count, so a new reference, or a
+     removed one whose row stayed, fails. `--report` lists every edge. Do not
+     grow the allowlist for new code: port it to Vellum instead.
    - **change events** (`vellum_freeze_check.py`) — a range touching a path in
      a transferred slice of `.github/vellum-ownership.json` (e.g.
      `core/view/src/pointer_dispatch.cpp` in `retained-ui-kernel`) without a

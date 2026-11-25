@@ -165,6 +165,20 @@ if(Python3_Interpreter_FOUND)
     set_tests_properties(core-vellum-direction core-vellum-direction-negative-contract
         PROPERTIES LABELS "pr" TIMEOUT 60)
 
+    # Nothing outside integrations/legacy-platform-hosts/ includes, names or
+    # links the quarantined Windows, Linux, iOS, Android or web UI hosts.
+    # Lexical and build-free; known edges carry an exact count. The self-test
+    # plants an include, a path and a link, and an empty scan must exit 2.
+    add_test(NAME legacy-platform-hosts-guard
+        COMMAND ${Python3_EXECUTABLE}
+            "${CMAKE_SOURCE_DIR}/tools/scripts/legacy_platform_hosts_guard.py"
+            --root "${CMAKE_SOURCE_DIR}")
+    add_test(NAME legacy-platform-hosts-guard-negative-contract
+        COMMAND ${Python3_EXECUTABLE}
+            "${CMAKE_SOURCE_DIR}/tools/scripts/test_legacy_platform_hosts_guard.py")
+    set_tests_properties(legacy-platform-hosts-guard legacy-platform-hosts-guard-negative-contract
+        PROPERTIES LABELS "pr" TIMEOUT 120)
+
     # Test-only compile macros (PULP_AU_V2_TEST_HOOKS guards an AU v2 accessor
     # that hands out a PluginViewHost*) may be defined only under test/;
     # elsewhere a line naming one may only guard on it or comment on it.

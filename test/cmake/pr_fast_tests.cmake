@@ -195,6 +195,8 @@ set(PULP_PR_FAST_TESTS
     interchange-concepts-drift
     interchange-matrix-docs-drift
     interchange-tables-drift
+    legacy-platform-hosts-guard
+    legacy-platform-hosts-guard-negative-contract
     linux-runner-lane-contract
     mac-objc-source-list-guard
     minblep-table-reproducible
