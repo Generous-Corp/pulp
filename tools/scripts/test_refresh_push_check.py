@@ -670,6 +670,20 @@ def case_the_overall_bound_during_the_add_exits_not_checked_and_cleans_up(fx: Fi
 
 
 
+def case_the_check_bound_holds_when_a_descendant_keeps_the_pipes_open(fx: Fixture) -> None:
+    """A checker's child that inherits stdout/stderr must not outlive the bound."""
+    code = "import subprocess,sys,time; subprocess.Popen([sys.executable,'-c','import time; time.sleep(60)']); time.sleep(60)"
+    start = time.monotonic()
+    try:
+        merge_tree_state._run_grouped([sys.executable, "-c", code], Path.cwd(), dict(os.environ), 1.0)
+    except subprocess.TimeoutExpired:
+        pass
+    else:
+        raise AssertionError("the checker was expected to time out")
+    elapsed = time.monotonic() - start
+    assert elapsed < 15, f"bound not enforced: {elapsed:.1f}s"
+
+
 def case_cancellation_reaps_checkout_before_removing_its_worktree(fx: Fixture) -> None:
     """Deliver real signals inside add's communicate and observe teardown order."""
     import signal

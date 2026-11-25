@@ -79,6 +79,31 @@ def _check_timeout() -> float:
     return min(MAX_CHECK_TIMEOUT, max(BASE_CHECK_TIMEOUT, scaled))
 
 
+def _run_grouped(cmd: list[str], cwd: Path, env: dict[str, str],
+                 limit: float) -> subprocess.CompletedProcess[str]:
+    """subprocess.run with a process-group kill on timeout: a descendant that
+    inherited the captured pipes cannot keep communicate() waiting past the
+    bound. Raises TimeoutExpired / OSError like subprocess.run."""
+    proc = subprocess.Popen(cmd, cwd=cwd, env=env, text=True, encoding="utf-8",
+                            stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+                            stderr=subprocess.PIPE, start_new_session=True)
+    try:
+        out, err = proc.communicate(timeout=limit)
+    except BaseException as exc:
+        try:
+            os.killpg(proc.pid, signal.SIGKILL)
+        except (ProcessLookupError, PermissionError):
+            pass
+        try:
+            proc.communicate(timeout=5)
+        except subprocess.TimeoutExpired:
+            pass
+        if isinstance(exc, subprocess.TimeoutExpired):
+            raise subprocess.TimeoutExpired(cmd, limit) from None
+        raise
+    return subprocess.CompletedProcess(proc.args, proc.returncode, out, err)
+
+
 def _run(cmd: list[str], cwd: Path, env: dict[str, str], timeout: float | None = None,
          deadline: float | None = None) -> int | str | None:
     """Run one check. A timeout is retried once with double the limit; a second
@@ -98,8 +123,7 @@ def _run(cmd: list[str], cwd: Path, env: dict[str, str], timeout: float | None =
             if limit >= remaining:
                 limit, bounded = remaining, True
         try:
-            proc = subprocess.run(cmd, cwd=cwd, env=env, text=True, encoding="utf-8",
-                                  timeout=limit, capture_output=True)
+            proc = _run_grouped(cmd, cwd, env, limit)
             break
         except (OSError, subprocess.TimeoutExpired) as exc:
             elapsed = time.monotonic() - start
