@@ -87,6 +87,15 @@ bool drag(format::Editor* editor) {
            editor->automation()->inject_input("drag -50", error);
 }
 
+// The editor itself holds the size, not only the host's call reporting success:
+// a fixed-size editor's host call succeeds and leaves the editor where it was.
+bool takes_size(const format::Editor* editor, std::uint32_t width, std::uint32_t height) {
+    if (editor == nullptr)
+        return false;
+    const auto size = editor->size();
+    return size.width == width && size.height == height;
+}
+
 const format::EditorKeyEvent kSpace{format::EditorKey::space, U' ', 0, true, false};
 
 // ── VST3 ─────────────────────────────────────────────────────────────────────
@@ -179,7 +188,9 @@ void run_vst3(void* parent) {
               "attach to a real NSView");
         check(f, host_view_subview_count(parent) > baseline, "attach added a native subview");
         Steinberg::ViewRect rect(0, 0, 320, 200);
-        check(f, view->onSize(&rect) == Steinberg::kResultTrue, "resize to 320x200");
+        check(f,
+              view->onSize(&rect) == Steinberg::kResultTrue && takes_size(view->editor(), 320, 200),
+              "resize to 320x200");
         if (round == 0) {
             handler.stream.clear();
             check(f, drag(view->editor()), "a knob drag through the editor");
@@ -244,10 +255,11 @@ void run_clap(void* parent) {
         window.cocoa = parent;
         check(f, gui->set_parent(plugin, &window), "attach to a real NSView");
         check(f, host_view_subview_count(parent) > baseline, "attach added a native subview");
-        check(f, gui->set_size(plugin, 320, 200), "resize to 320x200");
+        const bool resized = gui->set_size(plugin, 320, 200);
         auto* session = format::clap_adapter::contract_gui_session(plugin);
         check(f, session != nullptr, "the GUI's contract session is reachable");
         auto* editor = session != nullptr ? session->editor() : nullptr;
+        check(f, resized && takes_size(editor, 320, 200), "resize to 320x200");
         if (round == 0) {
             check(f, drag(editor), "a knob drag through the editor");
             held = observe_value(editor);
@@ -318,7 +330,7 @@ void run_au(void* parent) {
             auto* session = format::au::contract_view_session((__bridge void*)view);
             check(f, session != nullptr, "the view's contract session is reachable");
             auto* editor = session != nullptr ? session->editor() : nullptr;
-            check(f, editor != nullptr && editor->size().width == 320, "resize to 320x200");
+            check(f, takes_size(editor, 320, 200), "resize to 320x200");
             if (round == 0) {
                 check(f, drag(editor), "a knob drag through the editor");
                 held = observe_value(editor);
