@@ -804,12 +804,12 @@ TEST_CASE("the conformance comparison reports planted divergences",
         CHECK(compare("js", "f", reference, reference).empty());
     }
     SECTION("paint bounds within half a pixel agree, beyond it diverge") {
-        auto near = reference;
-        near["a"]["paint.bounds"] = "10.400,10.000,90.000,16.000";
-        CHECK(compare("js", "f", reference, near).empty());
-        auto far = reference;
-        far["a"]["paint.bounds"] = "11.000,10.000,90.000,16.000";
-        REQUIRE(compare("js", "f", reference, far).size() == 1);
+        auto near_case = reference;
+        near_case["a"]["paint.bounds"] = "10.400,10.000,90.000,16.000";
+        CHECK(compare("js", "f", reference, near_case).empty());
+        auto far_case = reference;
+        far_case["a"]["paint.bounds"] = "11.000,10.000,90.000,16.000";
+        REQUIRE(compare("js", "f", reference, far_case).size() == 1);
     }
     SECTION("a wrong kind, a lost binding and a missing node are each reported") {
         auto candidate = reference;

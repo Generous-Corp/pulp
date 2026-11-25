@@ -147,6 +147,13 @@ class FixedFunction<R(Args...), Capacity, Alignment> {
         R (*invoke)(void* target, Args&&... args);
         void (*relocate)(void* dst, void* src) noexcept; // move-construct into dst, destroy src
         void (*destroy)(void* target) noexcept;
+
+        // Explicit constructor so MSVC does not treat the constexpr table as
+        // zero-filled by an implicit default constructor (warning C4268).
+        constexpr VTable(R (*invoke_fn)(void*, Args&&...),
+                         void (*relocate_fn)(void*, void*) noexcept,
+                         void (*destroy_fn)(void*) noexcept) noexcept
+            : invoke(invoke_fn), relocate(relocate_fn), destroy(destroy_fn) {}
     };
 
     // Named static functions (not lambdas): MSVC rejects lambda-to-function-
