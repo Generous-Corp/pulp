@@ -57,7 +57,7 @@ def sh(cwd, *args, env=None):
     e = dict(os.environ, GIT_AUTHOR_NAME="t", GIT_AUTHOR_EMAIL="t@e",
              GIT_COMMITTER_NAME="t", GIT_COMMITTER_EMAIL="t@e")
     e.update(env or {})
-    return subprocess.run(args, cwd=cwd, check=True, capture_output=True, text=True, env=e).stdout.strip()
+    return subprocess.run(args, cwd=cwd, check=True, capture_output=True, text=True, encoding="utf-8", env=e).stdout.strip()
 
 
 def age(path: pathlib.Path, days: float) -> None:
@@ -83,11 +83,11 @@ class Base(unittest.TestCase):
         self.prdir = self.tmp / "prs"
         self.prdir.mkdir()
         self.log = self.tmp / "calls.log"
-        self.log.write_text("")
+        self.log.write_text("", encoding="utf-8")
         self.lsof_extra = self.tmp / "lsof-extra"
         for name, body in (("ghread", PR_STUB), ("ghapp", PR_STUB), ("lsof", LSOF_STUB)):
             p = self.bin / name
-            p.write_text(body)
+            p.write_text(body, encoding="utf-8")
             p.chmod(0o755)
         self.env = {
             "PULP_REAPER_GHREAD": str(self.bin / "ghread"),
@@ -110,25 +110,25 @@ class Base(unittest.TestCase):
         repo = lane / "repo"
         repo.mkdir(parents=True)
         sh(repo, "git", "init", "-q", "-b", "main")
-        (repo / "src.txt").write_text("one\n")
+        (repo / "src.txt").write_text("one\n", encoding="utf-8")
         if tracked_build:
             (repo / "build").mkdir()
-            (repo / "build" / "kept.txt").write_text("tracked\n")
+            (repo / "build" / "kept.txt").write_text("tracked\n", encoding="utf-8")
         sh(repo, "git", "add", "-A")
         sh(repo, "git", "commit", "-q", "-m", f"base {name}")
         sh(repo, "git", "remote", "add", "origin", remote)
         sh(repo, "git", "update-ref", "refs/remotes/origin/main", "HEAD")
         sh(repo, "git", "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main")
         if not merged:
-            (repo / "feature.txt").write_text("work\n")
+            (repo / "feature.txt").write_text("work\n", encoding="utf-8")
             sh(repo, "git", "add", "feature.txt")
             sh(repo, "git", "commit", "-q", "-m", "unmerged work")
             sh(repo, "git", "update-ref", "refs/remotes/origin/feature", "HEAD")
         if build:
             (repo / "build").mkdir(exist_ok=True)
-            (repo / "build" / "obj.o").write_text("x" * 4096)
+            (repo / "build" / "obj.o").write_text("x" * 4096, encoding="utf-8")
         if artifact:
-            (repo / "Foo.pkg").write_text("p" * 200_000)
+            (repo / "Foo.pkg").write_text("p" * 200_000, encoding="utf-8")
         age(lane, age_days)
         return repo
 
@@ -140,13 +140,13 @@ class Base(unittest.TestCase):
         for st in states:
             prs.append({"state": "open" if st == "open" else "closed",
                         "merged_at": "2026-11-01T00:00:00Z" if st == "merged" else None})
-        (self.prdir / f"{self.head(repo)}.json").write_text(json.dumps(prs))
+        (self.prdir / f"{self.head(repo)}.json").write_text(json.dumps(prs), encoding="utf-8")
 
     def run_reaper(self, *extra, expect_rc=0, env_extra=None):
         env = {**os.environ, **self.env, **(env_extra or {})}
         p = subprocess.run([sys.executable, str(SCRIPT), "--root", str(self.root), "--json",
                             "--cache-file", str(self.cache), "--min-artifact-mb", "0.1", *extra],
-                           capture_output=True, text=True, env=env)
+                           capture_output=True, text=True, encoding="utf-8", env=env)
         self.assertEqual(p.returncode, expect_rc, p.stdout + p.stderr)
         return json.loads(p.stdout) if expect_rc == 0 else p
 
@@ -208,7 +208,7 @@ class BuildGuards(Base):
 
     def test_pr_lookup_failure_is_held(self):
         repo = self.lane("a", merged=False)
-        (self.prdir / f"{self.head(repo)}.fail").write_text("")
+        (self.prdir / f"{self.head(repo)}.fail").write_text("", encoding="utf-8")
         self.assertHeld(self.run_reaper(), "a", "build", "build", why="error")
 
     def test_unknown_owner_is_held(self):
@@ -228,13 +228,13 @@ class BuildGuards(Base):
         self.pr(b, "merged")
         r1 = self.run_reaper()
         self.assertEqual(r1["api_calls"], 2)
-        calls = self.log.read_text().splitlines()
+        calls = self.log.read_text(encoding="utf-8").splitlines()
         self.assertEqual(sum(1 for c in calls if "/ghread " in c), 1)
         self.assertEqual(sum(1 for c in calls if "/ghapp " in c), 1)
         # Terminal states are cached: a second run makes no API call.
         r2 = self.run_reaper()
         self.assertEqual(r2["api_calls"], 0)
-        self.assertEqual(len(self.log.read_text().splitlines()), 2)
+        self.assertEqual(len(self.log.read_text(encoding="utf-8").splitlines()), 2)
         self.assertReclaim(r2, "a", "build", "build")
 
     def test_ancestry_needs_no_api_call(self):
@@ -248,7 +248,7 @@ class BuildGuards(Base):
 
     def test_recent_write_inside_build_is_held(self):
         repo = self.lane("a")
-        (repo / "build" / "fresh.o").write_text("y")
+        (repo / "build" / "fresh.o").write_text("y", encoding="utf-8")
         self.assertHeld(self.run_reaper(), "a", "build", "build", why="idle window")
 
     def test_idle_window_is_configurable(self):
@@ -258,31 +258,31 @@ class BuildGuards(Base):
 
     def test_live_process_in_checkout_is_held(self):
         repo = self.lane("a")
-        self.lsof_extra.write_text(f"n{repo}/build/obj.o\n")
+        self.lsof_extra.write_text(f"n{repo}/build/obj.o\n", encoding="utf-8")
         self.assertHeld(self.run_reaper(), "a", "build", "build", why="live process")
 
     def test_live_process_cwd_at_checkout_is_held(self):
         repo = self.lane("a")
-        self.lsof_extra.write_text(f"n{repo}\n")
+        self.lsof_extra.write_text(f"n{repo}\n", encoding="utf-8")
         self.assertHeld(self.run_reaper(), "a", "build", "build", why="live process")
 
     def test_live_process_elsewhere_or_lookalike_does_not_block(self):
         repo = self.lane("a")
         other = self.lane("b")
-        self.lsof_extra.write_text(f"n{other}/build/obj.o\nn{repo}-twin/x\n")
+        self.lsof_extra.write_text(f"n{other}/build/obj.o\nn{repo}-twin/x\n", encoding="utf-8")
         r = self.run_reaper()
         self.assertReclaim(r, "a", "build", "build")
         self.assertHeld(r, "b", "build", "build", why="live process")
 
     def test_dirty_tracked_tree_is_held(self):
         repo = self.lane("a")
-        (repo / "src.txt").write_text("edited\n")
+        (repo / "src.txt").write_text("edited\n", encoding="utf-8")
         age(repo, 3)
         self.assertHeld(self.run_reaper(), "a", "build", "build", why="dirty")
 
     def test_untracked_noise_alone_is_not_dirty(self):
         repo = self.lane("a")
-        (repo / "notes.txt").write_text("scratch\n")
+        (repo / "notes.txt").write_text("scratch\n", encoding="utf-8")
         age(repo, 3)
         self.assertReclaim(self.run_reaper(), "a", "build", "build")
 
@@ -292,11 +292,11 @@ class BuildGuards(Base):
 
     def test_keep_marker_in_checkout_or_entry_is_held(self):
         repo = self.lane("a")
-        (repo / ".reaper-keep").write_text("")
+        (repo / ".reaper-keep").write_text("", encoding="utf-8")
         age(repo, 3)
         self.assertHeld(self.run_reaper(), "a", "build", "build", why="reaper-keep")
         repo2 = self.lane("b")
-        (repo2 / "build" / ".reaper-keep").write_text("")
+        (repo2 / "build" / ".reaper-keep").write_text("", encoding="utf-8")
         age(repo2, 3)
         self.assertHeld(self.run_reaper(), "b", "build", "build", why="reaper-keep")
 
@@ -304,7 +304,7 @@ class BuildGuards(Base):
         repo = self.lane("a", build=False)
         for n in ("build", "build-host", "build_x", "_build", "builder", "rebuild", "src"):
             (repo / n).mkdir()
-            (repo / n / "f").write_text("x")
+            (repo / n / "f").write_text("x", encoding="utf-8")
         age(repo, 3)
         r = self.run_reaper()
         names = {pathlib.Path(e["path"]).name for e in r["lanes"]["a"]["entries"] if e["kind"] == "build"}
@@ -313,7 +313,7 @@ class BuildGuards(Base):
     def test_nested_build_dirs_are_never_touched(self):
         repo = self.lane("a", build=False)
         (repo / "external" / "build").mkdir(parents=True)
-        (repo / "external" / "build" / "f").write_text("x")
+        (repo / "external" / "build" / "f").write_text("x", encoding="utf-8")
         age(repo, 3)
         self.assertEqual(self.run_reaper()["lanes"].get("a", {"entries": []})["entries"] and
                          [e for e in self.run_reaper()["lanes"]["a"]["entries"] if e["kind"] == "build"], [])
@@ -322,7 +322,7 @@ class BuildGuards(Base):
         repo = self.lane("a", build=False)
         outside = self.tmp / "outside"
         outside.mkdir()
-        (outside / "precious").write_text("keep")
+        (outside / "precious").write_text("keep", encoding="utf-8")
         os.symlink(outside, repo / "build")
         os.symlink(outside, repo / "sdk-link")
         age(repo, 3)
@@ -335,7 +335,7 @@ class BuildGuards(Base):
 class ArtifactGuards(Base):
     def test_large_untracked_pkg_is_reclaimable_small_is_not(self):
         repo = self.lane("a", build=False, artifact=True)
-        (repo / "tiny.pkg").write_text("x")
+        (repo / "tiny.pkg").write_text("x", encoding="utf-8")
         age(repo, 3)
         r = self.run_reaper()
         self.assertReclaim(r, "a", "artifact", "Foo.pkg")
@@ -344,13 +344,13 @@ class ArtifactGuards(Base):
     def test_extracted_sdk_dir_is_an_artifact(self):
         repo = self.lane("a", build=False)
         (repo / "sdk-copy").mkdir()
-        (repo / "sdk-copy" / "lib.a").write_text("z" * 300_000)
+        (repo / "sdk-copy" / "lib.a").write_text("z" * 300_000, encoding="utf-8")
         age(repo, 3)
         self.assertReclaim(self.run_reaper(), "a", "artifact", "sdk-copy")
 
     def test_tracked_artifact_is_held(self):
         repo = self.lane("a", build=False)
-        (repo / "Foo.pkg").write_text("p" * 200_000)
+        (repo / "Foo.pkg").write_text("p" * 200_000, encoding="utf-8")
         sh(repo, "git", "add", "Foo.pkg")
         sh(repo, "git", "commit", "-q", "-m", "track pkg")
         sh(repo, "git", "update-ref", "refs/remotes/origin/main", "HEAD")
@@ -378,7 +378,7 @@ class LaneGuards(Base):
     def test_unpushed_commit_on_another_branch_holds_the_lane(self):
         repo = self.lane("a", age_days=9)
         sh(repo, "git", "checkout", "-q", "-b", "wip")
-        (repo / "w.txt").write_text("w")
+        (repo / "w.txt").write_text("w", encoding="utf-8")
         sh(repo, "git", "add", "w.txt")
         sh(repo, "git", "commit", "-q", "-m", "wip")
         sh(repo, "git", "checkout", "-q", "main")
@@ -387,20 +387,20 @@ class LaneGuards(Base):
 
     def test_stash_holds_the_lane(self):
         repo = self.lane("a", age_days=9)
-        (repo / "src.txt").write_text("stashme\n")
+        (repo / "src.txt").write_text("stashme\n", encoding="utf-8")
         sh(repo, "git", "stash", "-q")
         age(repo, 9)
         self.assertHeld(self.run_reaper(), "a", "lane", why="stash")
 
     def test_dirty_tracked_tree_holds_the_lane(self):
         repo = self.lane("a", age_days=9)
-        (repo / "src.txt").write_text("edit\n")
+        (repo / "src.txt").write_text("edit\n", encoding="utf-8")
         age(repo, 9)
         self.assertHeld(self.run_reaper(), "a", "lane", why="dirty")
 
     def test_untracked_work_outside_artifact_dirs_holds_the_lane(self):
         repo = self.lane("a", age_days=9)
-        (repo / "analysis.md").write_text("notes worth keeping\n")
+        (repo / "analysis.md").write_text("notes worth keeping\n", encoding="utf-8")
         age(repo, 9)
         self.assertHeld(self.run_reaper(), "a", "lane", why="untracked files")
 
@@ -413,12 +413,12 @@ class LaneGuards(Base):
         second = self.root / "a" / "second"
         second.mkdir()
         sh(second, "git", "init", "-q", "-b", "main")
-        (second / "f").write_text("1")
+        (second / "f").write_text("1", encoding="utf-8")
         sh(second, "git", "add", "f")
         sh(second, "git", "commit", "-q", "-m", "x")
         sh(second, "git", "remote", "add", "origin", GH)
         sh(second, "git", "update-ref", "refs/remotes/origin/main", "HEAD")
-        (second / "g").write_text("2")
+        (second / "g").write_text("2", encoding="utf-8")
         sh(second, "git", "add", "g")
         sh(second, "git", "commit", "-q", "-m", "unmerged")
         sh(second, "git", "update-ref", "refs/remotes/origin/wip", "HEAD")
@@ -427,18 +427,18 @@ class LaneGuards(Base):
 
     def test_live_process_in_lane_holds_it(self):
         self.lane("a", age_days=9)
-        self.lsof_extra.write_text(f"n{self.root}/a/log.txt\n")
+        self.lsof_extra.write_text(f"n{self.root}/a/log.txt\n", encoding="utf-8")
         self.assertHeld(self.run_reaper(), "a", "lane", why="live process")
 
     def test_keep_marker_holds_the_lane(self):
         self.lane("a", age_days=9)
-        (self.root / "a" / ".reaper-keep").write_text("")
+        (self.root / "a" / ".reaper-keep").write_text("", encoding="utf-8")
         age(self.root / "a", 9)
         self.assertHeld(self.run_reaper(), "a", "lane", why="reaper-keep")
 
     def test_lane_without_checkout_is_never_reclaimed(self):
         (self.root / "notes").mkdir()
-        (self.root / "notes" / "goal.txt").write_text("a goal")
+        (self.root / "notes" / "goal.txt").write_text("a goal", encoding="utf-8")
         age(self.root / "notes", 30)
         r = self.run_reaper()
         self.assertHeld(r, "notes", "lane", why="no git checkout")
@@ -481,7 +481,7 @@ class Instruments(Base):
 
     def test_unknown_idle_measurement_is_held(self):
         self.lane("a")
-        (self.bin / "find").write_text("#!/bin/sh\nexit 1\n")
+        (self.bin / "find").write_text("#!/bin/sh\nexit 1\n", encoding="utf-8")
         (self.bin / "find").chmod(0o755)
         env = {"PATH": f"{self.bin}{os.pathsep}{os.environ['PATH']}"}
         r = self.run_reaper(env_extra=env)
@@ -518,7 +518,7 @@ class Removal(Base):
     def test_yes_rechecks_with_a_fresh_process_listing(self):
         repo = self.lane("a", age_days=3)
         second = self.tmp / "lsof-second"
-        second.write_text(f"n{repo}/build/obj.o\n")
+        second.write_text(f"n{repo}/build/obj.o\n", encoding="utf-8")
         env = {"STUB_LSOF_COUNT": str(self.tmp / "lsof-count"), "STUB_LSOF_SECOND": str(second)}
         r = self.run_reaper("--yes", env_extra=env)
         self.assertIn("no longer reclaimable", r["results"][str(repo / "build")])
@@ -526,7 +526,7 @@ class Removal(Base):
 
     def test_yes_does_not_touch_held_entries(self):
         repo = self.lane("a", age_days=3)
-        self.lsof_extra.write_text(f"n{repo}\n")
+        self.lsof_extra.write_text(f"n{repo}\n", encoding="utf-8")
         r = self.run_reaper("--yes")
         self.assertEqual(r["results"], {})
         self.assertTrue((repo / "build" / "obj.o").exists())
@@ -535,7 +535,7 @@ class Removal(Base):
         repo = self.lane("a", build=False)
         left = repo / ".reaping-build-1-2"
         left.mkdir()
-        (left / "f").write_text("x" * 10)
+        (left / "f").write_text("x" * 10, encoding="utf-8")
         age(repo, 3)
         r = self.run_reaper("--yes")
         self.assertEqual(r["results"][str(left)], "removed")
@@ -544,7 +544,7 @@ class Removal(Base):
     def test_remove_refuses_symlink_outside_root_and_git(self):
         outside = self.tmp / "outside"
         outside.mkdir()
-        (outside / "f").write_text("x")
+        (outside / "f").write_text("x", encoding="utf-8")
         link = self.root / "lnk"
         os.symlink(outside, link)
         it = reaper.Item("lane", link, "lnk")
@@ -560,7 +560,7 @@ class Removal(Base):
     def test_remove_refuses_a_build_dir_that_is_not_inside_a_checkout(self):
         stray = self.root / "a" / "deep" / "er" / "build"
         stray.mkdir(parents=True)
-        (stray / "f").write_text("x")
+        (stray / "f").write_text("x", encoding="utf-8")
         self.assertIn("not directly inside a checkout",
                       reaper.remove(reaper.Item("build", stray, "a"), self.root))
         self.assertTrue(stray.exists())

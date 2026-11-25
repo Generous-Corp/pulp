@@ -88,7 +88,7 @@ def git_env() -> dict[str, str]:
 
 def run(cmd: list[str], cwd: str | Path | None = None, timeout: float = 600) -> tuple[int, str]:
     try:
-        p = subprocess.run(cmd, cwd=cwd, capture_output=True, text=True,
+        p = subprocess.run(cmd, cwd=cwd, capture_output=True, text=True, encoding="utf-8",
                            timeout=timeout, env=git_env())
     except (OSError, subprocess.TimeoutExpired) as exc:
         return 127, str(exc)
@@ -112,7 +112,7 @@ class LiveFiles:
             raise InstrumentUnavailable(f"{exe} not found")
         try:
             p = subprocess.run([exe, "-nP", "-w", "-F", "pn"], capture_output=True,
-                               text=True, timeout=600)
+                               text=True, encoding="utf-8", timeout=600)
         except (OSError, subprocess.TimeoutExpired) as exc:
             raise InstrumentUnavailable(f"lsof failed: {exc}") from exc
         pids: set[int] = set()
@@ -155,7 +155,7 @@ class PrStates:
         self.calls = 0
         if cache_file and cache_file.is_file():
             try:
-                self.disk = json.loads(cache_file.read_text())
+                self.disk = json.loads(cache_file.read_text(encoding="utf-8"))
             except (OSError, ValueError):
                 self.disk = {}
 
@@ -204,7 +204,7 @@ class PrStates:
         try:
             self.cache_file.parent.mkdir(parents=True, exist_ok=True)
             tmp = self.cache_file.with_suffix(".tmp")
-            tmp.write_text(json.dumps(self.disk))
+            tmp.write_text(json.dumps(self.disk), encoding="utf-8")
             os.replace(tmp, self.cache_file)
         except OSError:
             pass
@@ -219,7 +219,7 @@ def modified_since(path: Path, cutoff: float) -> bool | None:
     stamp = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(cutoff))
     try:
         p = subprocess.run(["find", os.path.realpath(path), "-newermt", stamp,
-                            "-print", "-quit"], capture_output=True, text=True,
+                            "-print", "-quit"], capture_output=True, text=True, encoding="utf-8",
                            timeout=1800)
     except (OSError, subprocess.TimeoutExpired):
         return None
