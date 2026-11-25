@@ -60,6 +60,60 @@ pub const PINS: &[Pin] = &[
     },
 ];
 
+/// chrome-headless-shell archives of the same release, keyed like `PINS`.
+/// The shell has no window-server connection, so a headless capture cannot
+/// stall behind another application's UI the way the full browser can.
+/// SHA-256 values were computed from the exact official archives at
+/// https://storage.googleapis.com/chrome-for-testing-public/151.0.7922.47/.
+pub const SHELL_PINS: &[Pin] = &[
+    Pin {
+        platform: "mac-arm64",
+        archive: "chrome-headless-shell-mac-arm64.zip",
+        sha256: "0bf92463e337d207792b6ba460a06db1d40ab048e72f80cf608942cd7885552f",
+        executable: "chrome-headless-shell-mac-arm64/chrome-headless-shell",
+    },
+    Pin {
+        platform: "mac-x64",
+        archive: "chrome-headless-shell-mac-x64.zip",
+        sha256: "c59bae764cfd38c6f26b076f19bee73dea6f8aa416781ce7467bf363db9e3996",
+        executable: "chrome-headless-shell-mac-x64/chrome-headless-shell",
+    },
+    Pin {
+        platform: "linux64",
+        archive: "chrome-headless-shell-linux64.zip",
+        sha256: "e60f546a64ecc6b5b5ddbde7b47f1304fc8fdba9ea65fd63c16bbc994787b3d5",
+        executable: "chrome-headless-shell-linux64/chrome-headless-shell",
+    },
+    Pin {
+        platform: "win64",
+        archive: "chrome-headless-shell-win64.zip",
+        sha256: "26f826217d9b6b626c000daa12a939d53b92aadd810dcec5d4fcf8ef5dc7498f",
+        executable: "chrome-headless-shell-win64/chrome-headless-shell.exe",
+    },
+];
+
+/// Where one archive kind lives below the managed root, and the record that
+/// names its executable. The record is written only after the archive is
+/// verified and in place, so it is the sole authority for that kind.
+#[derive(Clone, Copy)]
+struct Kind {
+    /// Appended to the platform directory name (`""` for the full browser).
+    dir_suffix: &'static str,
+    record: &'static str,
+    label: &'static str,
+}
+
+const BROWSER: Kind = Kind {
+    dir_suffix: "",
+    record: "current.json",
+    label: "Chrome for Testing",
+};
+const SHELL: Kind = Kind {
+    dir_suffix: "-headless-shell",
+    record: "headless-shell.json",
+    label: "chrome-headless-shell",
+};
+
 #[derive(Debug, Serialize, Deserialize)]
 struct Current {
     schema: u32,
@@ -85,6 +139,10 @@ pub fn host_platform_key() -> Option<&'static str> {
 }
 
 /// Find the committed archive pin for an upstream platform key.
+pub fn shell_pin_for(platform: &str) -> Option<&'static Pin> {
+    SHELL_PINS.iter().find(|pin| pin.platform == platform)
+}
+
 pub fn pin_for(platform: &str) -> Option<&'static Pin> {
     PINS.iter().find(|pin| pin.platform == platform)
 }
@@ -120,27 +178,57 @@ pub fn root_under(home: &Path) -> PathBuf {
 
 /// Version/platform install directory below an explicit Pulp home.
 pub fn install_dir_under(home: &Path, pin: &Pin) -> PathBuf {
-    root_under(home).join(PINNED_VERSION).join(pin.platform)
+    kind_dir_under(home, pin, BROWSER)
 }
 
-fn relative_executable(pin: &Pin) -> PathBuf {
+/// Version/platform directory of the matching chrome-headless-shell.
+pub fn shell_install_dir_under(home: &Path, pin: &Pin) -> PathBuf {
+    kind_dir_under(home, pin, SHELL)
+}
+
+fn kind_dir_under(home: &Path, pin: &Pin, kind: Kind) -> PathBuf {
+    root_under(home)
+        .join(PINNED_VERSION)
+        .join(format!("{}{}", pin.platform, kind.dir_suffix))
+}
+
+fn relative_executable(pin: &Pin, kind: Kind) -> PathBuf {
     Path::new(PINNED_VERSION)
-        .join(pin.platform)
+        .join(format!("{}{}", pin.platform, kind.dir_suffix))
         .join(pin.executable)
+}
+
+fn read_record(root: &Path, record: &str) -> Option<Current> {
+    let body = std::fs::read_to_string(root.join(record)).ok()?;
+    let current: Current = serde_json::from_str(&body).ok()?;
+    (current.schema == 1).then_some(current)
 }
 
 /// Resolve only the executable named by a valid `current.json`.
 pub fn current_browser_under(home: &Path) -> Option<PathBuf> {
     let root = root_under(home);
-    let body = std::fs::read_to_string(root.join("current.json")).ok()?;
-    let current: Current = serde_json::from_str(&body).ok()?;
-    if current.schema != 1 {
+    let current = read_record(&root, BROWSER.record)?;
+    resolve_record(&root, &current, &current.platform)
+}
+
+/// Resolve the chrome-headless-shell named by `headless-shell.json`, only when
+/// it is the release `current.json` names, for the same platform.
+pub fn current_headless_shell_under(home: &Path) -> Option<PathBuf> {
+    let root = root_under(home);
+    let current = read_record(&root, BROWSER.record)?;
+    let shell = read_record(&root, SHELL.record)?;
+    if shell.version != current.version || shell.platform != current.platform {
         return None;
     }
+    current_browser_under(home)?;
+    resolve_record(&root, &shell, &format!("{}{}", shell.platform, SHELL.dir_suffix))
+}
+
+fn resolve_record(root: &Path, current: &Current, platform_dir: &str) -> Option<PathBuf> {
     let relative = PathBuf::from(&current.executable);
     let mut components = relative.components();
     if components.next() != Some(Component::Normal(current.version.as_ref()))
-        || components.next() != Some(Component::Normal(current.platform.as_ref()))
+        || components.next() != Some(Component::Normal(platform_dir.as_ref()))
         || components.any(|part| !matches!(part, Component::Normal(_)))
     {
         return None;
@@ -151,7 +239,7 @@ pub fn current_browser_under(home: &Path) -> Option<PathBuf> {
     }
     // `current.json` is the sole authority, but it must not be able to
     // nominate a symlink that escapes the managed installation root.
-    let canonical_root = std::fs::canonicalize(&root).ok()?;
+    let canonical_root = std::fs::canonicalize(root).ok()?;
     let canonical_path = std::fs::canonicalize(&path).ok()?;
     canonical_path.starts_with(canonical_root).then_some(path)
 }
@@ -176,25 +264,31 @@ pub fn uninstall_pinned() -> Result<Option<PathBuf>> {
 }
 
 fn write_current(root: &Path, pin: &Pin) -> Result<()> {
+    write_record(root, pin, BROWSER)
+}
+
+fn write_record(root: &Path, pin: &Pin, kind: Kind) -> Result<()> {
     let current = Current {
         schema: 1,
         version: PINNED_VERSION.to_owned(),
         platform: pin.platform.to_owned(),
-        executable: relative_executable(pin)
+        executable: relative_executable(pin, kind)
             .to_string_lossy()
             .replace('\\', "/"),
     };
     let body = serde_json::to_vec_pretty(&current)
-        .map_err(|e| CliError::Other(format!("could not serialize current.json: {e}")))?;
+        .map_err(|e| CliError::Other(format!("could not serialize {}: {e}", kind.record)))?;
     let tmp = root.join(format!(
-        ".current.json.tmp-{}-{}",
+        ".{}.tmp-{}-{}",
+        kind.record,
         std::process::id(),
         nonce()
     ));
     std::fs::write(&tmp, body).map_err(|e| CliError::io(&tmp, e))?;
-    let destination = root.join("current.json");
+    let destination = root.join(kind.record);
     let backup = root.join(format!(
-        ".current.json.backup-{}-{}",
+        ".{}.backup-{}-{}",
+        kind.record,
         std::process::id(),
         nonce()
     ));
@@ -312,15 +406,18 @@ fn install_archive_under(
     force: bool,
     out: &mut impl Write,
 ) -> Result<i32> {
-    install_archive_under_with_extractor(
-        home,
-        pin,
-        url,
-        expected_sha,
-        force,
-        host_zip_extractor(),
-        out,
-    )
+    install_kind_under(home, pin, url, expected_sha, force, BROWSER, host_zip_extractor(), out)
+}
+
+fn install_shell_archive_under(
+    home: &Path,
+    pin: &Pin,
+    url: &str,
+    expected_sha: &str,
+    force: bool,
+    out: &mut impl Write,
+) -> Result<i32> {
+    install_kind_under(home, pin, url, expected_sha, force, SHELL, host_zip_extractor(), out)
 }
 
 fn install_archive_under_with_extractor(
@@ -332,15 +429,30 @@ fn install_archive_under_with_extractor(
     extractor: ZipExtractor,
     out: &mut impl Write,
 ) -> Result<i32> {
+    install_kind_under(home, pin, url, expected_sha, force, BROWSER, extractor, out)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn install_kind_under(
+    home: &Path,
+    pin: &Pin,
+    url: &str,
+    expected_sha: &str,
+    force: bool,
+    kind: Kind,
+    extractor: ZipExtractor,
+    out: &mut impl Write,
+) -> Result<i32> {
+    let label = kind.label;
     let platform = pin.platform;
     let root = root_under(home);
-    let final_dir = install_dir_under(home, pin);
+    let final_dir = kind_dir_under(home, pin, kind);
     let final_browser = final_dir.join(pin.executable);
     if final_browser.is_file() && !force {
-        write_current(&root, pin)?;
+        write_record(&root, pin, kind)?;
         writeln!(
             out,
-            "Chrome for Testing {PINNED_VERSION} already present: {}",
+            "{label} {PINNED_VERSION} already present: {}",
             final_browser.display()
         )
         .map_err(|e| CliError::io("<stdout>", e))?;
@@ -350,14 +462,16 @@ fn install_archive_under_with_extractor(
     std::fs::create_dir_all(final_dir.parent().expect("version parent"))
         .map_err(|e| CliError::io(final_dir.clone(), e))?;
     let incoming = final_dir.parent().expect("version parent").join(format!(
-        ".{}.incoming-{}-{}",
+        ".{}{}.incoming-{}-{}",
         platform,
+        kind.dir_suffix,
         std::process::id(),
         nonce()
     ));
     let archive = root.join(format!(
-        ".download-{}-{}-{}.zip",
+        ".download-{}{}-{}-{}.zip",
         platform,
+        kind.dir_suffix,
         std::process::id(),
         nonce()
     ));
@@ -375,7 +489,7 @@ fn install_archive_under_with_extractor(
         let browser = incoming.join(pin.executable);
         if !browser.is_file() {
             return Err(CliError::Other(format!(
-                "verified Chrome-for-Testing archive did not contain {}",
+                "verified {label} archive did not contain {}",
                 pin.executable
             )));
         }
@@ -400,7 +514,7 @@ fn install_archive_under_with_extractor(
             }
             return Err(CliError::io(final_dir.clone(), error));
         }
-        if let Err(error) = write_current(&root, pin) {
+        if let Err(error) = write_record(&root, pin, kind) {
             cleanup(&final_dir);
             if backup.exists() {
                 let _ = std::fs::rename(&backup, &final_dir);
@@ -417,7 +531,7 @@ fn install_archive_under_with_extractor(
     install_result?;
     writeln!(
         out,
-        "Installed Chrome for Testing {PINNED_VERSION} ({platform}) -> {}",
+        "Installed {label} {PINNED_VERSION} ({platform}) -> {}",
         final_browser.display()
     )
     .map_err(|e| CliError::io("<stdout>", e))?;
@@ -440,7 +554,13 @@ pub fn install_pinned(force: bool, out: &mut impl Write) -> Result<i32> {
     let home = chrome_home().ok_or_else(|| {
         CliError::Other("cannot resolve Pulp home ($PULP_HOME / home directory unset)".to_owned())
     })?;
-    install_archive_under(&home, pin, &pin_url(pin), pin.sha256, force, out)
+    let status = install_archive_under(&home, pin, &pin_url(pin), pin.sha256, force, out)?;
+    if status != 0 {
+        return Ok(status);
+    }
+    // The shell of the same release, which headless captures prefer.
+    let shell = shell_pin_for(platform).expect("mapped platform must have a shell pin");
+    install_shell_archive_under(&home, shell, &pin_url(shell), shell.sha256, force, out)
 }
 
 #[cfg(test)]
@@ -482,6 +602,94 @@ mod tests {
 
         std::fs::write(root.join("current.json"), b"{}").unwrap();
         assert!(current_browser_under(temp.path()).is_none());
+    }
+
+    #[test]
+    fn shell_pins_cover_every_browser_platform() {
+        for pin in PINS {
+            let shell = shell_pin_for(pin.platform).expect("shell pin");
+            assert_eq!(shell.sha256.len(), 64);
+            assert!(shell.sha256.bytes().all(|byte| byte.is_ascii_hexdigit()));
+            assert!(pin_url(shell).contains(PINNED_VERSION));
+            assert!(shell.executable.contains("chrome-headless-shell"));
+        }
+    }
+
+    #[test]
+    fn headless_shell_resolves_only_for_the_current_release() {
+        let temp = tempfile::tempdir().unwrap();
+        let pin = pin_for("linux64").unwrap();
+        let shell_pin = shell_pin_for("linux64").unwrap();
+        let root = root_under(temp.path());
+        let shell = shell_install_dir_under(temp.path(), shell_pin).join(shell_pin.executable);
+        std::fs::create_dir_all(shell.parent().unwrap()).unwrap();
+        std::fs::write(&shell, b"shell").unwrap();
+        write_record(&root, shell_pin, SHELL).unwrap();
+        // No current browser: a shell record alone names nothing.
+        assert!(current_headless_shell_under(temp.path()).is_none());
+
+        let browser = install_dir_under(temp.path(), pin).join(pin.executable);
+        std::fs::create_dir_all(browser.parent().unwrap()).unwrap();
+        std::fs::write(&browser, b"browser").unwrap();
+        write_current(&root, pin).unwrap();
+        assert_eq!(current_headless_shell_under(temp.path()), Some(shell.clone()));
+        assert_eq!(current_browser_under(temp.path()), Some(browser));
+
+        // A shell from another release is not the pinned one.
+        let record = root.join(SHELL.record);
+        let body = std::fs::read_to_string(&record).unwrap();
+        std::fs::write(&record, body.replace(PINNED_VERSION, "150.0.0.1")).unwrap();
+        assert!(current_headless_shell_under(temp.path()).is_none());
+
+        // Nor is a shell record that points into the browser's directory.
+        write_record(&root, shell_pin, SHELL).unwrap();
+        let body = std::fs::read_to_string(&record).unwrap();
+        std::fs::write(&record, body.replace("linux64-headless-shell", "linux64")).unwrap();
+        assert!(current_headless_shell_under(temp.path()).is_none());
+    }
+
+    #[cfg(not(windows))]
+    #[test]
+    fn shell_install_survives_a_forced_browser_refresh() {
+        let source = tempfile::tempdir().unwrap();
+        let home = tempfile::tempdir().unwrap();
+        let browser_zip = source.path().join("browser.zip");
+        let shell_zip = source.path().join("shell.zip");
+        let browser_sha =
+            write_fixture_archive(source.path(), &browser_zip, "fixture/chrome", b"browser");
+        let shell_sha = write_fixture_archive(
+            source.path(),
+            &shell_zip,
+            "fixture-shell/chrome-headless-shell",
+            b"shell",
+        );
+        let browser = Pin {
+            platform: "fixture-platform",
+            archive: "browser.zip",
+            sha256: "",
+            executable: "fixture/chrome",
+        };
+        let shell = Pin {
+            platform: "fixture-platform",
+            archive: "shell.zip",
+            sha256: "",
+            executable: "fixture-shell/chrome-headless-shell",
+        };
+        let mut output = Vec::new();
+        let url = |path: &Path| format!("file://{}", path.display());
+        install_archive_under(home.path(), &browser, &url(&browser_zip), &browser_sha, false,
+                              &mut output).unwrap();
+        install_shell_archive_under(home.path(), &shell, &url(&shell_zip), &shell_sha, false,
+                                    &mut output).unwrap();
+        let installed = shell_install_dir_under(home.path(), &shell).join(shell.executable);
+        assert_eq!(current_headless_shell_under(home.path()), Some(installed.clone()));
+        install_archive_under(home.path(), &browser, &url(&browser_zip), &browser_sha, true,
+                              &mut output).unwrap();
+        assert_eq!(current_headless_shell_under(home.path()), Some(installed));
+        let error = install_shell_archive_under(home.path(), &shell, &url(&shell_zip),
+                                                &"0".repeat(64), true, &mut output)
+            .unwrap_err();
+        assert!(format!("{error}").contains("SHA-256 mismatch"));
     }
 
     #[cfg(unix)]
