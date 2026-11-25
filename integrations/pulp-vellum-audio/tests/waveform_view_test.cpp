@@ -322,7 +322,7 @@ TEST_CASE("Vellum WaveformView leaves no gaps when samples equal columns",
     view.set_data(std::vector<float>(100, 1.0f));
     const auto frame = render(view, 100, 40);
     for (std::uint32_t x = 0; x < 100; ++x)
-        CHECK(near(frame.at(x, 20), {100, 180, 250}));
+        CHECK(near(frame.at(x, 6), {100, 180, 250}));
 }
 
 TEST_CASE("Vellum WaveformView renders a sine thumbnail and a preview for review",
