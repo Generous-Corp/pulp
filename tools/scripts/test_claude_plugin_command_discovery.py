@@ -28,7 +28,7 @@ PULP_INVOCATION = re.compile(r"`?\bpulp ([a-z][a-z0-9-]*)(?: ([a-z][a-z0-9-]*))?
 
 def discover_commands(root: Path) -> dict[str, Path]:
     """Map command name to file, the way the plug-in manifest resolves them."""
-    plugin = json.loads((root / ".claude-plugin/plugin.json").read_text())
+    plugin = json.loads((root / ".claude-plugin/plugin.json").read_text(encoding="utf-8"))
     command_dir = (root / plugin["commands"]).resolve()
     if not command_dir.is_dir():
         raise FileNotFoundError(f"plugin commands path is not a directory: {command_dir}")
@@ -53,7 +53,7 @@ def cli_manifest(root: Path) -> dict[str, set[str]]:
     commands: dict[str, set[str]] = {}
     current: str | None = None
     in_subcommands = False
-    for line in (root / "docs/status/cli-commands.yaml").read_text().splitlines():
+    for line in (root / "docs/status/cli-commands.yaml").read_text(encoding="utf-8").splitlines():
         top = re.match(r"^  - name: (\S+)\s*$", line)
         if top:
             current = top.group(1)
@@ -81,7 +81,7 @@ def problems(root: Path) -> list[str]:
         if path is None:
             found.append(f"/{name} is not discoverable from .claude-plugin/plugin.json")
             continue
-        fields, body = parse_front_matter(path.read_text())
+        fields, body = parse_front_matter(path.read_text(encoding="utf-8"))
         if fields and fields.get("name") != name:
             found.append(f"/{name}: front matter name is {fields.get('name')!r}")
         if fields and len(fields.get("description", "")) < 10:
@@ -129,24 +129,31 @@ class NegativeControls(unittest.TestCase):
 
     def test_renamed_front_matter_is_reported(self) -> None:
         path = self.tmp / ".claude/commands/design.md"
-        path.write_text(path.read_text().replace("name: design\n", "name: designer\n", 1))
+        path.write_text(
+            path.read_text(encoding="utf-8").replace("name: design\n", "name: designer\n", 1),
+            encoding="utf-8",
+        )
         self.assertIn("front matter name is 'designer'", " ".join(problems(self.tmp)))
 
     def test_unknown_cli_command_is_reported(self) -> None:
         path = self.tmp / ".claude/commands/import-design.md"
-        path.write_text(path.read_text() + "\nRun `pulp no-such-command` next.\n")
+        path.write_text(
+            path.read_text(encoding="utf-8") + "\nRun `pulp no-such-command` next.\n", encoding="utf-8"
+        )
         self.assertIn("`pulp no-such-command` is not a CLI command", " ".join(problems(self.tmp)))
 
     def test_declared_sibling_subcommand_under_wrong_command_is_reported(self) -> None:
         path = self.tmp / ".claude/commands/inspect.md"
-        path.write_text(path.read_text() + "\nThen `pulp inspect instances`.\n")
+        path.write_text(
+            path.read_text(encoding="utf-8") + "\nThen `pulp inspect instances`.\n", encoding="utf-8"
+        )
         self.assertIn("`pulp inspect instances` is not a subcommand", " ".join(problems(self.tmp)))
 
     def test_missing_plugin_commands_directory_is_reported(self) -> None:
         manifest = self.tmp / ".claude-plugin/plugin.json"
-        data = json.loads(manifest.read_text())
+        data = json.loads(manifest.read_text(encoding="utf-8"))
         data["commands"] = "./nowhere"
-        manifest.write_text(json.dumps(data))
+        manifest.write_text(json.dumps(data), encoding="utf-8")
         self.assertIn("does not resolve a command directory", " ".join(problems(self.tmp)))
 
 
