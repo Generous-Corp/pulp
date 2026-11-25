@@ -730,10 +730,12 @@ void MusicalTypingKeyboard::paint(::vellum::canvas::Canvas& canvas) {
     auto vy = [&](float py) { return t.oy + py * t.scale; };
     // Faithful strip colors — must match the baked SVG exactly (not theme
     // tokens), so they're deliberate literals. token-lint:allow
-    const auto bg = ::vellum::canvas::Color::rgba8(0xEB, 0xEE, 0xF1); // strip key color  token-lint:allow
-    const auto dark = ::vellum::canvas::Color::rgba(0, 0, 0, 0.16f);  // white-key divider  token-lint:allow
-    const auto blk =
-        ::vellum::canvas::Color::rgba(0x16 / 255.f, 0x19 / 255.f, 0x1E / 255.f, 1.0f); // token-lint:allow
+    const auto bg =
+        ::vellum::canvas::Color::rgba8(0xEB, 0xEE, 0xF1); // strip key color  token-lint:allow
+    const auto dark =
+        ::vellum::canvas::Color::rgba(0, 0, 0, 0.16f); // white-key divider  token-lint:allow
+    const auto blk = ::vellum::canvas::Color::rgba(0x16 / 255.f, 0x19 / 255.f, 0x1E / 255.f,
+                                                   1.0f); // token-lint:allow
 
     // 1) Cover the baked partial ribbon with the strip background (seamless — same
     //    #EBEEF1), so only our full-range ruler shows.
@@ -758,7 +760,7 @@ void MusicalTypingKeyboard::paint(::vellum::canvas::Canvas& canvas) {
     // 3) C-only labels along the bottom of the strip.
     const float lf = std::max(6.0f, 7.0f * t.scale);
     canvas.set_font("Inter", lf);
-    canvas.set_fill_color(::vellum::canvas::Color::rgba(             // token-lint:allow (matches baked SVG)
+    canvas.set_fill_color(::vellum::canvas::Color::rgba(   // token-lint:allow (matches baked SVG)
         0x16 / 255.f, 0x19 / 255.f, 0x1E / 255.f, 0.55f)); // C-label ink
     for (int m = kRulerLo; m <= kRulerHi; m += 12) {       // every C
         canvas.fill_text(c_label(m), vx(midi_to_x(m, x0, x1)) + 1.5f, vy(kStripY + kStripH) - 1.5f);
@@ -804,12 +806,14 @@ void MusicalTypingKeyboard::paint(::vellum::canvas::Canvas& canvas) {
     const float hx1 = vx(midi_to_x(std::clamp(hhi + 1, kRulerLo, kRulerHi), x0, x1));
     const float r = 3.0f * t.scale;
     const auto teal = resolve_color("accent.primary", ::vellum::canvas::Color::rgba8(22, 218, 194));
-    canvas.set_fill_color(::vellum::canvas::Color::rgba( // token-lint:allow (derived from resolved accent)
-        teal.r, teal.g, teal.b,                // token-lint:allow (derived from resolved accent)
-        dragging_strip_ ? 0.30f : 0.16f));     // token-lint:allow (derived from resolved accent)
+    canvas.set_fill_color(
+        ::vellum::canvas::Color::rgba(         // token-lint:allow (derived from resolved accent)
+            teal.r, teal.g, teal.b,            // token-lint:allow (derived from resolved accent)
+            dragging_strip_ ? 0.30f : 0.16f)); // token-lint:allow (derived from resolved accent)
     canvas.fill_rounded_rect(hx0, vy(kStripY), hx1 - hx0, kStripH * t.scale, r);
-    canvas.set_stroke_color(::vellum::canvas::Color::rgba( // token-lint:allow (derived from resolved accent)
-        teal.r, teal.g, teal.b, 1.0f));
+    canvas.set_stroke_color(
+        ::vellum::canvas::Color::rgba( // token-lint:allow (derived from resolved accent)
+            teal.r, teal.g, teal.b, 1.0f));
     canvas.set_line_width(std::max(1.0f, 1.5f * t.scale));
     canvas.stroke_rounded_rect(hx0, vy(kStripY), hx1 - hx0, kStripH * t.scale, r);
 }

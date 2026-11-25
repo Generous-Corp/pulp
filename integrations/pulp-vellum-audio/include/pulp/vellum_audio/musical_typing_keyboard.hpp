@@ -5,8 +5,8 @@
 #include <vellum/view/design_frame_view.hpp>
 
 #include <functional>
-#include <string>
 #include <span>
+#include <string>
 #include <vector>
 
 namespace pulp::vellum_audio {
