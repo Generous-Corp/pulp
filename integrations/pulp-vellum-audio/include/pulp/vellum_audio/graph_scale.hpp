@@ -23,8 +23,8 @@ namespace pulp::vellum_audio {
 struct LogFrequencyScale {
     float min_hz = 20.0f;
     float max_hz = 20000.0f;
-    float x = 0.0f;      ///< left edge, pixels
-    float width = 0.0f;  ///< axis width, pixels
+    float x = 0.0f;     ///< left edge, pixels
+    float width = 0.0f; ///< axis width, pixels
 
     /// Pixel x of a frequency. Not clamped — callers plotting a curve want
     /// points just outside the viewport to keep the line's slope correct at
@@ -55,8 +55,8 @@ struct LogFrequencyScale {
 struct DecibelScale {
     float min_db = -24.0f;
     float max_db = 24.0f;
-    float y = 0.0f;       ///< top edge, pixels
-    float height = 0.0f;  ///< axis height, pixels
+    float y = 0.0f;      ///< top edge, pixels
+    float height = 0.0f; ///< axis height, pixels
 
     float to_y(float db) const;
     float to_decibels(float py) const;
@@ -79,9 +79,7 @@ struct DecibelScale {
 /// exactly.
 ///
 /// Allocation-free; `out` is caller-owned.
-void resample_spectrum_log(std::span<const float> bins_db,
-                           float sample_rate,
-                           const LogFrequencyScale& scale,
-                           std::span<float> out);
+void resample_spectrum_log(std::span<const float> bins_db, float sample_rate,
+                           const LogFrequencyScale& scale, std::span<float> out);
 
 } // namespace pulp::vellum_audio

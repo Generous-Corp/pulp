@@ -5,10 +5,10 @@
 #include <pulp/signal/frequency_response.hpp>
 #include <pulp/vellum_audio/eq_curve_view.hpp>
 
-#include <vellum/view/continuous_frames.hpp>
-#include <vellum/view/theme_contrast.hpp>
 #include <span>
 #include <string>
+#include <vellum/view/continuous_frames.hpp>
+#include <vellum/view/theme_contrast.hpp>
 
 namespace pulp::vellum_audio {
 

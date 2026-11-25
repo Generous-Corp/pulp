@@ -6,9 +6,9 @@
 #include <pulp/state/store.hpp>
 #include <pulp/vellum_audio/graph_scale.hpp>
 
-#include <vellum/view/view.hpp>
 #include <span>
 #include <vector>
+#include <vellum/view/view.hpp>
 
 namespace pulp::vellum_audio {
 
