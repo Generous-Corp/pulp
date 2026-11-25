@@ -18,7 +18,6 @@
 /// never fakes zeros that look like a live-but-silent signal.
 
 #include <pulp/audio/audio_probe_snapshot.hpp>
-#include <pulp/audio/audio_scope.hpp>
 #include <pulp/audio/audio_stats.hpp>
 #include <vellum/canvas/canvas.hpp>
 #include <vellum/view/view.hpp>
@@ -26,7 +25,12 @@
 #include <array>
 #include <cstdint>
 #include <functional>
+#include <memory>
 #include <string>
+
+namespace pulp::audio {
+struct AudioScopeResult;
+} // namespace pulp::audio
 
 namespace vellum::view {
 class Label;
@@ -240,8 +244,7 @@ class AudioInspectorPanel final : public ::vellum::view::View {
     AudioInspectorMode mode_ = AudioInspectorMode::kSignal;
     audio::AudioProbeSnapshot snapshot_{};
     audio::AudioStats stats_{};
-    audio::AudioScopeResult scope_result_{};
-    bool has_scope_result_ = false;
+    std::unique_ptr<audio::AudioScopeResult> scope_result_; ///< null until a result is set
     float lr_match_ = 0.0f;
     float balance_ = 0.0f;
 

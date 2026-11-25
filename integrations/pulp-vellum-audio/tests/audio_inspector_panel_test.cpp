@@ -1,7 +1,6 @@
 #include <pulp/vellum_audio/audio_inspector_panel.hpp>
 
-#include <pulp/audio/audio_probe.hpp>
-#include <pulp/audio/buffer.hpp>
+#include <pulp/audio/audio_scope.hpp>
 #include <vellum/canvas/recording_canvas.hpp>
 #include <vellum/view/screenshot.hpp>
 
@@ -15,9 +14,7 @@
 #include <string>
 #include <vector>
 
-using pulp::audio::AudioProbe;
 using pulp::audio::AudioProbeStage;
-using pulp::audio::BufferView;
 using pulp::vellum_audio::AudioInspectorMode;
 using pulp::vellum_audio::AudioInspectorPanel;
 using pulp::vellum_audio::AudioWaveformView;
@@ -42,9 +39,9 @@ TEST_CASE("Audio Inspector meter fill is on the dBFS scale, not linear",
     // The meter bar and its "… dBFS" label must agree: the fill maps linear
     // amplitude through the same dBFS transform the label uses (−60 dBFS floor
     // → empty bar, 0 dBFS → full bar), not the raw linear amplitude.
-    REQUIRE(dbfs_meter_fill(1.0f) == Catch::Approx(1.0f));   // 0 dBFS → full.
-    REQUIRE(dbfs_meter_fill(0.0f) == 0.0f);                  // silence → empty.
-    REQUIRE(dbfs_meter_fill(0.001f) == 0.0f);                // −60 dBFS → empty.
+    REQUIRE(dbfs_meter_fill(1.0f) == Catch::Approx(1.0f)); // 0 dBFS → full.
+    REQUIRE(dbfs_meter_fill(0.0f) == 0.0f);                // silence → empty.
+    REQUIRE(dbfs_meter_fill(0.001f) == 0.0f);              // −60 dBFS → empty.
 
     // Half amplitude is ≈ −6 dBFS, which on a −60..0 scale is 0.9, NOT the 0.5
     // a linear meter would show — the assertion that distinguishes the two.
@@ -68,8 +65,7 @@ TEST_CASE("AudioWaveformView trigger mode only repositions over real samples",
 
     waveform.set_trigger_mode(AudioWaveformView::TriggerMode::kRisingZero);
     REQUIRE(waveform.display_start_index() == 4);
-    REQUIRE(waveform.sample_at(waveform.display_start_index()) ==
-            Catch::Approx(samples[4]));
+    REQUIRE(waveform.sample_at(waveform.display_start_index()) == Catch::Approx(samples[4]));
     REQUIRE(waveform.display_sample_count() == 2);
 
     const float no_crossing[] = {-0.6f, -0.4f, -0.2f, -0.1f};
@@ -111,8 +107,7 @@ TEST_CASE("AudioWaveformView paints grid and rounded thicker trace",
 
     bool saw_trace_width = false;
     for (const auto& cmd : grid_canvas.commands()) {
-        if (cmd.type == DrawCommand::Type::set_line_width &&
-            cmd.f[0] == Catch::Approx(1.75f)) {
+        if (cmd.type == DrawCommand::Type::set_line_width && cmd.f[0] == Catch::Approx(1.75f)) {
             saw_trace_width = true;
         }
     }
@@ -162,8 +157,7 @@ TEST_CASE("AudioInspectorPanel distinguishes Scope measurements from Signal read
 
     REQUIRE(panel.status_text().find("Scope") != std::string::npos);
     REQUIRE(panel.level_text().find("Freq: 440.0 Hz") != std::string::npos);
-    REQUIRE(panel.content_text().find("Trigger: rising-zero (locked)") !=
-            std::string::npos);
+    REQUIRE(panel.content_text().find("Trigger: rising-zero (locked)") != std::string::npos);
 }
 
 TEST_CASE("AudioInspectorPanel keeps a peak hold while live level falls",
@@ -246,24 +240,22 @@ TEST_CASE("AudioInspectorPanel mode buttons and set_mode stay in step",
 
 TEST_CASE("AudioInspectorPanel renders a non-empty headless snapshot",
           "[vellum-audio][audio-inspector]") {
-    AudioProbe probe;
-    AudioProbe::CaptureConfig cap;
-    cap.capture_frames = AudioWaveformView::kCapacity;
-    probe.prepare(2, 128, 48000.0, AudioProbeStage::kStandaloneOutputBoundary, cap);
-    std::vector<float> left(128), right(128);
-    for (std::size_t i = 0; i < left.size(); ++i) {
-        const float s = std::sin(2.0f * 3.14159265f * 440.0f * static_cast<float>(i) / 48000.0f);
-        left[i] = 0.6f * s;
-        right[i] = 0.45f * s;
-    }
-    const float* ptrs[2] = {left.data(), right.data()};
-    for (int b = 0; b < 8; ++b)
-        probe.analyze_output(BufferView<const float>(ptrs, 2, left.size()));
-
-    const auto snap = probe.latest();
+    // A 440 Hz capture and the snapshot a stereo probe reports for it.
     std::vector<float> wf(AudioWaveformView::kCapacity);
-    const int n = probe.read_capture(wf.data(), static_cast<int>(wf.size()));
-    REQUIRE(n > 0);
+    for (std::size_t i = 0; i < wf.size(); ++i)
+        wf[i] = 0.6f * std::sin(2.0f * 3.14159265f * 440.0f * static_cast<float>(i) / 48000.0f);
+    const int n = static_cast<int>(wf.size());
+    pulp::audio::AudioProbeSnapshot snap{};
+    snap.stage_id = AudioProbeStage::kStandaloneOutputBoundary;
+    snap.channel_count = 2;
+    snap.sample_rate = 48000.0;
+    snap.block_size = 128;
+    snap.callbacks = 8;
+    snap.sequence_number = 8;
+    snap.peak_max = 0.6f;
+    snap.rms_max = 0.42f;
+    snap.rms[0] = 0.42f;
+    snap.rms[1] = 0.32f;
 
     AudioInspectorPanel panel;
     panel.set_bounds({0, 0, 300, 440});
@@ -289,14 +281,14 @@ TEST_CASE("AudioInspectorPanel renders a non-empty headless snapshot",
     double sum = 0.0, sum2 = 0.0;
     const std::size_t count = static_cast<std::size_t>(w) * h;
     for (std::size_t i = 0; i < count; ++i) {
-        const double lum = 0.2126 * pixels[i * 4] + 0.7152 * pixels[i * 4 + 1] +
-                           0.0722 * pixels[i * 4 + 2];
+        const double lum =
+            0.2126 * pixels[i * 4] + 0.7152 * pixels[i * 4 + 1] + 0.0722 * pixels[i * 4 + 2];
         sum += lum;
         sum2 += lum * lum;
     }
     const double mean = sum / static_cast<double>(count);
     const double var = sum2 / static_cast<double>(count) - mean * mean;
-    REQUIRE(mean < 128.0);          // dark panel, not a white-clamped frame
+    REQUIRE(mean < 128.0);                        // dark panel, not a white-clamped frame
     REQUIRE(std::sqrt(std::max(var, 0.0)) > 1.0); // text and trace, not flat
     maybe_write_png(panel, 300, 440, "audio-inspector-live.png");
 }

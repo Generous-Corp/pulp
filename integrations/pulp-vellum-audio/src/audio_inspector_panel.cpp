@@ -1,5 +1,6 @@
 #include <pulp/vellum_audio/audio_inspector_panel.hpp>
 
+#include <pulp/audio/audio_scope.hpp>
 #include <pulp/vellum_audio/audio_widgets.hpp>
 #include <vellum/view/widgets.hpp>
 
@@ -377,7 +378,7 @@ void AudioInspectorPanel::update(Status status, const audio::AudioProbeSnapshot&
     if (status == Status::kNoProbe) {
         // Drop any stale numbers — show an empty, honest state.
         snapshot_ = audio::AudioProbeSnapshot{};
-        has_scope_result_ = false;
+        scope_result_.reset();
         lr_match_ = 0.0f;
         balance_ = 0.0f;
         if (waveform_view_)
@@ -453,14 +454,12 @@ void AudioInspectorPanel::set_mode(AudioInspectorMode mode) {
 }
 
 void AudioInspectorPanel::set_scope_result(const audio::AudioScopeResult& result) {
-    scope_result_ = result;
-    has_scope_result_ = true;
+    scope_result_ = std::make_unique<audio::AudioScopeResult>(result);
     refresh_labels();
 }
 
 void AudioInspectorPanel::clear_scope_result() {
-    has_scope_result_ = false;
-    scope_result_ = audio::AudioScopeResult{};
+    scope_result_.reset();
     refresh_labels();
 }
 
@@ -521,8 +520,8 @@ void AudioInspectorPanel::refresh_labels() {
     if (level_label_) {
         if (status_ == Status::kNoProbe) {
             level_label_->set_text("Peak: —\nRMS: —");
-        } else if (mode_ == AudioInspectorMode::kScope && has_scope_result_) {
-            const auto& m = scope_result_.measurements;
+        } else if (mode_ == AudioInspectorMode::kScope && scope_result_) {
+            const auto& m = scope_result_->measurements;
             std::string p2p =
                 m.peak_to_peak_available ? format_measurement(m.peak_to_peak, "", 3) : "—";
             std::string rms = m.rms_available ? format_measurement(m.rms, "", 3) : "—";
@@ -538,10 +537,10 @@ void AudioInspectorPanel::refresh_labels() {
     if (content_label_) {
         if (status_ == Status::kNoProbe) {
             content_label_->set_text("Clip: —   NaN/Inf: —\nSilence: —");
-        } else if (mode_ == AudioInspectorMode::kScope && has_scope_result_) {
-            const auto& a = scope_result_.acquisition;
+        } else if (mode_ == AudioInspectorMode::kScope && scope_result_) {
+            const auto& a = scope_result_->acquisition;
             const std::string trigger =
-                scope_result_.trigger_mode == audio::AudioScopeTriggerMode::kRisingZero
+                scope_result_->trigger_mode == audio::AudioScopeTriggerMode::kRisingZero
                     ? "rising-zero"
                     : "off";
             content_label_->set_text("Trigger: " + trigger +
@@ -559,8 +558,8 @@ void AudioInspectorPanel::refresh_labels() {
     if (phase_label_) {
         if (status_ == Status::kNoProbe) {
             phase_label_->set_text("L/R match: —   Balance: —");
-        } else if (mode_ == AudioInspectorMode::kScope && has_scope_result_) {
-            const auto& m = scope_result_.measurements;
+        } else if (mode_ == AudioInspectorMode::kScope && scope_result_) {
+            const auto& m = scope_result_->measurements;
             const std::string dc =
                 m.dc_offset_available ? format_measurement(m.dc_offset, "", 4) : "—";
             const std::string crest =
