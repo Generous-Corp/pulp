@@ -10,16 +10,19 @@ namespace pulp::cli {
 namespace {
 
 std::string shell_word(const std::string& value) {
-    if (value.find_first_of(" \t'\"\\$`") == std::string::npos && !value.empty()) return value;
+    if (value.find_first_of(" \t'\"\\$`") == std::string::npos && !value.empty())
+        return value;
     std::string out = "'";
     for (char c : value) {
-        if (c == '\'') out += "'\\''";
-        else out += c;
+        if (c == '\'')
+            out += "'\\''";
+        else
+            out += c;
     }
     return out + "'";
 }
 
-}  // namespace
+} // namespace
 
 std::string vellum_import_spelling(const std::vector<std::string>& args) {
     std::string from;
@@ -30,18 +33,23 @@ std::string vellum_import_spelling(const std::vector<std::string>& args) {
     for (size_t i = 0; i < args.size(); ++i) {
         const auto& arg = args[i];
         const bool has_value = i + 1 < args.size();
-        if (arg == "--from" && has_value) from = args[++i];
-        else if (arg == "--file" && has_value) files.push_back(args[++i]);
-        else if (arg == "--frame" && has_value) frame = args[++i];
-        else if (arg == "--page" && has_value) page = args[++i];
-        else if (arg == "--outline") outline = true;
+        if (arg == "--from" && has_value)
+            from = args[++i];
+        else if (arg == "--file" && has_value)
+            files.push_back(args[++i]);
+        else if (arg == "--frame" && has_value)
+            frame = args[++i];
+        else if (arg == "--page" && has_value)
+            page = args[++i];
+        else if (arg == "--outline")
+            outline = true;
     }
     const std::string file = files.empty() ? std::string("FILE") : shell_word(files.front());
 
-    static const std::set<std::string> source_types = {
-        "figma", "figma-plugin", "fig", "design-ir", "html"};
-    static const std::set<std::string> named_sources = {
-        "pencil", "designmd", "v0", "jsx", "preconverted-svg"};
+    static const std::set<std::string> source_types = {"figma", "figma-plugin", "fig", "design-ir",
+                                                       "html"};
+    static const std::set<std::string> named_sources = {"pencil", "designmd", "v0", "jsx",
+                                                        "preconverted-svg"};
     std::string spelling = "vellum import ";
     if (from.empty()) {
         spelling += file;
@@ -59,9 +67,12 @@ std::string vellum_import_spelling(const std::vector<std::string>& args) {
     } else {
         return {};
     }
-    if (outline) spelling += " --outline";
-    if (!page.empty()) spelling += " --page " + shell_word(page);
-    if (!frame.empty()) spelling += " --frame " + shell_word(frame);
+    if (outline)
+        spelling += " --outline";
+    if (!page.empty())
+        spelling += " --page " + shell_word(page);
+    if (!frame.empty())
+        spelling += " --frame " + shell_word(frame);
     return spelling;
 }
 
@@ -78,4 +89,4 @@ int report_import_design_moved(const std::vector<std::string>& args) {
     return 2;
 }
 
-}  // namespace pulp::cli
+} // namespace pulp::cli

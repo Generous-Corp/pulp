@@ -29,7 +29,8 @@ struct ScratchRoot {
     explicit ScratchRoot(bool with_tool) {
         fs::remove_all(path);
         fs::create_directories(path / "tools" / "ui-build");
-        if (with_tool) std::ofstream(path / "tools" / "ui-build" / "ui_build.py") << "\n";
+        if (with_tool)
+            std::ofstream(path / "tools" / "ui-build" / "ui_build.py") << "\n";
     }
     ~ScratchRoot() {
         std::error_code ec;
@@ -109,8 +110,7 @@ TEST_CASE("pulp ui forwards lint arguments and preserves delegate failures", "[c
     CHECK(delegated_args == args);
 }
 
-TEST_CASE("pulp ui forwards to vellum ui outside a checkout that carries the tool",
-          "[cli][ui]") {
+TEST_CASE("pulp ui forwards to vellum ui outside a checkout that carries the tool", "[cli][ui]") {
     const std::vector<std::string> args{"build", "--source", "native-ui/src", "--out", "out"};
 
     SECTION("no project root") {

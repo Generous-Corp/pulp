@@ -217,14 +217,13 @@ BuildBinaryLookup lookup_build_binary(const fs::path& relative_binary) {
     return {std::move(binary), std::move(candidates), std::move(root)};
 }
 
-}  // namespace
+} // namespace
 
 fs::path find_build_binary(const fs::path& relative_binary) {
     return lookup_build_binary(relative_binary).binary;
 }
 
-int delegate_to_build_binary(const fs::path& relative_binary,
-                             const std::vector<std::string>& args,
+int delegate_to_build_binary(const fs::path& relative_binary, const std::vector<std::string>& args,
                              const std::string& prepend_flag) {
     auto lookup = lookup_build_binary(relative_binary);
     const auto& binary = lookup.binary;
@@ -284,7 +283,8 @@ int forward_to_vellum(const std::string& pulp_command, const std::string& vellum
     return run_delegate_inheriting_stdio(vellum, forwarded);
 #else
     std::string cmd = shell_quote(vellum);
-    for (const auto& arg : forwarded) cmd += " " + shell_quote(arg);
+    for (const auto& arg : forwarded)
+        cmd += " " + shell_quote(arg);
     return run(cmd);
 #endif
 }

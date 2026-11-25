@@ -571,6 +571,25 @@ than stripped. A new rewrite mode needs the same check, and its shell-out test
 must diff the CLI's own output, not a file the C++ API wrote: the diff tests
 once passed while no CLI command could produce a diff input.
 
+### UI commands that moved to Vellum forward or name the Vellum spelling
+
+`pulp ui` runs `tools/ui-build/ui_build.py` only when the checkout carries it;
+otherwise `forward_to_vellum()` (`cli_delegate.cpp`) passes the arguments and
+exit status to `vellum ui`. The Vellum CLI is `$PULP_VELLUM_CLI` when set, else
+`vellum` on PATH; when neither exists the command exits 2 and names the install
+step. Never fall back to a silent success.
+
+`pulp import-design` is different: when `find_build_binary()` finds no
+`pulp-import-design`, it exits 2 and prints the `vellum import` spelling
+(`import_design_moved.cpp`) without running anything. Vellum imports into a
+Vellum project with its own grammar, so translating flags would hide that the
+output contract changed. Keep both forwarders free of view, canvas, render and
+design-import headers so the CLI can stop linking those targets.
+
+The `cli-vellum-forward` ctest copies `pulp-cpp` outside the build tree, so the
+sibling importer is not found, and runs it against a stub `vellum` that records
+its argv.
+
 ## Adding a CLI Command — Full Checklist
 
 ### 1. Implement in CLI source

@@ -15,4 +15,4 @@ std::string vellum_import_spelling(const std::vector<std::string>& args);
 // Vellum project with a different grammar and output contract.
 int report_import_design_moved(const std::vector<std::string>& args);
 
-}  // namespace pulp::cli
+} // namespace pulp::cli

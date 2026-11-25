@@ -18,13 +18,13 @@ TEST_CASE("import-design maps each source lane to its vellum import spelling", "
           "vellum import designmd DESIGN.md");
     CHECK(vellum_import_spelling(Args{"--from", "claude", "--file", "export.html"}) ==
           "vellum import --source-type claude-design export.html");
-    CHECK(vellum_import_spelling(Args{"--from", "fig", "--file", "a b.fig", "--page", "Main",
-                                      "--frame", "Panel"}) ==
+    CHECK(vellum_import_spelling(
+              Args{"--from", "fig", "--file", "a b.fig", "--page", "Main", "--frame", "Panel"}) ==
           "vellum import --source-type fig 'a b.fig' --page Main --frame Panel");
     CHECK(vellum_import_spelling(Args{"--from", "fig", "--file", "x.fig", "--outline"}) ==
           "vellum import --source-type fig x.fig --outline");
-    CHECK(vellum_import_spelling(Args{"--from", "figma-plugin", "--file", "a.json", "--file",
-                                      "b.json"}) ==
+    CHECK(vellum_import_spelling(
+              Args{"--from", "figma-plugin", "--file", "a.json", "--file", "b.json"}) ==
           "vellum import --source-type figma-plugin a.json --file b.json");
     CHECK(vellum_import_spelling(Args{"--from", "pdf", "--file", "art.pdf"}) ==
           "vellum import illustrator art.pdf");
