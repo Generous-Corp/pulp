@@ -1509,6 +1509,11 @@ build is about 2.5 hours and the suite 30 minutes, so its `timeout-minutes` is
 300; when a hosted Windows run is cancelled at the limit, read the step timings
 before blaming the test step.
 
+A hosted Windows checkout must keep LF bytes: Git for Windows defaults to
+`core.autocrlf=true`, so `cross-platform-check.yml` sets `core.autocrlf=false`
+and `core.eol=lf` before `actions/checkout`. Without it, tests that diff a
+committed artifact against a regenerated one fail on CRLF nobody committed.
+
 ## The Windows nightly skips the source-selftest lane
 
 `cross-platform-check.yml`'s Windows ctest excludes the `source-selftest` label.
