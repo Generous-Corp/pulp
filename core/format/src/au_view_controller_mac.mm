@@ -44,6 +44,22 @@ NSSize pulp_auv3_initial_editor_size() {
     return NSMakeSize(400, 300);
 }
 
+// The size the root view starts at and the first preferredContentSize the host
+// reads. Hosts usually bind the audio unit before they load the view, so its
+// processor's declared editor size is known here; publishing a placeholder
+// first would make the host open a small window and then grow it.
+NSSize pulp_auv3_initial_editor_size(AUAudioUnit* audioUnit) {
+    if ([audioUnit respondsToSelector:@selector(pulpProcessor)]) {
+        if (auto* processor = [(PulpAudioUnit*)audioUnit pulpProcessor]) {
+            const auto [width, height] = processor->editor_size();
+            if (width > 0 && height > 0) {
+                return NSMakeSize(static_cast<CGFloat>(width), static_cast<CGFloat>(height));
+            }
+        }
+    }
+    return pulp_auv3_initial_editor_size();
+}
+
 void pulp_auv3_apply_preferred_size(NSViewController *controller,
                                     NSSize size,
                                     bool resize_view_frame) {
@@ -155,8 +171,9 @@ static constexpr int64_t kInitialSizeSyncIntervalMs = 60;
     // `viewDidLoad` finds a correctly sized container even before the host
     // attaches us to a window. REAPER's in-process AUv3 path can choose the
     // initial container from this frame before createAudioUnit has provided
-    // the processor, so use compile-time design dimensions when available.
-    const NSSize initial = pulp_auv3_initial_editor_size();
+    // the processor, so use compile-time design dimensions then; once the
+    // unit is bound, its processor's declared editor size.
+    const NSSize initial = pulp_auv3_initial_editor_size(self.audioUnit);
     PulpAUMacRootView *root =
         [[PulpAUMacRootView alloc] initWithFrame:NSMakeRect(0, 0, initial.width, initial.height)];
     root.wantsLayer = YES;
@@ -171,7 +188,7 @@ static constexpr int64_t kInitialSizeSyncIntervalMs = 60;
     [super viewDidLoad];
     _designSize = NSZeroSize;
     _initialSizeSyncAttempts = 0;
-    pulp_auv3_apply_preferred_size(self, pulp_auv3_initial_editor_size(), true);
+    pulp_auv3_apply_preferred_size(self, pulp_auv3_initial_editor_size(self.audioUnit), true);
     [self rebuildEditorIfReady];
 }
 

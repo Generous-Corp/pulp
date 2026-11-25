@@ -9,6 +9,13 @@
 /// resize constraints and an authored viewport.
 /// Each window has its own `ParamPortModel` for subscriptions and gesture
 /// lifetime while all edits still use Pulp's existing parameter bridge.
+///
+/// Content-first presentation is opt-in. A root that returns true from
+/// `editor_defers_presentation()` opens with the host's native layer showing
+/// the plug-in's editor colour and no frame presented. The host presents once
+/// the root is ready: at attach for a root without `editor_content_ready()`,
+/// otherwise on the first idle tick where it returns true, and never later than
+/// `editor_presentation_timeout()` (default 500 ms) after attach.
 
 #include <pulp/format/editor_host.hpp>
 #include <pulp/format/editor_package.hpp>
@@ -22,6 +29,7 @@
 #include <vellum/graphics/dawn_native_bootstrap.hpp>
 #include <vellum/view/view.hpp>
 
+#include <chrono>
 #include <concepts>
 #include <cstddef>
 #include <cstdint>
@@ -119,6 +127,15 @@ class Editor final : public format::Editor, public format::EditorAttachDiagnosti
         ::vellum::view::PluginViewHost::Options options;
         options.size = {size_.width, size_.height};
         options.use_gpu = true;
+        if constexpr (
+            requires(const ViewType& view) {
+                { view.editor_defers_presentation() } -> std::convertible_to<bool>;
+            } &&
+            requires(::vellum::view::PluginViewHost::Options& o) { o.defer_presentation = true; }) {
+            defers_presentation_ =
+                static_cast<const ViewType&>(*root_).editor_defers_presentation();
+            options.defer_presentation = defers_presentation_;
+        }
         // The plug-in's declared editor colour is what the host shows before
         // the first frame and wherever the root does not paint.
         if (background)
@@ -168,6 +185,11 @@ class Editor final : public format::Editor, public format::EditorAttachDiagnosti
         attached_ = true;
         if constexpr (requires(ViewType& view) { view.editor_opened(); })
             root_->editor_opened();
+        if (defers_presentation_ && !presentation_resumed_) {
+            presentation_pending_ = true;
+            attached_at_ = std::chrono::steady_clock::now();
+            resume_presentation_when_ready(/*timeout_applies=*/false);
+        }
         return attached_;
     }
 
@@ -225,6 +247,8 @@ class Editor final : public format::Editor, public format::EditorAttachDiagnosti
         }
         if (host_ == nullptr)
             return;
+        if (presentation_pending_)
+            resume_presentation_when_ready(/*timeout_applies=*/true);
         // View damage already schedules a repaint through PluginViewHost.
         bool published = false;
         for (std::size_t i = 0; i < visual_publish_counts_.size(); ++i) {
@@ -261,6 +285,7 @@ class Editor final : public format::Editor, public format::EditorAttachDiagnosti
     };
 
     void close_attachment() {
+        presentation_pending_ = false;
         if (env_.lifetime_)
             env_.lifetime_->open = false;
         env_.lifetime_.reset();
@@ -270,6 +295,43 @@ class Editor final : public format::Editor, public format::EditorAttachDiagnosti
         if constexpr (requires(ViewType& view) { view.editor_closing(); })
             root_->editor_closing();
         closing_ = false;
+    }
+
+    // Ends a deferred open once the root is ready or its timeout has passed.
+    // The timeout is measured from attach and checked from idle, so attach
+    // itself resumes only a ready root.
+    void resume_presentation_when_ready(bool timeout_applies) {
+        if (!presentation_pending_ || host_ == nullptr)
+            return;
+        bool ready = true;
+        if constexpr (requires(ViewType& view) {
+                          { view.editor_content_ready() } -> std::convertible_to<bool>;
+                      }) {
+            ready = static_cast<bool>(root_->editor_content_ready());
+        }
+        if (!ready && timeout_applies) {
+            std::chrono::milliseconds timeout{500};
+            if constexpr (requires(const ViewType& view) {
+                              {
+                                  view.editor_presentation_timeout()
+                              } -> std::convertible_to<std::chrono::milliseconds>;
+                          }) {
+                timeout = static_cast<const ViewType&>(*root_).editor_presentation_timeout();
+            }
+            ready = std::chrono::steady_clock::now() - attached_at_ >= timeout;
+            if (ready)
+                runtime::log_info("Vellum editor: presenting after a {} ms content timeout",
+                                  timeout.count());
+        }
+        if (!ready)
+            return;
+        presentation_pending_ = false;
+        presentation_resumed_ = true;
+        if constexpr (requires(::vellum::view::PluginViewHost& host) {
+                          host.resume_presentation();
+                      }) {
+            host_->resume_presentation();
+        }
     }
 
     bool has_design_viewport() const {
@@ -296,6 +358,10 @@ class Editor final : public format::Editor, public format::EditorAttachDiagnosti
     std::optional<format::ViewSize> view_size_;
     format::EditorSize size_{400, 300, 1.0};
     std::string bootstrap_error_;
+    std::chrono::steady_clock::time_point attached_at_{};
+    bool defers_presentation_ = false;
+    bool presentation_pending_ = false;
+    bool presentation_resumed_ = false;
     bool attached_ = false;
     bool closing_ = false;
     bool invalidated_ = false;

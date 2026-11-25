@@ -13897,6 +13897,12 @@ with `-k 0`, and uploads a JSON report grouped by capability-ledger row. Notes:
   whose head does not contain that commit (checked with Vellum's compare
   endpoint before anything is downloaded); the workflow sets it to the commit
   that introduced the `ParamModel` surface `integrations/pulp-vellum` builds on.
+- **A `cmake -P` scenario needs no build target to join the lane.** The bridge
+  step builds three targets and then runs `ctest -L pulp-vellum`, so any test
+  carrying that label runs there, built or not. The Vellum-backed UI scenarios
+  (`cmake-vellum-ui-compat-real`, `-wrong-version`) take the label only when the
+  configure found Vellum, and with `REQUIRE_VELLUM` they fail instead of
+  printing SKIP, which ctest reports as skipped and leaves the lane green.
 
 ## Exporting a platform's Vellum closure
 

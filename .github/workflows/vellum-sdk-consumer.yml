@@ -42,6 +42,12 @@ on:
       - 'test/cmake/editor_host_slice_tests.cmake'
       - 'tools/scripts/editor_host_acceptance.py'
       - 'tools/ci/vellum_sdk_consumer.py'
+      # The Vellum-backed UI target names: the package config that defines
+      # them, their scenario driver and the installed consumer it builds. The
+      # `real` and `wrong-version` scenarios carry the pulp-vellum label.
+      - 'tools/cmake/PulpConfig.cmake.in'
+      - 'test/cmake/test_vellum_ui_compat_package.cmake'
+      - 'tools/validation/sdk-smoke/vellum-ui-compat/**'
       - '.github/workflows/vellum-sdk-consumer.yml'
   workflow_dispatch:
     inputs:
@@ -141,7 +147,10 @@ jobs:
             --json "$RUNNER_TEMP/vellum-sdk/acceptance.json" 2>&1 | tee "$RUNNER_TEMP/vellum-sdk/acceptance.log"
 
       # A separate configure: the bridge package is off in every other build,
-      # so it is built only here, from the SDK this run resolved.
+      # so it is built only here, from the SDK this run resolved. The
+      # pulp-vellum label also runs the Vellum-backed UI target scenarios
+      # against that SDK; registered with its Vellum_DIR they fail rather
+      # than skip.
       - name: Build and test the Pulp-Vellum parameter bridge
         if: steps.sdk.outputs.unchanged != 'true'
         shell: bash
