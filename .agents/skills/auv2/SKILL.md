@@ -1028,6 +1028,20 @@ plug-in host normalizes `NSEvent.deltaX/deltaY` into Pulp's positive-down
 native deltas and suppresses the duplicate point-only legacy callback. Product
 code supplies only its size/aspect policy through `on_resize`.
 
+### Tracing contract-editor geometry in a real host
+
+The contract container (`au_v2_contract_view.mm`) logs every geometry step
+with `PULP_AU_RESIZE_TRACE`: the frame it returns, each frame the host sets
+(`host-frame#N`, with the snap decision), every editor or snap-correction
+request and its result, and the move into the host's window. It is off unless
+`PULP_AUV2_RESIZE_TRACE=1` is in the plug-in's environment or the touch file
+`~/Library/Logs/Pulp/au-resize-trace.enabled` exists. Logic hosts AU v2 out
+of process, where a shell variable never arrives, so use the touch file there;
+lines append to `~/Library/Logs/Pulp/au-resize-trace.log` (rolled at 1 MiB to
+`.log.1`). The home is resolved with `getpwuid`, not `HOME`, because a
+sandboxed hosting service points `HOME` at its container; a sandbox that also
+denies the write leaves only the stderr copy, which Console shows.
+
 ### Out-of-process Logic starves the CPU editor's paint — drive it from the pump
 
 Logic hosts AU v2 **out-of-process** (`AUHostingServiceXPC`). A CPU

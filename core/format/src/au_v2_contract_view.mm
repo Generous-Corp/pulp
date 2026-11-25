@@ -52,6 +52,7 @@
 #include <pulp/format/au_v2_common.hpp>
 #include <pulp/format/contract_editor_session.hpp>
 #include <pulp/format/detail/appkit_contract_key.hpp>
+#include <pulp/format/detail/au_resize_trace.hpp>
 #include <pulp/format/detail/au_v2_resize_accept.hpp>
 #include <pulp/format/detail/editor_environment.hpp>
 #include <pulp/format/host_quirks.hpp>
@@ -116,6 +117,7 @@ EditorKeyEvent contract_key_event(unsigned short key_code, NSString* characters,
     std::shared_ptr<pulp::format::ContractEditorSession> _session;
     bool _applyingEditorSize;
     bool _editorResizeActive;
+    unsigned _hostFrameCount; // host-made frame changes, for the resize trace
 }
 - (void)adoptSession:(std::shared_ptr<pulp::format::ContractEditorSession>)session;
 - (pulp::format::ContractEditorSession*)session;
@@ -142,6 +144,9 @@ EditorKeyEvent contract_key_event(unsigned short key_code, NSString* characters,
     if (!_session || _session->editor() == nullptr)
         return;
     const auto size = _session->size();
+    PULP_AU_RESIZE_TRACE("contract apply-editor-size view=%p %ux%u (frame was %.0fx%.0f)",
+                         (__bridge void*)self, size.width, size.height, self.frame.size.width,
+                         self.frame.size.height);
     _applyingEditorSize = true;
     [super setFrameSize:NSMakeSize(size.width, size.height)];
     _applyingEditorSize = false;
@@ -157,6 +162,7 @@ EditorKeyEvent contract_key_event(unsigned short key_code, NSString* characters,
     [super setFrameSize:newSize];
     if (_applyingEditorSize || !_session || newSize.width < 1.0 || newSize.height < 1.0)
         return;
+    ++_hostFrameCount;
     auto width = static_cast<std::uint32_t>(newSize.width);
     auto height = static_cast<std::uint32_t>(newSize.height);
     if (_session->editor() == nullptr) {
@@ -165,6 +171,11 @@ EditorKeyEvent contract_key_event(unsigned short key_code, NSString* characters,
     }
     bool snapped = false;
     _session->set_host_size(width, height, snapped);
+    PULP_AU_RESIZE_TRACE("contract host-frame#%u view=%p host=%.0fx%.0f editor=%ux%u snap=%d "
+                         "window=%d superview=%.0fx%.0f",
+                         _hostFrameCount, (__bridge void*)self, newSize.width, newSize.height,
+                         width, height, snapped ? 1 : 0, self.window != nil ? 1 : 0,
+                         self.superview.frame.size.width, self.superview.frame.size.height);
 }
 
 // The editor's own resize request. AU v2 has no resize request: the host
@@ -184,6 +195,10 @@ EditorKeyEvent contract_key_event(unsigned short key_code, NSString* characters,
         return false;
     auto request_width = requested.width;
     auto request_height = requested.height;
+    PULP_AU_RESIZE_TRACE("contract request view=%p %ux%u pending=%d frame=%.0fx%.0f",
+                         (__bridge void*)self, request_width, request_height,
+                         _session->has_pending_resize(request_width, request_height) ? 1 : 0,
+                         self.frame.size.width, self.frame.size.height);
     const FrameSize wanted{static_cast<double>(request_width), static_cast<double>(request_height)};
     const NSRect previous = self.frame;
     const auto current = _session->size();
@@ -250,11 +265,18 @@ EditorKeyEvent contract_key_event(unsigned short key_code, NSString* characters,
         }
     }
     _editorResizeActive = false;
+    PULP_AU_RESIZE_TRACE("contract request-result view=%p accepted=%d frame=%.0fx%.0f",
+                         (__bridge void*)self, accepted ? 1 : 0, self.frame.size.width,
+                         self.frame.size.height);
     return accepted;
 }
 
 - (void)viewWillMoveToWindow:(NSWindow*)window {
     [super viewWillMoveToWindow:window];
+    PULP_AU_RESIZE_TRACE(
+        "contract move-to-window view=%p window=%d frame=%.0fx%.0f content=%.0fx%.0f",
+        (__bridge void*)self, window != nil ? 1 : 0, self.frame.size.width, self.frame.size.height,
+        window.contentView.frame.size.width, window.contentView.frame.size.height);
     if (_session)
         _session->visibility_changed(window != nil);
 }
@@ -307,7 +329,7 @@ EditorKeyEvent contract_key_event(unsigned short key_code, NSString* characters,
 
 - (NSView*)uiViewForAudioUnit:(AudioUnit)inAU withSize:(NSSize)inPreferredSize {
     using namespace pulp;
-    (void)inPreferredSize; // the editor states its own size
+    // The editor states its own size; the host's proposal is only traced.
 
     format::au::PulpEditorContext ctx{};
     UInt32 size = sizeof(ctx);
@@ -362,6 +384,9 @@ EditorKeyEvent contract_key_event(unsigned short key_code, NSString* characters,
     }
     if (ctx.contract_sessions != nullptr)
         [view session]->register_with(*ctx.contract_sessions);
+    PULP_AU_RESIZE_TRACE("contract returned view=%p frame=%.0fx%.0f host-proposed=%.0fx%.0f",
+                         (__bridge void*)view, view.frame.size.width, view.frame.size.height,
+                         inPreferredSize.width, inPreferredSize.height);
     return [view autorelease];
 }
 
