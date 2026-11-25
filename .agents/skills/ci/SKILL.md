@@ -1504,7 +1504,7 @@ configure log before checking the cache. The bake and server steps are in
 
 A GitHub-hosted Windows leg is the opposite case: it starts empty with no remote
 ccache, so `cross-platform-check.yml` restores and saves a `.ccache` directory
-with `actions/cache` there (skipped on a self-hosted runner). A cold hosted
+with `actions/cache` there (skipped on a self-hosted runner). It is capped at 1 GB, keyed on toolchain plus dependency pins, and saved only by the nightly on main, because the repository's 10 GB Actions cache is already full. A cold hosted
 build is about 2.5 hours and the suite 30 minutes, so its `timeout-minutes` is
 300; when a hosted Windows run is cancelled at the limit, read the step timings
 before blaming the test step.
