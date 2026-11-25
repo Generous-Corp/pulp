@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  launchd template for the daily lane reaper (tools/scripts/clean_lane_builds.py).
+  Do not copy it by hand: tools/ci/install-lane-reaper-launchagent.sh fills in
+  the placeholders and bootstraps the agent. Without the act option the installed job
+  stays a dry run and only logs what it would reclaim.
+-->
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.danielraffel.pulp.lane-reaper</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>/usr/bin/env</string>
+        <string>python3</string>
+        <string>$PULP_CHECKOUT/tools/scripts/clean_lane_builds.py</string>
+        <string>--root</string>
+        <string>$LANES_ROOT</string>
+        $ACT_ARG
+    </array>
+    <key>StartCalendarInterval</key>
+    <dict>
+        <key>Hour</key>
+        <integer>4</integer>
+        <key>Minute</key>
+        <integer>30</integer>
+    </dict>
+    <key>ProcessType</key>
+    <string>Background</string>
+    <key>Nice</key>
+    <integer>19</integer>
+    <key>LowPriorityIO</key>
+    <true/>
+    <key>StandardOutPath</key>
+    <string>$HOME/Library/Logs/pulp-lane-reaper.log</string>
+    <key>StandardErrorPath</key>
+    <string>$HOME/Library/Logs/pulp-lane-reaper.log</string>
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>/opt/homebrew/bin:/usr/local/bin:$HOME/.local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+    </dict>
+</dict>
+</plist>

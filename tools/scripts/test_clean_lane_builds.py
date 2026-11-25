@@ -580,5 +580,32 @@ class Removal(Base):
         self.assertReclaim(self.run_reaper(), "a", "build", "build")
 
 
+class Installer(unittest.TestCase):
+    INSTALL = HERE.parent / "ci" / "install-lane-reaper-launchagent.sh"
+
+    def render(self, *args):
+        import plistlib
+        out = subprocess.run(["bash", str(self.INSTALL), "--print", "--root", "/tmp", *args],
+                             capture_output=True, check=True).stdout
+        return plistlib.loads(out)
+
+    def test_default_render_is_a_dry_run(self):
+        plist = self.render()
+        argv = plist["ProgramArguments"]
+        self.assertTrue(argv[2].endswith("tools/scripts/clean_lane_builds.py"))
+        self.assertNotIn("--yes", argv)
+        self.assertEqual(argv[argv.index("--root") + 1], "/tmp")
+        self.assertEqual(plist["Nice"], 19)
+        self.assertTrue(plist["LowPriorityIO"])
+        self.assertNotIn("$", json.dumps(plist))
+
+    def test_act_render_passes_yes(self):
+        self.assertIn("--yes", self.render("--act")["ProgramArguments"])
+
+    def test_root_is_required(self):
+        p = subprocess.run(["bash", str(self.INSTALL), "--print"], capture_output=True)
+        self.assertEqual(p.returncode, 2)
+
+
 if __name__ == "__main__":
     unittest.main()
