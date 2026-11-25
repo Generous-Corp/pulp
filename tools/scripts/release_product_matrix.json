@@ -148,6 +148,7 @@
         "darwin-arm64": [
             "pulp-vellum",
             "pulp-vellum-audio",
+            "pulp-vellum-components",
             "pulp-vellum-scripted"
         ],
         "linux": [

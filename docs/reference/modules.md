@@ -49,6 +49,10 @@ use without hard-coding macOS, Windows, Linux, iOS, or Web behavior.
 
 `EqCurveView` (also in `pulp_vellum_audio`) is the parametric EQ curve view with draggable band handles. It draws the true magnitude response of the bands: each band is designed into biquad coefficients and evaluated with `signal::response_curve_db`, so a low-pass rolls off, a notch cuts a null and a shelf plateaus, at the sample rate set with `set_sample_rate()`. It also draws an optional spectrum overlay on its own dBFS scale (drag the left gutter to zoom), and `bind_bands()` records handle drags as host automation gestures and plays host parameter changes back onto the curve. `LogFrequencyScale`, `DecibelScale` and `resample_spectrum_log()` (`graph_scale.hpp`) are the shared axis mapping for frequency-domain plots, so a spectrum overlays an EQ curve by construction.
 
+## pulp_vellum_components
+
+`pulp::vellum_components` (`integrations/pulp-vellum-components`, optional, off unless `PULP_ENABLE_PULP_VELLUM_COMPONENTS=ON`) provides the retained Pulp view components as `vellum::view::View` subclasses: `PanicButton` (with `panic_target()` for a `format::Processor`), `LassoComponent` and `PreferencesPanel`. `make_pulp_view_component(id, context)` builds one by stable id (`pulp.panic_button`, `pulp.lasso`, `pulp.preferences_panel`); the `PulpViewComponentContext` carries the Pulp-owned services a component binds to. A preferences panel restores its stored page when the caller binds a `PropertiesFile` after adding its pages.
+
 ## simd
 
 Portable block kernels for DSP: elementwise buffer arithmetic (`add`, `sub`,
