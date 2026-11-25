@@ -163,9 +163,14 @@ jobs:
             -DPULP_ENABLE_PULP_VELLUM_AUDIO=ON \
             -DPULP_ENABLE_PULP_VELLUM_COMPONENTS=ON \
             -DCMAKE_PREFIX_PATH="${{ steps.sdk.outputs.prefix }}"
+          # Every executable a pulp-vellum test runs: an unbuilt add_test target
+          # fails as missing, and an unbuilt catch_discover_tests target
+          # silently contributes no tests.
           tools/ci/governed-build.sh cmake --build build-vellum-bridge \
             --target pulp-test-pulp-vellum pulp-test-pulp-vellum-editor pulp-test-pulp-vellum-audio \
-            pulp-test-pulp-vellum-components
+            pulp-test-pulp-vellum-components pulp-test-vellum-scripted-wiring \
+            pulp-test-pulp-vellum-about-notices pulp-test-motion-swift-bridge \
+            pulp-ui-script-vellum-fixture
           ctest --test-dir build-vellum-bridge -L pulp-vellum --output-on-failure \
             | tee "$RUNNER_TEMP/vellum-sdk/bridge.log"
 

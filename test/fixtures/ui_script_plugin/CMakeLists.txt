@@ -45,6 +45,58 @@ if(TARGET PulpUiScriptFixture_Standalone AND PULP_DEV_BUILD)
         NO_DEFINE)
 endif()
 
+# The same plug-in declared with UI_ENGINE vellum: the script and its embedded
+# assets open through the Vellum editor factory, so each format module and the
+# standalone app link no Pulp view layer. Built only where the scripted Vellum
+# bridge is (PULP_ENABLE_PULP_VELLUM with an SDK exporting
+# Vellum::MirrorView_script); nothing here is launched.
+if(TARGET pulp-vellum-scripted AND CMAKE_NM)
+    pulp_add_plugin(PulpUiScriptVellumFixture
+        FORMATS           ${_ui_script_formats}
+        PLUGIN_NAME       "Pulp UI Script Vellum Fixture"
+        BUNDLE_ID         "dev.pulp.test.ui-script-vellum-fixture"
+        MANUFACTURER      "Pulp"
+        VERSION           "1.0.0"
+        CATEGORY          Effect
+        PLUGIN_CODE       "PUiV"
+        MANUFACTURER_CODE "PlUs"
+        SOURCES           ui_script_gain.hpp
+        PROCESSOR_FACTORY pulp::test_fixtures::create_ui_script_gain
+        UI_SCRIPT         ui/main.js
+        UI_ENGINE         vellum
+    )
+    if(TARGET PulpUiScriptVellumFixture_AU)
+        target_compile_definitions(PulpUiScriptVellumFixture_AU PRIVATE
+            PULP_UI_SCRIPT_FIXTURE_AU_CLASS=PulpUiScriptVellumFixtureAU)
+    endif()
+    set(_vellum_route_targets "")
+    foreach(_fmt IN LISTS _ui_script_formats)
+        if(NOT TARGET PulpUiScriptVellumFixture_${_fmt})
+            continue()
+        endif()
+        list(APPEND _vellum_route_targets PulpUiScriptVellumFixture_${_fmt})
+        string(TOLOWER "${_fmt}" _route_format)
+        add_test(NAME ui-script-vellum-route-${_route_format}
+            COMMAND ${CMAKE_COMMAND} -DNM=${CMAKE_NM}
+                "-DBINARY=$<TARGET_FILE:PulpUiScriptVellumFixture_${_fmt}>" -DROUTE=vellum
+                -P "${CMAKE_CURRENT_SOURCE_DIR}/check_vellum_route.cmake")
+        set_tests_properties(ui-script-vellum-route-${_route_format} PROPERTIES
+            LABELS "pulp-vellum;format;scripted-ui" TIMEOUT 60)
+    endforeach()
+    # The census control: the plain UI_SCRIPT plug-in must show Pulp's editor
+    # stack, or a vellum verdict above proves nothing.
+    if(TARGET PulpUiScriptFixture_CLAP)
+        add_test(NAME ui-script-vellum-route-control
+            COMMAND ${CMAKE_COMMAND} -DNM=${CMAKE_NM}
+                "-DBINARY=$<TARGET_FILE:PulpUiScriptFixture_CLAP>" -DROUTE=legacy
+                -P "${CMAKE_CURRENT_SOURCE_DIR}/check_vellum_route.cmake")
+        set_tests_properties(ui-script-vellum-route-control PROPERTIES
+            LABELS "pulp-vellum;format;scripted-ui" TIMEOUT 60)
+        list(APPEND _vellum_route_targets PulpUiScriptFixture_CLAP)
+    endif()
+    add_custom_target(pulp-ui-script-vellum-fixture DEPENDS ${_vellum_route_targets})
+endif()
+
 add_executable(pulp-ui-script-editor-probe editor_probe.mm)
 target_link_libraries(pulp-ui-script-editor-probe PRIVATE
     pulp::host "-framework AppKit" "-framework AudioToolbox")

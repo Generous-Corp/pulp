@@ -41,6 +41,7 @@ if(PULP_BUILD_TESTS AND TARGET Catch2::Catch2WithMain)
         endif()
         if(TARGET pulp-vellum-scripted)
             add_executable(pulp-test-vellum-scripted-wiring test_scripted_editor_wiring.cpp)
+            target_include_directories(pulp-test-vellum-scripted-wiring PRIVATE ${PULP_ROOT_DIR}/test)
             target_link_libraries(pulp-test-vellum-scripted-wiring PRIVATE
                 pulp-vellum-scripted Vellum::MirrorView_script Catch2::Catch2WithMain Threads::Threads)
             # Keep format-core's environment gate deterministic in CI. This
