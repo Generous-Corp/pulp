@@ -74,6 +74,9 @@ TEST_CASE("Vellum MultiMeter update clamps channel count and moves ballistics",
     REQUIRE(meter.channel_count() == 4);
     meter.set_channel_count(20);
     REQUIRE(meter.channel_count() == pulp::signal::kMaxMeterChannels);
+    meter.set_channel_count(-3);
+    REQUIRE(meter.channel_count() == 0);
+    meter.set_channel_count(4);
 
     pulp::signal::MultiChannelMeterData data;
     data.num_channels = 4;
@@ -358,6 +361,36 @@ TEST_CASE("Vellum MultiMeter renders the segmented horizontal style",
     maybe_write_png(meter, 260, 60, "multi-meter-segmented.png");
 }
 
+TEST_CASE("Vellum MultiMeter segmented render dims only the peak-only segments",
+          "[pulp-vellum-audio][multi-meter][render]") {
+    if (!::vellum::view::raw_rgba_render_available())
+        SKIP("Vellum CPU raster backend unavailable");
+
+    // One channel with RMS well below peak: segments up to the RMS position are
+    // fully lit, segments between RMS and peak are lit at reduced alpha.
+    pulp::signal::MultiChannelMeterData data;
+    data.num_channels = 1;
+    data.channels[0].rms = 0.1f;
+    data.channels[0].peak = 0.9f;
+    MultiMeter meter;
+    meter.set_bounds({0, 0, 260, 60});
+    meter.set_layout(MultiMeter::Layout::horizontal);
+    meter.set_display_style(MultiMeter::DisplayStyle::segmented);
+    for (int i = 0; i < 20; ++i)
+        (void)meter.update(data, 0.1f);
+    const auto frame = render(meter, 260, 60);
+    REQUIRE(frame.width == 260);
+
+    // 36 segments, pitch 6.56 px from x=22: segment 14 is under the RMS
+    // position, segment 26 between RMS and peak. Both are the green band.
+    const auto rms_segment = frame.at(116, 20);
+    const auto peak_only = frame.at(195, 20);
+    CHECK(rms_segment.g > 215);
+    CHECK(peak_only.g > 110);
+    CHECK(peak_only.g < rms_segment.g - 40);
+    CHECK(peak_only.g > peak_only.r + 40); // still green, only dimmed
+}
+
 TEST_CASE("Vellum CorrelationMeter renders its needle, polarity colour and soft fill",
           "[pulp-vellum-audio][correlation-meter][render]") {
     if (!::vellum::view::raw_rgba_render_available())
@@ -375,7 +408,7 @@ TEST_CASE("Vellum CorrelationMeter renders its needle, polarity colour and soft 
     CHECK(needle.r < 40);
     // Soft fill between centre and needle: tinted green but translucent, so the
     // track still shows through (an opaque fill would read as the needle colour).
-    const auto fill = pos.at(75, 10);
+    const auto fill = pos.at(65, 10);
     CHECK(fill.g > fill.r + 15);
     CHECK(fill.g < 150);
     // Nothing is drawn on the other side of centre.

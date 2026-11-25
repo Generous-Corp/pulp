@@ -262,11 +262,9 @@ bool CorrelationMeter::update(float correlation, float dt) {
     // fraction of a bit every frame forever, and a caller gating a repaint on
     // "did it move" would repaint forever with nothing to show.
     //
-    // The meters next door snap with a floor test (`if (v < 1e-6f) v = 0`)
-    // because a silent meter rests AT zero. Correlation rests wherever the
-    // signal is — a steady mono source settles at +1 — so a floor test would
-    // never fire and copying it here would do nothing at all. The general form
-    // is the one that works for both.
+    // A floor test (`if (v < 1e-6f) v = 0`) only works for a value that rests
+    // at zero. Correlation rests wherever the signal is (a steady mono source
+    // settles at +1), so the snap compares against the target instead.
     if (std::abs(display_correlation_ - target) < 1e-6f)
         display_correlation_ = target;
 
