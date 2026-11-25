@@ -1,58 +1,64 @@
+#pragma once
+
+// The implementation of pulp/vellum/auto_ui.hpp. Header-only, like
+// pulp/vellum/editor.hpp, so only the binaries that build the generated
+// editor compile it: a plug-in's generated editor-package source and the
+// tests. Include pulp/vellum/auto_ui.hpp instead of this file.
+
+#include <pulp/format/processor.hpp>
+#include <pulp/state/store.hpp>
+#include <pulp/vellum/editor.hpp>
+
+#include <vellum/view/parameter_binding.hpp>
+#include <vellum/view/ui_components.hpp>
+#include <vellum/view/widgets.hpp>
+
 #include <algorithm>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <functional>
 #include <iomanip>
-#include <pulp/format/processor.hpp>
-#include <pulp/state/store.hpp>
-#include <pulp/vellum/auto_ui.hpp>
-#include <pulp/vellum/editor.hpp>
 #include <sstream>
 #include <string>
+#include <utility>
 #include <vector>
 
-#include <vellum/view/parameter_binding.hpp>
-#include <vellum/view/ui_components.hpp>
-#include <vellum/view/widgets.hpp>
-
-namespace pulp::vellum {
+namespace pulp::vellum::detail::auto_ui {
 
 using namespace ::vellum::view;
 
-namespace {
-
-constexpr float kTileWidth = 82.0f;
-constexpr float kTileHeight = 112.0f;
-constexpr float kTileGap = 14.0f;
-constexpr float kMaxGridWidth = 760.0f;
+inline constexpr float kTileWidth = 82.0f;
+inline constexpr float kTileHeight = 112.0f;
+inline constexpr float kTileGap = 14.0f;
+inline constexpr float kMaxGridWidth = 760.0f;
 
 // Shared chrome metrics, kept here so build()'s layout, the scroll body's
 // content-extent math, and preferred_size()'s fit math never drift apart.
-constexpr float kRootPadding = 14.0f;      ///< root column padding on every edge
-constexpr float kTitleHeight = 24.0f;      ///< "Parameters" title row
-constexpr float kRootGap = 12.0f;          ///< gap between title and body
-constexpr float kBodyContentInset = 10.0f; ///< body viewport → grid width slack
+inline constexpr float kRootPadding = 14.0f;      ///< root column padding on every edge
+inline constexpr float kTitleHeight = 24.0f;      ///< "Parameters" title row
+inline constexpr float kRootGap = 12.0f;          ///< gap between title and body
+inline constexpr float kBodyContentInset = 10.0f; ///< body viewport → grid width slack
 // Grouped-layout metrics (mirror update_content_extent()).
-constexpr float kGroupOuterPadding = 6.0f;
-constexpr float kGroupGap = 10.0f;
-constexpr float kGroupSidePadding = 8.0f;
-constexpr float kGroupBottomPadding = 8.0f;
-constexpr float kGroupHeaderExtra = 6.0f; ///< gap below the header before the grid
+inline constexpr float kGroupOuterPadding = 6.0f;
+inline constexpr float kGroupGap = 10.0f;
+inline constexpr float kGroupSidePadding = 8.0f;
+inline constexpr float kGroupBottomPadding = 8.0f;
+inline constexpr float kGroupHeaderExtra = 6.0f; ///< gap below the header before the grid
 
 // Widest column count AutoUi will wrap to before it starts a new row, derived
 // from the same tile+gap math the grid uses so the fit stays under kMaxGridWidth.
-constexpr std::size_t kMaxColumns =
+inline constexpr std::size_t kMaxColumns =
     static_cast<std::size_t>((kMaxGridWidth + kTileGap) / (kTileWidth + kTileGap));
 
 // Sensible floor so a one- or two-knob plugin doesn't open as a tiny sliver.
-constexpr std::uint32_t kMinPreferredWidth = 320;
-constexpr std::uint32_t kMinPreferredHeight = 240;
+inline constexpr std::uint32_t kMinPreferredWidth = 320;
+inline constexpr std::uint32_t kMinPreferredHeight = 240;
 
 /// Columns AutoUi wraps @p count tiles into: roughly square, clamped to a
 /// single row's worth and to kMaxColumns. 7 params → 3 columns (a 3x3-ish
 /// block), 4 → 2, 16 → 4.
-std::size_t columns_for(std::size_t count) {
+inline std::size_t columns_for(std::size_t count) {
     if (count <= 1)
         return count; // 0 → 0, 1 → 1
     const auto square = static_cast<std::size_t>(std::ceil(std::sqrt(static_cast<double>(count))));
@@ -64,7 +70,7 @@ struct GridExtent {
     float width = 0.0f;
     float height = 0.0f;
 };
-GridExtent grid_extent(std::size_t count, std::size_t columns) {
+inline GridExtent grid_extent(std::size_t count, std::size_t columns) {
     if (count == 0 || columns == 0)
         return {};
     const auto rows = (count + columns - 1) / columns;
@@ -74,7 +80,7 @@ GridExtent grid_extent(std::size_t count, std::size_t columns) {
     };
 }
 
-std::string format_parameter_value(const state::ParamInfo& param, float norm) {
+inline std::string format_parameter_value(const state::ParamInfo& param, float norm) {
     float val = param.range.denormalize(norm);
     // Normalization round-off can turn an exact plain zero into a tiny negative
     // value. Do not expose that implementation detail as "-0.00" in the UI.
@@ -93,7 +99,7 @@ std::string format_parameter_value(const state::ParamInfo& param, float norm) {
     return ss.str();
 }
 
-std::string value_label_id(state::ParamID id) {
+inline std::string value_label_id(state::ParamID id) {
     return "__auto_ui_value_" + std::to_string(id);
 }
 
@@ -220,8 +226,6 @@ class AutoUiRoot final : public View {
     float settled_height_ = 0.0f;
 };
 
-} // namespace
-
 // Layout:
 //
 //   root: column, padding 14, gap 12
@@ -241,8 +245,8 @@ class AutoUiRoot final : public View {
 // preferred_size() is the design size that fits this grid; the editor opens
 // at it when the processor declares no size of its own.
 
-std::unique_ptr<View> AutoUi::build(const format::ParamPort& port,
-                                    ::vellum::value::ParamModel& model) {
+inline std::unique_ptr<View> build(const format::ParamPort& port,
+                                   ::vellum::value::ParamModel& model) {
     // ParamPortModel resolves every parameter by its decimal id.
     auto handle_for = [&model](state::ParamID id) { return model.resolve(std::to_string(id)); };
     auto root = std::make_unique<AutoUiRoot>();
@@ -448,7 +452,7 @@ std::unique_ptr<View> AutoUi::build(const format::ParamPort& port,
     return root;
 }
 
-AutoUi::SizeHint AutoUi::preferred_size(const format::ParamPort& port) {
+inline ::pulp::vellum::AutoUi::SizeHint preferred_size(const format::ParamPort& port) {
     const auto params = port.params();
     const auto groups = port.groups();
 
@@ -512,11 +516,9 @@ AutoUi::SizeHint AutoUi::preferred_size(const format::ParamPort& port) {
     };
 }
 
-namespace {
-
 // The processor kept the SDK's default size: Processor::editor_size()'s
 // 400 x 300 with no bounds, no aspect and no design size.
-bool keeps_default_size(const format::ViewSize& size) {
+inline bool keeps_default_size(const format::ViewSize& size) {
     return size.min_width == 0 && size.min_height == 0 && size.aspect_ratio <= 0.0 &&
            size.preferred_width == 400 && size.preferred_height == 300;
 }
@@ -526,12 +528,12 @@ class AutoUiEditorRoot final : public View {
     AutoUiEditorRoot(EditorEnv& env, format::Processor& processor) : size_(processor.view_size()) {
         const auto& port = env.context.params();
         if (keeps_default_size(size_)) {
-            const auto fit = AutoUi::preferred_size(port);
+            const auto fit = auto_ui::preferred_size(port);
             size_ = format::view_size_from_design(fit.width, fit.height);
         }
         set_theme(Theme::dark());
         flex().direction = FlexDirection::column;
-        auto content = AutoUi::build(port, env.params);
+        auto content = auto_ui::build(port, env.params);
         content->flex().flex_grow = 1;
         add_child(std::move(content));
     }
@@ -544,10 +546,21 @@ class AutoUiEditorRoot final : public View {
     format::ViewSize size_;
 };
 
-} // namespace
+} // namespace pulp::vellum::detail::auto_ui
 
-format::EditorFactory* auto_ui_editor_factory() {
-    return editor_factory<AutoUiEditorRoot>();
+namespace pulp::vellum {
+
+inline std::unique_ptr<::vellum::view::View> AutoUi::build(const format::ParamPort& port,
+                                                           ::vellum::value::ParamModel& model) {
+    return detail::auto_ui::build(port, model);
+}
+
+inline AutoUi::SizeHint AutoUi::preferred_size(const format::ParamPort& port) {
+    return detail::auto_ui::preferred_size(port);
+}
+
+inline format::EditorFactory* auto_ui_editor_factory() {
+    return editor_factory<detail::auto_ui::AutoUiEditorRoot>();
 }
 
 } // namespace pulp::vellum

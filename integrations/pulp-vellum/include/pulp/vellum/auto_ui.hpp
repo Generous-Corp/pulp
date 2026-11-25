@@ -52,3 +52,5 @@ class AutoUi {
 format::EditorFactory* auto_ui_editor_factory();
 
 } // namespace pulp::vellum
+
+#include <pulp/vellum/detail/auto_ui_impl.hpp>
