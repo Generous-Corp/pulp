@@ -226,6 +226,47 @@ inline value::Value parseWithNumberTokenParser (std::string_view text, NumberTok
     endif()
 endfunction()
 
+# CHOC compiles QuickJS's stack check out under MSVC, so JS_SetMaxStackSize
+# does nothing there and unbounded JS recursion exhausts the C stack and kills
+# the process instead of throwing InternalError("stack overflow"). The check
+# only needs the current stack position, which MSVC exposes as
+# _AddressOfReturnAddress() where the other compilers use
+# __builtin_frame_address (clang-cl keeps the builtin).
+function(pulp_patch_choc_quickjs_msvc_stack_check choc_source_dir)
+    set(_pulp_choc_qjs_header "${choc_source_dir}/choc/javascript/choc_javascript_QuickJS.h")
+    if(NOT EXISTS "${_pulp_choc_qjs_header}")
+        message(FATAL_ERROR "Pulp: CHOC QuickJS header not found for the MSVC stack-check patch")
+    endif()
+    file(READ "${_pulp_choc_qjs_header}" _pulp_choc_qjs)
+    set(_pulp_choc_qjs_before "${_pulp_choc_qjs}")
+
+    _pulp_choc_apply_patch(_pulp_choc_qjs "QuickJS MSVC intrinsic include"
+[==[#include <math.h>
+#include <atomic>]==]
+[==[#include <math.h>
+#include <atomic>
+#if defined(_MSC_VER) && ! defined(__clang__)
+ #include <intrin.h>
+#endif]==])
+
+    _pulp_choc_apply_patch(_pulp_choc_qjs "QuickJS MSVC stack-check switch"
+[==[#if ! (defined(EMSCRIPTEN) || CHOC_QUICKJS_NO_STACK_CHECK || _MSC_VER)]==]
+[==[#if ! (defined(EMSCRIPTEN) || CHOC_QUICKJS_NO_STACK_CHECK)]==])
+
+    _pulp_choc_apply_patch(_pulp_choc_qjs "QuickJS MSVC stack pointer"
+[==[    return (uintptr_t)__builtin_frame_address(0);]==]
+[==[#if defined(_MSC_VER) && ! defined(__clang__)
+    return (uintptr_t)_AddressOfReturnAddress();
+#else
+    return (uintptr_t)__builtin_frame_address(0);
+#endif]==])
+
+    if(NOT _pulp_choc_qjs STREQUAL _pulp_choc_qjs_before)
+        file(WRITE "${_pulp_choc_qjs_header}" "${_pulp_choc_qjs}")
+        message(STATUS "Pulp: applied CHOC QuickJS MSVC stack-check patch")
+    endif()
+endfunction()
+
 # choc::file::Watcher on macOS stops its FSEventStream in ~Pimpl, but
 # FSEventStreamStop and FSEventStreamInvalidate only prevent new callbacks; one
 # already running on the stream's dispatch queue keeps going and calls

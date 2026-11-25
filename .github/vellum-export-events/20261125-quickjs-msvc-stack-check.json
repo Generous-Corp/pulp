@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "event_id": "20261125-quickjs-msvc-stack-check",
+  "kind": "exported-path-change",
+  "created_at": "2026-11-25T23:50:53Z",
+  "receipt_export_id": "20261107-f0ac0a4ff392",
+  "paths": [
+    "core/view/src/js_quickjs_engine.cpp"
+  ],
+  "vellum_inherits": false,
+  "rationale": "Pulp-only edit: the Windows stack-bounds read and the CHOC stack-check patch serve Pulp's own scripted-UI host; Vellum's framework transfer is in effect, so any change Vellum needs is made in Vellum's framework."
+}

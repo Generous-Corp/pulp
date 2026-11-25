@@ -128,6 +128,7 @@
           "pulp_patch_choc_v8",
           "pulp_patch_choc_json_number_exponent",
           "pulp_patch_choc_json_number_token_hook",
+          "pulp_patch_choc_quickjs_msvc_stack_check",
           "pulp_patch_choc_file_watcher",
           "pulp_patch_choc_wav_extensible_container_bits",
           "pulp_patch_choc_wav_block_align_bounds",

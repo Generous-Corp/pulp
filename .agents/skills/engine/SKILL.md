@@ -1493,3 +1493,17 @@ before it is compiled, so the hook can hold the compile in flight until
 `script_bytecode_cache_stats().waits` shows the evaluation waiting. Bound every
 wait in such a test (the hook's and the main thread's) so a regression fails
 instead of hanging, and clear the hook afterwards.
+
+## QuickJS's stack check needs a CHOC patch on MSVC
+
+CHOC compiles QuickJS's stack check out when `_MSC_VER` is defined, so
+`JS_SetMaxStackSize` does nothing there and unbounded JS recursion exhausts the C
+stack and kills the process instead of throwing `InternalError: stack overflow`.
+`pulp_patch_choc_quickjs_msvc_stack_check` in `tools/cmake/PulpPatchChoc.cmake`
+re-enables the check at configure time (`_AddressOfReturnAddress()` on MSVC).
+The limit is measured from the thread that creates the runtime, so
+`set_quickjs_stack_size` also reads the Windows stack bounds and clamps to the
+stack that thread has left; MSVC's default thread stack is 1 MB, the same size as
+the requested limit. A script that only recurses until the engine throws passes
+on macOS without proving any of this: the engine tests in `test_js_engine.cpp`
+run the recursion on the calling thread and on a 256 KB Windows thread.

@@ -18,6 +18,7 @@
 #endif
 #if defined(_WIN32)
 #include <io.h>
+#include <pulp/platform/win32_sane.hpp>
 #else
 #include <unistd.h>
 #endif
@@ -117,6 +118,58 @@ static std::vector<JsEngineType> available_engines() {
             auto engine_var = create_js_engine(engine_type_);
 
 #define END_FOR_EACH_ENGINE }}
+
+#if !defined(__EMSCRIPTEN__)
+// Unbounded JS recursion must surface as a catchable JS error on the calling
+// thread. CHOC builds QuickJS without its stack check under MSVC unless Pulp's
+// configure-time patch restores it, and the process would then die in the
+// recursion rather than throw.
+TEST_CASE("QuickJS reports unbounded recursion as a stack overflow, not a crash",
+          "[js_engine][quickjs][stack]") {
+    auto engine = create_js_engine(JsEngineType::quickjs);
+    const auto text = engine
+                          ->evaluate("function deep(n) { return deep(n + 1) + 1; }"
+                                     "var r; try { r = String(deep(0)); }"
+                                     "catch (e) { r = String(e); } r")
+                          .toString();
+    INFO(text);
+    CHECK(text.find("stack overflow") != std::string::npos);
+}
+#endif
+
+#if defined(_WIN32)
+// A thread smaller than the 1MB limit QuickJS is asked for must still get a
+// JS stack overflow: the limit is clamped to the stack the thread really has.
+TEST_CASE("QuickJS on a 256KB Windows thread reports a stack overflow, not a crash",
+          "[js_engine][quickjs][stack]") {
+    struct Result {
+        std::string text;
+        bool threw = false;
+    } result;
+    auto body = [](void* arg) -> unsigned long {
+        auto& out = *static_cast<Result*>(arg);
+        auto engine = create_js_engine(JsEngineType::quickjs);
+        try {
+            out.text = engine
+                           ->evaluate("function deep(n) { return deep(n + 1) + 1; }"
+                                      "var r; try { r = String(deep(0)); }"
+                                      "catch (e) { r = String(e); } r")
+                           .toString();
+        } catch (const std::exception& e) {
+            out.threw = true;
+            out.text = e.what();
+        }
+        return 0;
+    };
+    HANDLE thread = CreateThread(nullptr, 256 * 1024, body, &result,
+                                 STACK_SIZE_PARAM_IS_A_RESERVATION, nullptr);
+    REQUIRE(thread != nullptr);
+    WaitForSingleObject(thread, INFINITE);
+    CloseHandle(thread);
+    INFO(result.text);
+    CHECK(result.text.find("stack overflow") != std::string::npos);
+}
+#endif
 
 #if !defined(_WIN32) && !defined(__EMSCRIPTEN__)
 // QuickJS's stack limit is measured down from the thread that set it, so a
