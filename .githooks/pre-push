@@ -423,6 +423,7 @@ SCT="$ROOT/tools/import-validation/test_source_contracts.py"
 CFG="$ROOT/tools/scripts/versioning.json"
 COMPAT_MAP="$ROOT/tools/scripts/compat_path_map.json"
 TERMS_LINT="$ROOT/tools/scripts/processing_model_terms_lint.py"
+SINGLE_BACKEND_GUARD="$ROOT/tools/scripts/single_backend_guard.py"
 CONFLICT_MARKER_GUARD="$ROOT/tools/scripts/conflict_marker_check.py"
 GPU_PIN_FRESHNESS="$ROOT/tools/scripts/gpu_handoff_pin_freshness.py"
 GPU_LEDGER_SENTINEL="$ROOT/tools/scripts/gpu_ledger_sentinel_check.py"
@@ -520,15 +521,6 @@ unset _prepush_dirty
 # receives the exact pushed source object captured above.
 MERGE_TREE_SCRIPT_STATE="$ROOT/tools/scripts/merge_tree_script_state.py"
 MERGE_TREE_BASE="${PULP_PREPUSH_BASE:-origin/main}"
-# Overall time bound for the check, in seconds (0 = unbounded). Past it the
-# check is NOT CHECKED and advisory; CI builds the same merged tree.
-MERGE_TREE_BOUND="${PULP_PREPUSH_MERGE_TREE_BOUND:-30}"
-# Set to 1 when the check ran to a clean pass: it already ran the static
-# changed-surface families check on the merged tree (see below).
-_merge_tree_clean=0
-# Set to 1 when merge-tree ended NOT CHECKED (bound ran out, or exit 4 with the
-# override): the receipt records it and the final verdict names it.
-_prepush_merge_tree_not_checked=0
 if [ "${PULP_DISABLE_PREPUSH_GATES:-0}" = "1" ]; then
     echo "[pre-push] PULP_DISABLE_PREPUSH_GATES=1 — merge-tree script-state check DEMOTED to advisory." >&2
     prepush_receipt_note demoted merge-tree-script-state "PULP_DISABLE_PREPUSH_GATES=1"
@@ -540,10 +532,10 @@ elif [ -f "$MERGE_TREE_SCRIPT_STATE" ]; then
     if [[ "${_prepush_source_remote_ref:-}" == refs/heads/explore/* ]]; then
         echo "[pre-push] merge-tree script-state skipped for explore/*; that branch is intentionally independent of main." >&2
     else
-        "$PULP_PYTHON" "$MERGE_TREE_SCRIPT_STATE" --repo-root "$ROOT" --base "$MERGE_TREE_BASE" --head "$_merge_tree_head" --overall-bound "$MERGE_TREE_BOUND" --only-if-capability-inputs
+        "$PULP_PYTHON" "$MERGE_TREE_SCRIPT_STATE" --repo-root "$ROOT" --base "$MERGE_TREE_BASE" --head "$_merge_tree_head"
         _merge_tree_rc=$?
         case "$_merge_tree_rc" in
-            0) _merge_tree_clean=1 ;;
+            0) ;;
             1) exit 1 ;;
             2) echo "[pre-push] merge-tree script-state internal error (2); advisory, run it on a healthy host." >&2 ;;
             4)
@@ -551,16 +543,11 @@ elif [ -f "$MERGE_TREE_SCRIPT_STATE" ]; then
                 # the push is not allowed to pass as if it had been.
                 if [ "${PULP_PREPUSH_ALLOW_NOT_CHECKED:-0}" = "1" ]; then
                     echo "[pre-push] merge-tree script-state NOT CHECKED; PULP_PREPUSH_ALLOW_NOT_CHECKED=1, continuing." >&2
-                    prepush_receipt_note skipped merge-tree-script-state "a check did not run; PULP_PREPUSH_ALLOW_NOT_CHECKED=1"
-                    _prepush_merge_tree_not_checked=1
                 else
                     echo "[pre-push] merge-tree script-state NOT CHECKED: a check did not run (above). Re-run on a less loaded host, raise PULP_MERGE_TREE_CHECK_TIMEOUT, or set PULP_PREPUSH_ALLOW_NOT_CHECKED=1 to push anyway." >&2
                     exit 1
                 fi
                 ;;
-            5) echo "[pre-push] merge-tree script-state NOT CHECKED: the ${MERGE_TREE_BOUND}s bound ran out (above). ADVISORY, not a pass; CI builds the same merged tree. Raise PULP_PREPUSH_MERGE_TREE_BOUND (0 = unbounded) to wait for it." >&2
-               prepush_receipt_note skipped merge-tree-script-state "${MERGE_TREE_BOUND}s bound ran out"
-               _prepush_merge_tree_not_checked=1 ;;
             3) echo "[pre-push] merge-tree script-state: branch conflicts with $MERGE_TREE_BASE; advisory (GitHub will report DIRTY)." >&2 ;;
             *) echo "[pre-push] merge-tree script-state internal error ($_merge_tree_rc); advisory." >&2 ;;
         esac
@@ -920,8 +907,14 @@ if [ -f "$TERMS_LINT" ]; then
         *) gate_could_not_run "processing_model_terms_lint" "$gate_rc"; prepush_fail ;;
     esac
 fi
-# single_backend_guard.py is not run here: it refused 0 of 456 pushes, CI runs it
-# (version-skill-check.yml) and tools/scripts/gates.sh still runs it.
+if [ -f "$SINGLE_BACKEND_GUARD" ]; then
+    run_gate_captured "$PYTHON" "$SINGLE_BACKEND_GUARD"
+    gate_rc=$?; case $gate_rc in
+        0) ;;
+        1) prepush_fail ;;
+        *) gate_could_not_run "single_backend_guard" "$gate_rc"; prepush_fail ;;
+    esac
+fi
 # Conflict-marker guard — no tracked file may carry a committed git conflict
 # marker (a squash-merge whose stale side collided with an advanced line can
 # write one straight onto main). Here it reads the files the push changes, from
@@ -1146,10 +1139,7 @@ fi
 # fresh worktree lacks. `--static` predicts the mapping from the committed
 # script-inputs list at the merge base and at HEAD and blocks a mapping flip the
 # file does not carry. About a second; examines nothing when no script moved.
-# The merge-tree check above runs this same `--static` check on the merged
-# tree, so a clean merge-tree pass has already covered it; run it here only
-# when that check did not finish clean (skipped, bounded, conflicting).
-if [ -f "$SURFACE_FAMILIES" ] && [ "$_merge_tree_clean" != "1" ]; then
+if [ -f "$SURFACE_FAMILIES" ]; then
     run_gate_captured "$PYTHON" "$SURFACE_FAMILIES" --repo-root "$ROOT" --static --base "$BASE"
     gate_rc=$?; case $gate_rc in
         0) ;;

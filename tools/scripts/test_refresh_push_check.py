@@ -669,6 +669,62 @@ def case_the_overall_bound_during_the_add_exits_not_checked_and_cleans_up(fx: Fi
     assert not list(fx.repo.parent.glob("pulp-merge-tree-*")), list(fx.repo.parent.glob("pulp-merge-tree-*"))
 
 
+
+def case_cancellation_reaps_checkout_before_removing_its_worktree(fx: Fixture) -> None:
+    """Deliver real signals inside add's communicate and observe teardown order."""
+    import signal
+    from unittest import mock
+
+    fx.setup()
+    real_popen = subprocess.Popen
+    real_remove = merge_tree_state.remove_worktree
+    for signum in (signal.SIGINT, signal.SIGTERM):
+        children = []
+        events = []
+
+        def popen(*args, **kwargs):
+            proc = real_popen(*args, **kwargs)
+            if "worktree" in proc.args and "add" in proc.args:
+                children.append(proc)
+                communicate = proc.communicate
+
+                def cancel_once(*a, **kw):
+                    proc.communicate = communicate
+                    os.kill(os.getpid(), signum)
+                    raise AssertionError("signal did not interrupt checkout")
+
+                proc.communicate = cancel_once
+            return proc
+
+        def remove(root, path):
+            events.append("cleanup")
+            assert children and children[-1].returncode is not None, "cleanup preceded checkout reap"
+            real_remove(root, path)
+
+        try:
+            with mock.patch.object(subprocess, "Popen", side_effect=popen), \
+                 mock.patch.object(merge_tree_state, "remove_worktree", side_effect=remove):
+                try:
+                    merge_tree_state.main(["--repo-root", str(fx.repo)])
+                except SystemExit as exc:
+                    assert exc.code == 128 + signum, exc.code
+                else:
+                    raise AssertionError("cancellation was swallowed")
+            assert events == ["cleanup"], events
+            assert fx.git("worktree", "list", "--porcelain").count("worktree ") == 1
+            assert not list(fx.tmp.glob("pulp-merge-tree-*"))
+        finally:
+            # Also reap on the deliberately broken control implementation.
+            for proc in children:
+                try:
+                    os.killpg(proc.pid, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
+                proc.communicate()
+            for path in fx.tmp.glob("pulp-merge-tree-*"):
+                real_remove(fx.repo, path)
+
+
 def case_the_capability_check_runs_only_when_the_range_touches_its_inputs(fx: Fixture) -> None:
     fx.setup()
     base = fx.git("rev-parse", "origin/main")
@@ -677,6 +733,36 @@ def case_the_capability_check_runs_only_when_the_range_touches_its_inputs(fx: Fi
     head2 = fx.commit("core/state/include/pulp/state/x.hpp", "// h\n", "header")
     assert merge_tree_state._touches_capability_inputs(fx.repo, base, head2) is True
     assert merge_tree_state._touches_capability_inputs(fx.repo, "nonexistent-ref", head2) is True
+
+
+def case_both_capability_triggers_cover_manifest_data_and_helpers(fx: Fixture) -> None:
+    fx.setup()
+    hook = HOOK.read_text(encoding="utf-8")
+    trigger = next(line for line in hook.splitlines()
+                   if 'elif git diff --name-only "$capability_base"' in line)
+    pattern = trigger.split("grep -qE '", 1)[1].split("'", 1)[0]
+    paths = (
+        "tools/dsp_vocabulary.py",
+        "docs/status/forge-catalog.json",
+        "test/test_agent_capability_compile.cpp",
+        "tools/scripts/json_schema_lite.py",
+        "tools/scripts/gate_common.py",
+        "tools/scripts/agent_capability_manifest.py",
+        "core/signal/include/pulp/signal/test.hpp",
+        "tools/agent-capabilities/history/test.json",
+        "docs/status/agent-capabilities.json",
+        "docs/status/agent-capability-surface/test.json",
+        "docs/readme.txt",
+    )
+    for path in paths:
+        # Compare each change with its own parent: an earlier matching path
+        # must not hide a missing dependency later in the table.
+        base = fx.git("rev-parse", "HEAD")
+        head = fx.commit(path, "fixture\n", "change one capability input")
+        expected = path != "docs/readme.txt"
+        assert merge_tree_state._touches_capability_inputs(fx.repo, base, head) is expected, path
+        result = subprocess.run(["grep", "-qE", pattern], input=path + "\n", text=True, encoding="utf-8")
+        assert result.returncode == (0 if expected else 1), path
 
 
 def case_cheap_unrunnable_checks_come_before_the_slow_ones(fx: Fixture) -> None:

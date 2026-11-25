@@ -790,10 +790,9 @@
   },
   {
    "id": "C7",
-   "capability": "Emitter conformance gate (one IR, four lowerings)",
+   "capability": "Emitter conformance gate (one IR, four lowerings); now owned by Vellum as vellum.design-emitter-conformance",
    "paths": [
-    "test/fixtures/emitter-conformance/",
-    "test/test_design_emitter_conformance.cpp"
+    "authoring/design_pipeline/tests/design_emitter_conformance_test.cpp"
    ]
   },
   {
