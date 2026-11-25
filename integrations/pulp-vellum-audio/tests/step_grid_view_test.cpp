@@ -9,8 +9,8 @@
 
 #include <algorithm>
 #include <cstdint>
-#include <functional>
 #include <cstdlib>
+#include <functional>
 #include <memory>
 #include <string>
 #include <vector>
@@ -28,10 +28,12 @@ namespace {
 // lands in an observable dirty region. The accumulation lives in the WindowHost
 // base class (see test_partial_invalidation.cpp for the core-API coverage).
 class TestWindowHost : public WindowHost {
-public:
+  public:
     void show() override {}
     void hide() override {}
-    bool is_visible() const override { return true; }
+    bool is_visible() const override {
+        return true;
+    }
     void repaint() override {}
     void set_close_callback(std::function<void()>) override {}
     void run_event_loop() override {}
@@ -53,7 +55,10 @@ AppliedEdit cell_echo(EngineSequence seq, std::uint8_t pattern, std::uint8_t lan
     e.kind = AppliedEditKind::StepRangeChanged;
     e.dirty = {DirtyKind::Cell, pattern, lane, step, 1};
     StepRangeApplied sr;
-    sr.pattern = pattern; sr.lane = lane; sr.first_step = step; sr.step_count = 1;
+    sr.pattern = pattern;
+    sr.lane = lane;
+    sr.first_step = step;
+    sr.step_count = 1;
     sr.cells[0] = cell;
     e.payload.step_range = sr;
     return e;
@@ -75,7 +80,7 @@ PlayheadState playhead(std::uint8_t pattern, std::uint8_t step, bool playing) {
 
 // A View is non-copyable (it has identity), so configure one in place.
 void setup(StepGridView& v, SequencerStateChannel& ch) {
-    v.set_bounds(Rect{0, 0, 320, 96});  // 32 steps x 12 lanes
+    v.set_bounds(Rect{0, 0, 320, 96}); // 32 steps x 12 lanes
     v.set_channel(&ch);
 }
 
@@ -106,7 +111,7 @@ TEST_CASE("StepGridView cell echo updates render copy and one cached visual",
     SequencerStateChannel ch;
     StepGridView v;
     setup(v, ch);
-    v.pump();  // initial resync (empty)
+    v.pump(); // initial resync (empty)
 
     ch.audio_try_publish_applied(cell_echo(1, 0, 3, 7, on_cell(90)));
     auto r = v.pump();
@@ -133,7 +138,7 @@ TEST_CASE("StepGridView echo on an off-screen pattern updates render copy but do
     REQUIRE(r.echoes_applied == 1);
     REQUIRE(r.rebuilt_cells == 0);
     REQUIRE(r.requested_repaint == false);
-    REQUIRE(v.render_snapshot().patterns[5].lanes[1][1].enabled());  // render copy still advanced
+    REQUIRE(v.render_snapshot().patterns[5].lanes[1][1].enabled()); // render copy still advanced
 }
 
 TEST_CASE("StepGridView stale echo after resync is ignored", "[step-grid][sequencer]") {
@@ -144,7 +149,8 @@ TEST_CASE("StepGridView stale echo after resync is ignored", "[step-grid][sequen
 
     // Advance via echoes to engine_sequence 10.
     for (EngineSequence seq = 1; seq <= 10; ++seq)
-        ch.audio_try_publish_applied(cell_echo(seq, 0, 0, 0, on_cell(static_cast<std::uint8_t>(seq))));
+        ch.audio_try_publish_applied(
+            cell_echo(seq, 0, 0, 0, on_cell(static_cast<std::uint8_t>(seq))));
     v.pump();
     REQUIRE(v.last_engine_sequence() == 10);
 
@@ -154,7 +160,7 @@ TEST_CASE("StepGridView stale echo after resync is ignored", "[step-grid][sequen
     s.engine_sequence = 20;
     s.patterns[0].lanes[0][0] = on_cell(55);
     publish_snapshot(ch, s);
-    ch.audio_try_publish_applied(cell_echo(8, 0, 0, 0, on_cell(200)));  // stale (<= 20)
+    ch.audio_try_publish_applied(cell_echo(8, 0, 0, 0, on_cell(200))); // stale (<= 20)
     v.pump();
 
     REQUIRE(v.last_engine_sequence() == 20);
@@ -170,13 +176,13 @@ TEST_CASE("StepGridView playhead step change dirties old and new columns",
     v.pump();
 
     ch.audio_publish_playhead(playhead(0, 5, true));
-    REQUIRE(v.pump().requested_repaint);  // playhead became visible
+    REQUIRE(v.pump().requested_repaint); // playhead became visible
 
     ch.audio_publish_playhead(playhead(0, 6, true));
-    REQUIRE(v.pump().requested_repaint);  // step advanced
+    REQUIRE(v.pump().requested_repaint); // step advanced
 
     ch.audio_publish_playhead(playhead(0, 6, true));
-    REQUIRE(v.pump().requested_repaint == false);  // unchanged -> no repaint
+    REQUIRE(v.pump().requested_repaint == false); // unchanged -> no repaint
 }
 
 TEST_CASE("StepGridView playhead on a different pattern is not shown", "[step-grid][sequencer]") {
@@ -187,7 +193,7 @@ TEST_CASE("StepGridView playhead on a different pattern is not shown", "[step-gr
     // Engine plays pattern 3 while the editor shows pattern 0.
     ch.audio_publish_playhead(playhead(3, 4, true));
     auto r = v.pump();
-    REQUIRE(r.requested_repaint == false);  // overlay stays hidden -> nothing to draw
+    REQUIRE(r.requested_repaint == false); // overlay stays hidden -> nothing to draw
 }
 
 TEST_CASE("StepGridView active-pattern echo advances render copy without rebuilding shown cells",
@@ -206,7 +212,7 @@ TEST_CASE("StepGridView active-pattern echo advances render copy without rebuild
     auto r = v.pump();
 
     REQUIRE(r.echoes_applied == 1);
-    REQUIRE(r.rebuilt_cells == 0);            // displayed pattern (0) is independent
+    REQUIRE(r.rebuilt_cells == 0); // displayed pattern (0) is independent
     REQUIRE(v.render_snapshot().active_pattern == 3);
 }
 
@@ -217,17 +223,18 @@ TEST_CASE("StepGridView combined resync + echo + playhead reaches authoritative 
     setup(v, ch);
 
     Snapshot s;
-    s.epoch = 1; s.engine_sequence = 3;
+    s.epoch = 1;
+    s.engine_sequence = 3;
     s.patterns[0].lanes[1][1] = on_cell(80);
     publish_snapshot(ch, s);
-    ch.audio_try_publish_applied(cell_echo(4, 0, 2, 2, on_cell(64)));  // fresh (> 3)
+    ch.audio_try_publish_applied(cell_echo(4, 0, 2, 2, on_cell(64))); // fresh (> 3)
     ch.audio_publish_playhead(playhead(0, 0, true));
 
     auto r = v.pump();
     REQUIRE(r.resynced);
     REQUIRE(r.echoes_applied == 1);
-    REQUIRE(v.cell_visual(1, 1).enabled);   // from snapshot
-    REQUIRE(v.cell_visual(2, 2).enabled);   // from the fresh echo
+    REQUIRE(v.cell_visual(1, 1).enabled); // from snapshot
+    REQUIRE(v.cell_visual(2, 2).enabled); // from the fresh echo
     REQUIRE(v.last_engine_sequence() == 4);
 }
 
@@ -269,8 +276,8 @@ TEST_CASE("StepGridView release outside the grid does not edit a stray cell",
     setup(v, ch);
     v.pump();
 
-    v.on_mouse_down(Point{2, 2});          // press cell (0,0)
-    v.on_mouse_up(Point{-50, -50});        // release outside the grid
+    v.on_mouse_down(Point{2, 2});   // press cell (0,0)
+    v.on_mouse_up(Point{-50, -50}); // release outside the grid
 
     // Apply whatever was queued. The End marker must target the real last cell
     // (0,0), never a default 0,0 write on an unrelated release — and here (0,0)
@@ -279,7 +286,7 @@ TEST_CASE("StepGridView release outside the grid does not edit a stray cell",
     while (auto cmd = ch.audio_try_pop_command()) {
         const auto& e = cmd->payload.set_cell;
         REQUIRE(e.lane == 0);
-        REQUIRE(e.step == 0);              // only the pressed cell, never a stray
+        REQUIRE(e.step == 0); // only the pressed cell, never a stray
         ch.audio_try_publish_applied(cell_echo(++seq, e.pattern, e.lane, e.step, e.cell));
     }
     v.pump();
@@ -291,13 +298,13 @@ TEST_CASE("StepGridView pattern-length echo remutes visible cells on the shown p
     SequencerStateChannel ch;
     Snapshot s;
     s.epoch = 1;
-    s.patterns[0].lanes[0][20] = on_cell(100);  // an enabled step past a short length
+    s.patterns[0].lanes[0][20] = on_cell(100); // an enabled step past a short length
     publish_snapshot(ch, s);
 
     StepGridView v;
     setup(v, ch);
     v.pump();
-    REQUIRE(v.cell_visual(0, 20).muted == false);  // full length -> not muted
+    REQUIRE(v.cell_visual(0, 20).muted == false); // full length -> not muted
 
     // Shorten pattern 0 to 16 steps; step 20 now falls outside the pattern length.
     AppliedEdit e;
@@ -309,10 +316,10 @@ TEST_CASE("StepGridView pattern-length echo remutes visible cells on the shown p
 
     auto r = v.pump();
     REQUIRE(r.echoes_applied == 1);
-    REQUIRE(r.rebuilt_cells == kLaneCount * kStepCount);  // length remutes all visible
+    REQUIRE(r.rebuilt_cells == kLaneCount * kStepCount); // length remutes all visible
     REQUIRE(r.requested_repaint);
     REQUIRE(v.render_snapshot().patterns[0].length == 16);
-    REQUIRE(v.cell_visual(0, 20).muted);   // now past the length
+    REQUIRE(v.cell_visual(0, 20).muted); // now past the length
     REQUIRE(v.cell_visual(0, 15).muted == false);
     REQUIRE(v.last_engine_sequence() == 1);
 }
@@ -322,12 +329,12 @@ TEST_CASE("StepGridView pattern-length echo on an off-screen pattern rebuilds no
     SequencerStateChannel ch;
     StepGridView v;
     setup(v, ch);
-    v.pump();  // displayed_pattern_ == 0
+    v.pump(); // displayed_pattern_ == 0
 
     AppliedEdit e;
     e.engine_sequence = 1;
     e.kind = AppliedEditKind::PatternLengthChanged;
-    e.payload.pattern_length = {3, 8};   // pattern 3 is not shown
+    e.payload.pattern_length = {3, 8}; // pattern 3 is not shown
     ch.audio_try_publish_applied(e);
 
     auto r = v.pump();
@@ -356,11 +363,11 @@ TEST_CASE("StepGridView rejected-command echo advances the sequence but touches 
     ch.audio_try_publish_applied(e);
 
     auto r = v.pump();
-    REQUIRE(r.echoes_applied == 1);        // consumed and sequence advanced (no re-request)
-    REQUIRE(r.rebuilt_cells == 0);         // a rejection changes nothing on screen
+    REQUIRE(r.echoes_applied == 1); // consumed and sequence advanced (no re-request)
+    REQUIRE(r.rebuilt_cells == 0);  // a rejection changes nothing on screen
     REQUIRE(r.requested_repaint == false);
     REQUIRE(v.last_engine_sequence() == 7);
-    REQUIRE(v.cell_visual(1, 1).enabled);  // prior state intact
+    REQUIRE(v.cell_visual(1, 1).enabled); // prior state intact
 }
 
 TEST_CASE("StepGridView paint draws enabled and disabled cells distinctly",
@@ -368,7 +375,7 @@ TEST_CASE("StepGridView paint draws enabled and disabled cells distinctly",
     SequencerStateChannel ch;
     Snapshot s;
     s.epoch = 1;
-    s.patterns[0].lanes[0][0] = on_cell(127);  // enabled, full velocity
+    s.patterns[0].lanes[0][0] = on_cell(127); // enabled, full velocity
     publish_snapshot(ch, s);
 
     StepGridView v;
@@ -395,11 +402,11 @@ TEST_CASE("StepGridView paint draws enabled and disabled cells distinctly",
         else if (cmd.type == ::vellum::canvas::DrawCommand::Type::fill_rounded_rect) {
             if (cmd.f[0] == on_rect.x && cmd.f[1] == on_rect.y) {
                 saw_on = true;
-                REQUIRE(active.b > 0.8f);      // accent blue
-                REQUIRE(active.a > 0.9f);      // full velocity -> high alpha
+                REQUIRE(active.b > 0.8f); // accent blue
+                REQUIRE(active.a > 0.9f); // full velocity -> high alpha
             } else if (cmd.f[0] == off_rect.x && cmd.f[1] == off_rect.y) {
                 saw_off = true;
-                REQUIRE(active.b < 0.5f);      // dim grey
+                REQUIRE(active.b < 0.5f); // dim grey
             }
         }
     }
@@ -428,7 +435,7 @@ StepGridView* host_grid(std::unique_ptr<View>& root, TestWindowHost& host,
     v->set_channel(&ch);
     return v;
 }
-}  // namespace
+} // namespace
 
 TEST_CASE("StepGridView displayed pattern rebuilds cache repaints and retargets edits",
           "[step-grid][sequencer][partial-render]") {
@@ -463,8 +470,7 @@ TEST_CASE("StepGridView displayed pattern rebuilds cache repaints and retargets 
     REQUIRE(host.pending_repaint_is_full());
 
     const Rect clicked = v->cell_rect(2, 7);
-    const Point centre{clicked.x + clicked.width * 0.5f,
-                       clicked.y + clicked.height * 0.5f};
+    const Point centre{clicked.x + clicked.width * 0.5f, clicked.y + clicked.height * 0.5f};
     v->on_mouse_down(centre);
     v->on_mouse_up(centre);
 
@@ -506,7 +512,7 @@ TEST_CASE("StepGridView cell echo invalidates only that cell's mapped rect",
     std::unique_ptr<View> root;
     const Rect gb{40, 30, 320, 96};
     StepGridView* v = host_grid(root, host, ch, gb);
-    v->pump();                       // initial resync -> full (expected)
+    v->pump(); // initial resync -> full (expected)
     host.clear_pending_dirty();
 
     ch.audio_try_publish_applied(cell_echo(1, 0, 3, 7, on_cell(90)));
@@ -533,11 +539,11 @@ TEST_CASE("StepGridView playhead advance invalidates only the two columns",
     v->pump();
 
     ch.audio_publish_playhead(playhead(0, 5, true));
-    v->pump();                       // becomes visible at step 5
+    v->pump(); // becomes visible at step 5
     host.clear_pending_dirty();
 
     ch.audio_publish_playhead(playhead(0, 6, true));
-    v->pump();                       // 5 -> 6: leaving column 5 + entering column 6
+    v->pump(); // 5 -> 6: leaving column 5 + entering column 6
 
     REQUIRE_FALSE(host.pending_repaint_is_full());
     const Rect c5 = v->playhead_column_rect(5);
@@ -568,11 +574,11 @@ TEST_CASE("StepGridView pattern-length change escalates to a full repaint",
     e.engine_sequence = 1;
     e.kind = AppliedEditKind::PatternLengthChanged;
     e.dirty = {DirtyKind::FullSnapshot, 0, 0, 0, 0};
-    e.payload.pattern_length = SetPatternLengthEdit{0, 8};  // shown pattern shrinks
+    e.payload.pattern_length = SetPatternLengthEdit{0, 8}; // shown pattern shrinks
     ch.audio_try_publish_applied(e);
     v->pump();
 
-    REQUIRE(host.pending_repaint_is_full());  // every cell's muted flag may flip
+    REQUIRE(host.pending_repaint_is_full()); // every cell's muted flag may flip
 }
 
 TEST_CASE("StepGridView resync escalates to a full repaint",
@@ -610,7 +616,8 @@ struct VinePolicy2 {
     static VineCell2 make_set_cell(const VineCell2& old, bool enabled) {
         VineCell2 c = old;
         c.on = enabled ? 1 : 0;
-        if (enabled && c.growth == 0) c.growth = 1000;
+        if (enabled && c.growth == 0)
+            c.growth = 1000;
         return c;
     }
 };
@@ -628,7 +635,7 @@ TEST_CASE("StepGridViewT drives a second non-square config from a snapshot",
     YssChannel2::Snapshot s;
     s.epoch = 1;
     s.engine_sequence = 3;
-    s.patterns[0].lanes[4][15].flags = StepCell::kEnabledBit;  // lane 4 (<5), step 15 (<16)
+    s.patterns[0].lanes[4][15].flags = StepCell::kEnabledBit; // lane 4 (<5), step 15 (<16)
     s.patterns[0].lanes[4][15].velocity = 90;
     ch.audio_publish_snapshot(s);
     ch.audio_mark_resync_required(1);
@@ -644,7 +651,7 @@ TEST_CASE("StepGridViewT with a custom cell policy projects visuals and edits",
           "[step-grid][sequencer][freeze]") {
     VineChannel2 ch;
     StepGridViewT<VineConfig2, VinePolicy2> v;
-    v.set_bounds(Rect{0, 0, 80, 60});  // 8 steps x 6 lanes
+    v.set_bounds(Rect{0, 0, 80, 60}); // 8 steps x 6 lanes
     v.set_channel(&ch);
 
     VineChannel2::Snapshot s;
@@ -667,7 +674,7 @@ TEST_CASE("StepGridViewT with a custom cell policy projects visuals and edits",
     auto cmd = ch.audio_try_pop_command();
     REQUIRE(cmd.has_value());
     REQUIRE(cmd->kind == StepEditKind::SetCell);
-    REQUIRE(cmd->payload.set_cell.cell.on == 1);  // policy enabled a fresh cell
+    REQUIRE(cmd->payload.set_cell.cell.on == 1); // policy enabled a fresh cell
 }
 
 TEST_CASE("StepGridView self-heals when the resync bar precedes the matching snapshot",
@@ -687,7 +694,7 @@ TEST_CASE("StepGridView self-heals when the resync bar precedes the matching sna
 
     auto r1 = v.pump();
     REQUIRE(r1.resynced);
-    REQUIRE(v.cell_visual(1, 1).enabled);  // render copy correct, never corrupted
+    REQUIRE(v.cell_visual(1, 1).enabled); // render copy correct, never corrupted
 
     // Still below the bar: keeps resyncing (glitchy but safe), no corruption.
     auto r2 = v.pump();
@@ -701,7 +708,7 @@ TEST_CASE("StepGridView self-heals when the resync bar precedes the matching sna
     ch.audio_mark_resync_required(10);
     v.pump();
     auto r4 = v.pump();
-    REQUIRE(r4.resynced == false);  // converged
+    REQUIRE(r4.resynced == false); // converged
     REQUIRE(v.cell_visual(1, 1).enabled);
 }
 
@@ -730,7 +737,7 @@ TEST_CASE("StepGridView renders velocity-scaled accent pixels and a playhead col
     s.epoch = 1;
     s.patterns[0].lanes[0][0] = on_cell(127);
     s.patterns[0].lanes[0][1] = on_cell(32);
-    s.patterns[0].lanes[0][2] = on_cell(0);  // enabled bit with velocity 0
+    s.patterns[0].lanes[0][2] = on_cell(0); // enabled bit with velocity 0
     publish_snapshot(ch, s);
     ch.audio_publish_playhead(playhead(0, 5, true));
 
@@ -743,7 +750,8 @@ TEST_CASE("StepGridView renders velocity-scaled accent pixels and a playhead col
     REQUIRE(w == 320);
     REQUIRE(h == 96);
     auto at = [&](float x, float y, int ch_) {
-        return static_cast<int>(px[(static_cast<std::size_t>(y) * w + static_cast<std::size_t>(x)) * 4 + ch_]);
+        return static_cast<int>(
+            px[(static_cast<std::size_t>(y) * w + static_cast<std::size_t>(x)) * 4 + ch_]);
     };
     auto center = [&](std::uint8_t lane, std::uint8_t step) {
         const Rect r = v.cell_rect(lane, step);
@@ -761,5 +769,6 @@ TEST_CASE("StepGridView renders velocity-scaled accent pixels and a playhead col
     CHECK(at(head.x, head.y, 2) > at(center(4, 7).x, center(4, 7).y, 2) + 15);
 
     if (const char* dir = std::getenv("PULP_VELLUM_AUDIO_PNG_DIR"))
-        CHECK(::vellum::view::render_to_file(v, 320, 96, std::string(dir) + "/step-grid.png", 4.0f));
+        CHECK(
+            ::vellum::view::render_to_file(v, 320, 96, std::string(dir) + "/step-grid.png", 4.0f));
 }

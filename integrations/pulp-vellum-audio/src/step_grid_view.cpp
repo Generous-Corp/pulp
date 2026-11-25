@@ -118,8 +118,9 @@ StepGridViewBase::PumpResult StepGridViewBase::pump() {
     const float cw = b.width / static_cast<float>(steps_);
     const float ch = b.height / static_cast<float>(lanes_);
     constexpr float gap = 1.0f;
-    return ::vellum::view::Rect{static_cast<float>(step) * cw + gap, static_cast<float>(lane) * ch + gap,
-                std::max(0.0f, cw - 2 * gap), std::max(0.0f, ch - 2 * gap)};
+    return ::vellum::view::Rect{static_cast<float>(step) * cw + gap,
+                                static_cast<float>(lane) * ch + gap, std::max(0.0f, cw - 2 * gap),
+                                std::max(0.0f, ch - 2 * gap)};
 }
 
 ::vellum::view::Rect StepGridViewBase::playhead_column_rect(std::uint8_t step) const {
