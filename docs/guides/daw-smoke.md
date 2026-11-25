@@ -118,6 +118,21 @@ See [`tools/testing/daw-smoke/README.md`](../../tools/testing/daw-smoke/README.m
 - **No pollution.** VST3/CLAP scan from a temp path via a fresh REAPER portable dir —
   never writes your REAPER config or `~/Library/Audio/Plug-Ins`. `--format au`
   installs to the real Components folder and **always uninstalls** on exit.
+- **Only the plug-in under test is scanned.** Every VST3/CLAP scan key in the
+  temp profile names the temp scan dir, and a run whose plug-in cache lists any
+  other bundle stops as INCONCLUSIVE (not isolated). A stale or crashing plug-in
+  installed by someone else can no longer poison the run.
+- **Never collides with another REAPER.** If one is running (or the file named by
+  `PULP_DAW_SMOKE_BUSY_FILE` exists) the run SKIPs, or waits up to
+  `--wait-for-host` seconds.
+- **The crash-restore alert cannot block it.** After any REAPER crash, AppKit asks
+  to reopen windows on the next launch, scan subprocess included. The run passes
+  `-ApplePersistenceIgnoreState YES` and sets the same per-app default only for
+  its own duration, restoring the previous value on exit.
+- **Stalls are named, not timed out.** A scan subprocess showing a window
+  (`BLOCKED-MODAL`), a scan running past `--scan-seconds` (`SCAN-HUNG`, with the
+  bundle path), or a REAPER that never adopted the temp profile (`NOT-ISOLATED`)
+  ends the run as INCONCLUSIVE with that reason.
 - **Cleanup always runs** — kills spawned REAPER, removes temp dirs, uninstalls any AU.
 - **Headless-safe.** Verifies by scraping the plugin reload log, **never**
   `screencapture` (which returns black frames without a Screen-Recording grant). Use

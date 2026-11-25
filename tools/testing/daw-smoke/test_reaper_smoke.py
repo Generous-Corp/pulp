@@ -960,8 +960,9 @@ class DoesNotWreckSomebodysReaper(unittest.TestCase):
             session.reaper = pathlib.Path("/fake/REAPER")
             session.portable = portable
             session.reaper_out = portable / "reaper.out.txt"
-            session.args = argparse.Namespace(plugin_name="Native Nodal Proof",
-                                               timeout=3)
+            session.args = argparse.Namespace(
+                plugin_name="Native Nodal Proof", timeout=3,
+                plugin_path="/build/Native Nodal Proof.clap")
             session.proc = None
 
             warm = mock.Mock()
@@ -976,6 +977,261 @@ class DoesNotWreckSomebodysReaper(unittest.TestCase):
 
             stop.assert_called_once_with(warm)
             sleep.assert_any_call(rs.PREWARM_CACHE_SETTLE_SECONDS)
+
+
+guard = rs.guard
+
+
+class IsolatedConfig(unittest.TestCase):
+    """Only the plug-in under test may be scanned.
+
+    Another team's stale synths in ~/Library/Audio/Plug-Ins/VST3 crashed
+    REAPER's scan subprocess, which armed AppKit's crash-restore alert for
+    every later launch.  A scan root left at the user's value lets that in.
+    """
+
+    BASE = ("[REAPER]\naudio_device=Built-in\n"
+            "vstpath64=/Users/x/Library/Audio/Plug-Ins/VST3\n"
+            "vstpath_arm64=/Library/Audio/Plug-Ins/VST3;~/Library/Audio/Plug-Ins/VST3\n"
+            "clap_path_macos-x86_64=/Library/Audio/Plug-Ins/CLAP\n"
+            "CLAP_PATH=/Library/Audio/Plug-Ins/CLAP\n"
+            "lv2path_mac=/Library/Audio/Plug-Ins/LV2\n"
+            "lastproject=/Users/x/Private.RPP\n"
+            "[Recent]\nrecent01=/Users/x/Other.RPP\n")
+
+    def test_every_scan_root_points_at_the_scan_dir(self):
+        text = guard.isolated_ini_text(self.BASE, "/tmp/scan", "arm64")
+        self.assertNotIn("Plug-Ins", text)
+        roots = [line for line in text.splitlines() if guard.SCAN_PATH_KEY.match(line)]
+        self.assertTrue(roots)
+        for line in roots:
+            self.assertEqual(line.split("=", 1)[1], "/tmp/scan", line)
+        for key in ("vstpath", "vstpath64", "vstpath_arm64", "clap_path_macos-aarch64"):
+            self.assertIn(f"{key}=/tmp/scan", text)
+
+    def test_user_preferences_survive_but_their_sessions_do_not(self):
+        text = guard.isolated_ini_text(self.BASE, "/tmp/scan", "arm64")
+        self.assertIn("audio_device=Built-in", text)
+        self.assertNotIn("Private.RPP", text)
+        self.assertNotIn("Other.RPP", text)
+        self.assertIn("loadlastproj=0", text)
+
+    def test_the_session_writes_the_isolated_config(self):
+        with tempfile.TemporaryDirectory() as home:
+            real = pathlib.Path(home) / "Library/Application Support/REAPER"
+            real.mkdir(parents=True)
+            (real / "reaper.ini").write_text(self.BASE)
+            plugin = pathlib.Path(home) / "Thing.clap"
+            plugin.mkdir()
+            s = rs.ReaperSession.__new__(rs.ReaperSession)
+            s.args = argparse.Namespace(format="clap", plugin_path=str(plugin),
+                                        plugin_name="Thing", mode="editor-open")
+            s.portable = pathlib.Path(home) / "portable"
+            s.scan_dir = pathlib.Path(home) / "scan"
+            s.portable.mkdir()
+            s.scan_dir.mkdir()
+            s.au_installed = None
+            with mock.patch.dict(os.environ, {"HOME": home}):
+                rs.ReaperSession.place_plugin(s)
+            ini = (s.portable / "reaper.ini").read_text()
+            self.assertNotIn("Plug-Ins", ini)
+
+
+class ForeignCacheEntries(unittest.TestCase):
+    def test_a_foreign_vst3_and_clap_bundle_are_named(self):
+        vst = ("[vstcache]\nreaeq.vst.dylib=00,1,ReaEQ (Cockos)\n"
+               "Thing.clap=00\nNative_Vavra_Metal.vst3=80C2\n")
+        clap = "[Thing.clap]\n_=00\nid=0|Thing\n\n[Osirus.clap]\n_=00\nx=1|Osirus\n"
+        self.assertEqual(guard.foreign_cache_entries(vst, "Thing.clap"),
+                         ["Native_Vavra_Metal.vst3"])
+        self.assertEqual(guard.foreign_cache_entries(clap, "Thing.clap"), ["Osirus.clap"])
+
+    def test_builtins_and_the_target_are_not_foreign(self):
+        vst = "[vstcache]\nreaeq.vst.dylib=00,1,ReaEQ\nMy_Synth.vst3=00\n"
+        self.assertEqual(guard.foreign_cache_entries(vst, "My Synth.vst3"), [])
+
+    def test_a_breach_stops_the_run_before_the_scripted_launch(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            portable = pathlib.Path(temporary)
+            (portable / "reaper-vstplugins_arm64.ini").write_text(
+                "[vstcache]\nThing.vst3=00,1,Thing (Pulp)\nOther.vst3=00\n")
+            (portable / "reaper-install-rev.txt").write_text("1")
+            session = rs.ReaperSession.__new__(rs.ReaperSession)
+            session.reaper = pathlib.Path("/fake/REAPER")
+            session.portable = portable
+            session.reaper_out = portable / "reaper.out.txt"
+            session.args = argparse.Namespace(plugin_name="Thing", timeout=3,
+                                              format="vst3", plugin_path="/b/Thing.vst3")
+            session.proc = None
+            warm = mock.Mock(pid=1)
+            with mock.patch.object(rs.subprocess, "Popen", side_effect=[warm]) as popen, \
+                 mock.patch.object(rs, "stop_reaper_process"), \
+                 mock.patch.object(rs.time, "sleep"):
+                self.assertEqual(session.run_until_fx_shown({}, portable / "status"),
+                                 rs.EXIT_INCONCLUSIVE)
+            self.assertEqual(popen.call_count, 1, "launched the scripted run anyway")
+
+
+class LaunchArguments(unittest.TestCase):
+    def test_cfgfile_is_read_before_the_persistence_pair(self):
+        argv = guard.launch_argv("/R", "/p/reaper.ini", "/s.lua")
+        self.assertEqual(argv[0], "/R")
+        self.assertIn("-newinst", argv)
+        self.assertLess(argv.index("-cfgfile"), argv.index("-ApplePersistenceIgnoreState"))
+        self.assertEqual(argv[argv.index("-cfgfile") + 1], "/p/reaper.ini")
+        self.assertEqual(argv[-2:], ["-ApplePersistenceIgnoreState", "YES"])
+        self.assertLess(argv.index("/s.lua"), argv.index("-ApplePersistenceIgnoreState"))
+
+    def test_a_profile_that_was_never_adopted_is_reported(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            portable = pathlib.Path(temporary)
+            self.assertFalse(guard.profile_in_use(portable))
+            session = rs.ReaperSession.__new__(rs.ReaperSession)
+            session.portable = portable
+            session.args = argparse.Namespace()
+            proc = mock.Mock(pid=7)
+            proc.poll.return_value = None
+            session.launch_times = {7: 0.0}
+            with mock.patch.object(guard, "list_processes", return_value=[]), \
+                 mock.patch.object(guard, "list_windows", return_value=[]):
+                self.assertIn("NOT-ISOLATED", session.stall_reason(proc))
+            (portable / "reaper-install-rev.txt").write_text("1")
+            with mock.patch.object(guard, "list_processes", return_value=[]), \
+                 mock.patch.object(guard, "list_windows", return_value=[]):
+                self.assertNotIn("NOT-ISOLATED", session.stall_reason(proc) or "")
+
+
+class BusyHost(unittest.TestCase):
+    def test_another_reaper_or_the_busy_flag_blocks_a_launch(self):
+        self.assertIn("58954", guard.busy_reason([58954], None))
+        with tempfile.TemporaryDirectory() as temporary:
+            flag = pathlib.Path(temporary) / "ONSCREEN-BUSY"
+            self.assertIsNone(guard.busy_reason([], flag))
+            flag.write_text("busy")
+            self.assertIn("busy flag", guard.busy_reason([], flag))
+
+    def test_it_waits_for_the_host_then_proceeds(self):
+        answers = iter([[1], [1], []])
+        now = [0.0]
+        reason = rs.wait_for_free_host(60, pids=lambda: next(answers), flag=lambda: None,
+                                       sleep=lambda s: now.__setitem__(0, now[0] + s),
+                                       clock=lambda: now[0])
+        self.assertIsNone(reason)
+
+    def test_it_gives_up_at_the_deadline(self):
+        now = [0.0]
+        reason = rs.wait_for_free_host(10, pids=lambda: [5], flag=lambda: None,
+                                       sleep=lambda s: now.__setitem__(0, now[0] + s),
+                                       clock=lambda: now[0])
+        self.assertIn("another REAPER", reason)
+
+    def test_main_skips_without_launching_when_reaper_is_running(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            binary = pathlib.Path(temporary) / "REAPER"
+            binary.write_bytes(b"fixture")
+            binary.chmod(0o755)
+            argv = ["reaper_smoke.py", "--mode", "editor-open", "--plugin-name", "X",
+                    "--plugin-path", "/x.clap", "--reaper-bin", str(binary)]
+            with mock.patch.object(sys, "argv", argv), \
+                 mock.patch.object(rs.guard, "running_reaper_pids", return_value=[4242]), \
+                 mock.patch.object(rs, "run_mode") as run_mode:
+                self.assertEqual(rs.main(), rs.EXIT_SKIP)
+        run_mode.assert_not_called()
+
+
+class ScopedPersistence(unittest.TestCase):
+    def _runner(self, prior):
+        calls = []
+
+        def run(argv):
+            calls.append(argv)
+            if argv[0] == "read":
+                return subprocess.CompletedProcess(argv, 0 if prior is not None else 1,
+                                                   stdout=(prior or "") + "\n", stderr="")
+            return subprocess.CompletedProcess(argv, 0, stdout="", stderr="")
+        return run, calls
+
+    def test_an_absent_key_is_deleted_again(self):
+        run, calls = self._runner(None)
+        with guard.scoped_persistence_opt_out(run):
+            self.assertEqual(calls[-1][0], "write")
+        self.assertEqual(calls[-1], ["delete", guard.REAPER_DEFAULTS_DOMAIN,
+                                     guard.PERSISTENCE_KEY])
+
+    def test_a_prior_value_is_restored_even_after_an_exception(self):
+        run, calls = self._runner("0")
+        with self.assertRaises(RuntimeError):
+            with guard.scoped_persistence_opt_out(run):
+                raise RuntimeError("boom")
+        self.assertEqual(calls[-1], ["write", guard.REAPER_DEFAULTS_DOMAIN,
+                                     guard.PERSISTENCE_KEY, "-bool", "NO"])
+
+
+class StallClassification(unittest.TestCase):
+    """A blocked modal or hung scan is named at once, not after the cap."""
+
+    MAIN = guard.Proc(100, 1, 5, "/Applications/REAPER.app/Contents/MacOS/REAPER -newinst")
+    SCAN = guard.Proc(101, 100, 5, "/Applications/REAPER.app/Contents/MacOS/REAPER -cfgfile "
+                                   "/p/reaper.ini -__vst_scan__ /scan/Thing.vst3")
+
+    def classify(self, procs, windows, idle=0.0):
+        return guard.classify_stall(100, procs, windows, idle_seconds=idle,
+                                    stall_after=30, scan_budget=60)
+
+    def test_a_scan_subprocess_showing_a_window_is_a_blocked_modal(self):
+        reason = self.classify([self.MAIN, self.SCAN],
+                               [guard.Window(101, 8, 420, 180, True)])
+        self.assertTrue(reason.startswith("BLOCKED-MODAL"), reason)
+
+    def test_a_long_scan_is_hung_and_names_the_bundle(self):
+        slow = guard.Proc(101, 100, 75, self.SCAN.args)
+        reason = self.classify([self.MAIN, slow], [])
+        self.assertTrue(reason.startswith("SCAN-HUNG"), reason)
+        self.assertIn("Thing.vst3", reason)
+
+    def test_an_idle_main_process_with_only_an_alert_is_blocked(self):
+        reason = self.classify([self.MAIN], [guard.Window(100, 0, 420, 180, True)], idle=31)
+        self.assertTrue(reason.startswith("BLOCKED-MODAL"), reason)
+
+    def test_an_idle_main_window_is_not_a_modal(self):
+        windows = [guard.Window(100, 0, 1146, 606, True), guard.Window(100, 0, 420, 180, True)]
+        self.assertIsNone(self.classify([self.MAIN], windows, idle=31))
+
+    def test_no_window_and_no_progress_is_stalled(self):
+        self.assertTrue(self.classify([self.MAIN], [], idle=31).startswith("STALLED"))
+
+    def test_a_progressing_launch_is_left_alone(self):
+        self.assertIsNone(self.classify([self.MAIN], [guard.Window(100, 0, 420, 180, True)],
+                                        idle=3))
+
+    def test_an_unrelated_process_scan_is_not_ours(self):
+        other = guard.Proc(300, 299, 500, self.SCAN.args)
+        self.assertIsNone(self.classify([self.MAIN, other], []))
+
+    def test_ps_elapsed_times_parse(self):
+        procs = guard.parse_ps("  100     1    01:05 /R -x\n  101   100 1-02:03:04 /R\n")
+        self.assertEqual([p.elapsed for p in procs], [65.0, 93784.0])
+
+    def test_a_blocked_launch_ends_the_run_without_the_cap(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            portable = pathlib.Path(temporary)
+            session = rs.ReaperSession.__new__(rs.ReaperSession)
+            session.reaper = pathlib.Path("/fake/REAPER")
+            session.portable = portable
+            session.reaper_out = portable / "reaper.out.txt"
+            session.args = argparse.Namespace(plugin_name="Thing", timeout=900,
+                                              format="clap", plugin_path="/b/Thing.clap")
+            session.proc = None
+            warm = mock.Mock(pid=1)
+            with mock.patch.object(rs.subprocess, "Popen", side_effect=[warm]), \
+                 mock.patch.object(rs, "stop_reaper_process") as stop, \
+                 mock.patch.object(rs.ReaperSession, "stall_reason",
+                                   return_value="BLOCKED-MODAL: test"), \
+                 mock.patch.object(rs.time, "sleep") as sleep:
+                self.assertEqual(session.run_until_fx_shown({}, portable / "status"),
+                                 rs.EXIT_INCONCLUSIVE)
+            stop.assert_called_with(warm)
+            self.assertLess(sleep.call_count, 5, "waited out the cap")
 
 
 if __name__ == "__main__":
