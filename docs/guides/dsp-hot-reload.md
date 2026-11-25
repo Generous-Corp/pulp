@@ -169,6 +169,27 @@ cmake --build build --target my-plugin-logic
 # a host with the plugin loaded hot-swaps the DSP — no reload, no dropout
 ```
 
+## A UI-package editor over a reloading shell
+
+`ReloadableShellCore` (`reloadable_shell_core.hpp`) is the same shell with no
+dependency on Pulp's view layer. `ReloadableShell` derives from it and adds only
+the `create_view()` forwarding described below. Use the core class when the
+plug-in's editor comes from a UI package (`pulp_add_plugin(... UI <package>)`),
+for example the Vellum scripted editor:
+
+- the editor is built by the package's `editor_factory()` and bound to the
+  shell, not to the logic, so the logic stays DSP-only and links no UI;
+- the shell bumps `editor_reload_generation()` after each successful swap, and
+  the editor reloads its script once on its next idle tick (a rejected build
+  changes nothing, and a failed editor reload is retried on the next tick);
+- a DSP-only logic needs `pulp_reload_host()`, not `pulp_reload_host_ui()`.
+
+The editor's assets and storage identity key on the shell's `descriptor()`,
+which is the loaded logic's descriptor, or `com.pulp.reloadable-shell` when no
+logic loaded. `integrations/pulp-vellum/tests/test_reloadable_shell_editor.cpp`
+drives real logic swaps through the shell's watcher under the Vellum scripted
+editor root.
+
 ## Hot-reloading the UI too (thin logic)
 
 A reload can swap the **editor** as well as the DSP: `ReloadableShell::create_view()`
@@ -266,7 +287,8 @@ hot-swap on WASM would need module-instance swapping and is out of scope here.
 
 - Engine: `core/format/include/pulp/format/reload/`
   (`reload_abi.hpp`, `processor_hotswap_slot.hpp`, `reload_transaction.hpp`,
-  `reload_controller.hpp`, `reloadable_shell.hpp`).
+  `reload_controller.hpp`, `reloadable_shell_core.hpp`, `reloadable_shell.hpp`).
 - CMake: [`pulp_add_reload_logic`](../status/cmake-functions.yaml).
 - Tests: `test/test_hotswap_slot.cpp`, `test/test_reload_transaction.cpp`,
-  `test/test_reload_controller.cpp`, `test/test_reloadable_shell.cpp`.
+  `test/test_reload_controller.cpp`, `test/test_reloadable_shell.cpp`,
+  `integrations/pulp-vellum/tests/test_reloadable_shell_editor.cpp`.

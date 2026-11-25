@@ -11,7 +11,7 @@ modules:
 
   - name: pulp_vellum
     path: integrations/pulp-vellum
-    summary: The parameter bridge between the editor-host contract and Vellum value interfaces presenting a ParamPort as a Vellum ParamModel with nested gestures echo suppression restore replay text parsing and modulation readout and a VisualPort as a ValueFeed built only against an installed Vellum SDK
+    summary: The parameter bridge between the editor-host contract and Vellum value interfaces presenting a ParamPort as a Vellum ParamModel with nested gestures echo suppression restore replay text parsing and modulation readout and a VisualPort as a ValueFeed and a scripted editor that reloads on a view-free reload shell hot swap built only against an installed Vellum SDK
     status: experimental
     dependencies: [format]
     docs: reference/modules.md#pulp_vellum
