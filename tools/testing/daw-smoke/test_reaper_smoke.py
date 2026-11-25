@@ -1219,7 +1219,7 @@ class StallClassification(unittest.TestCase):
             session.reaper = pathlib.Path("/fake/REAPER")
             session.portable = portable
             session.reaper_out = portable / "reaper.out.txt"
-            session.args = argparse.Namespace(plugin_name="Thing", timeout=900,
+            session.args = argparse.Namespace(plugin_name="Thing", timeout=3,
                                               format="clap", plugin_path="/b/Thing.clap")
             session.proc = None
             warm = mock.Mock(pid=1)
