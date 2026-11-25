@@ -64,6 +64,9 @@ class ContractProcessor final : public pulp::format::Processor {
     std::pair<std::uint32_t, std::uint32_t> editor_size() const override {
         return g_editor_size;
     }
+    pulp::format::ViewSize view_size() const override {
+        return pulp::format::ViewSize{.preferred_width = 111, .preferred_height = 222};
+    }
 
   private:
     bool has_factory_;

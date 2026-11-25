@@ -51,10 +51,10 @@ NSSize pulp_auv3_initial_editor_size() {
 NSSize pulp_auv3_initial_editor_size(AUAudioUnit* audioUnit) {
     if ([audioUnit respondsToSelector:@selector(pulpProcessor)]) {
         if (auto* processor = [(PulpAudioUnit*)audioUnit pulpProcessor]) {
-            const auto hints = processor->view_size();
-            if (hints.preferred_width > 0 && hints.preferred_height > 0) {
-                return NSMakeSize(static_cast<CGFloat>(hints.preferred_width),
-                                  static_cast<CGFloat>(hints.preferred_height));
+            const auto [width, height] = processor->editor_size();
+            if (width > 0 && height > 0) {
+                return NSMakeSize(static_cast<CGFloat>(width),
+                                  static_cast<CGFloat>(height));
             }
         }
     }
