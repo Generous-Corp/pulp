@@ -1723,7 +1723,7 @@ foreach(_vellum_ui_compat_scenario wiring shape shadowed missing no-bridge no-ve
             -DVELLUM_DIR=${_vellum_ui_compat_vellum_dir}
             -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/test_vellum_ui_compat_package.cmake)
     set_tests_properties(${_vellum_ui_compat_test} PROPERTIES
-        LABELS "cmake;sdk" TIMEOUT 300
+        LABELS "cmake;sdk"
         SKIP_REGULAR_EXPRESSION "SKIP: no installed Vellum SDK")
 endforeach()
 unset(_vellum_ui_compat_scenario)

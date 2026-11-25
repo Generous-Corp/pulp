@@ -1689,6 +1689,18 @@ the bypass trailer by reflex:
   names the commit its binaries came from. It writes provenance JSON only; no
   header or covered root changes.
 
+- **The Vellum-backed UI target names**: `PulpVellumUiCompat.cmake` (installed
+  from `integrations/pulp-vellum/cmake/`, because `core_vellum_direction.py`
+  rejects `Vellum::` target names under `tools/cmake`) defines
+  `Pulp::view|canvas|render|view-native|design-import` as INTERFACE IMPORTED
+  targets over Vellum's mirror targets, but only for names the SDK no longer
+  exports itself. It installs no header and adds no archive, so no covered root
+  or release-matrix stem moves. The headers consumers reach through those names
+  are Vellum's (`vellum/...`), whose surface Vellum owns; note that the installed
+  mirror refuses `vellum/render/gpu_surface.hpp` and `skia_surface.hpp` with an
+  `#error`, so a probe or test reaching `Pulp::render` must use a supported
+  render header such as `render/texture_atlas.hpp`.
+
 ## A platform header installed for per-binary recompilation is not capability surface
 
 `PulpInstallRules.cmake` installs more than public API. The macOS ObjC cluster

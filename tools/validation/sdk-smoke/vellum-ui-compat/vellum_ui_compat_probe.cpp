@@ -24,8 +24,7 @@ int main() {
     vellum::render::AtlasPacker packer(64, 32);
     vellum::render::AtlasPacker::Region region;
     const bool ok = packer.allocate(16, 8, region) && region.w == 16 && region.h == 8;
-    std::printf("Pulp::render -> vellum::render::AtlasPacker::allocate %s\n",
-                ok ? "ok" : "failed");
+    std::printf("Pulp::render -> vellum::render::AtlasPacker::allocate %s\n", ok ? "ok" : "failed");
     return ok ? 0 : 1;
 }
 
@@ -43,7 +42,8 @@ int main() {
     return create != nullptr ? 0 : 1;
 }
 
-#elif defined(PULP_VELLUM_UI_COMPAT_PROBE_VIEW) || defined(PULP_VELLUM_UI_COMPAT_PROBE_DESIGN_IMPORT)
+#elif defined(PULP_VELLUM_UI_COMPAT_PROBE_VIEW) ||                                                 \
+    defined(PULP_VELLUM_UI_COMPAT_PROBE_DESIGN_IMPORT)
 #include <vellum/view/design_import.hpp>
 #if defined(PULP_VELLUM_UI_COMPAT_PROBE_VIEW)
 #include <vellum/view/plugin_view_host.hpp>
@@ -54,16 +54,15 @@ int main() {
 #endif
 
 int main() {
-    const auto ir = vellum::view::parse_designmd_yaml(
-        "---\n"
-        "name: Installed SDK probe\n"
-        "colors:\n"
-        "  primary: \"#336699\"\n"
-        "---\n");
+    const auto ir = vellum::view::parse_designmd_yaml("---\n"
+                                                      "name: Installed SDK probe\n"
+                                                      "colors:\n"
+                                                      "  primary: \"#336699\"\n"
+                                                      "---\n");
     const auto primary = ir.tokens.colors.find("primary");
     const bool ok = primary != ir.tokens.colors.end() && primary->second == "#336699";
-    std::printf("%s -> vellum::view::parse_designmd_yaml primary=%s\n",
-                PULP_VELLUM_UI_COMPAT_NAME, ok ? primary->second.c_str() : "missing");
+    std::printf("%s -> vellum::view::parse_designmd_yaml primary=%s\n", PULP_VELLUM_UI_COMPAT_NAME,
+                ok ? primary->second.c_str() : "missing");
     return ok ? 0 : 1;
 }
 
