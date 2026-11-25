@@ -186,7 +186,7 @@
         "test_clean_lane_builds"
       ],
       "cwd": "{repo}/tools/scripts",
-      "timeout": 300.0
+      "timeout": 120.0
     },
     {
       "name": "clean-worktree-builds-selftest",
