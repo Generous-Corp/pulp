@@ -201,7 +201,7 @@ The required gate excludes these groups with one CTest filter,
 the same string). The other lanes filter differently and deliberately: a macOS
 `push` to `main` excludes `validation|slow|performance|bench|quality-lab` and so
 still runs `source-selftest`, a Linux or Windows push excludes only
-`validation`, and `cross-platform-check.yml` excludes only `validation|slow`. Read the lane you mean; the filters are not uniform. It is set in
+`validation`, and `cross-platform-check.yml` excludes `validation|slow` (plus `source-selftest` on its Windows job, whose copy of those checkout-only scripts is redundant with the required Linux run). Read the lane you mean; the filters are not uniform. It is set in
 [`.shipyard/config.toml`](../../.shipyard/config.toml) (`[validation.default]`,
 `test =`).
 
@@ -291,6 +291,12 @@ stopped compiling and no Pulp check noticed.
   tests need Vellum's view layer (`Vellum::MirrorView_core`), which is in Vellum
   main's SDK but not in the v0.2.0 release, so this lane, which builds against
   main, is where they run until `pulp.lock` pins a release that ships it.
+- **View components.** `PULP_ENABLE_PULP_VELLUM_COMPONENTS` is on in the same
+  configure, and `pulp-test-pulp-vellum-components` (ctest label
+  `pulp-vellum-components`, also matched by `-L pulp-vellum`) builds the
+  retained Pulp view components against Vellum main's view layer and renders
+  them offscreen. PRs touching `integrations/pulp-vellum-components/**` run the
+  lane.
 - **Vellum-backed UI target names.** The `pulp-vellum` filter also runs
   `cmake-vellum-ui-compat-real` and `cmake-vellum-ui-compat-wrong-version`. In a
   configure that found Vellum they get that label and `REQUIRE_VELLUM`, so they

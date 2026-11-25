@@ -2225,3 +2225,11 @@ belongs in the existing reviewed header it extends, not in a new public header:
 a new `core/midi/include/pulp/midi/*.hpp` fails `--check` as an unclassified
 public header until it is registered. Keep test-only seams in a `core/*/src/`
 header that the test includes by relative path.
+
+## An optional integration package's headers install through PulpInstallRules
+
+Headers under an optional `integrations/<package>/include/pulp/` root are
+installed by a conditional block in `tools/cmake/PulpInstallRules.cmake` and
+listed in the Doxyfile INPUT roots plus `doxygen_installed_header_check.py`.
+Adding a package means adding all three, or the installed-header parity check
+fails.

@@ -13,6 +13,13 @@ if(TARGET pulp-render)
 endif()
 pulp_add_test_group(pulp-test-group-view-widgets LIBRARIES ${_pulp_view_group_libs})
 
+# The WidgetBridge cases that recurse until QuickJS's own stack limit trips need
+# more native stack than MSVC's 1 MB default, or the process overflows first.
+# The web-compat executables get the same headroom on Apple and Linux.
+if(MSVC)
+    target_link_options(pulp-test-group-view-widgets PRIVATE /STACK:16777216)
+endif()
+
 # Platform maturity tests (cursor, focus, IME, context menu, accessibility)
 pulp_add_test_suite(pulp-test-platform-maturity GROUP pulp-test-group-view-widgets
     LIBRARIES pulp::view)
