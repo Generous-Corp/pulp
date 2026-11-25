@@ -183,7 +183,7 @@ def busy_reason(reaper_pids: Iterable[int], busy_flag: Path | None) -> str | Non
 
 def running_reaper_pids() -> list[int]:
     """PIDs whose process name is exactly REAPER (never an argv match)."""
-    r = subprocess.run(["pgrep", "-x", REAPER_PROCESS_NAME], capture_output=True, text=True)
+    r = subprocess.run(["pgrep", "-x", REAPER_PROCESS_NAME], capture_output=True, text=True, encoding="utf-8")
     return [int(tok) for tok in r.stdout.split() if tok.isdigit()]
 
 
@@ -199,7 +199,7 @@ DefaultsRunner = Callable[[list[str]], "subprocess.CompletedProcess[str]"]
 
 
 def _run_defaults(argv: list[str]) -> "subprocess.CompletedProcess[str]":
-    return subprocess.run(["defaults", *argv], capture_output=True, text=True)
+    return subprocess.run(["defaults", *argv], capture_output=True, text=True, encoding="utf-8")
 
 
 class scoped_persistence_opt_out:
@@ -340,7 +340,7 @@ def parse_ps(text: str) -> list[Proc]:
 
 def list_processes() -> list[Proc]:
     r = subprocess.run(["ps", "-axo", "pid=,ppid=,etime=,args="],
-                       capture_output=True, text=True)
+                       capture_output=True, text=True, encoding="utf-8")
     return parse_ps(r.stdout)
 
 

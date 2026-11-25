@@ -1020,7 +1020,7 @@ class IsolatedConfig(unittest.TestCase):
         with tempfile.TemporaryDirectory() as home:
             real = pathlib.Path(home) / "Library/Application Support/REAPER"
             real.mkdir(parents=True)
-            (real / "reaper.ini").write_text(self.BASE)
+            (real / "reaper.ini").write_text(self.BASE, encoding="utf-8")
             plugin = pathlib.Path(home) / "Thing.clap"
             plugin.mkdir()
             s = rs.ReaperSession.__new__(rs.ReaperSession)
@@ -1033,7 +1033,7 @@ class IsolatedConfig(unittest.TestCase):
             s.au_installed = None
             with mock.patch.dict(os.environ, {"HOME": home}):
                 rs.ReaperSession.place_plugin(s)
-            ini = (s.portable / "reaper.ini").read_text()
+            ini = (s.portable / "reaper.ini").read_text(encoding="utf-8")
             self.assertNotIn("Plug-Ins", ini)
 
 
@@ -1054,8 +1054,8 @@ class ForeignCacheEntries(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary:
             portable = pathlib.Path(temporary)
             (portable / "reaper-vstplugins_arm64.ini").write_text(
-                "[vstcache]\nThing.vst3=00,1,Thing (Pulp)\nOther.vst3=00\n")
-            (portable / "reaper-install-rev.txt").write_text("1")
+                "[vstcache]\nThing.vst3=00,1,Thing (Pulp)\nOther.vst3=00\n", encoding="utf-8")
+            (portable / "reaper-install-rev.txt").write_text("1", encoding="utf-8")
             session = rs.ReaperSession.__new__(rs.ReaperSession)
             session.reaper = pathlib.Path("/fake/REAPER")
             session.portable = portable
@@ -1095,7 +1095,7 @@ class LaunchArguments(unittest.TestCase):
             with mock.patch.object(guard, "list_processes", return_value=[]), \
                  mock.patch.object(guard, "list_windows", return_value=[]):
                 self.assertIn("NOT-ISOLATED", session.stall_reason(proc))
-            (portable / "reaper-install-rev.txt").write_text("1")
+            (portable / "reaper-install-rev.txt").write_text("1", encoding="utf-8")
             with mock.patch.object(guard, "list_processes", return_value=[]), \
                  mock.patch.object(guard, "list_windows", return_value=[]):
                 self.assertNotIn("NOT-ISOLATED", session.stall_reason(proc) or "")
@@ -1107,7 +1107,7 @@ class BusyHost(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary:
             flag = pathlib.Path(temporary) / "ONSCREEN-BUSY"
             self.assertIsNone(guard.busy_reason([], flag))
-            flag.write_text("busy")
+            flag.write_text("busy", encoding="utf-8")
             self.assertIn("busy flag", guard.busy_reason([], flag))
 
     def test_it_waits_for_the_host_then_proceeds(self):
@@ -1260,7 +1260,7 @@ def test_seeded_config_never_reopens_the_users_project(tmp_path, monkeypatch):
         "recent01=/Users/someone/Desktop/Another Private.RPP\n"
         "recent02=/Users/someone/Music/Unreleased.RPP\n"
         "[MoreStuff]\n"
-        "keepme=1\n")
+        "keepme=1\n", encoding="utf-8")
     monkeypatch.setattr(os.path, "expanduser", lambda p: p.replace(
         "~/Library/Application Support/REAPER", str(real)).replace(
         "~", str(tmp_path)))
@@ -1277,7 +1277,7 @@ def test_seeded_config_never_reopens_the_users_project(tmp_path, monkeypatch):
     session.au_installed = None
     assert session.place_plugin() is None
 
-    ini = (session.portable / "reaper.ini").read_text()
+    ini = (session.portable / "reaper.ini").read_text(encoding="utf-8")
     # The two that matter.
     assert "Private Session.RPP" not in ini, "it would reopen the user's project"
     assert "Unreleased.RPP" not in ini, "it copied the user's recent-project list"

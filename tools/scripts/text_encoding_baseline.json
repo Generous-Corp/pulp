@@ -1,7 +1,7 @@
 {
   "schema": 1,
   "comment": "Per-file count of text I/O calls without encoding=. Only ever lowered; regenerate with text_encoding_lint.py --write.",
-  "total": 4152,
+  "total": 4150,
   "files": {
     "test/cmake/test_forge_catalog_install.py": 22,
     "test/harness/test_canvas2d_adapter.py": 1,
@@ -876,7 +876,7 @@
     "tools/testing/daw-smoke/sample_region_native_audio_oracle.py": 3,
     "tools/testing/daw-smoke/sample_region_native_reaper.py": 18,
     "tools/testing/daw-smoke/sample_region_native_smoke.py": 1,
-    "tools/testing/daw-smoke/test_reaper_smoke.py": 20,
+    "tools/testing/daw-smoke/test_reaper_smoke.py": 18,
     "tools/validation/mlx_named_model_harness.py": 1,
     "tools/validation/sample_region_installed_sdk.py": 19,
     "tools/validation/test_mlx_named_model_harness.py": 1
