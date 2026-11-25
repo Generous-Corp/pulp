@@ -7,8 +7,9 @@
 # Pulp's own editor stack (pulp::view code, the format ViewBridge, or the legacy
 # scripted editor builder), so a UI_SCRIPT plug-in declared with UI_ENGINE
 # vellum needs nothing the view layer deletion removes.
-# ROUTE=legacy: the image defines Pulp's own editor stack. Run on a plain
-# UI_SCRIPT plug-in, it is the control that the census can see that stack.
+# ROUTE=legacy: the image defines Pulp's own editor stack. Run on a listing
+# from a plain UI_SCRIPT plug-in, it is the control that the census can see
+# that stack.
 #
 # Only definitions count, never undefined references, and never a standard
 # library symbol instantiated over one of these types.

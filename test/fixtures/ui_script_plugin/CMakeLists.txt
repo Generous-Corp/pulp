@@ -83,16 +83,34 @@ if(TARGET pulp-vellum-scripted AND CMAKE_NM)
         set_tests_properties(ui-script-vellum-route-${_route_format} PROPERTIES
             LABELS "pulp-vellum;format;scripted-ui" TIMEOUT 60)
     endforeach()
-    # The census control: the plain UI_SCRIPT plug-in must show Pulp's editor
-    # stack, or a vellum verdict above proves nothing.
-    if(TARGET PulpUiScriptFixture_CLAP)
-        add_test(NAME ui-script-vellum-route-control
-            COMMAND ${CMAKE_COMMAND} -DNM=${CMAKE_NM}
-                "-DBINARY=$<TARGET_FILE:PulpUiScriptFixture_CLAP>" -DROUTE=legacy
-                -P "${CMAKE_CURRENT_SOURCE_DIR}/check_vellum_route.cmake")
-        set_tests_properties(ui-script-vellum-route-control PROPERTIES
-            LABELS "pulp-vellum;format;scripted-ui" TIMEOUT 60)
-        list(APPEND _vellum_route_targets PulpUiScriptFixture_CLAP)
+    # The census on fixed listings (cat stands in for nm), with symbols taken
+    # from real images. A listing with Pulp's editor stack reads as legacy. An
+    # image that defines the Vellum factory beside that stack (what a
+    # UI_ENGINE vellum plug-in linked to the view layer looks like) fails the
+    # vellum verdict. Undefined references and std instantiations over a
+    # pulp::view type do not count against a Vellum image.
+    find_program(_ui_script_census_cat cat)
+    if(_ui_script_census_cat)
+        foreach(_control legacy-passes mixed-not-vellum vellum-ignores-references)
+            if(_control STREQUAL "legacy-passes")
+                set(_listing legacy_route.nm)
+                set(_route legacy)
+            elseif(_control STREQUAL "mixed-not-vellum")
+                set(_listing mixed_route.nm)
+                set(_route vellum)
+            else()
+                set(_listing vellum_route.nm)
+                set(_route vellum)
+            endif()
+            add_test(NAME ui-script-vellum-route-census-${_control}
+                COMMAND ${CMAKE_COMMAND} -DNM=${_ui_script_census_cat}
+                    "-DBINARY=${CMAKE_CURRENT_SOURCE_DIR}/${_listing}" -DROUTE=${_route}
+                    -P "${CMAKE_CURRENT_SOURCE_DIR}/check_vellum_route.cmake")
+            set_tests_properties(ui-script-vellum-route-census-${_control} PROPERTIES
+                LABELS "pulp-vellum;format;scripted-ui" TIMEOUT 60)
+        endforeach()
+        set_tests_properties(ui-script-vellum-route-census-mixed-not-vellum PROPERTIES
+            WILL_FAIL TRUE)
     endif()
     add_custom_target(pulp-ui-script-vellum-fixture DEPENDS ${_vellum_route_targets})
     # The census reads built plug-in images, which no labelled test executable
@@ -105,7 +123,7 @@ if(TARGET pulp-vellum-scripted AND CMAKE_NM)
         LABELS "pulp-vellum;format;scripted-ui" TIMEOUT 1800
         FIXTURES_SETUP ui-script-vellum-route)
     get_property(_vellum_route_tests DIRECTORY PROPERTY TESTS)
-    list(FILTER _vellum_route_tests INCLUDE REGEX "^ui-script-vellum-route-(vst3|clap|au|standalone|control)$")
+    list(FILTER _vellum_route_tests INCLUDE REGEX "^ui-script-vellum-route-(vst3|clap|au|standalone)$")
     set_tests_properties(${_vellum_route_tests} PROPERTIES FIXTURES_REQUIRED ui-script-vellum-route)
 endif()
 
