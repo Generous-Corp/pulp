@@ -2373,3 +2373,11 @@ a known-bad input proves nothing, so include the historical tags that failed
   posted; for example an `update` rule comes back without its parameters.
 - `gh attestation verify --bundle <file>` refuses a bundle whose name does not
   end in `.json` or `.jsonl`; name a downloaded bundle accordingly.
+
+## Optional Vellum packages are built into the release SDK by flag
+
+`release-cli.yml` turns on `PULP_ENABLE_PULP_VELLUM`, `_AUDIO` and `_COMPONENTS`
+for the darwin-arm64 SDK leg. A new optional package must be listed in the same
+flag array, in `release_product_matrix.json` (darwin-arm64 stems) and in the
+conditional `PULP_SDK_TARGETS` append in `PulpInstallRules.cmake`, or the SDK
+archive silently omits it.

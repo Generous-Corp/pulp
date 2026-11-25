@@ -63,7 +63,8 @@ INPUT                  = ../../core/audio/include \
                          ../../inspect/include \
                          ../../integrations/pulp-native/include \
                          ../../integrations/pulp-vellum/include \
-                         ../../integrations/pulp-vellum-audio/include
+                         ../../integrations/pulp-vellum-audio/include \
+                         ../../integrations/pulp-vellum-components/include
 RECURSIVE              = YES
 FILE_PATTERNS          = *.hpp *.h *.inc *.hpp.in
 
