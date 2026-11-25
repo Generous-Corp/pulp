@@ -4,7 +4,7 @@
 find_package(Vellum CONFIG REQUIRED)
 
 add_library(pulp-vellum-audio STATIC src/audio_display_provider.cpp src/audio_widgets.cpp
-    src/multi_meter.cpp src/register_audio_widgets.cpp src/spectrogram_view.cpp
+    src/eq_curve_view.cpp src/graph_scale.cpp src/multi_meter.cpp src/register_audio_widgets.cpp src/spectrogram_view.cpp
     src/waveform_editor.cpp src/waveform_editor_primitives.cpp src/waveform_view.cpp)
 add_library(pulp::vellum-audio ALIAS pulp-vellum-audio)
 target_include_directories(pulp-vellum-audio PUBLIC
