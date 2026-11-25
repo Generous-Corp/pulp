@@ -1,0 +1,11 @@
+{
+ "name": "clean-lane-builds-selftest",
+ "record": {
+  "entry": "tools/scripts/test_clean_lane_builds.py",
+  "inputs": [
+   "tools/scripts/clean_lane_builds.py",
+   "tools/scripts/test_clean_lane_builds.py"
+  ],
+  "kind": "python"
+ }
+}

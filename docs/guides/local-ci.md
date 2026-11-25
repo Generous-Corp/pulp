@@ -9131,3 +9131,68 @@ workflows (`web-plugins.yml`, `wclap-cloudflare.yml`, `format-baseline-diff.yml`
 call it as `python3 tools/scripts/download_retry.py URL DEST`. The macOS
 `brew install ccache` step in `build.yml` uses the same schedule inline. A new
 workflow download should use the helper rather than a bare `curl -fsSL`.
+
+## Reclaiming agent lane clones
+
+Agent lanes live in plain clones under `<worktrees>/lanes/<lane>/<clone>`, which
+`clean_worktree_builds.sh` and `clean_build_cov.sh` never see because they only
+walk `git worktree list`. `tools/scripts/clean_lane_builds.py` covers those
+clones. It is a dry run unless `--yes` is passed.
+
+```bash
+python3 tools/scripts/clean_lane_builds.py --root /Volumes/Atelier/Code/agent-worktrees/lanes            # report
+python3 tools/scripts/clean_lane_builds.py --root <lanes dir> --verbose                                    # explain every held entry
+python3 tools/scripts/clean_lane_builds.py --root <lanes dir> --lane w-foo --yes                           # act on one lane
+```
+
+What it considers, per git checkout found up to three levels below the root:
+
+- top-level build directories (`build`, `build-*`, `build_*`, `_build`);
+- large untracked artifact entries (package outputs, extracted SDK copies;
+  the name patterns are `ARTIFACT_PATTERNS` in the script, the size floor is
+  `--min-artifact-mb`, default 100);
+- the whole lane directory.
+
+A build or artifact entry is reclaimable only when all of these hold:
+
+1. HEAD is an ancestor of the remote default branch, or a pull request that
+   contains HEAD is merged or closed and none is open. `ghread` answers for
+   Generous-Corp repositories and `ghapp` for danielraffel repositories; a
+   commit with no PR, an unknown owner or a failed call blocks. Merged and
+   closed answers are cached for six hours in
+   `~/.cache/pulp/lane-reaper/pr-states.json`, so a repeat run makes no calls.
+2. Nothing in the checkout changed in the last 48 hours (`--idle-hours`).
+3. No live process has a cwd or open file under the checkout. One `lsof`
+   snapshot is taken per run and, as a control, must list the reaper itself;
+   a listing without it, or no `lsof`, stops the run with exit 3.
+4. The tracked tree is clean.
+5. The entry holds no tracked file and has no `.reaper-keep` marker.
+
+A whole lane is reclaimable only when every checkout in it is merged, clean
+(including no untracked files outside artifact entries), has no unpushed
+commit and no stash, the whole lane has been idle for 7 days
+(`--lane-idle-days`), nothing is open under it, no git repository hides inside
+it that the scan did not assess, and no checkout is a linked worktree. A lane
+with no checkout is never reclaimed. Put an empty `.reaper-keep` file in a lane,
+checkout or entry to opt it out.
+
+`--yes` re-measures with a fresh process listing, acts only on entries that are
+still reclaimable, renames each path to a `.reaping-*` sibling and removes only
+that renamed path. An interrupted removal leaves the `.reaping-*` directory,
+which the next run finishes once it is idle. Symlinks are never followed.
+
+Tests: `tools/scripts/test_clean_lane_builds.py` (ctest `clean-lane-builds-selftest`).
+
+### Scheduling it
+
+`tools/ci/install-lane-reaper-launchagent.sh` renders
+`tools/ci/com.danielraffel.pulp.lane-reaper.plist.template` into a daily 04:30
+LaunchAgent (nice 19, low-priority IO, log at `~/Library/Logs/pulp-lane-reaper.log`).
+Installing is an operator decision. Without `--act` the job only logs what it
+would reclaim; with `--act` it passes `--yes`. Install from a checkout that
+tracks main, because the job runs the script from that checkout.
+
+```bash
+tools/ci/install-lane-reaper-launchagent.sh --root /Volumes/Atelier/Code/agent-worktrees/lanes --act
+tools/ci/install-lane-reaper-launchagent.sh --uninstall
+```
