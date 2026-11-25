@@ -328,7 +328,7 @@ elseif(SCENARIO STREQUAL "no-vellum" OR SCENARIO STREQUAL "real" OR SCENARIO STR
         # the refusal is the gate's and not an accident of missing targets.
         # CMake wraps warning text, so match it with whitespace collapsed.
         string(REGEX REPLACE "[ \n]+" " " _flat "${_out}${_err}")
-        _expect("${_flat}" "serves Pulp::view;Pulp::canvas;Pulp::render;Pulp::view-native;Pulp::design-import from Vellum, but the Vellum package was not found" "the config's warning naming the cause")
+        _expect("${_flat}" "CMake Warning at [^ ]*/PulpConfig.cmake:[0-9]+ \\(message\\): Pulp: this SDK serves Pulp::view;Pulp::canvas;Pulp::render;Pulp::view-native;Pulp::design-import from Vellum, but the Vellum package was not found" "the config's warning naming the cause")
         _expect("${_out}${_err}" "Pulp::view is not Vellum-backed in this SDK" "a configure error naming the first name")
         message(STATUS "${SCENARIO}: warned and refused as expected")
         return()
