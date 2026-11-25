@@ -11,7 +11,7 @@
 /// scripted editor) uses `ReloadableShellCore` directly and needs no Pulp view.
 
 #include <pulp/format/reload/reloadable_shell_core.hpp>
-#include <pulp/view/view.hpp>  // complete View for create_view() forwarding
+#include <pulp/view/view.hpp> // complete View for create_view() forwarding
 
 #include <memory>
 #include <string>
@@ -20,7 +20,7 @@
 namespace pulp::format::reload {
 
 class ReloadableShell : public ReloadableShellCore {
-public:
+  public:
     /// @param logic_path path to the logic shared library. Empty resolves it
     /// from the `PULP_RELOAD_LOGIC_PATH` environment variable.
     explicit ReloadableShell(std::string logic_path = {})

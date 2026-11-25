@@ -51,19 +51,19 @@
 #include <pulp/format/reload/processor_hotswap_slot.hpp>
 #include <pulp/format/reload/reload_abi.hpp>
 #include <pulp/format/reload/reload_controller.hpp>
-#include <pulp/format/reload/reload_trust_policy.hpp>
 #include <pulp/format/reload/reload_library.hpp>
 #include <pulp/format/reload/reload_transaction.hpp>
+#include <pulp/format/reload/reload_trust_policy.hpp>
 #include <pulp/runtime/log.hpp>
 #include <pulp/state/store.hpp>
 
 #include <algorithm>
 #include <atomic>
-#include <functional>
 #include <chrono>
 #include <cstdint>
 #include <cstdlib>
 #include <filesystem>
+#include <functional>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -74,9 +74,9 @@
 #include <vector>
 
 #if defined(_WIN32)
-#include <process.h>   // _getpid
+#include <process.h> // _getpid
 #else
-#include <unistd.h>    // getpid
+#include <unistd.h> // getpid
 #endif
 
 // Ship-safety gate. The dev filesystem WATCHER (the
@@ -95,7 +95,7 @@
 namespace pulp::format::reload {
 
 class ReloadableShellCore : public Processor {
-public:
+  public:
     /// Poll interval for the watcher thread. Small enough to feel instant in a
     /// dev loop, large enough not to spin.
     static constexpr std::chrono::milliseconds kPollInterval{150};
@@ -110,11 +110,15 @@ public:
         load_initial();
     }
 
-    ~ReloadableShellCore() override { stop_watcher(); }
+    ~ReloadableShellCore() override {
+        stop_watcher();
+    }
 
     // ── Processor interface ──────────────────────────────────────────────
 
-    PluginDescriptor descriptor() const override { return descriptor_; }
+    PluginDescriptor descriptor() const override {
+        return descriptor_;
+    }
 
     // A raw pointer cannot carry the hot-swap slot's lifetime lease beyond this
     // call. Fail closed for legacy callers; reload-aware consumers use the
@@ -123,17 +127,21 @@ public:
         return nullptr;
     }
 
-    void visit_value_channels(
-        const std::function<void(view::ValueChannelSet*)>& visitor) override {
+    void visit_value_channels(const std::function<void(view::ValueChannelSet*)>& visitor) override {
         const bool visited = slot_.with_active([&](Processor& p) {
             p.visit_value_channels(visitor);
             return true;
         });
-        if (!visited && visitor) visitor(nullptr);
+        if (!visited && visitor)
+            visitor(nullptr);
     }
 
-    view::ScriptedUiSession* active_scripted_ui() override { return nullptr; }
-    const view::ScriptedUiSession* active_scripted_ui() const override { return nullptr; }
+    view::ScriptedUiSession* active_scripted_ui() override {
+        return nullptr;
+    }
+    const view::ScriptedUiSession* active_scripted_ui() const override {
+        return nullptr;
+    }
 
     void visit_active_scripted_ui(
         const std::function<void(view::ScriptedUiSession*)>& visitor) override {
@@ -141,7 +149,8 @@ public:
             p.visit_active_scripted_ui(visitor);
             return true;
         });
-        if (!visited && visitor) visitor(nullptr);
+        if (!visited && visitor)
+            visitor(nullptr);
     }
 
     void visit_active_scripted_ui(
@@ -150,7 +159,8 @@ public:
             static_cast<const Processor&>(p).visit_active_scripted_ui(visitor);
             return true;
         });
-        if (!visited && visitor) visitor(nullptr);
+        if (!visited && visitor)
+            visitor(nullptr);
     }
 
     // This shell's editor reloads in place on each hot swap. The editor polls
@@ -158,7 +168,9 @@ public:
     // script) when it changes, so the notification never crosses threads
     // unsafely: the counter is bumped on the control or watcher thread and read
     // on the UI thread.
-    bool supports_editor_reload() const override { return true; }
+    bool supports_editor_reload() const override {
+        return true;
+    }
     std::uint64_t editor_reload_generation() const override {
         return reload_generation_.load(std::memory_order_acquire);
     }
@@ -192,12 +204,15 @@ public:
     // The host caches latency once (for plugin-delay compensation), so it is part
     // of the frozen contract: report the initial logic's latency, and a reload
     // that changes latency is rejected (see prepare()/the reload note below).
-    int latency_samples() const override { return initial_latency_; }
+    int latency_samples() const override {
+        return initial_latency_;
+    }
 
     void define_parameters(state::StateStore& store) override {
         // Mirror the initial logic's parameter contract so the host sees the
         // automatable surface the DSP expects. Reloads must match this contract.
-        if (initial_) initial_->define_parameters(store);
+        if (initial_)
+            initial_->define_parameters(store);
     }
 
     void prepare(const PrepareContext& context) override {
@@ -210,7 +225,8 @@ public:
         if (initial_) {
             initial_->set_state_store(&state());
             initial_->prepare(context);
-            (void)slot_.swap(std::move(initial_));   // install the starting DSP (first install never fades)
+            (void)slot_.swap(
+                std::move(initial_)); // install the starting DSP (first install never fades)
             initial_.reset();
         } else {
             // Re-prepare (e.g. a sample-rate change): the DSP already in the slot
@@ -250,20 +266,20 @@ public:
             std::optional<ReloadController::Baseline> live =
                 controller_ ? controller_->baseline() : loaded_baseline_;
             controller_.emplace(*session_, logic_path_, std::filesystem::path{},
-                                 reload_trust_policy_);
+                                reload_trust_policy_);
             if (live)
                 controller_->set_baseline(*live);
 #endif
         }
-        start_watcher();  // no-op (compiled out) when the watcher is gated off
+        start_watcher(); // no-op (compiled out) when the watcher is gated off
     }
 
-    void release() override { stop_watcher(); }
+    void release() override {
+        stop_watcher();
+    }
 
-    void process(audio::BufferView<float>& output,
-                 const audio::BufferView<const float>& input,
-                 midi::MidiBuffer& midi_in,
-                 midi::MidiBuffer& midi_out,
+    void process(audio::BufferView<float>& output, const audio::BufferView<const float>& input,
+                 midi::MidiBuffer& midi_in, midi::MidiBuffer& midi_out,
                  const ProcessContext& context) override {
         // Audio thread: forward to the live DSP. On swap contention the slot
         // passes input through for one block and never blocks/allocates/destroys.
@@ -279,28 +295,44 @@ public:
         std::function<void()> on_reloaded;
         {
             std::lock_guard<std::mutex> g(controller_mutex_);
-            if (!controller_) return {ReloadOutcome::Status::RejectedLoadFailed, "not prepared"};
+            if (!controller_)
+                return {ReloadOutcome::Status::RejectedLoadFailed, "not prepared"};
             outcome = controller_->reload_now();
             record(outcome);
             if (outcome.ok()) {
-                reload_generation_.fetch_add(1, std::memory_order_release);  // editor reload edge
+                reload_generation_.fetch_add(1, std::memory_order_release); // editor reload edge
                 on_reloaded = on_reloaded_snapshot();
             }
         }
-        if (on_reloaded) on_reloaded();   // fire AFTER releasing the lock (re-entrant-safe)
+        if (on_reloaded)
+            on_reloaded(); // fire AFTER releasing the lock (re-entrant-safe)
         return outcome;
     }
 
-    const std::string& logic_path() const { return logic_path_; }
-    std::uint64_t reload_attempts() const { return reload_attempts_.load(std::memory_order_relaxed); }
-    std::uint64_t successful_reloads() const { return successful_reloads_.load(std::memory_order_relaxed); }
-    ReloadOutcome::Status last_status() const { return last_status_.load(std::memory_order_relaxed); }
+    const std::string& logic_path() const {
+        return logic_path_;
+    }
+    std::uint64_t reload_attempts() const {
+        return reload_attempts_.load(std::memory_order_relaxed);
+    }
+    std::uint64_t successful_reloads() const {
+        return successful_reloads_.load(std::memory_order_relaxed);
+    }
+    ReloadOutcome::Status last_status() const {
+        return last_status_.load(std::memory_order_relaxed);
+    }
     /// Total wall-clock of the last successful DSP reload, ms.
-    double last_reload_ms() const { return last_reload_ms_.load(std::memory_order_relaxed); }
-    std::uint64_t contention_blocks() const { return slot_.contention_blocks(); }
-    bool has_active_dsp() const { return slot_.has_active(); }
+    double last_reload_ms() const {
+        return last_reload_ms_.load(std::memory_order_relaxed);
+    }
+    std::uint64_t contention_blocks() const {
+        return slot_.contention_blocks();
+    }
+    bool has_active_dsp() const {
+        return slot_.has_active();
+    }
 
-protected:
+  protected:
     /// Run `fn` against the live logic processor under the slot's reader lock
     /// (see ProcessorHotSwapSlot::with_active). Returns a value-initialized
     /// result when no logic is loaded.
@@ -309,9 +341,10 @@ protected:
         return slot_.with_active(std::forward<Fn>(fn));
     }
 
-private:
+  private:
     static std::string resolve_logic_path(std::string explicit_path) {
-        if (!explicit_path.empty()) return explicit_path;
+        if (!explicit_path.empty())
+            return explicit_path;
         if (const char* env = std::getenv("PULP_RELOAD_LOGIC_PATH"); env && *env)
             return std::string(env);
         return {};
@@ -338,15 +371,15 @@ private:
         std::error_code ec;
         const fs::path src(logic_path);
         const fs::path staged =
-            src.parent_path() /
-            (src.stem().string() + ".initial." + std::to_string(pid) + "." +
-             std::to_string(counter.fetch_add(1, std::memory_order_relaxed)) +
-             src.extension().string());
+            src.parent_path() / (src.stem().string() + ".initial." + std::to_string(pid) + "." +
+                                 std::to_string(counter.fetch_add(1, std::memory_order_relaxed)) +
+                                 src.extension().string());
         fs::copy_file(src, staged, fs::copy_options::overwrite_existing, ec);
         if (ec) {
             runtime::log_warn("[reload-shell] could not stage initial logic ({}); "
                               "loading in place — a rebuild that overwrites it while "
-                              "live may corrupt the image on Linux", ec.message());
+                              "live may corrupt the image on Linux",
+                              ec.message());
             return logic_path;
         }
         return staged.string();
@@ -418,7 +451,7 @@ private:
             return;
         }
         descriptor_ = p->descriptor();
-        initial_latency_ = p->latency_samples();        // freeze the host-cached latency
+        initial_latency_ = p->latency_samples(); // freeze the host-cached latency
         initial_ = std::move(p);
         initial_images_.push_back(std::move(image.lib)); // keep the code mapped
         runtime::log_info("[reload-shell] loaded initial logic: {}", logic_path_);
@@ -436,7 +469,8 @@ private:
 
     void start_watcher() {
 #if PULP_RELOAD_DEV_WATCHER
-        if (running_.exchange(true)) return;  // already running
+        if (running_.exchange(true))
+            return; // already running
         // The token is the release-artifact scan's string marker for the dev
         // watcher (tools/cmake/release_artifact_forbidden.json, gate
         // reload-ship): a stripped shipping build has no symbol table to
@@ -449,8 +483,10 @@ private:
 
     void stop_watcher() {
 #if PULP_RELOAD_DEV_WATCHER
-        if (!running_.exchange(false)) return;
-        if (watcher_.joinable()) watcher_.join();
+        if (!running_.exchange(false))
+            return;
+        if (watcher_.joinable())
+            watcher_.join();
 #endif
     }
 
@@ -471,13 +507,15 @@ private:
                     if (auto outcome = controller_->poll()) {
                         record(*outcome);
                         if (outcome->ok()) {
-                            reload_generation_.fetch_add(1, std::memory_order_release);  // editor reload edge
+                            reload_generation_.fetch_add(
+                                1, std::memory_order_release); // editor reload edge
                             on_reloaded = on_reloaded_snapshot();
                         }
                     }
                 }
             }
-            if (on_reloaded) on_reloaded();   // fire outside the lock (re-entrant-safe)
+            if (on_reloaded)
+                on_reloaded(); // fire outside the lock (re-entrant-safe)
             // Free a processor whose crossfade has finished (RT-safe reclaim:
             // the audio thread only marks the fade done; we free it here).
             slot_.reclaim();
@@ -515,20 +553,22 @@ private:
     // Snapshot the on-reloaded callback (caller holds controller_mutex_). The
     // caller fires it AFTER releasing the lock, so a callback that re-enters the
     // shell (reload_now / create_view) can't self-deadlock on controller_mutex_.
-    std::function<void()> on_reloaded_snapshot() const { return on_reloaded_; }
+    std::function<void()> on_reloaded_snapshot() const {
+        return on_reloaded_;
+    }
 
     std::string logic_path_;
-    ReloadTrustPolicy reload_trust_policy_;  // opt-in require_signed (default OFF)
+    ReloadTrustPolicy reload_trust_policy_; // opt-in require_signed (default OFF)
     PluginDescriptor descriptor_;
-    int initial_latency_ = 0;                     // host-cached latency of the initial logic
-    std::unique_ptr<Processor> initial_;          // pre-prepare; moved into slot_
-    std::vector<ReloadLibrary> initial_images_;   // retains the initial logic's code
+    int initial_latency_ = 0;                   // host-cached latency of the initial logic
+    std::unique_ptr<Processor> initial_;        // pre-prepare; moved into slot_
+    std::vector<ReloadLibrary> initial_images_; // retains the initial logic's code
     std::optional<ReloadController::Baseline>
         loaded_baseline_; // file version load_initial() loaded
     PrepareContext prepare_ctx_;
     ProcessorHotSwapSlot slot_;
 
-    std::mutex controller_mutex_;                 // serializes poll() vs reload_now()
+    std::mutex controller_mutex_; // serializes poll() vs reload_now()
     std::optional<ReloadSession> session_;
     std::optional<ReloadController> controller_;
 
@@ -536,10 +576,10 @@ private:
     std::atomic<bool> running_{false};
     std::atomic<std::uint64_t> reload_attempts_{0};
     std::atomic<std::uint64_t> successful_reloads_{0};
-    std::atomic<double> last_reload_ms_{0.0};     // wall-clock of the last swap
+    std::atomic<double> last_reload_ms_{0.0}; // wall-clock of the last swap
     std::atomic<ReloadOutcome::Status> last_status_{ReloadOutcome::Status::RejectedLoadFailed};
-    std::atomic<std::uint64_t> reload_generation_{0};  // editor reload counter (UI-thread read)
-    std::function<void()> on_reloaded_;           // host editor-rebuild hook (control thread)
+    std::atomic<std::uint64_t> reload_generation_{0}; // editor reload counter (UI-thread read)
+    std::function<void()> on_reloaded_;               // host editor-rebuild hook (control thread)
 };
 
 } // namespace pulp::format::reload

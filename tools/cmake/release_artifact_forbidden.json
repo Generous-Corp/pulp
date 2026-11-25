@@ -31,9 +31,9 @@
      "reason": "Retained sentinel core/runtime/src/trace.cpp emits in every PULP_TRACING=ON build; pulp ship refuses it and it is the string backstop for a stripped binary (tools/cli/ship_tracing_guard.hpp assembles its needle from halves so the CLI does not carry these bytes)."},
 
     {"id": "reload.watcher-loop", "kind": "symbol", "pattern": "watcher_loop", "gates": ["reload-ship"],
-     "reason": "ReloadableShellCore::watcher_loop is the filesystem watch / auto-dlopen thread body; a shipping build carries no such entry point."},
+     "reason": "ReloadableShell::watcher_loop is the filesystem watch / auto-dlopen thread body; a shipping build carries no such entry point."},
     {"id": "reload.watcher-armed-literal", "kind": "string", "pattern": "PULP_RELOAD_DEV_WATCHER_ACTIVE", "gates": ["reload-ship"],
-     "reason": "Log token ReloadableShellCore::start_watcher emits when the dev watcher thread starts; the string backstop for a stripped binary."},
+     "reason": "Log token ReloadableShell::start_watcher emits when the dev watcher thread starts; the string backstop for a stripped binary."},
 
     {"id": "bridge.exec-registrar", "kind": "symbol", "pattern": "register_platform_services_exec_api", "gates": ["bridge-exec-off"],
      "reason": "Registrar that installs exec/execAsync on the platform-services bridge."},

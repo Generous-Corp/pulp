@@ -22,7 +22,7 @@
 #include <system_error>
 #include <thread>
 
-#if !defined(RELOAD_LOGIC_UNITY) || !defined(RELOAD_LOGIC_COMPATIBLE) ||                        \
+#if !defined(RELOAD_LOGIC_UNITY) || !defined(RELOAD_LOGIC_COMPATIBLE) ||                           \
     !defined(RELOAD_LOGIC_INCOMPATIBLE) || !defined(RELOAD_WATCH_DIR)
 #error "RELOAD_LOGIC_{UNITY,COMPATIBLE,INCOMPATIBLE} and RELOAD_WATCH_DIR must be defined"
 #endif

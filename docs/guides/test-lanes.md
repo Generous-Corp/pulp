@@ -291,6 +291,12 @@ stopped compiling and no Pulp check noticed.
   tests need Vellum's view layer (`Vellum::MirrorView_core`), which is in Vellum
   main's SDK but not in the v0.2.0 release, so this lane, which builds against
   main, is where they run until `pulp.lock` pins a release that ships it.
+- **Reload shell under the Vellum editor.** `pulp-test-vellum-reload-shell`
+  (label `pulp-vellum-editor`) builds the view-free DAW reload shell
+  (`reloadable_shell_core.hpp`) into a target that cannot see Pulp's view
+  headers and hot-swaps real logic libraries under the Vellum scripted editor
+  root, so a view include in the shell or a lost reload edge fails here. PRs
+  touching that header run the lane.
 - **View components.** `PULP_ENABLE_PULP_VELLUM_COMPONENTS` is on in the same
   configure, and `pulp-test-pulp-vellum-components` (ctest label
   `pulp-vellum-components`, also matched by `-L pulp-vellum`) builds the

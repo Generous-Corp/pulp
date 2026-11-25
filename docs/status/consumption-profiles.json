@@ -407,6 +407,7 @@
       "pulp/format/reload/reload_transaction.hpp",
       "pulp/format/reload/reload_trust_policy.hpp",
       "pulp/format/reload/reloadable_shell.hpp",
+      "pulp/format/reload/reloadable_shell_core.hpp",
       "pulp/format/reload/remote_update.hpp",
       "pulp/format/reload/remote_update_fetch.hpp",
       "pulp/format/reload/revocation.hpp",
@@ -1764,7 +1765,7 @@
       },
       "build_scope": {
         "PULP_BUILD_TESTS": "ON",
-        "PULP_BUILD_EXAMPLES": "OFF"
+        "PULP_BUILD_EXAMPLES": "ON"
       },
       "summary": {
         "installed_target_count": 90,
