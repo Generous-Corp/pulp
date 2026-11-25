@@ -16,6 +16,7 @@
 
 #include <pulp/format/au_v2_common.hpp>
 #include <pulp/format/contract_editor_session.hpp>
+#include <pulp/format/detail/au_resize_trace.hpp>
 #include <pulp/format/processor.hpp>
 #include <pulp/runtime/alive_token.hpp>
 #include <pulp/state/store.hpp>
@@ -27,6 +28,9 @@
 #include <cstdint>
 #include <memory>
 #include <optional>
+#include <fstream>
+#include <sstream>
+#include <string>
 #include <thread>
 
 namespace pulp::format::au {
@@ -1024,6 +1028,110 @@ TEST_CASE(
     }
     [window close];
     [window release];
+    AudioComponentInstanceDispose(au);
+    g_instance = nullptr;
+}
+
+namespace {
+
+// A fresh directory standing in for the user's home.
+std::string make_trace_home() {
+    NSString* dir =
+        [NSTemporaryDirectory() stringByAppendingPathComponent:[[NSUUID UUID] UUIDString]];
+    [[NSFileManager defaultManager] createDirectoryAtPath:dir
+                              withIntermediateDirectories:YES
+                                               attributes:nil
+                                                    error:nil];
+    return dir.UTF8String;
+}
+
+std::string read_file(const std::string& path) {
+    std::ifstream in(path);
+    std::stringstream text;
+    text << in.rdbuf();
+    return text.str();
+}
+
+struct TraceOverrideReset {
+    ~TraceOverrideReset() {
+        pulp::format::detail::set_au_resize_trace_for_testing(std::nullopt);
+    }
+};
+
+} // namespace
+
+TEST_CASE("the AU resize trace is off by default and on with its touch file or variable",
+          "[auv2][editor-host][au-contract][resize-trace]") {
+    using pulp::format::detail::resolve_au_resize_trace;
+    const auto home = make_trace_home();
+
+    auto off = resolve_au_resize_trace(nullptr, home);
+    CHECK_FALSE(off.enabled);
+    CHECK(off.log_path.empty());
+    CHECK_FALSE(resolve_au_resize_trace("0", home).enabled);
+    CHECK_FALSE(resolve_au_resize_trace("", home).enabled);
+
+    auto by_env = resolve_au_resize_trace("1", home);
+    CHECK(by_env.enabled);
+    CHECK(by_env.log_path == home + "/Library/Logs/Pulp/au-resize-trace.log");
+
+    // The touch file alone turns it on: an out-of-process host never passes
+    // the shell's environment to the plug-in.
+    std::ofstream(home + "/Library/Logs/Pulp/au-resize-trace.enabled").put('\n');
+    auto by_file = resolve_au_resize_trace(nullptr, home);
+    CHECK(by_file.enabled);
+    CHECK(by_file.log_path == home + "/Library/Logs/Pulp/au-resize-trace.log");
+}
+
+TEST_CASE("the AU resize trace log appends and rolls over at its cap",
+          "[auv2][editor-host][au-contract][resize-trace]") {
+    const auto path = make_trace_home() + "/trace.log";
+    const std::string line(40, 'x');
+    for (int i = 0; i < 3; ++i)
+        pulp::format::detail::au_resize_trace_append(path, line + "\n", 100);
+    CHECK(read_file(path).size() == 41);
+    CHECK(read_file(path + ".1").size() == 82);
+}
+
+TEST_CASE("an AU v2 contract view traces its returned frame and host frames only when enabled",
+          "[auv2][editor-host][au-contract][resize-trace]") {
+    EditorEnvironment env;
+    reset_contract_recording();
+    ScopedManualSnapTimer settle;
+    FakeInstance instance(true);
+    g_instance = &instance;
+    AudioUnit au = fake_audio_unit();
+    TraceOverrideReset reset;
+    const auto log = make_trace_home() + "/au-resize-trace.log";
+
+    // Off: nothing is written.
+    pulp::format::detail::set_au_resize_trace_for_testing(
+        pulp::format::detail::AuResizeTraceConfig{false, log});
+    @autoreleasepool {
+        NSView* view = open_view(au);
+        REQUIRE(view != nil);
+        [view setFrameSize:NSMakeSize(640, 480)];
+    }
+    CHECK(read_file(log).empty());
+
+    // On: the frame the factory returns, the host's first frame and the
+    // editor's request are each one line.
+    pulp::format::detail::set_au_resize_trace_for_testing(
+        pulp::format::detail::AuResizeTraceConfig{true, log});
+    @autoreleasepool {
+        NSView* view = open_view(au);
+        REQUIRE(view != nil);
+        [view setFrameSize:NSMakeSize(640, 480)];
+        REQUIRE(contract_log().context->request_resize({720, 540, 1.0}));
+    }
+    const auto text = read_file(log);
+    CHECK(text.find("contract returned view=") != std::string::npos);
+    CHECK(text.find("frame=400x300") != std::string::npos);
+    CHECK(text.find("contract host-frame#1 ") != std::string::npos);
+    CHECK(text.find("host=640x480") != std::string::npos);
+    CHECK(text.find("contract request view=") != std::string::npos);
+    CHECK(text.find("720x540") != std::string::npos);
+    CHECK(text.find("[pulp-auv2-resize]") != std::string::npos);
     AudioComponentInstanceDispose(au);
     g_instance = nullptr;
 }
