@@ -1502,6 +1502,13 @@ line reads `cacheable 0`, check for `-- Building for: Visual Studio` in its
 configure log before checking the cache. The bake and server steps are in
 `docs/guides/local-ci.md`, "Windows build caches".
 
+A GitHub-hosted Windows leg is the opposite case: it starts empty with no remote
+ccache, so `cross-platform-check.yml` restores and saves a `.ccache` directory
+with `actions/cache` there (skipped on a self-hosted runner). A cold hosted
+build is about 2.5 hours and the suite 30 minutes, so its `timeout-minutes` is
+300; when a hosted Windows run is cancelled at the limit, read the step timings
+before blaming the test step.
+
 ## Hosted Windows checkouts need LF bytes
 
 Git for Windows defaults to `core.autocrlf=true`, so a hosted Windows checkout
@@ -13954,3 +13961,12 @@ merge: that once emptied a PR's diff. Use the helper instead:
 
 Review the printed stat before pushing; push once. Tests:
 `tools/scripts/test_regen_agent_capability_after_merge.py`.
+
+## The Vellum SDK consumer lane builds every optional Vellum package
+
+`vellum-sdk-consumer.yml` configures `PULP_ENABLE_PULP_VELLUM`, `_AUDIO` and
+`_COMPONENTS` together and builds each package's test target against Vellum
+main's SDK. A new optional Vellum integration package needs its option, its
+`pulp-test-*` target and a `paths:` entry added there, or no lane compiles it
+against main. The tests' ctest label should start with `pulp-vellum` so the
+lane's `-L pulp-vellum` filter runs them.

@@ -1,4 +1,7 @@
 #include <cstdlib>
+#if defined(_WIN32)
+#include <malloc.h>
+#endif
 #include <new>
 
 #include <array>
@@ -43,7 +46,13 @@ void* allocate(std::size_t bytes) {
             throw std::bad_alloc();
     }
     const auto actual = bytes == 0 ? 1 : bytes;
+#if defined(_WIN32)
+    // release() frees through _aligned_free on Windows, so every block comes from
+    // _aligned_malloc.
+    void* result = _aligned_malloc(actual, 16);
+#else
     void* result = std::malloc(actual);
+#endif
     if (result == nullptr)
         throw std::bad_alloc();
     records[record_count++] = {result, armed};
@@ -68,8 +77,14 @@ void* allocate_aligned(std::size_t bytes, std::align_val_t alignment) {
     }
     void* result = nullptr;
     const auto actual = bytes == 0 ? 1 : bytes;
+#if defined(_WIN32)
+    result = _aligned_malloc(actual, static_cast<std::size_t>(alignment));
+    if (result == nullptr)
+        throw std::bad_alloc();
+#else
     if (posix_memalign(&result, static_cast<std::size_t>(alignment), actual) != 0)
         throw std::bad_alloc();
+#endif
     records[record_count++] = {result, armed};
     if (armed)
         ++window_balance;
@@ -93,7 +108,11 @@ void release(void* ptr) noexcept {
         records[i] = records[--record_count];
         break;
     }
+#if defined(_WIN32)
+    _aligned_free(ptr);
+#else
     std::free(ptr);
+#endif
 }
 } // namespace allocation_failure
 

@@ -1193,6 +1193,18 @@ Git for Windows defaults to `core.autocrlf=true`. The Windows job in
 Without it every text file arrives with CRLF line endings, and tests that diff a
 committed artifact against a regenerated one (the timeline schema drift checks)
 or compare a pinned digest fail on bytes nobody committed.
+### Hosted Windows budget and compiler cache
+
+On a GitHub-hosted `windows-latest` runner (4 vCPUs, no remote ccache storage) a
+cold `cross-platform-check.yml` Windows build takes about 2 h 25 min and the
+suite about 30 min more, so the job's `timeout-minutes` is 300 (the hosted
+ceiling is 360). The job restores a ccache directory with `actions/cache/restore`
+(`.ccache` in the workspace, key prefix `ccache-windows-x64-`, newest entry from
+this branch first, then main) and saves it after the build with
+`actions/cache/save`, even when a test fails, so a repeat run recompiles only
+what changed. A self-hosted runner skips both steps and keeps its own storage.
+A pull request branch cannot write a cache entry that another branch reads, so
+it cannot poison main's cache.
 
 ## The FetchContent cache had to point at a real path
 

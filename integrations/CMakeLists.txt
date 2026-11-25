@@ -58,3 +58,11 @@ if(PULP_ENABLE_PULP_VELLUM_AUDIO)
     set_property(GLOBAL APPEND PROPERTY PULP_INTEGRATION_TEST_DIRS
         "${CMAKE_CURRENT_SOURCE_DIR}/pulp-vellum-audio/tests")
 endif()
+
+option(PULP_ENABLE_PULP_VELLUM_COMPONENTS
+    "Build integrations/pulp-vellum-components (retained Pulp view components on Vellum views)" OFF)
+if(PULP_ENABLE_PULP_VELLUM_COMPONENTS)
+    add_subdirectory(pulp-vellum-components)
+    set_property(GLOBAL APPEND PROPERTY PULP_INTEGRATION_TEST_DIRS
+        "${CMAKE_CURRENT_SOURCE_DIR}/pulp-vellum-components/tests")
+endif()

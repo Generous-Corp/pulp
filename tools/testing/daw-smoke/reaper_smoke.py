@@ -93,12 +93,16 @@ import os
 import platform
 import re
 import shutil
+import signal
 import subprocess
 import sys
 import tempfile
 import time
 from pathlib import Path
 from typing import NamedTuple
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import reaper_host_guard as guard  # noqa: E402
 
 EXIT_PASS, EXIT_FAIL, EXIT_SKIP, EXIT_INCONCLUSIVE = 0, 1, 2, 3
 
@@ -107,6 +111,10 @@ EXIT_PASS, EXIT_FAIL, EXIT_SKIP, EXIT_INCONCLUSIVE = 0, 1, 2, 3
 # races the scanner and can report FX_NOT_FOUND.  Keep this short and bounded;
 # it only applies after the target entry is visible.
 PREWARM_CACHE_SETTLE_SECONDS = 2.0
+
+# REAPER initializes the -cfgfile resource directory within a second or two.
+# Past this, a launch that has not done so is using some other profile.
+PROFILE_ADOPT_SECONDS = 10.0
 
 HERE = Path(__file__).resolve().parent
 LUA = HERE / "insert_and_float.lua"
@@ -280,43 +288,12 @@ class ReaperSession:
         self.proc: subprocess.Popen | None = None
         # Extra portable reaper.ini keys a mode needs (never written back).
         self.extra_ini: dict[str, str] = {}
+        self.launch_times: dict[int, float] = {}
 
     def place_plugin(self) -> int | None:
         """Put the plugin where REAPER finds it without touching real folders.
         Returns an EXIT_* code on failure, else None."""
         plugin = Path(os.path.expanduser(self.args.plugin_path))
-        machine = platform.machine().lower()
-        arch_lines: list[str] = []
-        if sys.platform == "darwin":
-            # Mark plugin-path preferences initialized. Without this, a fresh
-            # cfgfile appends every system VST3 directory and can spend the
-            # entire bounded pre-warm rescanning unrelated installed plugins.
-            arch_lines.append("vstfullstate=33605")
-            if machine in ("arm64", "aarch64"):
-                arch_lines.extend([
-                    "vstpath_arm64=" + str(self.scan_dir),
-                    "clap_path_macos-aarch64=" + str(self.scan_dir),
-                ])
-            elif machine in ("x86_64", "amd64"):
-                arch_lines.extend([
-                    "vstpath64=" + str(self.scan_dir),
-                    "clap_path_macos-x86_64=" + str(self.scan_dir),
-                ])
-        # Seed the portable config FROM the real one, rather than starting
-        # from nothing.
-        #
-        # The throwaway config is deliberate: it is what keeps a run from
-        # polluting somebody's REAPER install. But an EMPTY one makes REAPER
-        # come up as a fresh install every single launch -- licence prompt,
-        # first-run preferences, and the audio-hardware setup dialog, over and
-        # over. That is what this did to the person whose machine it ran on,
-        # and this harness ships in Pulp, so it would have done it to everyone
-        # who ran it.
-        #
-        # Their settings are COPIED, never written back: the licence, the audio
-        # device, every preference they have chosen. Only the plugin-scan paths
-        # are overridden, which is the one thing this run legitimately needs to
-        # differ.
         real_dir = Path(os.path.expanduser("~/Library/Application Support/REAPER"))
         for extra in ("reaper-license.rk", "reaper-license.txt",
                       "reaper-menu.ini", "reaper-fxfolders.ini"):
@@ -327,25 +304,12 @@ class ReaperSession:
                 except Exception:
                     pass
 
-        ours = {"vstpath": str(self.scan_dir), "clap_path": str(self.scan_dir),
-                "splashscreen": "0",
-                # Never reopen the user's last project.
-                #
-                # Seeding from the real reaper.ini carries `lastproject` with
-                # it, so this "isolated" REAPER opened somebody's actual
-                # session — and because that session referenced a plugin the
-                # smoke had not installed, REAPER came up on a modal "Project
-                # Load Warning" and sat there. The scripted insert never ran
-                # and the smoke reported INCONCLUSIVE, which named neither the
-                # dialog nor the project. Worse, it put a stranger's work on
-                # screen on a machine somebody was using.
-                "lastproject": "",
-                "loadlastproj": "0"}
-        for line in arch_lines:
-            key, _, value = line.partition("=")
-            ours[key] = value
-        ours.update(getattr(self, "extra_ini", {}))
-
+        # Never reopen the user's last project: a session that references a
+        # plug-in the smoke has not installed comes up on a modal "Project
+        # Load Warning", and puts a stranger's work on screen.  Every scan-path
+        # key is pointed at the temp scan directory, so no other installed
+        # plug-in is ever loaded (one that crashes on scan arms AppKit's
+        # crash-restore alert for every later launch).
         base = ""
         real_ini = real_dir / "reaper.ini"
         if real_ini.exists():
@@ -353,31 +317,8 @@ class ReaperSession:
                 base = real_ini.read_text(errors="replace")
             except Exception:
                 base = ""
-        if base:
-            # `[Recent]` is the user's recent-project list. It is not needed to
-            # run a smoke, and copying it puts their filenames into a temp dir
-            # and into REAPER's menus for the run.
-            kept, section = [], ""
-            for ln in base.splitlines():
-                stripped = ln.strip()
-                if stripped.startswith("[") and stripped.endswith("]"):
-                    section = stripped.lower()
-                if section == "[recent]" and not stripped.startswith("["):
-                    continue
-                if ln.split("=", 1)[0].strip() in ours:
-                    continue
-                kept.append(ln)
-            out, inserted = [], False
-            for ln in kept:
-                out.append(ln)
-                if not inserted and ln.strip().lower() == "[reaper]":
-                    out.extend(f"{k}={v}" for k, v in ours.items())
-                    inserted = True
-            if not inserted:
-                out = ["[REAPER]"] + [f"{k}={v}" for k, v in ours.items()] + out
-            text = "\n".join(out) + "\n"
-        else:
-            text = "[REAPER]\n" + "\n".join(f"{k}={v}" for k, v in ours.items()) + "\n"
+        text = guard.isolated_ini_text(base, self.scan_dir, platform.machine(),
+                                       getattr(self, "extra_ini", {}))
         (self.portable / "reaper.ini").write_text(text)
 
         if self.args.format in ("vst3", "clap"):
@@ -429,10 +370,11 @@ class ReaperSession:
         signals completion separately."""
         # Nothing of ours is running yet, and somebody else's REAPER is not
         # this harness's to close.
+        ini = self.portable / "reaper.ini"
         with open(self.reaper_out, "w") as out:
-            warm = subprocess.Popen(
-                [str(self.reaper), "-cfgfile", str(self.portable / "reaper.ini")],
-                stdout=out, stderr=subprocess.STDOUT, env=env)
+            warm = subprocess.Popen(guard.launch_argv(self.reaper, ini),
+                                    stdout=out, stderr=subprocess.STDOUT, env=env)
+        self.__dict__.setdefault("launch_times", {})[warm.pid] = time.time()
         # A fixed warm-up sleep can repeatedly kill a fresh REAPER instance
         # while it is still scanning a large bundle, before its cache is
         # durable. The scripted launch then starts the same scan from scratch
@@ -460,6 +402,11 @@ class ReaperSession:
                         continue
                 if cache_ready:
                     break
+                blocked = self.stall_reason(warm)
+                if blocked:
+                    log(f"{blocked} — INCONCLUSIVE (blocked, not slow).")
+                    stop_reaper_process(warm)
+                    return EXIT_INCONCLUSIVE
         if not cache_ready:
             log("pre-warm scan did not publish the target into REAPER's plugin "
                 "cache before timeout; scripted launch may remain inconclusive.")
@@ -471,13 +418,18 @@ class ReaperSession:
             # FX_NOT_FOUND even though the cache already contains the target.
             time.sleep(PREWARM_CACHE_SETTLE_SECONDS)
         stop_reaper_process(warm)
+        breach = self.isolation_breach()
+        if breach:
+            log("the plug-in scan was NOT confined to the temp scan directory; REAPER "
+                "also cached: " + ", ".join(breach) + " — INCONCLUSIVE (not isolated).")
+            return EXIT_INCONCLUSIVE
 
         if before_scripted is not None:
             before_scripted()
         with open(self.reaper_out, "a") as out:
-            self.proc = subprocess.Popen(
-                [str(self.reaper), "-cfgfile", str(self.portable / "reaper.ini"), str(script)],
-                stdout=out, stderr=subprocess.STDOUT, env=env)
+            self.proc = subprocess.Popen(guard.launch_argv(self.reaper, ini, str(script)),
+                                         stdout=out, stderr=subprocess.STDOUT, env=env)
+        self.__dict__.setdefault("launch_times", {})[self.proc.pid] = time.time()
         deadline = time.time() + self.args.timeout
         while time.time() < deadline:
             time.sleep(2)
@@ -488,6 +440,10 @@ class ReaperSession:
                 if s.startswith("FX_NOT_FOUND"):
                     log("REAPER could not find/insert the FX (scan issue) — INCONCLUSIVE.")
                     return EXIT_INCONCLUSIVE
+            blocked = self.stall_reason(self.proc, status)
+            if blocked:
+                log(f"{blocked} — INCONCLUSIVE (blocked, not slow).")
+                return EXIT_INCONCLUSIVE
         log("REAPER did not open the FX within timeout (flaky launch) — INCONCLUSIVE.")
         captured = self.captured_log().splitlines()
         if captured:
@@ -497,6 +453,42 @@ class ReaperSession:
         else:
             log("REAPER produced no captured stdout/stderr.")
         return EXIT_INCONCLUSIVE
+
+    def stall_reason(self, proc: subprocess.Popen, status: Path | None = None) -> str | None:
+        """A blocked modal or hung scan for `proc`, or None while it progresses."""
+        if proc.poll() is not None:
+            return f"EXITED: REAPER exited with code {proc.returncode} before it was ready"
+        if (time.time() - self.launched_at(proc) > PROFILE_ADOPT_SECONDS
+                and not guard.profile_in_use(self.portable)):
+            return ("NOT-ISOLATED: REAPER did not adopt the isolated -cfgfile profile "
+                    f"{self.portable} and is running against another one")
+        watched = [p for p in self.portable.iterdir() if p.is_file()]
+        if status is not None:
+            watched.append(status)
+        now = time.time()
+        newest = max(guard.latest_progress(watched), self.launched_at(proc))
+        return guard.classify_stall(
+            proc.pid, guard.list_processes(), guard.list_windows(),
+            idle_seconds=now - newest,
+            stall_after=getattr(self.args, "stall_seconds", 30),
+            scan_budget=max(getattr(self.args, "scan_seconds", 0) or 0,
+                            getattr(self.args, "timeout", 0) or 0))
+
+    def launched_at(self, proc: subprocess.Popen) -> float:
+        return self.__dict__.setdefault("launch_times", {}).setdefault(proc.pid, time.time())
+
+    def isolation_breach(self) -> list[str]:
+        """Cache entries that prove REAPER scanned beyond the temp directory."""
+        plugin_name = Path(os.path.expanduser(self.args.plugin_path)).name
+        foreign: list[str] = []
+        for cache in sorted(self.portable.glob("reaper-*clap*.ini")) + \
+                sorted(self.portable.glob("reaper-vstplugins*.ini")):
+            try:
+                text = cache.read_text(encoding="utf-8", errors="replace")
+            except OSError:
+                continue
+            foreign.extend(guard.foreign_cache_entries(text, plugin_name))
+        return foreign
 
     def captured_log(self) -> str:
         return self.reaper_out.read_text(errors="replace") if self.reaper_out.exists() else ""
@@ -1768,6 +1760,15 @@ def build_parser() -> argparse.ArgumentParser:
                     help="Exact absolute REAPER executable; invalid paths fail instead of falling back.")
     ap.add_argument("--check-config", action="store_true",
                     help="Honor ~/.config/pulp/daw-smoke.toml: SKIP unless enabled.")
+    ap.add_argument("--wait-for-host", type=int, default=0,
+                    help="Seconds to wait for another REAPER (or the busy flag named by "
+                         "PULP_DAW_SMOKE_BUSY_FILE) to go away before giving up with SKIP.")
+    ap.add_argument("--stall-seconds", type=int, default=30,
+                    help="No-progress budget before a launch showing only an alert-sized "
+                         "window (or none) is reported as blocked.")
+    ap.add_argument("--scan-seconds", type=int, default=0,
+                    help="Budget for one REAPER scan subprocess before it is reported hung "
+                         "(never less than --timeout).")
 
     reload_group = ap.add_argument_group("reload mode")
     reload_group.add_argument("--watched-logic",
@@ -1918,6 +1919,33 @@ def main() -> int:
         log("REAPER not installed — SKIP (this is not a PASS). See docs/guides/daw-smoke.md.")
         return EXIT_SKIP
 
+    busy = wait_for_free_host(args.wait_for_host)
+    if busy:
+        log(f"{busy} — SKIP (this is not a PASS). Re-run when REAPER is free.")
+        return EXIT_SKIP
+
+    # SIGTERM would otherwise end the process without running the finally
+    # blocks that stop REAPER, uninstall an AU, and restore the user's
+    # crash-restore setting.
+    signal.signal(signal.SIGTERM, lambda *_: sys.exit(EXIT_INCONCLUSIVE))
+    with guard.scoped_persistence_opt_out():
+        return run_mode(reaper, args)
+
+
+def wait_for_free_host(wait_seconds: int, pids=None, flag=None,
+                       sleep=time.sleep, clock=time.time) -> str | None:
+    """None once no other REAPER runs and no busy flag is set, else why not."""
+    pids = pids or guard.running_reaper_pids
+    flag = flag or guard.busy_flag_path
+    deadline = clock() + max(wait_seconds, 0)
+    while True:
+        reason = guard.busy_reason(pids(), flag())
+        if reason is None or clock() >= deadline:
+            return reason
+        sleep(5)
+
+
+def run_mode(reaper: Path, args: argparse.Namespace) -> int:
     if args.mode == "reload":
         return run_reload_mode(reaper, args)
     if args.mode == "live-plugin-swap":

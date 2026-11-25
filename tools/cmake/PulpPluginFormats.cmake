@@ -129,6 +129,7 @@ function(_pulp_add_vst3 target name bundle_id version manufacturer category)
         message(FATAL_ERROR "pulp_add_plugin(${target}): VST3 requested but the VST3 SDK is unavailable")
     endif()
     if(NOT PULP_${target}_VIEW_TARGET AND NOT PULP_${target}_NO_EDITOR)
+        _pulp_refuse_view_editor_from_vellum("pulp_add_plugin(${target}) VST3")
         message(FATAL_ERROR "pulp_add_plugin(${target}): VST3 GUI targets require a Pulp view target")
     endif()
 
@@ -386,6 +387,7 @@ function(_pulp_add_clap target name bundle_id version manufacturer category)
         message(FATAL_ERROR "pulp_add_plugin(${target}): CLAP requested but the CLAP SDK is unavailable")
     endif()
     if(NOT PULP_${target}_VIEW_TARGET AND NOT PULP_${target}_NO_EDITOR)
+        _pulp_refuse_view_editor_from_vellum("pulp_add_plugin(${target}) CLAP")
         message(FATAL_ERROR "pulp_add_plugin(${target}): CLAP GUI targets require Pulp::view")
     endif()
 
@@ -705,6 +707,7 @@ function(_pulp_add_au target name bundle_id version manufacturer category plugin
         message(FATAL_ERROR "pulp_add_plugin(${target}): AU requested but AudioUnitSDK is unavailable")
     endif()
     if(NOT PULP_${target}_VIEW_TARGET AND NOT PULP_${target}_NO_EDITOR)
+        _pulp_refuse_view_editor_from_vellum("pulp_add_plugin(${target}) AU")
         message(FATAL_ERROR "pulp_add_plugin(${target}): AU GUI targets require Pulp::view")
     endif()
 

@@ -334,7 +334,10 @@ jobs:
     needs: windows-runner
     if: github.event_name != 'schedule' || github.repository == vars.PULP_PRIMARY_REPO
     runs-on: ${{ fromJSON(needs.windows-runner.outputs.runs_on) }}
-    timeout-minutes: 180
+    # A cold hosted build takes about 2.5 hours (4 vCPUs, no remote ccache) and
+    # the suite about 30 minutes more; 180 cancelled the job mid-suite. The
+    # hosted ceiling is 360, and a ccache restored below makes later runs short.
+    timeout-minutes: 300
     env:
       PULP_BUILD_DIR: build-windows
     steps:
@@ -368,6 +371,29 @@ jobs:
       - name: Point ccache at the host's remote storage
         shell: bash
         run: python3 tools/ci/ccache_remote_storage.py --github-env "$GITHUB_ENV"
+
+      # A GitHub-hosted runner starts empty and has no remote ccache storage, so
+      # every build compiled from scratch. Cache the compiler cache itself:
+      # restore the newest entry (this branch, then main), save after the build
+      # even when a test fails. A self-hosted runner keeps its own storage.
+      - name: Restore ccache (GitHub-hosted)
+        if: runner.environment == 'github-hosted'
+        id: ccache-restore
+        uses: actions/cache/restore@v6
+        with:
+          path: ${{ github.workspace }}/.ccache
+          key: ccache-windows-x64-${{ github.run_id }}
+          restore-keys: |
+            ccache-windows-x64-
+
+      - name: Point ccache at the restored directory (GitHub-hosted)
+        if: runner.environment == 'github-hosted'
+        shell: bash
+        run: |
+          {
+            echo "CCACHE_DIR=${GITHUB_WORKSPACE}/.ccache"
+            echo "CCACHE_MAXSIZE=2G"
+          } >> "$GITHUB_ENV"
 
       - name: Bootstrap repository dependencies
         run: ./setup.sh --ci --deps-only
@@ -440,6 +466,14 @@ jobs:
           else
             echo "ccache not available; skipping stats"
           fi
+
+      - name: Save ccache (GitHub-hosted)
+        if: ${{ always() && runner.environment == 'github-hosted' && steps.build.outcome != 'skipped' }}
+        continue-on-error: true
+        uses: actions/cache/save@v6
+        with:
+          path: ${{ github.workspace }}/.ccache
+          key: ccache-windows-x64-${{ github.run_id }}
 
       - name: Test (UTF-8 code page wrapped)
         # Runs after a build that finished with errors, not only after a clean
