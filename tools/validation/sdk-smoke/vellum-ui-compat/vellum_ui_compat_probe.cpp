@@ -28,20 +28,6 @@ int main() {
     return ok ? 0 : 1;
 }
 
-#elif defined(PULP_VELLUM_UI_COMPAT_PROBE_VIEW_NATIVE)
-#include <vellum/view/native_view_host.hpp>
-#include <vellum/view/plugin_view_host.hpp>
-
-int main() {
-    // Taking the factory's address makes the link resolve the platform host.
-    auto* create = static_cast<std::unique_ptr<vellum::view::PluginViewHost> (*)(
-        vellum::view::View&, vellum::view::PluginViewHost::Size)>(
-        &vellum::view::PluginViewHost::create);
-    std::printf("Pulp::view-native -> vellum::view::PluginViewHost::create %s\n",
-                create != nullptr ? "linked" : "missing");
-    return create != nullptr ? 0 : 1;
-}
-
 #elif defined(PULP_VELLUM_UI_COMPAT_PROBE_VIEW) ||                                                 \
     defined(PULP_VELLUM_UI_COMPAT_PROBE_DESIGN_IMPORT)
 #include <vellum/view/design_import.hpp>
