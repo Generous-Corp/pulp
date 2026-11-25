@@ -4,6 +4,8 @@ namespace pulp::vellum_audio {
 
 void SpectrogramView::configure(int history_columns, int freq_rows, pulp::signal::ColorRamp ramp,
                                 float min_db, float max_db) {
+    // Resize through empty so cells from an earlier configuration are zeroed.
+    buffer_.configure(0, 0);
     buffer_.configure(history_columns, freq_rows);
     mapper_.set_ramp(ramp);
     min_db_ = min_db;

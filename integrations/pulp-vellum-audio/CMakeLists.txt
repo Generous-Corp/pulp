@@ -1,5 +1,6 @@
-# Pulp's audio display provider for Vellum meters and scopes. The provider is
-# optional and depends only on Pulp runtime plus Vellum's value interfaces.
+# Pulp's audio widgets and display provider for Vellum: meters, scopes, the
+# waveform editor, and the spectrogram and waveform displays. Optional; depends
+# on Pulp runtime, signal and audio plus Vellum's value and view interfaces.
 find_package(Vellum CONFIG REQUIRED)
 
 add_library(pulp-vellum-audio STATIC src/audio_display_provider.cpp src/audio_widgets.cpp

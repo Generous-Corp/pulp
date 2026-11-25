@@ -239,8 +239,12 @@ void WaveformView::paint(::vellum::canvas::Canvas& canvas) {
     const float half_h = b.height * 0.5f - 1.0f;
     canvas.set_fill_color(wave_color);
     for (int c = 0; c < cols; ++c) {
-        std::size_t i0 = static_cast<std::size_t>(static_cast<float>(c) / cols * n);
-        std::size_t i1 = static_cast<std::size_t>(static_cast<float>(c + 1) / cols * n);
+        // Integer window so no column is empty when there are fewer samples
+        // than columns; every column then covers at least one sample.
+        const std::size_t i0 = static_cast<std::size_t>(c) * n / static_cast<std::size_t>(cols);
+        std::size_t i1 = static_cast<std::size_t>(c + 1) * n / static_cast<std::size_t>(cols);
+        if (i1 <= i0)
+            i1 = i0 + 1;
         float amp = 0.0f;
         for (std::size_t i = i0; i < i1 && i < n; ++i)
             amp = std::max(amp, std::abs(samples_[i]));

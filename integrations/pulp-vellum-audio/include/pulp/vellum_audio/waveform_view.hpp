@@ -3,8 +3,11 @@
 // Display-only waveform widgets. WaveformView draws either live samples, a
 // decoded pulp::audio::WaveformOverview, or a static oscillator preview;
 // WaveformOverviewView draws the min/max peak columns of an overview over a
-// caller-set viewport. Peak data and decimation stay in pulp::audio; trim
+// caller-set viewport. Peak tables and their decimation stay in pulp::audio;
+// the live-samples path reduces to one peak per column at paint time. Trim
 // handles, fades, loops and playheads belong to WaveformEditor.
+//
+// Threading: every mutator is UI-thread only.
 
 #include <vellum/view/data_display.hpp>
 #include <vellum/view/inspector_facts.hpp>

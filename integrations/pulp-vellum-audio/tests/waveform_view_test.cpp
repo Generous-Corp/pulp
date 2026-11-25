@@ -265,6 +265,14 @@ TEST_CASE("Vellum WaveformView mutators request repaint", "[pulp-vellum-audio][w
     CHECK(::vellum::view::View::damage_request_count() > before);
 
     before = ::vellum::view::View::damage_request_count();
+    view.set_thumbnail(std::make_shared<WaveformOverview>(ov));
+    CHECK(::vellum::view::View::damage_request_count() > before);
+
+    before = ::vellum::view::View::damage_request_count();
+    view.set_preview_shape("sine");
+    CHECK(::vellum::view::View::damage_request_count() > before);
+
+    before = ::vellum::view::View::damage_request_count();
     view.clear_thumbnail();
     CHECK(::vellum::view::View::damage_request_count() > before);
 }
@@ -285,6 +293,38 @@ TEST_CASE("Vellum WaveformView renders bars in the waveform colour",
     maybe_write_png(view, 100, 40, "waveform_view_bars.png");
 }
 
+TEST_CASE("Vellum WaveformView paints every column when samples are fewer than columns",
+          "[pulp-vellum-audio][waveform-view][render]") {
+    if (!::vellum::view::raw_rgba_render_available())
+        SKIP("Vellum CPU raster backend unavailable");
+
+    // 16 samples across 200 columns with a single full-scale sample: every
+    // column in that sample's span is tall, with no empty windows between.
+    WaveformView comb;
+    comb.set_bounds({0, 0, 200, 40});
+    std::vector<float> samples(16, 0.0f);
+    samples[3] = 1.0f;
+    comb.set_data(samples);
+    const auto frame = render(comb, 200, 40);
+    for (std::uint32_t x = 38; x <= 49; ++x)
+        CHECK(near(frame.at(x, 4), {100, 180, 250}));
+    CHECK(near(frame.at(20, 4), {30, 30, 40}, 6));
+    maybe_write_png(comb, 200, 40, "waveform_view_comb.png");
+}
+
+TEST_CASE("Vellum WaveformView leaves no gaps when samples equal columns",
+          "[pulp-vellum-audio][waveform-view][render]") {
+    if (!::vellum::view::raw_rgba_render_available())
+        SKIP("Vellum CPU raster backend unavailable");
+
+    WaveformView view;
+    view.set_bounds({0, 0, 100, 40});
+    view.set_data(std::vector<float>(100, 1.0f));
+    const auto frame = render(view, 100, 40);
+    for (std::uint32_t x = 0; x < 100; ++x)
+        CHECK(near(frame.at(x, 20), {100, 180, 250}));
+}
+
 TEST_CASE("Vellum WaveformView renders a sine thumbnail and a preview for review",
           "[pulp-vellum-audio][waveform-view][render]") {
     if (!::vellum::view::raw_rgba_render_available())
@@ -295,10 +335,12 @@ TEST_CASE("Vellum WaveformView renders a sine thumbnail and a preview for review
     thumb.set_thumbnail(std::make_shared<WaveformOverview>(
         WaveformOverview::build_from_buffer(make_sine(8820, 100.0), 64)));
     const auto thumb_frame = render(thumb, 160, 50);
-    // Somewhere on the centre line the primitive has drawn the waveform colour.
+    // A 0.8-amplitude sine peaks near y = 5; the primitive draws the waveform
+    // colour there, and nowhere near the top edge outside the peaks.
     bool drew = false;
-    for (std::uint32_t x = 0; x < 160 && !drew; ++x)
-        drew = !near(thumb_frame.at(x, 25), {30, 30, 40}, 8);
+    for (std::uint32_t y = 5; y <= 9 && !drew; ++y)
+        for (std::uint32_t x = 0; x < 160 && !drew; ++x)
+            drew = near(thumb_frame.at(x, y), {100, 180, 250}, 40);
     CHECK(drew);
     maybe_write_png(thumb, 160, 50, "waveform_view_thumbnail.png");
 

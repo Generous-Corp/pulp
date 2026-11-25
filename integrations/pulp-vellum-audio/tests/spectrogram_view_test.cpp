@@ -187,3 +187,25 @@ TEST_CASE("Vellum SpectrogramView renders a ramped scroll for review",
     REQUIRE(frame.width == 160);
     maybe_write_png(spectrogram, 160, 80, "spectrogram_inferno.png");
 }
+
+TEST_CASE("Vellum SpectrogramView configure clears the previous history",
+          "[pulp-vellum-audio][spectrogram][render]") {
+    if (!::vellum::view::raw_rgba_render_available())
+        SKIP("Vellum CPU raster backend unavailable");
+
+    SpectrogramView spectrogram;
+    spectrogram.set_bounds({0, 0, 40, 20});
+    spectrogram.configure(4, 1, ColorRamp::grayscale, -60.0f, -20.0f);
+    const float bright = -20.0f;
+    for (int i = 0; i < 4; ++i)
+        spectrogram.push_spectrum(&bright, 1);
+    CHECK(render(spectrogram, 40, 20).r(5, 10) == 255);
+
+    spectrogram.configure(4, 1, ColorRamp::grayscale, -60.0f, -20.0f);
+    CHECK(spectrogram.buffer().frames_written() == 0);
+    const float dark = -60.0f;
+    spectrogram.push_spectrum(&dark, 1);
+    const auto frame = render(spectrogram, 40, 20);
+    for (std::uint32_t x : {5u, 15u, 25u, 35u})
+        CHECK(frame.r(x, 10) == 0);
+}

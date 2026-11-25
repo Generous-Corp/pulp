@@ -4,6 +4,8 @@
 // coloured cells that scroll left as new frames arrive. The dB-to-colour
 // mapping and the column history live in pulp::signal (ColorMapper,
 // SpectrogramBuffer); the widget only paints them.
+//
+// Threading: every mutator, including push_spectrum, is UI-thread only.
 
 #include <pulp/signal/spectrogram.hpp>
 #include <vellum/view/view.hpp>
