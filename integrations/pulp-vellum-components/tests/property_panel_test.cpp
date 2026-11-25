@@ -61,13 +61,14 @@ TEST_CASE("PropertyPanel: defaults are empty", "[property-panel]") {
     REQUIRE(p.find("missing") == nullptr);
 }
 
-TEST_CASE("PropertyPanel: add_boolean stores value + fires observer",
-          "[property-panel][boolean]") {
+TEST_CASE("PropertyPanel: add_boolean stores value + fires observer", "[property-panel][boolean]") {
     PropertyPanel p;
     bool last = false;
     int calls = 0;
-    p.add_boolean("audio.mono", "Force Mono", true,
-                  [&](bool v) { last = v; ++calls; });
+    p.add_boolean("audio.mono", "Force Mono", true, [&](bool v) {
+        last = v;
+        ++calls;
+    });
 
     REQUIRE(p.size() == 1);
     REQUIRE(p.get_bool("audio.mono").value_or(false));
@@ -83,12 +84,10 @@ TEST_CASE("PropertyPanel: add_boolean stores value + fires observer",
     REQUIRE(last);
 }
 
-TEST_CASE("PropertyPanel: add_choice clamps index + fires observer",
-          "[property-panel][choice]") {
+TEST_CASE("PropertyPanel: add_choice clamps index + fires observer", "[property-panel][choice]") {
     PropertyPanel p;
     int last = -1;
-    p.add_choice("audio.driver", "Driver",
-                 {"CoreAudio", "JACK", "PortAudio"}, 10,
+    p.add_choice("audio.driver", "Driver", {"CoreAudio", "JACK", "PortAudio"}, 10,
                  [&](int i) { last = i; });
 
     // Initial clamped down to 2 (3 options, index 0..2).
@@ -103,14 +102,12 @@ TEST_CASE("PropertyPanel: add_choice clamps index + fires observer",
     REQUIRE(last == 0);
 }
 
-TEST_CASE("PropertyPanel: add_slider clamps to min/max",
-          "[property-panel][slider]") {
+TEST_CASE("PropertyPanel: add_slider clamps to min/max", "[property-panel][slider]") {
     PropertyPanel p;
     float last = 0.0f;
-    p.add_slider("audio.gain", "Input gain", -60.0f, 12.0f, 100.0f,
-                 [&](float v) { last = v; });
+    p.add_slider("audio.gain", "Input gain", -60.0f, 12.0f, 100.0f, [&](float v) { last = v; });
 
-    REQUIRE(p.get_slider("audio.gain") == 12.0f);  // clamped initial
+    REQUIRE(p.get_slider("audio.gain") == 12.0f); // clamped initial
 
     REQUIRE(p.simulate_slide("audio.gain", -200.0f));
     REQUIRE(p.get_slider("audio.gain") == -60.0f);
@@ -120,8 +117,7 @@ TEST_CASE("PropertyPanel: add_slider clamps to min/max",
     REQUIRE(p.get_slider("audio.gain") == 0.0f);
 }
 
-TEST_CASE("PropertyPanel: add_button fires click handler",
-          "[property-panel][button]") {
+TEST_CASE("PropertyPanel: add_button fires click handler", "[property-panel][button]") {
     PropertyPanel p;
     int clicks = 0;
     p.add_button("audio.reset", "Reset", [&] { ++clicks; });
@@ -139,8 +135,7 @@ TEST_CASE("PropertyPanel: multi_choice normalizes selection + observer",
           "[property-panel][multi-choice]") {
     PropertyPanel p;
     std::vector<int> last;
-    p.add_multi_choice("ports.in", "Input ports",
-                       {"L", "R", "FX1", "FX2"}, {3, 0, 0, 5},
+    p.add_multi_choice("ports.in", "Input ports", {"L", "R", "FX1", "FX2"}, {3, 0, 0, 5},
                        [&](const std::vector<int>& xs) { last = xs; });
 
     // Dedup + clamp: 5 is out of range, double 0 collapses → {0, 3}.
@@ -162,8 +157,7 @@ TEST_CASE("PropertyPanel: multi_choice normalizes selection + observer",
 TEST_CASE("PropertyPanel: text variant", "[property-panel][text]") {
     PropertyPanel p;
     std::string last;
-    p.add_text("user.name", "Name", "Anonymous",
-               [&](const std::string& v) { last = v; });
+    p.add_text("user.name", "Name", "Anonymous", [&](const std::string& v) { last = v; });
 
     REQUIRE(p.get_text("user.name") == "Anonymous");
     REQUIRE(p.simulate_set_text("user.name", "Alice"));
@@ -171,8 +165,7 @@ TEST_CASE("PropertyPanel: text variant", "[property-panel][text]") {
     REQUIRE(last == "Alice");
 }
 
-TEST_CASE("PropertyPanel: typed setters reject mismatched kinds",
-          "[property-panel][type-safety]") {
+TEST_CASE("PropertyPanel: typed setters reject mismatched kinds", "[property-panel][type-safety]") {
     PropertyPanel p;
     p.add_text("a", "A", "x");
     REQUIRE_FALSE(p.set_bool("a", true));
@@ -180,7 +173,7 @@ TEST_CASE("PropertyPanel: typed setters reject mismatched kinds",
     REQUIRE_FALSE(p.set_slider("a", 0.5f));
     REQUIRE_FALSE(p.set_multi_choice("a", {0}));
     REQUIRE_FALSE(p.click("a"));
-    REQUIRE(p.get_text("a") == "x");  // value untouched
+    REQUIRE(p.get_text("a") == "x"); // value untouched
 }
 
 TEST_CASE("PropertyPanel: re-registering a key replaces the slot in place",
@@ -248,12 +241,12 @@ TEST_CASE("PropertyPanel: persistence round-trips all typed variants",
 TEST_CASE("PropertyPanel: bind_persistence clamps stored out-of-range Choice",
           "[property-panel][persistence][defensive]") {
     pulp::state::PropertiesFile pf;
-    pf.set_int("c", 99);  // someone hand-edited the JSON
+    pf.set_int("c", 99); // someone hand-edited the JSON
 
     PropertyPanel p;
     p.add_choice("c", "C", {"a", "b"}, 0);
     p.bind_persistence(&pf);
-    REQUIRE(p.get_choice("c") == 1);  // clamped
+    REQUIRE(p.get_choice("c") == 1); // clamped
 }
 
 TEST_CASE("PropertyPanel: bind_persistence(nullptr) detaches without erasing",
