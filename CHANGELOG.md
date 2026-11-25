@@ -9,6 +9,15 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
      release's bullet block. See docs/guides/versioning.md § Release pipeline
      for the full end-to-end flow. -->
 
+<a id="v12080"></a>
+## [1.208.0] - 2026-11-25
+
+- release/version bump ([#12841](https://github.com/Generous-Corp/pulp/pull/12841))
+- fix/msvc fixed function vtable ([#12837](https://github.com/Generous-Corp/pulp/pull/12837))
+- chore/planning bump m5s receipt ([#12836](https://github.com/Generous-Corp/pulp/pull/12836))
+- release/version bump ([#12835](https://github.com/Generous-Corp/pulp/pull/12835))
+- feat/prepush targeted fixture tests ([#12823](https://github.com/Generous-Corp/pulp/pull/12823))
+
 <a id="v12070"></a>
 ## [1.207.0] - 2026-11-24
 
@@ -13705,6 +13714,7 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/Generous-Corp/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/Generous-Corp/pulp/pull/2))
 
+[1.208.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.208.0
 [1.207.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.207.0
 [1.206.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.206.0
 [1.205.1]: https://github.com/Generous-Corp/pulp/releases/tag/v1.205.1
