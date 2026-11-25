@@ -5,6 +5,7 @@
 #include <pulp/format/detail/standalone_key_sequence.hpp>
 #include <pulp/format/detail/standalone_environment.hpp>
 #include <pulp/format/standalone.hpp>
+#include <pulp/view/input_events.hpp>
 
 #include <cstdlib>
 #include <string>
@@ -13,6 +14,26 @@
 using namespace pulp;
 using namespace pulp::format::detail;
 using KC = pulp::format::detail::SequenceKey;
+
+// A step's key and modifiers keep view::KeyCode's and view::Modifier's values,
+// so a sequence names the same key on either side of the view boundary.
+namespace {
+template <typename A, typename B> constexpr bool same_value(A a, B b) {
+    return static_cast<int>(a) == static_cast<int>(b);
+}
+using VK = pulp::view::KeyCode;
+static_assert(same_value(KC::a, VK::a) && same_value(KC::z, VK::z));
+static_assert(same_value(KC::num0, VK::num0) && same_value(KC::num9, VK::num9));
+static_assert(same_value(KC::semicolon, VK::semicolon) &&
+              same_value(KC::apostrophe, VK::apostrophe));
+static_assert(same_value(KC::left, VK::left) && same_value(KC::page_down, VK::page_down));
+static_assert(same_value(KC::backspace, VK::backspace) && same_value(KC::escape, VK::escape));
+static_assert(same_value(KC::space, VK::space));
+static_assert(same_value(KC::f1, VK::f1) && same_value(KC::f12, VK::f12));
+static_assert(kSequenceModShift == pulp::view::kModShift &&
+              kSequenceModCtrl == pulp::view::kModCtrl && kSequenceModAlt == pulp::view::kModAlt &&
+              kSequenceModMeta == pulp::view::kModMeta && kSequenceModCmd == pulp::view::kModCmd);
+} // namespace
 
 TEST_CASE("key sequence parses arrow and named keys", "[standalone][keyboard]") {
     std::vector<KeySequenceStep> steps;
