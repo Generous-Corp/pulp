@@ -20,6 +20,23 @@ namespace pulp::slice {
 inline constexpr state::ParamID kGainParam = 1;
 inline constexpr float kGainDefault = 0.5f;
 
+/// The smallest size every slice editor takes; set_size() refuses anything
+/// smaller.
+inline constexpr std::uint32_t kEditorMinWidth = 120;
+inline constexpr std::uint32_t kEditorMinHeight = 80;
+
+/// The size hints every slice editor declares: resizable from the minimum up,
+/// with no maximum, preferring its current size. An editor that declares no
+/// minimum is fixed-size, and its hosts then keep it at one size.
+inline format::ViewSize slice_editor_size_hints(const format::EditorSize& current) {
+    format::ViewSize hints;
+    hints.preferred_width = current.width;
+    hints.preferred_height = current.height;
+    hints.min_width = kEditorMinWidth;
+    hints.min_height = kEditorMinHeight;
+    return hints;
+}
+
 /// The per-binary editor hook. Exactly one definition is linked into each
 /// executable; the headless one returns null.
 format::EditorFactory* slice_editor_factory();
