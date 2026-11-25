@@ -1199,13 +1199,13 @@ or compare a pinned digest fail on bytes nobody committed.
 On a GitHub-hosted `windows-latest` runner (4 vCPUs, no remote ccache storage) a
 cold `cross-platform-check.yml` Windows build takes about 2 h 25 min and the
 suite about 30 min more, so the job's `timeout-minutes` is 300 (the hosted
-ceiling is 360). The job restores a ccache directory with `actions/cache/restore`
-(`.ccache` in the workspace, key prefix `ccache-windows-x64-`, newest entry from
-this branch first, then main) and saves it after the build with
-`actions/cache/save`, even when a test fails, so a repeat run recompiles only
-what changed. A self-hosted runner skips both steps and keeps its own storage.
-A pull request branch cannot write a cache entry that another branch reads, so
-it cannot poison main's cache.
+ceiling is 360). The job restores a ccache directory with `actions/cache/restore` (`.ccache` in
+the workspace, capped at 1 GB by `CCACHE_MAXSIZE`; key
+`ccache-windows-x64-msvc14-<hash of the dependency pins>-<run id>`, falling back
+to the newest entry for the same toolchain). Only the nightly on `main` saves
+it, because the repository's 10 GB Actions cache is already full and a save from
+every dispatch would evict other workflows' entries. A self-hosted runner skips
+both steps and keeps its own storage.
 
 ### Windows skips the source-selftest lane
 

@@ -374,17 +374,18 @@ jobs:
 
       # A GitHub-hosted runner starts empty and has no remote ccache storage, so
       # every build compiled from scratch. Cache the compiler cache itself:
-      # restore the newest entry (this branch, then main), save after the build
-      # even when a test fails. A self-hosted runner keeps its own storage.
+      # restore the newest entry; only the nightly on main saves, so a pull request
+      # or dispatch cannot churn the repository's 10 GB cache budget. A self-hosted runner keeps its own storage.
       - name: Restore ccache (GitHub-hosted)
         if: runner.environment == 'github-hosted'
         id: ccache-restore
         uses: actions/cache/restore@v6
         with:
           path: ${{ github.workspace }}/.ccache
-          key: ccache-windows-x64-${{ github.run_id }}
+          key: ccache-windows-x64-msvc14-${{ hashFiles('tools/cmake/PulpDependencies.cmake', 'tools/deps/manifest.json') }}-${{ github.run_id }}
           restore-keys: |
-            ccache-windows-x64-
+            ccache-windows-x64-msvc14-${{ hashFiles('tools/cmake/PulpDependencies.cmake', 'tools/deps/manifest.json') }}-
+            ccache-windows-x64-msvc14-
 
       - name: Point ccache at the restored directory (GitHub-hosted)
         if: runner.environment == 'github-hosted'
@@ -392,7 +393,7 @@ jobs:
         run: |
           {
             echo "CCACHE_DIR=${GITHUB_WORKSPACE}/.ccache"
-            echo "CCACHE_MAXSIZE=2G"
+            echo "CCACHE_MAXSIZE=1G"
           } >> "$GITHUB_ENV"
 
       - name: Bootstrap repository dependencies
@@ -468,12 +469,12 @@ jobs:
           fi
 
       - name: Save ccache (GitHub-hosted)
-        if: ${{ always() && runner.environment == 'github-hosted' && steps.build.outcome != 'skipped' }}
+        if: ${{ always() && runner.environment == 'github-hosted' && steps.build.outcome != 'skipped' && github.ref == 'refs/heads/main' && (github.event_name == 'schedule' || github.event_name == 'push') }}
         continue-on-error: true
         uses: actions/cache/save@v6
         with:
           path: ${{ github.workspace }}/.ccache
-          key: ccache-windows-x64-${{ github.run_id }}
+          key: ccache-windows-x64-msvc14-${{ hashFiles('tools/cmake/PulpDependencies.cmake', 'tools/deps/manifest.json') }}-${{ github.run_id }}
 
       - name: Test (UTF-8 code page wrapped)
         # Runs after a build that finished with errors, not only after a clean
