@@ -13968,3 +13968,7 @@ main's SDK. A new optional Vellum integration package needs its option, its
 `pulp-test-*` target and a `paths:` entry added there, or no lane compiles it
 against main. The tests' ctest label should start with `pulp-vellum` so the
 lane's `-L pulp-vellum` filter runs them.
+
+The lane's build target list is explicit, so a test target registered under
+`integrations/pulp-vellum/tests` (for example `pulp-test-motion-swift-bridge`)
+is never compiled against Vellum main until it is named there.
