@@ -67,6 +67,8 @@ struct ContractEditorConfig {
     bool resize_inside_set_size = false;
     /// set_size() refuses every size (the editor keeps its own).
     bool refuse_set_size = false;
+    /// The size a new editor starts at (inside the 200x150 to 800x600 hints).
+    format::EditorSize initial_size{400, 300, 1.0};
 };
 
 inline ContractEditorLog& contract_log() {
@@ -115,6 +117,7 @@ class RecordingContractEditor final : public format::Editor {
     explicit RecordingContractEditor(format::EditorContext& context) {
         contract_log().context = &context;
         ++contract_log().live;
+        size_ = contract_config().initial_size;
     }
     ~RecordingContractEditor() override {
         note_editor_thread();

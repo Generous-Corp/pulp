@@ -150,7 +150,7 @@ class ReleaseWorkflowWiringTests(unittest.TestCase):
     def test_config_hints_staged_vellum_and_stays_optional(self) -> None:
         text = (REPO / "tools/cmake/PulpConfig.cmake.in").read_text(encoding="utf-8")
         self.assertIn("share/pulp/vellum-sdk/*/sdk", text)
-        self.assertRegex(text, r"find_package\(Vellum CONFIG QUIET PATHS")
+        self.assertRegex(text, r"find_package\(Vellum [^)]*CONFIG QUIET HINTS")
         self.assertNotIn("find_dependency(Vellum", text)
 
 
