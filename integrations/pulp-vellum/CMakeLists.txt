@@ -6,6 +6,8 @@
 # GLOBAL: the imported Vellum targets must resolve outside this directory too,
 # where the plug-in link-floor checks walk pulp-vellum's link closure.
 find_package(Vellum CONFIG REQUIRED GLOBAL)
+# Recorded for the installed PulpConfig, which requires this exact version.
+set_property(GLOBAL PROPERTY PULP_VELLUM_SDK_VERSION "${Vellum_VERSION}")
 
 add_library(pulp-vellum STATIC
     src/mapping.cpp

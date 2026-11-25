@@ -18,9 +18,9 @@ modules:
 
   - name: pulp_vellum_audio
     path: integrations/pulp-vellum-audio
-    summary: A lock-free TripleBuffer provider that publishes Pulp audio-thread meter and scope frames to Vellum value feeds
+    summary: A lock-free TripleBuffer provider that publishes Pulp audio-thread meter and scope frames to Vellum value feeds, plus Vellum MultiMeter and CorrelationMeter views over pulp::signal meter data
     status: experimental
-    dependencies: [runtime]
+    dependencies: [runtime, signal]
     docs: reference/modules.md#pulp_vellum_audio
 
   - name: pulp_vellum_components

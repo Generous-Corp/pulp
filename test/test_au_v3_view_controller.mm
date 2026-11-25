@@ -31,6 +31,8 @@ namespace {
 
 constexpr pulp::state::ParamID kGain = 1;
 bool g_has_factory = true;
+// The editor size the processor declares (Processor::editor_size()).
+std::pair<std::uint32_t, std::uint32_t> g_editor_size{400, 300};
 
 class ContractProcessor final : public pulp::format::Processor {
   public:
@@ -58,6 +60,12 @@ class ContractProcessor final : public pulp::format::Processor {
                  const pulp::format::ProcessContext&) override {}
     pulp::format::EditorFactory* editor_factory() override {
         return has_factory_ ? &factory_ : nullptr;
+    }
+    std::pair<std::uint32_t, std::uint32_t> editor_size() const override {
+        return g_editor_size;
+    }
+    pulp::format::ViewSize view_size() const override {
+        return pulp::format::ViewSize{.preferred_width = 111, .preferred_height = 222};
     }
 
   private:
@@ -120,6 +128,77 @@ NSWindow* make_window() {
 }
 
 } // namespace
+
+/// Records every preferredContentSize a controller publishes, the way a host
+/// observing it to size its window would see them.
+@interface PreferredSizeRecorder : NSObject {
+  @public
+    std::vector<NSSize> sizes;
+}
+@end
+
+@implementation PreferredSizeRecorder
+- (void)observeValueForKeyPath:(NSString*)keyPath
+                      ofObject:(id)object
+                        change:(NSDictionary*)change
+                       context:(void*)context {
+    (void)keyPath;
+    (void)change;
+    (void)context;
+    sizes.push_back([(NSViewController*)object preferredContentSize]);
+}
+@end
+
+TEST_CASE("an AU v3 controller bound before its view loads opens at the editor's size",
+          "[auv3][editor-host][au-v3-contract][controller]") {
+    EditorEnvironment env;
+    reset_contract_recording();
+    g_has_factory = true;
+    struct EditorSizeScope {
+        EditorSizeScope() {
+            g_editor_size = {720, 540};
+        }
+        ~EditorSizeScope() {
+            g_editor_size = {400, 300};
+        }
+    } editor_size_scope;
+    pulp::test_support::contract_config().initial_size = {720, 540, 1.0};
+    ScopedFactoryRegistration registration(create_processor);
+
+    PulpAudioUnit* unit = nil;
+    NSViewController* controller = nil;
+    PreferredSizeRecorder* recorder = [[PreferredSizeRecorder alloc] init];
+    @autoreleasepool {
+        unit = make_unit();
+        // A host instantiates the audio unit first and asks for the view after.
+        Class cls = NSClassFromString(@"PulpAUMacViewController");
+        REQUIRE(cls != nil);
+        controller = [[cls alloc] init];
+        [controller setValue:unit forKey:@"audioUnit"];
+        [controller addObserver:recorder
+                     forKeyPath:@"preferredContentSize"
+                        options:NSKeyValueObservingOptionNew
+                        context:nullptr];
+        (void)controller.view; // loadView + viewDidLoad
+
+        // The root view starts at the editor's size, and every size the host
+        // could read is that size: no placeholder for it to open a window at.
+        REQUIRE(contract_view_of(controller) != nil);
+        REQUIRE(controller.view.frame.size.width == 720);
+        REQUIRE(controller.view.frame.size.height == 540);
+        REQUIRE_FALSE(recorder->sizes.empty());
+        for (const NSSize size : recorder->sizes) {
+            CAPTURE(size.width, size.height);
+            REQUIRE(size.width == 720);
+            REQUIRE(size.height == 540);
+        }
+        [controller removeObserver:recorder forKeyPath:@"preferredContentSize"];
+        [controller release];
+        [unit release];
+    }
+    pulp::test_support::MainLoop().run_for(0.3);
+    [recorder release];
+}
 
 TEST_CASE("the AU v3 view controller opens, resizes and closes a contract editor",
           "[auv3][editor-host][au-v3-contract][controller]") {

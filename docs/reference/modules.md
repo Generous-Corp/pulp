@@ -45,7 +45,7 @@ use without hard-coding macOS, Windows, Linux, iOS, or Web behavior.
 
 ## pulp_vellum_audio
 
-`pulp::vellum_audio` (`integrations/pulp-vellum-audio`, optional, off unless `PULP_ENABLE_PULP_VELLUM_AUDIO=ON`) provides `AudioDisplayProvider`, a fixed-channel Vellum `ValueFeed` for audio-thread meter and scope publications. A processor publishes complete frames through `publish_meter()` or `publish_scope()`; each channel uses a `runtime::TripleBuffer`, so the UI reads a coherent latest frame without allocating or blocking the audio thread. The channel list is fixed at construction and tests cover shape checks, frame contents and publish counters.
+`pulp::vellum_audio` (`integrations/pulp-vellum-audio`, optional, off unless `PULP_ENABLE_PULP_VELLUM_AUDIO=ON`) provides `AudioDisplayProvider`, a fixed-channel Vellum `ValueFeed` for audio-thread meter and scope publications. A processor publishes complete frames through `publish_meter()` or `publish_scope()`; each channel uses a `runtime::TripleBuffer`, so the UI reads a coherent latest frame without allocating or blocking the audio thread. The channel list is fixed at construction and tests cover shape checks, frame contents and publish counters. `MultiMeter` is a Vellum view that draws up to `signal::kMaxMeterChannels` smoothed level columns, continuous or segmented, from `signal::MultiChannelMeterData`; its `update()` reports whether a displayed level moved so callers repaint only on change. `CorrelationMeter` is a Vellum view that draws a smoothed stereo correlation needle from -1 to +1 and likewise reports movement from `update()`.
 
 ## pulp_vellum_components
 

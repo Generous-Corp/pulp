@@ -35,6 +35,7 @@
 
 #include <algorithm>
 #include <array>
+#include <chrono>
 #include <cstdint>
 #include <memory>
 #include <optional>
@@ -176,7 +177,18 @@ class StubHost final : public ::vellum::view::PluginViewHost {
         ++fixed_aspect_calls;
         aspect_ratio = ratio;
     }
+    void resume_presentation() {
+        ++resume_presentation_calls;
+        if constexpr (requires(PluginViewHost& host) { host.resume_presentation(); })
+            PluginViewHost::resume_presentation();
+    }
+    bool presentation_allowed() const noexcept {
+        if constexpr (requires(const StubHost& host) { host.root_presentation_allowed(); })
+            return root_presentation_allowed();
+        return true;
+    }
 
+    int resume_presentation_calls = 0;
     int design_viewport_calls = 0;
     int fixed_aspect_calls = 0;
     int repaint_calls = 0;
@@ -1274,4 +1286,168 @@ TEST_CASE("runtime interaction coordinates scale to Vellum backing pixels",
     REQUIRE(adapter.deliver(view, recycled));
     REQUIRE(view.events.size() == 3);
     CHECK(view.events[2].pointer_id == view.events[0].pointer_id);
+}
+
+namespace {
+
+// A root that opts into content-first presentation and reports when its
+// content is ready, with a test-controlled timeout.
+bool g_content_ready = false;
+std::chrono::milliseconds g_presentation_timeout{60'000};
+
+class DeferredView final : public ::vellum::view::View {
+  public:
+    explicit DeferredView(pulp::vellum::EditorEnv&) {}
+    static bool editor_defers_presentation() {
+        return true;
+    }
+    bool editor_content_ready() const {
+        return g_content_ready;
+    }
+    std::chrono::milliseconds editor_presentation_timeout() const {
+        return g_presentation_timeout;
+    }
+};
+
+// A deferring root with no readiness hook: its content is there at attach.
+class DeferredNativeView final : public ::vellum::view::View {
+  public:
+    explicit DeferredNativeView(pulp::vellum::EditorEnv&) {}
+    static bool editor_defers_presentation() {
+        return true;
+    }
+};
+
+template <typename Root> struct PresentationFixture {
+    using PluginViewHost = ::vellum::view::PluginViewHost;
+
+    FactoryReset reset;
+    Fixture fixture;
+    Context context{*fixture.port};
+    Processor processor;
+    StubHost* host = nullptr;
+    std::optional<bool> deferred;
+    std::unique_ptr<pulp::format::Editor> editor;
+
+    PresentationFixture() {
+        PluginViewHost::set_factory(
+            [this](::vellum::view::View&, const PluginViewHost::Options& options) {
+                if constexpr (requires(const PluginViewHost::Options& o) { o.defer_presentation; })
+                    deferred = options.defer_presentation;
+                else
+                    deferred = false;
+                auto stub = std::make_unique<StubHost>(options.size);
+                host = stub.get();
+                return stub;
+            });
+        pulp::vellum::EditorFactory<Root> factory;
+        editor = factory.create(processor, context, pulp::format::EditorRole::editor);
+        REQUIRE(host != nullptr);
+    }
+
+    bool attach() {
+        return editor->attach({.kind = pulp::format::NativeParentKind::cocoa_view, .handle = host});
+    }
+};
+
+struct PresentationGlobals {
+    PresentationGlobals() {
+        g_content_ready = false;
+        g_presentation_timeout = std::chrono::milliseconds{60'000};
+    }
+    ~PresentationGlobals() {
+        g_content_ready = false;
+        g_presentation_timeout = std::chrono::milliseconds{60'000};
+    }
+};
+
+constexpr bool has_presentation_api() {
+    return requires(::vellum::view::PluginViewHost& host) { host.resume_presentation(); }&&
+        requires(::vellum::view::PluginViewHost::Options & options)
+    {
+        options.defer_presentation = true;
+    };
+}
+
+} // namespace
+
+TEST_CASE("A Vellum root that defers presentation presents nothing until its content is ready",
+          "[pulp-vellum][editor][presentation]") {
+    if constexpr (!has_presentation_api())
+        SKIP("installed Vellum SDK has no deferred-presentation host API");
+    PresentationGlobals globals;
+    PresentationFixture<DeferredView> f;
+    REQUIRE(f.deferred == std::optional<bool>{true});
+    REQUIRE(f.attach());
+
+    // Attached and ticking, but not ready: the host keeps its native layer.
+    for (int i = 0; i < 5; ++i)
+        f.editor->idle();
+    CHECK(f.host->resume_presentation_calls == 0);
+    CHECK(f.host->present_first_frame_calls == 0);
+    CHECK_FALSE(f.host->presentation_allowed());
+
+    // Ready: the host presents, exactly once.
+    g_content_ready = true;
+    f.editor->idle();
+    CHECK(f.host->resume_presentation_calls == 1);
+    CHECK(f.host->presentation_allowed());
+    f.editor->idle();
+    CHECK(f.host->resume_presentation_calls == 1);
+
+    // A later attach does not defer again.
+    f.editor->detach();
+    REQUIRE(f.attach());
+    f.editor->idle();
+    CHECK(f.host->resume_presentation_calls == 1);
+}
+
+TEST_CASE("A deferred Vellum root that never reports ready still presents after its timeout",
+          "[pulp-vellum][editor][presentation]") {
+    if constexpr (!has_presentation_api())
+        SKIP("installed Vellum SDK has no deferred-presentation host API");
+    PresentationGlobals globals;
+    g_presentation_timeout = std::chrono::milliseconds{0};
+    PresentationFixture<DeferredView> f;
+    REQUIRE(f.attach());
+    // The timeout runs from idle, never from attach itself.
+    CHECK(f.host->resume_presentation_calls == 0);
+    f.editor->idle();
+    CHECK(f.host->resume_presentation_calls == 1);
+}
+
+TEST_CASE("A detached deferred Vellum root does not present from a stale timeout",
+          "[pulp-vellum][editor][presentation]") {
+    if constexpr (!has_presentation_api())
+        SKIP("installed Vellum SDK has no deferred-presentation host API");
+    PresentationGlobals globals;
+    g_presentation_timeout = std::chrono::milliseconds{0};
+    PresentationFixture<DeferredView> f;
+    REQUIRE(f.attach());
+    f.editor->detach();
+    f.editor->idle();
+    CHECK(f.host->resume_presentation_calls == 0);
+}
+
+TEST_CASE("A deferring Vellum root without a readiness hook presents at attach",
+          "[pulp-vellum][editor][presentation]") {
+    if constexpr (!has_presentation_api())
+        SKIP("installed Vellum SDK has no deferred-presentation host API");
+    PresentationFixture<DeferredNativeView> f;
+    REQUIRE(f.deferred == std::optional<bool>{true});
+    CHECK(f.host->resume_presentation_calls == 0);
+    REQUIRE(f.attach());
+    CHECK(f.host->resume_presentation_calls == 1);
+}
+
+TEST_CASE("A Vellum root that does not opt in keeps immediate presentation",
+          "[pulp-vellum][editor][presentation]") {
+    if constexpr (!has_presentation_api())
+        SKIP("installed Vellum SDK has no deferred-presentation host API");
+    PresentationFixture<TestView> f;
+    REQUIRE(f.deferred == std::optional<bool>{false});
+    REQUIRE(f.attach());
+    f.editor->idle();
+    CHECK(f.host->resume_presentation_calls == 0);
+    CHECK(f.host->presentation_allowed());
 }

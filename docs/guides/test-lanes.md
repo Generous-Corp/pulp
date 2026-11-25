@@ -297,6 +297,14 @@ stopped compiling and no Pulp check noticed.
   retained Pulp view components against Vellum main's view layer and renders
   them offscreen. PRs touching `integrations/pulp-vellum-components/**` run the
   lane.
+- **Vellum-backed UI target names.** The `pulp-vellum` filter also runs
+  `cmake-vellum-ui-compat-real` and `cmake-vellum-ui-compat-wrong-version`. In a
+  configure that found Vellum they get that label and `REQUIRE_VELLUM`, so they
+  fail rather than skip when the SDK cannot be used. They build the installed
+  consumer under `tools/validation/sdk-smoke/vellum-ui-compat/` against a
+  fabricated Pulp prefix that stages this run's Vellum SDK. Pull requests that
+  touch `tools/cmake/PulpConfig.cmake.in`, the scenario driver
+  `test/cmake/test_vellum_ui_compat_package.cmake` or that consumer run the lane.
 - **Negative control.** Every full run recompiles one Vellum-side translation
   unit (`knob_panel.cpp`) with `-fsyntax-only`, once against the SDK as
   published, which must succeed, and once against a copy of its mirror headers
