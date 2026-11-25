@@ -1093,6 +1093,54 @@ def _fetch_bump_tip(repo: Path, remote: str) -> str | None:
     return tip or None
 
 
+def _marker_line(text: str) -> str | None:
+    """The `Version-Bump-Applied:` trailer line of a commit message or PR body."""
+    for line in text.splitlines():
+        if line.startswith(f"{APPLIED_MARKER}:"):
+            return line.strip()
+    return None
+
+
+def _set_bump_pr_body(repo: Path, number: str, body: str) -> bool:
+    """Replace the bump PR's description through the REST pulls endpoint.
+
+    `gh pr edit` fails for the release bot's token in the workflow, so the
+    description is written with a plain PATCH. A failure is reported with the
+    API's own message; the next drain retries it through
+    `_reconcile_bump_pr_body`."""
+    res = _gh(repo, "api", "--method", "PATCH",
+              f"repos/{{owner}}/{{repo}}/pulls/{number}",
+              "-f", f"body={body}", check=False)
+    if res.returncode != 0:
+        detail = (res.stderr or res.stdout or "").strip()
+        sys.stderr.write(f"version-at-land: could not refresh the body of bump "
+                         f"PR #{number} (exit {res.returncode}): {detail}\n")
+        return False
+    return True
+
+
+def _reconcile_bump_pr_body(repo: Path, number: str, tip: str) -> None:
+    """Make the standing bump PR's description describe its current head.
+
+    Reviewers read the assigned versions from the description, so one that
+    names an older drain range holds a correct head. The head commit's message
+    is the description whenever their `Version-Bump-Applied` markers differ."""
+    want = _git(repo, "log", "-1", "--format=%B", tip, check=False).stdout
+    marker = _marker_line(want)
+    if marker is None:
+        return
+    got = _gh(repo, "api", f"repos/{{owner}}/{{repo}}/pulls/{number}",
+              "--jq", ".body", check=False)
+    if got.returncode != 0:
+        detail = (got.stderr or got.stdout or "").strip()
+        sys.stderr.write(f"version-at-land: could not read the body of bump "
+                         f"PR #{number} (exit {got.returncode}): {detail}\n")
+        return
+    if _marker_line(got.stdout) == marker:
+        return
+    _set_bump_pr_body(repo, number, want.strip() + "\n")
+
+
 def _tip_age_minutes(repo: Path, tip: str, now: int) -> int | None:
     """Minutes since the standing bump commit was built; None when unreadable."""
     stamp = _git(repo, "log", "-1", "--format=%ct", tip, check=False).stdout.strip()
@@ -1318,12 +1366,48 @@ def _update_standing_pr(
             f"{pushed.returncode}); the branch moved under us.\n"
             f"{(pushed.stderr or pushed.stdout or '').strip()}\n")
         return "exhausted"
-    edit = _gh(repo, "pr", "edit", number, "--body",
-               _bump_message(plan, base, head), check=False)
-    if edit.returncode != 0:
-        sys.stderr.write(f"version-at-land: could not refresh the body of bump "
-                         f"PR #{number} (exit {edit.returncode}).\n")
+    _set_bump_pr_body(repo, number, message)
     return "pr-updated"
+
+
+def _drive_standing_pr(
+    repo: Path, config: Config, *, remote: str, number: str, tip: str | None,
+    plan: list[Assignment], base: str, head: str, heal_stale: bool,
+    window: int, release_now: bool, now: int, report: dict[str, str] | None,
+) -> str:
+    """Decide what this drain does to the one standing bump PR; see
+    `apply_via_pr` for the statuses."""
+    covers = _bump_pr_covers(repo, number, head)
+    if covers is True and not heal_stale:
+        return ("pending" if _arm_auto_merge(repo, number)
+                else "arm-failed")
+    state, reason = _bump_pr_liveness(repo, number)
+    if report is not None:
+        report.update(pr=number, reason=reason)
+    if covers is True and state != "red":
+        return ("pending" if _arm_auto_merge(repo, number)
+                else "arm-failed")
+    if covers is None or state not in ("progressing", "red", "dead",
+                                       "queued"):
+        # Unknown coverage or state, or a draft: an explicit hold or a
+        # fact that could not be read is never replaced.
+        return "stale-defer"
+    if state == "queued":
+        return "stale-wait"
+    if state in ("red", "dead") and not heal_stale and not (
+            tip is not None and _capability_assignment_is_stale(repo, tip, head)):
+        # A head whose capability assignment main has outgrown can never
+        # land, so repairing it needs no opt-in.
+        return "stale-defer"
+    if tip is None:
+        # The branch could not be read, so there is nothing to compare
+        # with or replace; wait rather than guess.
+        return ("stale-wait" if state == "progressing"
+                else "stale-defer")
+    return _update_standing_pr(
+        repo, config, remote=remote, number=number, tip=tip, plan=plan,
+        base=base, head=head, state=state, window=window,
+        release_now=release_now, now=now, report=report)
 
 
 def apply_via_pr(
@@ -1438,37 +1522,18 @@ def apply_via_pr(
         # needs a higher version. Unknown coverage is treated as NOT covering.
         stamp = now if now is not None else int(time.time())
         tip = _fetch_bump_tip(repo, remote)
-        covers = _bump_pr_covers(repo, existing, head)
-        if covers is True and not heal_stale:
-            return ("pending" if _arm_auto_merge(repo, existing)
-                    else "arm-failed"), plan
-        state, reason = _bump_pr_liveness(repo, existing)
-        if report is not None:
-            report.update(pr=existing, reason=reason)
-        if covers is True and state != "red":
-            return ("pending" if _arm_auto_merge(repo, existing)
-                    else "arm-failed"), plan
-        if covers is None or state not in ("progressing", "red", "dead",
-                                           "queued"):
-            # Unknown coverage or state, or a draft: an explicit hold or a
-            # fact that could not be read is never replaced.
-            return "stale-defer", plan
-        if state == "queued":
-            return "stale-wait", plan
-        if state in ("red", "dead") and not heal_stale and not (
-                tip is not None and _capability_assignment_is_stale(repo, tip, head)):
-            # A head whose capability assignment main has outgrown can never
-            # land, so repairing it needs no opt-in.
-            return "stale-defer", plan
-        if tip is None:
-            # The branch could not be read, so there is nothing to compare
-            # with or replace; wait rather than guess.
-            return ("stale-wait" if state == "progressing"
-                    else "stale-defer"), plan
-        return _update_standing_pr(
+        status = _drive_standing_pr(
             repo, config, remote=remote, number=existing, tip=tip, plan=plan,
-            base=base, head=head, state=state, window=coalesce_window,
-            release_now=release_now, now=stamp, report=report), plan
+            base=base, head=head, heal_stale=heal_stale,
+            window=coalesce_window, release_now=release_now, now=stamp,
+            report=report)
+        if status not in ("pr-updated", "exhausted") and tip is not None:
+            # An update writes its own description, and a lost push means the
+            # head is no longer `tip`. Every other outcome keeps the head, so
+            # a description an earlier drain failed to refresh is repaired
+            # here.
+            _reconcile_bump_pr_body(repo, existing, tip)
+        return status, plan
 
     edited = _write_plan(repo, config, plan)
     if not edited:
