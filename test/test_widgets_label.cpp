@@ -760,7 +760,7 @@ TEST_CASE("Label text can be changed", "[view][widget]") {
 
 TEST_CASE("Label intrinsic_width fits long text", "[view][widget][issue-928]") {
     // Regression: previously Label reported 0 intrinsic width and
-    // inherited a small_label parent width in flex-row containers, causing
+    // inherited a small parent width in flex-row containers, causing
     // Spectr's "ZOOMABLE FILTER BANK" header to clip to "ZOOMABLE FII".
     Label long_label("ZOOMABLE FILTER BANK");
     Label short_label("BANK");
@@ -791,14 +791,14 @@ TEST_CASE("Label intrinsic_width scales with font size", "[view][widget][issue-9
     REQUIRE(large.intrinsic_width() > small_label.intrinsic_width());
 }
 
-TEST_CASE("Label intrinsic_height bumps line-height multiplier for small_label fonts (#76)",
+TEST_CASE("Label intrinsic_height bumps line-height multiplier for small fonts (#76)",
           "[view][widget][issue-pulp-internal-76]") {
     // pulp-internal #76 — Spectr's `<span fontSize=10>SNAPSHOT</span>` in
     // the bottom toolbar was vertically clipped because Yoga reserved
     // 10 * 1.4 = 14px for the Label, but Inter's typographic ascent +
     // descent at 10pt is ~13px and the GPU clip-rect on the View bounds
     // shaved descender slack off in practice. intrinsic_height now uses
-    // a 1.6 multiplier for small_label font sizes (< 12pt) to ensure the full
+    // a 1.6 multiplier for small font sizes (< 12pt) to ensure the full
     // glyph extent fits inside the reserved box.
     //
     // Larger sizes keep the historical 1.4 multiplier — they have plenty
@@ -1086,7 +1086,7 @@ TEST_CASE("Label measured_height counts soft-wrapped lines under a bounded width
     // off so single-line widgets pay no extra cost.
     Label snap("SNAPSHOT");
     snap.set_font_size(10.0f);
-    // pulp-internal #76: small_label fonts (<12pt) use the 1.6 line-height
+    // pulp-internal #76: small fonts (<12pt) use the 1.6 line-height
     // multiplier so glyphs don't clip in compact toolbars; the measure
     // path mirrors that to keep Yoga reservation in sync with paint.
     const float snap_lh = snap.intrinsic_height();
@@ -1166,7 +1166,7 @@ TEST_CASE("Label intrinsic_width matches text after rebuild / re-measure",
     REQUIRE(long_w > short_w * 5.0f);
 
     // Reverting back to the short text must give back the short width
-    // (within a small_label rounding margin) — proves measurement is a pure
+    // (within a small rounding margin) — proves measurement is a pure
     // function of the current text, not stuck on a stale value.
     l.set_text("SF");
     float short_again = l.intrinsic_width();
@@ -2164,16 +2164,16 @@ TEST_CASE("Label captured single-line fallback reflows attributed spans without 
 
 TEST_CASE("Label mixed-size attributed runs share measurement and paint metrics",
           "[view][widget][label-cache][attributed][metrics]") {
-    Label small_label("small_label BIG");
+    Label small_label("small BIG");
     small_label.set_font_family("Inter");
     small_label.set_font_size(10.0f);
 
-    Label mixed("small_label BIG");
+    Label mixed("small BIG");
     mixed.set_font_family("Inter");
     mixed.set_font_size(10.0f);
     AttributedString attributed;
     TextSpan first;
-    first.text = "small_label ";
+    first.text = "small ";
     first.font_family = "Inter";
     first.font_size = 10.0f;
     attributed.append(first);
@@ -2208,7 +2208,7 @@ TEST_CASE("Label automatic attributed line boxes use per-line metrics",
     large.font_size = 28.0f;
     attributed.append(large);
     TextSpan small_label;
-    small_label.text = "small_label";
+    small_label.text = "small";
     small_label.font_family = "Inter";
     small_label.font_size = 10.0f;
     attributed.append(small_label);
@@ -2224,7 +2224,7 @@ TEST_CASE("Label automatic attributed line boxes use per-line metrics",
     expected_large.font_size = 28.0f;
     expected_text.append(expected_large);
     TextSpan expected_small;
-    expected_small.text = "small_label";
+    expected_small.text = "small";
     expected_small.font_family = "Inter";
     expected_small.font_size = 10.0f;
     expected_text.append(expected_small);
@@ -2978,7 +2978,7 @@ TEST_CASE("a single-line label does not break on a newline when measuring width"
     // "COPY\nFAILED" is shaping "COPYFAILED" -- the newline contributes no
     // advance, and nothing is dropped around it.
     //
-    // Paint reads ~2.8 pt wider here because fill_text gives the `\n` a small_label
+    // Paint reads ~2.8 pt wider here because fill_text gives the `\n` a small
     // advance the shaper gives zero. That measure-vs-paint gap predates the
     // max-content split and is not what this case guards, so it is asserted as
     // a direction above rather than an equality.
