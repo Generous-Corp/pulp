@@ -2487,6 +2487,50 @@ failure is the last tool line before `Process completed with exit code 1`.
 Exit codes: 0 nothing owed · 10 event owed · 11 inventory stale · 20 no
 verdict · 2 `--write-event` refused. Both callers block on 10 and 11 only.
 
+### Fixture tests the pre-push hook runs: the ones the range reaches, capped at 60 s
+
+The hook runs `tools/ci/prepush_fixtures.py --base <base>`. The candidates are
+the commands of the workflow's "Gate-script fixture tests" step and the
+source-only selftests in `tools/ci/source_selftests.json`. An aggregate suite
+such as `test_gates.py` (about two minutes) is split into the classes it
+imports, one candidate per module, so a CMake module change runs
+`test_version_bump_surfaces.py` (about 2 s) instead of the whole aggregate.
+
+The step runs a candidate only when the range changes one of these:
+
+- its own script;
+- a module it imports, directly or through repo helpers;
+- a declared read in `tools/ci/prepush_triggers.json`;
+- the lane itself, in which case it runs everything.
+
+A test that `select_for_changes` reaches only because its source names a
+changed file is left to CI. Add a declared read only from what the test's
+code scans, globs or loads. `select_for_changes` (the selector
+`gates.sh --changed-from` uses) also selects a test whose source writes a glob
+the change matches (`"tools/cmake/Pulp*.cmake"`).
+
+The cap is a hard 60 s wall clock, selection included, on at most 4 workers.
+`PULP_PREPUSH_FIXTURE_BUDGET` can lower it, never raise it. A test the cap
+stops is killed with its whole process group. Its output pipe is abandoned
+after a second, so a child that left the group cannot hold the step.
+
+A failure prints one line: `✗ fixture test <name>: <first failing item> |
+repro: <command> (base: <verdict>)`. Before refusing, the step re-runs the
+failing test on the merge base within what is left of the cap. A failure the
+base shares is printed as PRE-EXISTING ON BASE and does not block, as in
+`gates.sh`.
+
+A test the cap stops or never starts makes the step exit 3, NOT CHECKED, and
+prints each such test's own command. That command is the remedy, because
+`gates.sh` does not run these suites on a gate host. The hook writes a
+`skipped fixture-tests` receipt event and ends with `gates passed except
+fixture tests: N NOT CHECKED`, never `gates clean`. The step is plain Python,
+with no configure, compile or receipt of its own, so gate hosts run it too.
+A tag-only or delete-only push skips it.
+
+Exit codes: 0 every selected test ran and nothing new failed, 1 a test failed,
+2 could not run, 3 NOT CHECKED.
+
 ### `gates.sh` and the pre-push hook are two lists, not one
 
 `gates.sh` describes itself as running the gates `.githooks/pre-push` runs, and
