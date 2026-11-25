@@ -284,8 +284,6 @@ stopped compiling and no Pulp check noticed.
   requests that touch the package, its test, or the two CMake files that own its
   option and test registration (`integrations/CMakeLists.txt` and the root
   `CMakeLists.txt`) run the lane.
-  The same build includes `pulp-test-motion-swift-bridge`, which links the
-  Swift C bridge's parameter and state shims with the Vellum-backed motion shims.
 - **Editor package and audio display.** The same configure also turns on
   `PULP_ENABLE_PULP_VELLUM_AUDIO` and builds `pulp-test-pulp-vellum-editor` and
   `pulp-test-pulp-vellum-audio`, whose ctest labels (`pulp-vellum-editor`,
