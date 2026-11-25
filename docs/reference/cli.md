@@ -1997,6 +1997,12 @@ Figma plugin, Stitch, v0, Pencil, Claude Design, generic runnable HTML, React
 JSX, or Google DESIGN.md source files into generated Pulp UI code. Runnable
 HTML auto-detects its source, so `--from` is optional for that lane.
 
+When this Pulp build has no `pulp-import-design` binary, the command runs
+nothing. It exits 2 and prints the equivalent `vellum import` spelling, for
+example `vellum import pencil ui.json`, or says that Vellum has no route yet
+for the source. Vellum imports into a Vellum project and writes canonical
+DesignIR rather than `ui.js`.
+
 ```bash
 pulp import-design --from fig --file design.fig --outline
 pulp import-design --from fig --file design.fig --frame 'Plugin UI' --output ui.js
