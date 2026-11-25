@@ -37,6 +37,38 @@ class PickRunTests(unittest.TestCase):
             vsc.pick_run([_run(1, conclusion="failure")])
 
 
+class SelectRunTests(unittest.TestCase):
+    @staticmethod
+    def _fetch(having):
+        def fetch(run):
+            return [{"id": run["id"], "name": vsc.EVIDENCE_ARTIFACT, "expired": False}] if run["id"] in having else []
+        return fetch
+
+    def test_newest_run_without_the_artifact_is_passed_over(self):
+        runs = [_run(1, created="2026-11-11T09:00:00Z"), _run(2, created="2026-11-11T10:00:00Z")]
+        run, artifact = vsc.select_run(runs, self._fetch({1}))
+        self.assertEqual((run["id"], artifact["id"]), (1, 1))
+
+    def test_newest_run_with_the_artifact_wins(self):
+        runs = [_run(1, created="2026-11-11T09:00:00Z"), _run(2, created="2026-11-11T10:00:00Z")]
+        self.assertEqual(vsc.select_run(runs, self._fetch({1, 2}))[0]["id"], 2)
+
+    def test_expired_artifact_does_not_count(self):
+        runs = [_run(1)]
+        with self.assertRaises(vsc.ResolveError):
+            vsc.select_run(runs, lambda r: [{"id": 1, "name": vsc.EVIDENCE_ARTIFACT, "expired": True}])
+
+    def test_none_in_range_fails_clearly(self):
+        runs = [_run(i, created=f"2026-11-11T{i:02d}:00:00Z") for i in range(1, 6)]
+        with self.assertRaisesRegex(vsc.ResolveError, "none of the newest 5"):
+            vsc.select_run(runs, self._fetch(set()))
+
+    def test_search_is_bounded(self):
+        runs = [_run(i, created=f"2026-11-11T{i:02d}:00:00Z") for i in range(1, 6)]
+        with self.assertRaisesRegex(vsc.ResolveError, "none of the newest 2"):
+            vsc.select_run(runs, self._fetch({1}), limit=2)
+
+
 class MinimumCommitTests(unittest.TestCase):
     """A run older than the required Vellum commit is refused, not downloaded."""
 
@@ -55,6 +87,8 @@ class MinimumCommitTests(unittest.TestCase):
             self.paths.append(path)
             if path.startswith(f"repos/{vsc.VELLUM_REPO}/actions/runs?"):
                 return {"workflow_runs": [_run(1)]}
+            if path == f"repos/{vsc.VELLUM_REPO}/actions/runs/1/artifacts":
+                return {"artifacts": [{"id": 9, "name": vsc.EVIDENCE_ARTIFACT, "expired": False}]}
             if path.startswith(f"repos/{vsc.VELLUM_REPO}/compare/"):
                 return {"status": compare_status}
             raise vsc.ResolveError(f"unexpected {path}")
@@ -67,15 +101,15 @@ class MinimumCommitTests(unittest.TestCase):
 
     def test_run_behind_the_minimum_is_refused_before_any_download(self):
         self.assertEqual(self._resolve("behind"), vsc.INCONCLUSIVE)
-        self.assertFalse(any("artifacts" in p for p in self.paths))
+        self.assertFalse(any(p.endswith("/zip") for p in self.paths))
         self.assertTrue(any(p.endswith("compare/abc...sha1") for p in self.paths))
 
     def test_run_at_or_ahead_of_the_minimum_goes_on_to_download(self):
         for status in ("identical", "ahead"):
             self.paths.clear()
-            # The fake has no artifact listing, so the download step fails loudly.
+            # The fake serves no archive, so the download step fails loudly.
             self.assertEqual(self._resolve(status), vsc.INCONCLUSIVE)
-            self.assertTrue(any("runs/1/artifacts" in p for p in self.paths), status)
+            self.assertTrue(any(p.endswith("artifacts/9/zip") for p in self.paths), status)
 
 
 class PickArtifactTests(unittest.TestCase):
@@ -159,6 +193,8 @@ class SkipIfUnchangedTests(unittest.TestCase):
             return _zip({"receipt.json": '{"vellum_head_sha": "%s"}' % self.recorded})
         if path.startswith(f"repos/{vsc.VELLUM_REPO}/actions/runs?"):
             return {"workflow_runs": [_run(1)]}
+        if path == f"repos/{vsc.VELLUM_REPO}/actions/runs/1/artifacts":
+            return {"artifacts": [{"id": 9, "name": vsc.EVIDENCE_ARTIFACT, "expired": False}]}
         raise vsc.ResolveError(f"unexpected {path}")
 
     def _resolve(self):
@@ -178,7 +214,7 @@ class SkipIfUnchangedTests(unittest.TestCase):
         rc, outputs = self._resolve()
         self.assertEqual(rc, 0)
         self.assertIn("unchanged=true", outputs)
-        self.assertFalse(any("runs/1/artifacts" in c for c in self.calls))
+        self.assertFalse(any(c.endswith("artifacts/9/zip") for c in self.calls))
 
     def test_new_head_goes_on_to_download(self):
         self.recorded = "sha0"

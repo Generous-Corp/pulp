@@ -128,6 +128,31 @@ def pick_run(runs: list[dict]) -> dict:
     return max(candidates, key=lambda run: (run.get("created_at") or "", run.get("id") or 0))
 
 
+RUN_SEARCH_LIMIT = 10
+
+
+def select_run(runs: list[dict], fetch_artifacts, limit: int = RUN_SEARCH_LIMIT) -> tuple[dict, dict]:
+    """The newest successful push run on main that still carries the evidence
+    artifact, looking at no more than `limit` runs. A run whose change the
+    classifier skipped (for example an observatory-only push) is green but
+    builds and uploads nothing, so it is passed over rather than treated as
+    the SDK source. `fetch_artifacts(run)` returns that run's artifact list."""
+    candidates = sorted(
+        (run for run in runs
+         if run.get("name") == GPU_WORKFLOW_NAME and run.get("event") == "push"
+         and run.get("head_branch") == "main" and run.get("conclusion") == "success"),
+        key=lambda run: (run.get("created_at") or "", run.get("id") or 0), reverse=True)
+    if not candidates:
+        raise ResolveError(f"no successful '{GPU_WORKFLOW_NAME}' push run on {VELLUM_REPO} main")
+    for run in candidates[:limit]:
+        live = [a for a in fetch_artifacts(run)
+                if a.get("name") == EVIDENCE_ARTIFACT and not a.get("expired")]
+        if len(live) == 1:
+            return run, live[0]
+    raise ResolveError(f"none of the newest {min(limit, len(candidates))} successful '{GPU_WORKFLOW_NAME}' "
+                       f"runs on {VELLUM_REPO} main has an unexpired '{EVIDENCE_ARTIFACT}' artifact")
+
+
 def run_contains_commit(token: str, minimum: str, head: str) -> bool:
     """Whether `head` is `minimum` or descends from it, by Vellum's own history."""
     status = _api(f"repos/{VELLUM_REPO}/compare/{minimum}...{head}", token).get("status")
@@ -213,7 +238,9 @@ def resolve(args: argparse.Namespace) -> int:
         else:
             listing = _api(f"repos/{VELLUM_REPO}/actions/runs?branch=main&event=push&status=success&per_page=50",
                            token)
-            run = pick_run(listing.get("workflow_runs", []))
+            run, artifact = select_run(
+                listing.get("workflow_runs", []),
+                lambda r: _api(f"repos/{VELLUM_REPO}/actions/runs/{r['id']}/artifacts", token).get("artifacts", []))
         head = run["head_sha"]
         minimum = getattr(args, "min_vellum_sha", None)
         if minimum and not run_contains_commit(token, minimum, head):
@@ -228,8 +255,9 @@ def resolve(args: argparse.Namespace) -> int:
             print(f"vellum-sdk-consumer: unchanged; Vellum main {head} was already checked")
             _write_outputs(args.github_output, {"unchanged": "true", "vellum_head_sha": head})
             return 0
-        artifact = pick_artifact(_api(f"repos/{VELLUM_REPO}/actions/runs/{run['id']}/artifacts", token)
-                                 .get("artifacts", []))
+        if args.run_id:
+            artifact = pick_artifact(_api(f"repos/{VELLUM_REPO}/actions/runs/{run['id']}/artifacts", token)
+                                     .get("artifacts", []))
         payload = _api(f"repos/{VELLUM_REPO}/actions/artifacts/{artifact['id']}/zip", token, raw=True)
         evidence = out / "evidence"
         if evidence.exists():
