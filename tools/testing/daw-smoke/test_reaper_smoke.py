@@ -1031,3 +1031,25 @@ def test_seeded_config_never_reopens_the_users_project(tmp_path, monkeypatch):
     assert "audiodevice=CoreAudio" in ini
     assert "keepme=1" in ini
     assert str(session.scan_dir) in ini
+
+
+class WhyNoEditorWindow(unittest.TestCase):
+    """An unmeasurable editor window must say which of three causes it was."""
+
+    def _why(self, returncode, stdout, stderr):
+        done = subprocess.CompletedProcess([], returncode, stdout, stderr)
+        with mock.patch.object(rs.subprocess, "run", return_value=done):
+            return rs._why_no_editor_window()
+
+    def test_refused_query_is_blamed_on_the_harness(self):
+        why = self._why(1, "", "execution error: not allowed assistive access (-25211)")
+        self.assertIn("harness's reach", why)
+        self.assertIn("-25211", why)
+
+    def test_no_windows_names_the_display(self):
+        self.assertIn("no windows", self._why(0, "", ""))
+
+    def test_unmatched_windows_are_listed(self):
+        why = self._why(0, "REAPER, Track 1", "")
+        self.assertIn("Track 1", why)
+        self.assertIn("none matched", why)

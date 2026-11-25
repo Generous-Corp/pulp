@@ -286,6 +286,7 @@
       "pulp/format/descriptor_agreement.hpp",
       "pulp/format/descriptor_validation.hpp",
       "pulp/format/detail/appkit_contract_key.hpp",
+      "pulp/format/detail/au_resize_trace.hpp",
       "pulp/format/detail/au_v2_editor_resize.hpp",
       "pulp/format/detail/au_v2_resize_accept.hpp",
       "pulp/format/detail/audio_buffer_list_validation.hpp",
