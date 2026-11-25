@@ -100,7 +100,7 @@ These three failures all present as "demo says `status: 'ready'` but the canvas 
 
 ### iOS AUv3 live-present gotchas
 
-The iOS AUv3 GPU path (`PulpMetalPluginView` in `integrations/legacy-platform-hosts/ios/src/plugin_view_host_ios.mm`) is **not on `main`** — `main` routes iOS AUv3 to the CPU host — so it has no CI coverage. Hard-won facts:
+The iOS AUv3 GPU path (`PulpMetalPluginView` in `integrations/legacy-platform-hosts/ios/src/plugin_view_host_ios.mm`) is **not on `main`**; `main` routes iOS AUv3 to the CPU host; so it has no CI coverage. Hard-won facts:
 
 - **The out-of-process `.appex` swallows logs.** `OS_LOG_DEFAULT` info/debug records are not persisted for extensions, so `simctl log show/stream` saw nothing. Pulp now routes `runtime::log_*` through a named os_log subsystem (`dev.pulp.runtime`); capture with `xcrun simctl spawn <UDID> log stream --level debug --predicate 'subsystem == "dev.pulp.runtime"'`. This is the only way to read an AUv3 extension's diagnostics. Env vars do NOT reach the appex — gate any temporary per-draw dump on a static frame counter, not `getenv`.
 - **"Black canvas" was NOT the offscreen-Skia-fallback theory.** `SkiaSurface::begin_frame()` reports `presentable: yes` and all three offscreen-fallback branches fire 0 times; the HUD renders through the same presentable drawable, proving the present path works. Don't chase the offscreen fallback — verify it with the log first.

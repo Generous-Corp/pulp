@@ -684,7 +684,7 @@ pulp_add_test_suite(pulp-test-win-plugin-input-router GROUP pulp-test-group-view
 
 # Windows plug-in editor host: LPARAM coordinate unpacking, physical->logical
 # scaling, WPARAM modifier mapping, and the GPU surface attach/detach contract
-# (integrations/legacy-platform-hosts/tests/test_win_pointer_input.cpp). Deliberately NOT gated on WIN32 — the
+# (integrations/legacy-platform-hosts/tests/test_win_pointer_input.cpp). Deliberately NOT gated on WIN32; the
 # logic is HWND-free precisely so it runs on the required macOS gate.
 pulp_add_test_suite(pulp-test-win-pointer-input GROUP pulp-test-group-view-host
     SOURCES ${CMAKE_SOURCE_DIR}/integrations/legacy-platform-hosts/tests/test_win_pointer_input.cpp

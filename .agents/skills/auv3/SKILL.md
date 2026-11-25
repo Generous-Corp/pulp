@@ -23,7 +23,7 @@ subclass surface.
 - Touching `core/format/src/au_audio_unit.h` — the Obj-C forward
   declaration used by `au_entry.mm` and the iOS view controller.
 - Editing the iOS extension view controller
-  (`integrations/legacy-platform-hosts/ios/src/au_view_controller_ios.mm`) — but first read the
+  (`integrations/legacy-platform-hosts/ios/src/au_view_controller_ios.mm`); but first read the
   `ios` and `view-bridge` skills; that file is **also** mapped to
   them.
 - An AUv3 host reports a behaviour issue — sidechain pull missing,

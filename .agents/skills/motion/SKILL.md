@@ -655,7 +655,7 @@ allocation.
 - `core/platform/include/pulp/platform/android/motion_bridge.h` — C
   ABI declarations the JNI shims forward into (also pulled by the
   Catch2 host test).
-- `integrations/legacy-platform-hosts/android/src/jni_motion.cpp` — bridge implementation:
+- `integrations/legacy-platform-hosts/android/src/jni_motion.cpp`: bridge implementation:
   C ABI + `Java_com_pulp_motion_PulpMotionNative_*` JNI shims.
   Internal mutex-protected registry keeps the `TraceHandle`
   separate from the lambda-captured atomic rect so
@@ -680,7 +680,7 @@ allocation.
   composable.
 - `android/app/src/test/kotlin/com/pulp/motion/PulpMotionTest.kt` —
   JVM facade unit tests (JUnit4 only, no Mockito, no native lib).
-- `integrations/legacy-platform-hosts/tests/test_motion_android_bridge.cpp` — Catch2 round-trip test for
+- `integrations/legacy-platform-hosts/tests/test_motion_android_bridge.cpp`: Catch2 round-trip test for
   the C ABI + the `Coordinator::reset()` deadlock regression.
 
 ## Agent contract
@@ -720,7 +720,7 @@ discovery.
 - `core/view/include/pulp/view/motion_preferences.hpp` — reduced-motion policy + duration_scale
 - `core/view/src/motion_preferences.cpp` — singleton + override + OS readers
 - `core/view/platform/mac/motion_preferences_mac.mm` — NSWorkspace reduced-motion query
-- `integrations/legacy-platform-hosts/win/src/motion_preferences_win.cpp` — SPI_GETCLIENTAREAANIMATION query
+- `integrations/legacy-platform-hosts/win/src/motion_preferences_win.cpp`: SPI_GETCLIENTAREAANIMATION query
 - `inspect/include/pulp/inspect/motion_inspector.hpp` — Motion inspector bridge
 - `inspect/src/motion_inspector.cpp` — protocol handler + event broadcaster
 - `inspect/include/pulp/inspect/motion_scrubber.hpp` — timeline scrubber (Phase 7)
@@ -739,7 +739,7 @@ discovery.
 - `apple/Sources/PulpSwift/PulpMotion.swift` — Swift facade + Trace DSL (Path G)
 - `apple/Sources/PulpSwift/PulpMotionProbe.swift` — SwiftUI / UIKit probe (Path G)
 - `core/platform/include/pulp/platform/android/motion_bridge.h` — Android C ABI (Path H)
-- `integrations/legacy-platform-hosts/android/src/jni_motion.cpp` — Android JNI bridge + C ABI (Path H)
+- `integrations/legacy-platform-hosts/android/src/jni_motion.cpp`: Android JNI bridge + C ABI (Path H)
 - `android/app/src/main/kotlin/com/pulp/motion/PulpMotion.kt` — Kotlin facade (Path H)
 - `android/app/src/main/kotlin/com/pulp/motion/PulpMotionBackend.kt` — closure-bag backend seam (Path H)
 - `android/app/src/main/kotlin/com/pulp/motion/PulpMotionNative.kt` — internal JNI declarations (Path H)
@@ -747,7 +747,7 @@ discovery.
 - `android/app/src/main/kotlin/com/pulp/motion/MotionProbe.kt` — View probe + AutoCloseable handle (Path H)
 - `android/app/src/main/kotlin/com/pulp/motion/MotionCompose.kt` — Compose modifier (Path H)
 - `android/app/src/test/kotlin/com/pulp/motion/PulpMotionTest.kt` — JVM facade unit tests (Path H)
-- `integrations/legacy-platform-hosts/tests/test_motion_android_bridge.cpp` — Catch2 round-trip for the C ABI (Path H)
+- `integrations/legacy-platform-hosts/tests/test_motion_android_bridge.cpp`: Catch2 round-trip for the C ABI (Path H)
 - `docs/guides/motion-observability.md` — full guide
 
 ## Provenance
