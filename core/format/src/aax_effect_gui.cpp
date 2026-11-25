@@ -75,16 +75,27 @@ public:
       // host that drops the GUI without that call would otherwise leak the
       // bridge and strand Processor::on_view_closed.
       teardown();
+      contract_.close();
   }
 
 private:
-    // ── AAX_CEffectGUI pure virtual interface ──────────────────────────────
+  // ── AAX_CEffectGUI pure virtual interface ──────────────────────────────
 
-    /// Called from Initialize(), before any window exists. The editor is built
-    /// in CreateViewContainer() instead, where the parent is known, so open and
-    /// close stay symmetric and a plug-in whose window never appears never
-    /// builds a view tree.
-    void CreateViewContents() override {}
+  /// Called from Initialize(), before any window exists. A processor with an
+  /// editor factory has its editor built here, unattached, so GetViewSize can
+  /// answer with the editor's own size before Pro Tools makes the window.
+  /// The create_view() editor is built in CreateViewContainer() instead,
+  /// where the parent is known, so a plug-in whose window never appears never
+  /// builds a view tree.
+  void CreateViewContents() override {
+      auto* model = host_model();
+      if (model == nullptr || !ContractEditorShell::applies(*model))
+          return;
+      if (!contract_.create(*model, [this](uint32_t w, uint32_t h) {
+              return publish_view_size(w, h, "editor request") == AAX_SUCCESS;
+          }))
+          runtime::log_error("AAX editor: the editor factory built no editor");
+  }
 
     /// Called from SetViewContainer() once a valid window is present.
     void CreateViewContainer() override {
@@ -114,6 +125,13 @@ private:
         auto* model = host_model();
         if (!model) {
             runtime::log_error("AAX editor: data model does not expose an EditorHost");
+            return;
+        }
+
+        // A processor with an editor factory: the contract editor built in
+        // CreateViewContents() is attached into the host's view.
+        if (ContractEditorShell::applies(*model)) {
+            attach_contract_editor(*model, parent);
             return;
         }
 
@@ -266,6 +284,30 @@ private:
         reconcile_native_parent(parent, plan);
     }
 
+    /// Attach the factory-built editor to the host's view, building it first
+    /// when CreateViewContents() ran before the model had a processor.
+    void attach_contract_editor(EditorHost& model, void* parent) {
+        if (!contract_.create(model, [this](uint32_t w, uint32_t h) {
+                return publish_view_size(w, h, "editor request") == AAX_SUCCESS;
+            })) {
+            runtime::log_error("AAX editor: the editor factory built no editor");
+            return;
+        }
+        NativeParent native;
+#if defined(__APPLE__)
+        native.kind = NativeParentKind::cocoa_view;
+#elif defined(_WIN32)
+        native.kind = NativeParentKind::win32_window;
+#endif
+        native.handle = parent;
+        if (!contract_.attach(native))
+            return;
+        aax_scale_ = aax_display_scale(parent);
+        if (const auto plan = contract_.plan())
+            runtime::log_info("AAX editor: contract editor attached ({}x{})", plan->width,
+                              plan->height);
+    }
+
     /// Fit the native child to the parent Pro Tools handed down.
     ///
     /// `PluginViewHost::attach_to_parent` only adds the child at origin (0,0),
@@ -336,11 +378,11 @@ private:
         if (!oViewSize) {
             return AAX_ERROR_NULL_ARGUMENT;
         }
-        const auto hints = size_hints();
-        if (!hints) {
+        const auto planned = size_plan();
+        if (!planned) {
             return AAX_ERROR_NULL_OBJECT;
         }
-        const auto plan = plan_editor_size(*hints);
+        const auto& plan = *planned;
         oViewSize->horz = static_cast<float>(aax_host_dimension(plan.width, aax_scale_));
         oViewSize->vert = static_cast<float>(aax_host_dimension(plan.height, aax_scale_));
         log_size_query("GetViewSize", view_size_queries_, *oViewSize);
@@ -353,11 +395,11 @@ private:
         if (!oMinimumViewSize) {
             return AAX_ERROR_NULL_ARGUMENT;
         }
-        const auto hints = size_hints();
-        if (!hints) {
+        const auto planned = size_plan();
+        if (!planned) {
             return AAX_ERROR_NULL_OBJECT;
         }
-        const auto plan = plan_editor_size(*hints);
+        const auto& plan = *planned;
         oMinimumViewSize->horz = static_cast<float>(aax_host_dimension(plan.min_width, aax_scale_));
         oMinimumViewSize->vert =
             static_cast<float>(aax_host_dimension(plan.min_height, aax_scale_));
@@ -420,6 +462,7 @@ private:
     /// paints the current modulation state.
     AAX_Result TimerWakeup() override {
         PULP_TRACE_SCOPE_NAMED("render", "aax_timer_wakeup");
+        // A contract editor ticks itself from its session's own timer.
         if (!bridge_)
             return AAX_SUCCESS;
         // The view host's frame driver already runs this pump once per
@@ -465,6 +508,17 @@ private:
     /// scripted UI may revise them as it loads. Deferring to
     /// `AAX_CEffectGUI::GetViewSize()` is not an option: it returns AAX_SUCCESS
     /// without writing the point, so the host would read whatever it passed in.
+    /// The sizing plan the host queries answer from: the contract editor's
+    /// own when one is built, else the create_view() editor's hints.
+    std::optional<EditorSizePlan> size_plan() const {
+        if (auto plan = contract_.plan())
+            return plan;
+        const auto hints = size_hints();
+        if (!hints)
+            return std::nullopt;
+        return plan_editor_size(*hints);
+    }
+
     std::optional<ViewSize> size_hints() const {
         if (bridge_) {
             return bridge_->size_hints();
@@ -474,6 +528,9 @@ private:
     }
 
     void teardown() {
+        // A contract editor outlives its container: detached here, destroyed
+        // with this GUI.
+        contract_.detach();
         if (!bridge_ && !host_) {
             return;  // editor never opened
         }
@@ -527,6 +584,8 @@ private:
     }
 #endif
 
+    // Declared first so it is destroyed last, after the create_view() editor.
+    ContractEditorShell contract_;
     std::unique_ptr<ViewBridge> bridge_;
     std::unique_ptr<view::PluginViewHost> host_;
     std::function<void()> idle_pump_;
