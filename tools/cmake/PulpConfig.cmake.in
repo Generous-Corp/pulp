@@ -263,6 +263,18 @@ unset(_pulp_export_name)
 unset(_pulp_sdk_target)
 unset(_pulp_sdk_export_targets)
 
+# Vellum-backed Pulp::view, Pulp::canvas, Pulp::render, Pulp::view-native and
+# Pulp::design-import for any of those names this SDK does not export itself.
+# This runs after the Skia attach above, so a Vellum-backed Pulp::canvas never
+# gains a second Skia beside the one in Vellum's provider, and before the
+# PULP_HAS_* / PULP_ENABLE_GPU facts below, which read the final target set.
+# An SDK without the bridge, or a consumer whose Vellum find failed, gets none.
+set(PULP_SDK_VELLUM_UI_COMPAT_TARGETS "")
+if(PULP_SDK_HAS_VELLUM_BRIDGE AND Vellum_FOUND)
+    include("${CMAKE_CURRENT_LIST_DIR}/PulpVellumUiCompat.cmake")
+    pulp_define_vellum_ui_compat_targets()
+endif()
+
 if(TARGET Pulp::yogacore)
     set_target_properties(Pulp::yogacore PROPERTIES
         INTERFACE_INCLUDE_DIRECTORIES "${PULP_SDK_DIR}/include"

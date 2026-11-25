@@ -637,3 +637,14 @@ if(TARGET webgpu)
         endif()
     endforeach()
 endif()
+
+# Vellum-backed UI names. An SDK that no longer exports one of Pulp::view,
+# Pulp::canvas, Pulp::render, Pulp::view-native or Pulp::design-import from
+# Pulp's own code serves it from Vellum (PulpVellumUiCompat.cmake). Build and
+# run the shared consumer for exactly those names, so each one is proved to
+# compile against a Vellum header, link and execute. An SDK that still exports
+# all five itself reports none and skips this.
+if(PULP_SDK_VELLUM_UI_COMPAT_TARGETS)
+    set(PULP_VELLUM_UI_COMPAT_PROBE_NAMES ${PULP_SDK_VELLUM_UI_COMPAT_TARGETS})
+    add_subdirectory(vellum-ui-compat)
+endif()

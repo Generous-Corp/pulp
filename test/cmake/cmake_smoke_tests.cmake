@@ -1705,6 +1705,31 @@ add_test(NAME cmake-canvas-fontconfig-link
 set_tests_properties(cmake-canvas-fontconfig-link PROPERTIES
     LABELS "cmake;format" TIMEOUT 60)
 
+# The installed package config serves Pulp's UI target names from Vellum for
+# any name the SDK does not export itself. Every scenario but `real` uses
+# stand-in targets and runs everywhere; `real` builds and runs the installed
+# consumer against the Vellum SDK this build found, and skips without one.
+foreach(_vellum_ui_compat_scenario wiring shape shadowed missing no-bridge no-vellum real)
+    set(_vellum_ui_compat_test "cmake-vellum-ui-compat-${_vellum_ui_compat_scenario}")
+    set(_vellum_ui_compat_vellum_dir "")
+    if(_vellum_ui_compat_scenario STREQUAL "real" AND Vellum_DIR)
+        set(_vellum_ui_compat_vellum_dir "${Vellum_DIR}")
+    endif()
+    add_test(NAME ${_vellum_ui_compat_test}
+        COMMAND ${CMAKE_COMMAND}
+            -DPULP_SOURCE_DIR=${CMAKE_SOURCE_DIR}
+            -DFIXTURE_DIR=${CMAKE_CURRENT_BINARY_DIR}/vellum-ui-compat
+            -DSCENARIO=${_vellum_ui_compat_scenario}
+            -DVELLUM_DIR=${_vellum_ui_compat_vellum_dir}
+            -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/test_vellum_ui_compat_package.cmake)
+    set_tests_properties(${_vellum_ui_compat_test} PROPERTIES
+        LABELS "cmake;sdk" TIMEOUT 300
+        SKIP_REGULAR_EXPRESSION "SKIP: no installed Vellum SDK")
+endforeach()
+unset(_vellum_ui_compat_scenario)
+unset(_vellum_ui_compat_test)
+unset(_vellum_ui_compat_vellum_dir)
+
 if(UNIX)
     if(Python3_Interpreter_FOUND)
         add_test(NAME pulp.plugin-identity-contract

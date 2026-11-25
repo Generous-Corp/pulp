@@ -1007,6 +1007,8 @@ install(FILES
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpVerifyRuntimeStaging.cmake"
     # Included by PulpConfig.cmake to find the gpu-runtime package beside the SDK.
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpGpuRuntimeRecord.cmake"
+    # Included by PulpConfig.cmake for the Vellum-backed UI target names.
+    "${CMAKE_CURRENT_SOURCE_DIR}/integrations/pulp-vellum/cmake/PulpVellumUiCompat.cmake"
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/FindSkia.cmake"
     # Included by FindSkia.cmake relative to its own directory.
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpSkiaDawnProvider.cmake"
