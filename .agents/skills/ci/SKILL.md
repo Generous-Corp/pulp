@@ -1502,6 +1502,16 @@ line reads `cacheable 0`, check for `-- Building for: Visual Studio` in its
 configure log before checking the cache. The bake and server steps are in
 `docs/guides/local-ci.md`, "Windows build caches".
 
+## Hosted Windows checkouts need LF bytes
+
+Git for Windows defaults to `core.autocrlf=true`, so a hosted Windows checkout
+turns every committed text file into CRLF. A test that diffs a committed
+artifact against a regenerated one, or hashes a file against a pinned digest,
+then fails on bytes nobody committed (the timeline schema drift checks and the
+`pulp help` registry digest were the first). Set `core.autocrlf=false` and
+`core.eol=lf` before `actions/checkout`, as `release-cli.yml` and the Windows
+job in `cross-platform-check.yml` do.
+
 ## Android minimum-API allocation check
 
 The Android workflow compiles and links the public aligned DSP buffer for both

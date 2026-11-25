@@ -1184,6 +1184,16 @@ Such a dispatch also gets its own concurrency group per run, so a long proof on
 This is a deliberate trade: up to ~24 h of latency on a Windows regression, in
 exchange for merge-queue capacity and spend. Revisit if Windows parity becomes an
 active workstream rather than a background one.
+
+### Hosted Windows checkout keeps LF bytes
+
+Git for Windows defaults to `core.autocrlf=true`. The Windows job in
+`cross-platform-check.yml` therefore sets `core.autocrlf=false` and
+`core.eol=lf` before `actions/checkout`, the same pin `release-cli.yml` uses.
+Without it every text file arrives with CRLF line endings, and tests that diff a
+committed artifact against a regenerated one (the timeline schema drift checks)
+or compare a pinned digest fail on bytes nobody committed.
+
 ## The FetchContent cache had to point at a real path
 
 `build.yml` restored and saved three FetchContent paths and none of them ever
