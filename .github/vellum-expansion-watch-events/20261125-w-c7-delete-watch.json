@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20261125-w-c7-delete-watch",
+  "created_at": "2026-11-25T02:13:42Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "design-output-and-packaging",
+    "design-source-ingest"
+  ],
+  "rationale": "Deletes Pulp's test-only emitter conformance gate (test, fixtures, generator, CMake edges, ctest input manifests) now that Vellum's vellum.design-emitter-conformance builds the same fixtures through the js, cpp and swiftui lanes. Docs and the import-design skill name Vellum as owner. No IR field, schema, public header, Chromium capture, rendering or packaging authority moves.",
+  "tests": [
+    "python3 tools/scripts/vellum_expansion_watch_check.py --base <merge-base origin/main HEAD> --head <HEAD>",
+    "vellum-expansion-watch"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}
