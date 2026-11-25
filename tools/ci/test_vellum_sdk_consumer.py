@@ -385,7 +385,7 @@ class LabelledTargetTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             build = Path(tmp)
             (build / "a").mkdir()
-            (build / "a/pulp-test-pulp-vellum").write_text("")
+            (build / "a/pulp-test-pulp-vellum").write_text("", encoding="utf-8")
             targets = ["pulp-test-pulp-vellum", "pulp-test-vellum-scripted-wiring"]
             programs = [("wiring", build / "a/pulp-test-vellum-scripted-wiring")]
             problems = vsc.missing_programs(build, targets, self.EXECUTABLES, programs)
@@ -393,7 +393,7 @@ class LabelledTargetTests(unittest.TestCase):
             self.assertIn("target pulp-test-vellum-scripted-wiring", problems[0])
             self.assertIn("test wiring", problems[1])
             # Control: once both exist the same check is clean.
-            (build / "a/pulp-test-vellum-scripted-wiring").write_text("")
+            (build / "a/pulp-test-vellum-scripted-wiring").write_text("", encoding="utf-8")
             self.assertEqual(vsc.missing_programs(build, targets, self.EXECUTABLES, programs), [])
 
     def test_missing_reply_is_an_error_not_an_empty_selection(self):
@@ -408,13 +408,13 @@ class LabelledTargetTests(unittest.TestCase):
             reply = build / ".cmake/api/v1/reply"
             reply.mkdir(parents=True)
             (reply / "index-1.json").write_text(json.dumps(
-                {"objects": [{"kind": "codemodel", "jsonFile": "codemodel.json"}]}))
+                {"objects": [{"kind": "codemodel", "jsonFile": "codemodel.json"}]}), encoding="utf-8")
             (reply / "codemodel.json").write_text(json.dumps({"configurations": [{"targets": [
-                {"name": "exe", "jsonFile": "exe.json"}, {"name": "lib", "jsonFile": "lib.json"}]}]}))
+                {"name": "exe", "jsonFile": "exe.json"}, {"name": "lib", "jsonFile": "lib.json"}]}]}), encoding="utf-8")
             (reply / "exe.json").write_text(json.dumps({"name": "exe", "type": "EXECUTABLE",
-                "paths": {"source": "integrations/pulp-vellum/tests"}, "artifacts": [{"path": "x/exe"}]}))
+                "paths": {"source": "integrations/pulp-vellum/tests"}, "artifacts": [{"path": "x/exe"}]}), encoding="utf-8")
             (reply / "lib.json").write_text(json.dumps({"name": "lib", "type": "STATIC_LIBRARY",
-                "paths": {"source": "integrations/pulp-vellum"}, "artifacts": [{"path": "x/lib.a"}]}))
+                "paths": {"source": "integrations/pulp-vellum"}, "artifacts": [{"path": "x/lib.a"}]}), encoding="utf-8")
             self.assertEqual(vsc.codemodel_executables(build),
                              {"exe": {"source": "integrations/pulp-vellum/tests", "artifact": "x/exe"}})
 
