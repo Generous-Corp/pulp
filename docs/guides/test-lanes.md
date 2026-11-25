@@ -201,7 +201,7 @@ The required gate excludes these groups with one CTest filter,
 the same string). The other lanes filter differently and deliberately: a macOS
 `push` to `main` excludes `validation|slow|performance|bench|quality-lab` and so
 still runs `source-selftest`, a Linux or Windows push excludes only
-`validation`, and `cross-platform-check.yml` excludes only `validation|slow`. Read the lane you mean; the filters are not uniform. It is set in
+`validation`, and `cross-platform-check.yml` excludes `validation|slow` (plus `source-selftest` on its Windows job, whose copy of those checkout-only scripts is redundant with the required Linux run). Read the lane you mean; the filters are not uniform. It is set in
 [`.shipyard/config.toml`](../../.shipyard/config.toml) (`[validation.default]`,
 `test =`).
 
