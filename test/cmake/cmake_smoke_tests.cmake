@@ -1713,7 +1713,7 @@ set_tests_properties(cmake-canvas-fontconfig-link PROPERTIES
 # must not skip; elsewhere they report SKIP.
 foreach(_vellum_ui_compat_scenario
         wiring shape pulp-ui partial-ui view-core missing twice no-bridge
-        no-vellum real wrong-version gpu-guard gpu-owner-real)
+        no-vellum real wrong-version view-native gpu-guard gpu-owner-real)
     set(_vellum_ui_compat_test "cmake-vellum-ui-compat-${_vellum_ui_compat_scenario}")
     set(_vellum_ui_compat_args "")
     set(_vellum_ui_compat_labels "cmake;sdk")
