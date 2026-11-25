@@ -383,6 +383,17 @@ enum class KeyDisposition : std::uint8_t {
     consumed = 1, ///< the editor handled it; the host must not act on it
 };
 
+/// `EditorContext::query_extension()` id a host answers with a non-null
+/// pointer when every key it offers through `Editor::offer_key()` has already
+/// been through the platform's key-equivalent pass over the editor's own
+/// native view, as the keys reaching an AppKit container have. That pass gave
+/// the editor's global shortcuts their one look at the press, so the editor's
+/// `offer_key()` must not offer the press to them again. A host that offers
+/// keys outside the native event path (VST3 `IPlugView::onKeyDown`) answers
+/// null, and there the offer is the only one.
+inline constexpr std::string_view editor_keys_after_native_pass_extension_id =
+    "dev.pulp.editor.keys-after-native-pass/1";
+
 // ── Editor ───────────────────────────────────────────────────────────────────
 
 /// Optional automation surface of an editor, so tooling (the `pulp control`
