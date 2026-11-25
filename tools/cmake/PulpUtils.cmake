@@ -20,12 +20,57 @@ function(_pulp_pick_target out_var)
     set(${out_var} "" PARENT_SCOPE)
 endfunction()
 
+# Sets `out_var` to the provider of the Pulp UI targets: "vellum" when an
+# installed SDK serves Pulp::view and its siblings from Vellum (the
+# compatibility targets carry PULP_UI_PROVIDER "vellum"), "pulp" when the view
+# target is Pulp's own, and "" when neither Pulp::view nor pulp::view exists.
+# The modules that compile Pulp's view, render or editor-adapter sources into a
+# consumer target read this instead of `if(TARGET Pulp::view)`, because a
+# Vellum-backed Pulp::view has none of Pulp's view headers or sources behind it.
+function(_pulp_ui_provider out_var)
+    set(_provider "")
+    foreach(_candidate IN ITEMS Pulp::view pulp::view)
+        if(TARGET "${_candidate}")
+            get_target_property(_declared "${_candidate}" PULP_UI_PROVIDER)
+            if(_declared STREQUAL "vellum")
+                set(_provider "vellum")
+            else()
+                set(_provider "pulp")
+            endif()
+            break()
+        endif()
+    endforeach()
+    set(${out_var} "${_provider}" PARENT_SCOPE)
+endfunction()
+
+# Stops configure when `context` would build Pulp's own view editor in an SDK
+# that serves its UI targets from Vellum, and names the editors that apply.
+function(_pulp_refuse_view_editor_from_vellum context)
+    _pulp_ui_provider(_provider)
+    if(_provider STREQUAL "vellum")
+        message(FATAL_ERROR
+            "${context}: this Pulp SDK serves Pulp::view from Vellum, so Pulp's own "
+            "view editor (the default editor, NATIVE_UI, GPU_UI, FULL_EDITOR or a "
+            "Pulp UI_SCRIPT) cannot be built with it. Use UI_ENGINE vellum with "
+            "UI_SCRIPT, UI <package> with a Vellum editor package, or NO_EDITOR.")
+    endif()
+endfunction()
+
 macro(_pulp_resolve_consumer_targets)
 _pulp_pick_target(_PULP_FORMAT_TARGET Pulp::format pulp::format)
 _pulp_pick_target(_PULP_FORMAT_CORE_TARGET Pulp::format-core pulp::format-core)
 _pulp_pick_target(_PULP_FORMAT_CLAP_CORE_TARGET Pulp::format-clap-core pulp::format-clap-core)
 _pulp_pick_target(_PULP_VIEW_TARGET Pulp::view pulp::view)
 _pulp_pick_target(_PULP_NATIVE_VIEW_TARGET Pulp::view-native pulp::view-native)
+# Pulp's editor adapters (VST3 plug view, CLAP GUI, AU Cocoa view, AAX view)
+# compile against Pulp's own view. A Vellum-backed Pulp::view cannot stand in
+# for it, so in that SDK no view target is picked for them; plug-ins reach an
+# editor through UI <package> or UI_ENGINE vellum instead.
+_pulp_ui_provider(_PULP_UI_PROVIDER)
+if(_PULP_UI_PROVIDER STREQUAL "vellum")
+    set(_PULP_VIEW_TARGET "")
+    set(_PULP_NATIVE_VIEW_TARGET "")
+endif()
 _pulp_pick_target(_PULP_AUDIO_TARGET Pulp::audio pulp::audio)
 _pulp_pick_target(_PULP_MIDI_TARGET Pulp::midi pulp::midi)
 _pulp_pick_target(_PULP_STANDALONE_TARGET Pulp::standalone pulp::standalone)
@@ -142,6 +187,12 @@ endif()
 # No-op off macOS, on iOS, or when the cluster sources aren't available.
 function(_pulp_apply_view_mac_objc_suffix target)
     if(NOT APPLE OR IOS)
+        return()
+    endif()
+    # A Vellum-backed view keeps its Objective-C classes in Vellum's provider
+    # library; Pulp's cluster sources do not apply to it.
+    _pulp_ui_provider(_pulp_objc_ui_provider)
+    if(_pulp_objc_ui_provider STREQUAL "vellum")
         return()
     endif()
     # When the cluster sources aren't present (an installed SDK that didn't ship
