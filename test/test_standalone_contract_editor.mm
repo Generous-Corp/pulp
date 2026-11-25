@@ -404,3 +404,79 @@ TEST_CASE("open_settings_window uses the registered opener and reports its resul
     REQUIRE(app.open_settings_window());
     REQUIRE(calls == 2);
 }
+
+// ── The standalone contract window hosting a Vellum editor ──────────────────
+//
+// This source built a second time against Pulp's Vellum bridge, over a
+// processor whose editor factory is pulp::vellum's. Only these cases run in
+// that executable.
+
+#if defined(PULP_TEST_STANDALONE_VELLUM)
+
+#include <pulp/vellum/editor.hpp>
+
+#include <vellum/view/input_events.hpp>
+#include <vellum/view/view.hpp>
+
+namespace {
+
+// Offers of each press to the root's global shortcut hook.
+int g_hook_offers = 0;
+
+class StandaloneRootView final : public ::vellum::view::View {
+  public:
+    explicit StandaloneRootView(pulp::vellum::EditorEnv&) {
+        on_global_key = [](const ::vellum::view::KeyEvent&) {
+            ++g_hook_offers;
+            return false;
+        };
+    }
+};
+
+class StandaloneVellumProcessor final : public pulp::format::Processor {
+  public:
+    pulp::format::PluginDescriptor descriptor() const override {
+        pulp::format::PluginDescriptor d;
+        d.name = "Vellum standalone";
+        d.manufacturer = "Pulp";
+        d.bundle_id = "dev.pulp.test.standalone-vellum-editor";
+        d.version = "1.0.0";
+        return d;
+    }
+    void define_parameters(pulp::state::StateStore&) override {}
+    void prepare(const pulp::format::PrepareContext&) override {}
+    void process(pulp::audio::BufferView<float>&, const pulp::audio::BufferView<const float>&,
+                 pulp::midi::MidiBuffer&, pulp::midi::MidiBuffer&,
+                 const pulp::format::ProcessContext&) override {}
+    pulp::format::EditorFactory* editor_factory() override {
+        return pulp::vellum::editor_factory<StandaloneRootView>();
+    }
+};
+
+std::unique_ptr<pulp::format::Processor> create_vellum_processor() {
+    return std::make_unique<StandaloneVellumProcessor>();
+}
+
+} // namespace
+
+// The window's own key harness delivers the press the way AppKit does, the
+// key-equivalent pass over the view tree before keyDown:. A window
+// -sendEvent: alone would miss that pass, which NSApplication runs first.
+TEST_CASE("The standalone contract window offers a Vellum root's global key hook once per press",
+          "[standalone][vellum][editor-host][keys][global-hook]") {
+    EditorEnvironment env;
+    const auto png = temp_png("pulp-standalone-vellum-key-hook");
+    std::filesystem::remove(png);
+    g_hook_offers = 0;
+
+    pulp::format::StandaloneApp app(create_vellum_processor);
+    auto config = headless_config(png); // never ordered in
+    config.test_key_sequence = "space";
+    config.test_key_frame_delay = 2;
+    app.set_config(config);
+    REQUIRE(app.run_with_editor(false));
+    CHECK(g_hook_offers == 1);
+    std::filesystem::remove(png);
+}
+
+#endif // PULP_TEST_STANDALONE_VELLUM

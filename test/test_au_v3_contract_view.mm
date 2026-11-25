@@ -164,6 +164,9 @@ TEST_CASE("AU v3 opens, sizes and closes a contract editor, twice",
         REQUIRE(view.frame.size.height == 300);
         REQUIRE(contract_log().saw("attach:cocoa_view"));
         REQUIRE(contract_log().parent_handle == (__bridge void*)view);
+        // Its keys arrive after AppKit's key-equivalent pass, and it says so.
+        REQUIRE(contract_log().context->query_extension(
+                    pulp::format::editor_keys_after_native_pass_extension_id) != nullptr);
         REQUIRE(instance.sessions->size() == 1);
 
         [resizes.container addSubview:view];
@@ -507,3 +510,109 @@ TEST_CASE("AU v3 serves no contract view without a factory, an editor or a paren
                                                       resizeRequest:nil] == nil);
     }
 }
+
+// ── An AU v3 host opening a Vellum editor ───────────────────────────────────
+//
+// The same view, built into a second executable that links Pulp's Vellum
+// bridge, over a processor whose editor factory is pulp::vellum's. Only these
+// cases run in that executable.
+
+#if defined(PULP_TEST_AU_VELLUM)
+
+#include <pulp/vellum/editor.hpp>
+
+#include <vellum/view/input_events.hpp>
+
+#include <vellum/view/plugin_view_host.hpp>
+#include <vellum/view/view.hpp>
+
+namespace {
+
+::vellum::view::View* g_v3_root = nullptr;
+
+class V3RootView final : public ::vellum::view::View {
+  public:
+    explicit V3RootView(pulp::vellum::EditorEnv&) {
+        g_v3_root = this;
+    }
+    ~V3RootView() override {
+        g_v3_root = nullptr;
+    }
+};
+
+class V3VellumProcessor final : public pulp::format::Processor {
+  public:
+    pulp::format::PluginDescriptor descriptor() const override {
+        pulp::format::PluginDescriptor d;
+        d.name = "Vellum AU v3";
+        d.manufacturer = "Pulp";
+        d.bundle_id = "dev.pulp.test.au-v3-vellum-editor";
+        d.version = "1.0.0";
+        return d;
+    }
+    void define_parameters(pulp::state::StateStore&) override {}
+    void prepare(const pulp::format::PrepareContext&) override {}
+    void process(pulp::audio::BufferView<float>&, const pulp::audio::BufferView<const float>&,
+                 pulp::midi::MidiBuffer&, pulp::midi::MidiBuffer&,
+                 const pulp::format::ProcessContext&) override {}
+    pulp::format::EditorFactory* editor_factory() override {
+        return pulp::vellum::editor_factory<V3RootView>();
+    }
+};
+
+} // namespace
+
+TEST_CASE("AU v3 offers a Vellum root's global key hook once per press",
+          "[auv3][vellum][editor-host][keys][global-hook]") {
+    EditorEnvironment env;
+    pulp::state::StateStore store;
+    V3VellumProcessor processor;
+    processor.set_state_store(&store);
+    // Never ordered in: it only gives AppKit a first responder.
+    NSWindow* window = make_window();
+
+    @autoreleasepool {
+        PULP_AUV3_CONTRACT_VIEW_CLASS* view =
+            [[PULP_AUV3_CONTRACT_VIEW_CLASS openViewForProcessor:&processor
+                                                           store:&store
+                                                        registry:nullptr
+                                                   resizeRequest:nil] retain];
+        REQUIRE(view != nil);
+        REQUIRE(g_v3_root != nullptr);
+        auto* host = g_v3_root->plugin_view_host();
+        REQUIRE(host != nullptr);
+        NSView* editor_view = (__bridge NSView*)host->native_handle();
+        REQUIRE(editor_view.superview == view);
+        [window.contentView addSubview:view];
+
+        int hook_offers = 0;
+        g_v3_root->on_global_key = [&hook_offers](const ::vellum::view::KeyEvent&) {
+            ++hook_offers;
+            return false;
+        };
+        NSEvent* space = key_event(NSEventTypeKeyDown, 49, @" ");
+
+        // The window dispatches the press the way AppKit does: the
+        // key-equivalent pass over the view tree, then keyDown: to the first
+        // responder, whose unclaimed key climbs to the contract view.
+        SECTION("the editor's view holds focus") {
+            REQUIRE([window makeFirstResponder:editor_view]);
+            [window sendEvent:space];
+            CHECK(hook_offers == 1);
+        }
+        SECTION("the contract view holds focus") {
+            REQUIRE([window makeFirstResponder:view]);
+            [window sendEvent:space];
+            CHECK(hook_offers == 1);
+        }
+
+        g_v3_root->on_global_key = nullptr;
+        [view removeFromSuperview];
+        [view closeEditor];
+        [view release];
+    }
+    [window close];
+    [window release];
+}
+
+#endif // PULP_TEST_AU_VELLUM

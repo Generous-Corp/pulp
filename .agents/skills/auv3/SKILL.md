@@ -1046,6 +1046,12 @@ factory keeps the ViewBridge editor untouched.
   frame (`setFrameSize:` on macOS, `layoutSubviews` on iOS). Backing scale,
   window visibility and, on macOS, key events reach the editor from the same
   view; a declined key goes up the responder chain.
+  Those keys arrive after AppKit's key-equivalent pass has already shown
+  them to the editor's own view, so the macOS view sets
+  `HostHooks::keys_after_native_pass` and an editor must not offer the press
+  to its global shortcut hook a second time (measured with a Vellum editor:
+  `pulp-test-au-v3-vellum-view` `[global-hook]`, where the contract view
+  holding focus doubled it). The standalone contract window sets it too.
 - **Size is published, not negotiated.** AU v3 has no accept or refuse
   callback. The controller sets `preferredContentSize` to the editor's size at
   attach, and the editor's `request_resize` publishes the new size (resizing
