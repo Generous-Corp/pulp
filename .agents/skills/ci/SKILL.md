@@ -13944,3 +13944,12 @@ merge: that once emptied a PR's diff. Use the helper instead:
 
 Review the printed stat before pushing; push once. Tests:
 `tools/scripts/test_regen_agent_capability_after_merge.py`.
+
+## The Vellum SDK consumer lane builds every optional Vellum package
+
+`vellum-sdk-consumer.yml` configures `PULP_ENABLE_PULP_VELLUM`, `_AUDIO` and
+`_COMPONENTS` together and builds each package's test target against Vellum
+main's SDK. A new optional Vellum integration package needs its option, its
+`pulp-test-*` target and a `paths:` entry added there, or no lane compiles it
+against main. The tests' ctest label should start with `pulp-vellum` so the
+lane's `-L pulp-vellum` filter runs them.

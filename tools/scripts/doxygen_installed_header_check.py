@@ -20,6 +20,7 @@ VIEW_AUDIO_ROOT = "core/view/audio/include"
 NATIVE_SURFACE_ROOT = "integrations/pulp-native/include"
 PULP_VELLUM_ROOT = "integrations/pulp-vellum/include"
 PULP_VELLUM_AUDIO_ROOT = "integrations/pulp-vellum-audio/include"
+PULP_VELLUM_COMPONENTS_ROOT = "integrations/pulp-vellum-components/include"
 RT_ALLOCATION_PROBE_ROOT = "tools/testing/rt_allocation_probe/include"
 GPU_HEALTH_TOOLING_ROOT = "tools/cli/gpu_health/include"
 GPU_TOOLING_DOCUMENTATION_CONTRACTS = {
@@ -259,6 +260,8 @@ def _install_roots(root: Path) -> tuple[list[str], set[str], set[str]]:
             continue
         if sources == [f"${{CMAKE_CURRENT_SOURCE_DIR}}/{PULP_VELLUM_AUDIO_ROOT}/pulp/"]:
             continue
+        if sources == [f"${{CMAKE_CURRENT_SOURCE_DIR}}/{PULP_VELLUM_COMPONENTS_ROOT}/pulp/"]:
+            continue
         if sources == [f"${{CMAKE_CURRENT_SOURCE_DIR}}/{RT_ALLOCATION_PROBE_ROOT}/pulp/"]:
             continue
         if sources and all(
@@ -278,6 +281,7 @@ def _install_roots(root: Path) -> tuple[list[str], set[str], set[str]]:
                 source == f"{NATIVE_SURFACE_ROOT}/pulp/" or
                 source == f"{PULP_VELLUM_ROOT}/pulp/" or
                 source == f"{PULP_VELLUM_AUDIO_ROOT}/pulp/" or
+                source == f"{PULP_VELLUM_COMPONENTS_ROOT}/pulp/" or
                 source == f"{RT_ALLOCATION_PROBE_ROOT}/pulp/" or
                 source == "tools/cli/gpu_health/include/pulp_tooling/"):
             raise ValueError(f"unsupported independent public-header install authority: {source}")
@@ -292,6 +296,8 @@ def _install_roots(root: Path) -> tuple[list[str], set[str], set[str]]:
         roots.append(PULP_VELLUM_ROOT)
     if f"{PULP_VELLUM_AUDIO_ROOT}/pulp/" in text:
         roots.append(PULP_VELLUM_AUDIO_ROOT)
+    if f"{PULP_VELLUM_COMPONENTS_ROOT}/pulp/" in text:
+        roots.append(PULP_VELLUM_COMPONENTS_ROOT)
     if f"{RT_ALLOCATION_PROBE_ROOT}/pulp/" in text:
         roots.append(RT_ALLOCATION_PROBE_ROOT)
     if 'tools/cli/gpu_health/include/pulp_tooling/' in text:
