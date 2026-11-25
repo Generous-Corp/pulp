@@ -1418,6 +1418,9 @@ if [ "$fail" = "0" ] && [ "$diff_cover_failed" = "0" ] && [ "$compat_flip_failed
     if [ "$_prepush_diff_cover_refused" = "1" ]; then
         echo "[pre-push] diff coverage: NOT CHECKED (gate host; run tools/scripts/local_diff_cover.sh on a TARTCI_ROLE=light host such as m1, or a disposable VM)." >&2
     fi
+    if [ "${_prepush_merge_tree_not_checked:-0}" = "1" ] || [ -n "${_prepush_fixtures_not_checked:-}" ]; then
+        _prepush_final_verdict_line
+    fi
     exit 0
 fi
 

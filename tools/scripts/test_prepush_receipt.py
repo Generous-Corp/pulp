@@ -68,6 +68,13 @@ def case_a_skipped_push_is_recorded_with_its_knobs(fx: Receipt) -> None:
     assert r["hooks_path"] == "" and r["hooks_path_is_githooks"] is False, r
 
 
+def case_the_merge_tree_bound_override_is_recorded(fx: Receipt) -> None:
+    feat = fx.setup()
+    fx.hook(feat, PULP_SKIP_PREPUSH="1", PULP_PREPUSH_MERGE_TREE_BOUND="0")
+    (r,) = fx.lines()
+    assert r["env"]["PULP_PREPUSH_MERGE_TREE_BOUND"] == "0", r
+
+
 def case_hooks_path_is_reported(fx: Receipt) -> None:
     feat = fx.setup()
     fx.git("config", "core.hooksPath", ".githooks")
