@@ -1948,7 +1948,7 @@ if(Python3_Interpreter_FOUND)
         add_test(NAME clean-lane-builds-selftest
             COMMAND ${Python3_EXECUTABLE} -m unittest test_clean_lane_builds
             WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}/tools/scripts")
-        set_tests_properties(clean-lane-builds-selftest PROPERTIES TIMEOUT 600)
+        set_tests_properties(clean-lane-builds-selftest PROPERTIES TIMEOUT 120)
 
         add_test(NAME clean-worktree-builds-selftest
             COMMAND ${Python3_EXECUTABLE} -m unittest test_clean_worktree_builds

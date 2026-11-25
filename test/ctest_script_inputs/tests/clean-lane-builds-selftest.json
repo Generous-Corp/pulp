@@ -4,9 +4,7 @@
   "entry": "tools/scripts/test_clean_lane_builds.py",
   "inputs": [
    "tools/scripts/clean_lane_builds.py",
-   "tools/scripts/test_clean_lane_builds.py",
-   "tools/ci/install-lane-reaper-launchagent.sh",
-   "tools/ci/com.danielraffel.pulp.lane-reaper.plist.template"
+   "tools/scripts/test_clean_lane_builds.py"
   ],
   "kind": "python"
  }

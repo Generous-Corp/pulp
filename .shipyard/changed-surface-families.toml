@@ -99,7 +99,6 @@ paths = [
   "tools/scripts/test_check_sdk_complete.py",
   "tools/scripts/test_check_web_plugin_docs.py",
   "tools/scripts/test_checkout_preflight.py",
-  "tools/scripts/test_clean_lane_builds.py",
   "tools/scripts/test_clean_worktree_planning.py",
   "tools/scripts/test_cli_sync_check.py",
   "tools/scripts/test_cli_sync_check_extra.py",
@@ -3023,6 +3022,44 @@ tests = [
   "changed-surface-script-families-selftest",
   "changed-surface-shadow-plans-selftest",
   "clean-build-cov-selftest",
+  "clean-worktree-planning-selftest",
+  "configure-only-selftest",
+  "flake-exoneration-selftest",
+  "gate-common-selftest",
+  "gpu-audio-provider-identity-selftest",
+  "gpu-dpr-runner-selftest",
+  "gpu-first-visible-acceptance-selftest",
+  "gpu-first-visible-campaign-selftest",
+  "gpu-first-visible-external-adapter-selftest",
+  "gpu-first-visible-role-producers-selftest",
+  "gpu-handoff-provenance-selftest",
+  "pr-head-affected-tests-selftest",
+  "pr-head-diff-scoped-registrations",
+  "prepush-receipt",
+  "prepush-refresh-push",
+  "reuse-policy-replay-selftest",
+  "sample-region-compat-baseline-selftest",
+  "vellum-watch-preflight-selftest",
+  "wide-non-native-selftest",
+]
+build_targets = ["pulp-cli"]
+supported_build_types = [
+  "debug",
+  "release",
+]
+risk_class = "low"
+
+[[families]]
+name = "script-readers-24bc519874fe"
+paths = ["tools/scripts/test_clean_lane_builds.py"]
+tests = [
+  "build-parallelism-guard",
+  "changed-surface-policy-inventory",
+  "changed-surface-policy-selftest",
+  "changed-surface-script-families-drift",
+  "changed-surface-script-families-selftest",
+  "changed-surface-shadow-plans-selftest",
+  "clean-lane-builds-selftest",
   "clean-worktree-planning-selftest",
   "configure-only-selftest",
   "flake-exoneration-selftest",

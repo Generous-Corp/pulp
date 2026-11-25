@@ -62,7 +62,7 @@ def sh(cwd, *args, env=None):
 
 def age(path: pathlib.Path, days: float) -> None:
     """Backdate every file and directory under path, children first."""
-    when = time.time() - days * DAY
+    when = time.time() - days * DAY  # clock-ok: ages are relative to now by design
     for dirpath, dirs, files in os.walk(path, topdown=False):
         for n in files + dirs:
             try:
