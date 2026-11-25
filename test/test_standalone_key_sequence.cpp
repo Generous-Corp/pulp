@@ -12,7 +12,7 @@
 
 using namespace pulp;
 using namespace pulp::format::detail;
-using KC = pulp::view::KeyCode;
+using KC = pulp::format::detail::SequenceKey;
 
 TEST_CASE("key sequence parses arrow and named keys", "[standalone][keyboard]") {
     std::vector<KeySequenceStep> steps;
@@ -25,7 +25,7 @@ TEST_CASE("key sequence parses arrow and named keys", "[standalone][keyboard]") 
     CHECK(steps[2].key == KC::up);
     CHECK(steps[3].key == KC::enter);
     for (const auto& s : steps)
-        CHECK(s.modifiers == view::kModNone);
+        CHECK(s.modifiers == pulp::format::detail::kSequenceModNone);
 }
 
 TEST_CASE("key sequence parses modifier chords", "[standalone][keyboard]") {
@@ -35,14 +35,14 @@ TEST_CASE("key sequence parses modifier chords", "[standalone][keyboard]") {
     REQUIRE(steps.size() == 3);
 
     CHECK(steps[0].key == KC::a);
-    CHECK(steps[0].modifiers == view::kModCmd);
+    CHECK(steps[0].modifiers == pulp::format::detail::kSequenceModCmd);
     CHECK(steps[0].label == "cmd+a");
 
     CHECK(steps[1].key == KC::tab);
-    CHECK(steps[1].modifiers == view::kModShift);
+    CHECK(steps[1].modifiers == pulp::format::detail::kSequenceModShift);
 
     CHECK(steps[2].key == KC::f7);
-    CHECK(steps[2].modifiers == (view::kModCtrl | view::kModAlt));
+    CHECK(steps[2].modifiers == (pulp::format::detail::kSequenceModCtrl | pulp::format::detail::kSequenceModAlt));
 }
 
 TEST_CASE("key sequence normalizes case and whitespace", "[standalone][keyboard]") {
@@ -53,7 +53,7 @@ TEST_CASE("key sequence normalizes case and whitespace", "[standalone][keyboard]
     CHECK(steps[0].key == KC::down);
     CHECK(steps[0].label == "down");
     CHECK(steps[1].key == KC::a);
-    CHECK(steps[1].modifiers == view::kModCmd);
+    CHECK(steps[1].modifiers == pulp::format::detail::kSequenceModCmd);
     // Inner whitespace is stripped so "Cmd + A" and "cmd+a" name one artifact.
     CHECK(steps[1].label == "cmd+a");
 }
