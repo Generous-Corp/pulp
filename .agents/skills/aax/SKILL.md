@@ -74,6 +74,18 @@ path to maintain. Its `ViewBridge` is built from
 hand-assembled `Options`, and a structural test enforces that. See the
 `view-bridge` skill.
 
+A processor with an editor factory (`Processor::editor_factory()`, a UI
+package such as a Vellum editor) does not take that path: the GUI forwards to
+`aax::ContractEditorShell` in `aax_editor.hpp`, which is free of AAX types and
+tested without the SDK (`test_aax_editor.cpp` `[aax-contract]`, and the same
+file built against Vellum as `pulp-test-aax-vellum-editor`). It builds the
+editor in `CreateViewContents()`, unattached, because Pro Tools asks
+`GetViewSize` before it makes the window and only a built editor knows its
+size; it attaches in `CreateViewContainer()`. AAX has no host resize callback,
+so a `SetViewSize` the host accepts is applied to the editor at once. Still to
+wire with the SDK present: the container's own frame changes into
+`host_resized()`, and `SetControlHighlightInfo` into `parameter_highlight()`.
+
 **The editor is opt-in, and defaulting it off is deliberate — do not "fix" it.**
 `PULP_AAX_PLUGIN` registers no editor, so a plugin gets Pro Tools'
 auto-generated parameter strip; `PULP_AAX_PLUGIN_WITH_GUI` registers the custom

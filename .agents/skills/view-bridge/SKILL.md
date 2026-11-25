@@ -827,6 +827,7 @@ the `clap` skill's Parameters section for the complete transport contract.
 | AU v3 | `viewDidLoad` | After `PluginViewHost::attach_to_parent` in `viewDidLoad` |
 | AU v3, processor with an `editor_factory()` | `rebuildEditorIfReady` opens a `ContractEditorSession` in `PulpAUv3ContractView` and never creates a ViewBridge | n/a: the contract editor's `attach()` is the attach point |
 | AAX | `AAX_CEffectGUI::CreateViewContainer()` — not `CreateViewContents()`, which runs before any window exists | After `try_attach_to_parent` succeeds |
+| AAX, processor with an `editor_factory()` | `CreateViewContents()` builds the contract editor unattached through `aax::ContractEditorShell`, so `GetViewSize` knows its size; no ViewBridge | n/a: `CreateViewContainer()` calls the editor's `attach()` |
 | Standalone | Before `WindowHost::create` | After `WindowHost::create` succeeds |
 
 AAX keeps a host-side data model and a real-time algorithm instance, but the
