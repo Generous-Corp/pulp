@@ -506,8 +506,8 @@ TEST_CASE("MCP exec runs a quoted executable that takes a quoted argument", "[mc
     std::filesystem::permissions(script, std::filesystem::perms::owner_all,
                                  std::filesystem::perm_options::add);
 #endif
-    const auto run = pulp_mcp::exec_with_status(shell_quote(script.string()) + " " +
-                                                shell_quote("two words"));
+    const auto run =
+        pulp_mcp::exec_with_status(shell_quote(script.string()) + " " + shell_quote("two words"));
     REQUIRE(run.status == 0);
     REQUIRE(run.output.find("got:two words") != std::string::npos);
 }
