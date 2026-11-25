@@ -3,6 +3,7 @@ if(PULP_BUILD_TESTS AND TARGET Catch2::Catch2WithMain)
     add_executable(pulp-test-pulp-vellum-components
         ${CMAKE_CURRENT_SOURCE_DIR}/panic_button_test.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/lasso_test.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/midi_learn_menu_test.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/model_manager_view_test.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/preferences_panel_test.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/catalogue_test.cpp)
