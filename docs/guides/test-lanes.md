@@ -291,6 +291,12 @@ stopped compiling and no Pulp check noticed.
   tests need Vellum's view layer (`Vellum::MirrorView_core`), which is in Vellum
   main's SDK but not in the v0.2.0 release, so this lane, which builds against
   main, is where they run until `pulp.lock` pins a release that ships it.
+- **View components.** `PULP_ENABLE_PULP_VELLUM_COMPONENTS` is on in the same
+  configure, and `pulp-test-pulp-vellum-components` (ctest label
+  `pulp-vellum-components`, also matched by `-L pulp-vellum`) builds the
+  retained Pulp view components against Vellum main's view layer and renders
+  them offscreen. PRs touching `integrations/pulp-vellum-components/**` run the
+  lane.
 - **Negative control.** Every full run recompiles one Vellum-side translation
   unit (`knob_panel.cpp`) with `-fsyntax-only`, once against the SDK as
   published, which must succeed, and once against a copy of its mirror headers
