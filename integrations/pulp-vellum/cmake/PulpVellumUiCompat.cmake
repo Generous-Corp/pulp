@@ -41,12 +41,18 @@ set(_PULP_VELLUM_GPU_OWNER_PROVIDER
 
 # Splits one link item, generator expressions included, into the names it may
 # refer to. Conditions are not evaluated, so a conditional dependency counts.
+# Every generator-expression wrapper, however deeply nested, is stripped down to
+# its words: `$<$<CONFIG:Debug>:Pulp::gpu-device>` yields CONFIG, Debug and
+# Pulp::gpu-device. The condition words come along as candidates too; a word
+# that is not a target is skipped by the walk, so over-collecting is harmless.
+# A single colon separates a wrapper from its value, while "::" belongs to a
+# namespaced target name and is kept whole.
 function(_pulp_vellum_link_tokens item out)
-    string(REGEX REPLACE "\\$<[A-Za-z_]+:" ";" _text "${item}")
-    string(REGEX REPLACE "[$<>,]" ";" _text "${_text}")
+    string(REPLACE "::" "@PULP_NS@" _text "${item}")
+    string(REGEX REPLACE "[$<>,:;]+" ";" _text "${_text}")
     set(_tokens "")
     foreach(_token IN LISTS _text)
-        string(REGEX REPLACE "^:+" "" _token "${_token}")
+        string(REPLACE "@PULP_NS@" "::" _token "${_token}")
         if(NOT _token STREQUAL "")
             list(APPEND _tokens "${_token}")
         endif()
