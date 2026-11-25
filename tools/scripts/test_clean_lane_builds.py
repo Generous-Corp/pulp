@@ -46,6 +46,10 @@ LSOF_STUB = """#!/bin/sh
 if [ -z "$STUB_LSOF_BLIND" ]; then echo "p$PPID"; fi
 echo "n/"
 if [ -f "$STUB_LSOF_EXTRA" ]; then cat "$STUB_LSOF_EXTRA"; fi
+if [ -n "$STUB_LSOF_COUNT" ]; then
+  echo x >> "$STUB_LSOF_COUNT"
+  if [ "$(wc -l < "$STUB_LSOF_COUNT")" -ge 2 ] && [ -f "$STUB_LSOF_SECOND" ]; then cat "$STUB_LSOF_SECOND"; fi
+fi
 """
 
 
@@ -320,9 +324,11 @@ class BuildGuards(Base):
         outside.mkdir()
         (outside / "precious").write_text("keep")
         os.symlink(outside, repo / "build")
+        os.symlink(outside, repo / "sdk-link")
         age(repo, 3)
-        r = self.run_reaper("--yes")
+        r = self.run_reaper("--yes", "--min-artifact-mb", "0")
         self.assertIsNone(self.entry(r, "a", "build"))
+        self.assertIsNone(self.entry(r, "a", "artifact"))
         self.assertTrue((outside / "precious").exists())
 
 
@@ -473,6 +479,15 @@ class Instruments(Base):
         p = self.run_reaper(expect_rc=3, env_extra={"PULP_REAPER_LSOF": "/nonexistent/lsof"})
         self.assertIn("unavailable", p.stderr)
 
+    def test_unknown_idle_measurement_is_held(self):
+        self.lane("a")
+        (self.bin / "find").write_text("#!/bin/sh\nexit 1\n")
+        (self.bin / "find").chmod(0o755)
+        env = {"PATH": f"{self.bin}{os.pathsep}{os.environ['PATH']}"}
+        r = self.run_reaper(env_extra=env)
+        self.assertHeld(r, "a", "build", "build", why="idle check could not run")
+        self.assertHeld(r, "a", "lane", why="idle check could not run")
+
     def test_reading_state_does_not_make_a_checkout_look_busy(self):
         self.lane("a")
         self.run_reaper()
@@ -499,6 +514,15 @@ class Removal(Base):
         self.assertFalse((self.root / "a").exists())
         self.assertTrue(other.exists())
         self.assertEqual([p.name for p in self.root.iterdir() if p.name.startswith(".reaping-")], [])
+
+    def test_yes_rechecks_with_a_fresh_process_listing(self):
+        repo = self.lane("a", age_days=3)
+        second = self.tmp / "lsof-second"
+        second.write_text(f"n{repo}/build/obj.o\n")
+        env = {"STUB_LSOF_COUNT": str(self.tmp / "lsof-count"), "STUB_LSOF_SECOND": str(second)}
+        r = self.run_reaper("--yes", env_extra=env)
+        self.assertIn("no longer reclaimable", r["results"][str(repo / "build")])
+        self.assertTrue((repo / "build" / "obj.o").exists())
 
     def test_yes_does_not_touch_held_entries(self):
         repo = self.lane("a", age_days=3)
