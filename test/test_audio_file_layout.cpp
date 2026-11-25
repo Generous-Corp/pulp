@@ -25,7 +25,9 @@
 #include <string_view>
 #include <vector>
 
-#if !defined(_WIN32)
+#if defined(_WIN32)
+#include <process.h>
+#else
 #include <sys/resource.h>
 #include <unistd.h>
 #endif
@@ -87,9 +89,17 @@ class CountingSource final : public LayoutByteSource {
     LayoutByteSource& inner_;
 };
 
+long long process_id() {
+#if defined(_WIN32)
+    return static_cast<long long>(_getpid());
+#else
+    return static_cast<long long>(::getpid());
+#endif
+}
+
 fs::path temp_file(const std::string& name) {
     return fs::temp_directory_path() /
-           ("pulp-audio-file-layout-" + std::to_string(::getpid()) + "-" + name);
+           ("pulp-audio-file-layout-" + std::to_string(process_id()) + "-" + name);
 }
 
 std::uint64_t resident_bytes() {

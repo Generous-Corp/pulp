@@ -104,6 +104,62 @@ async function managedHome(executable) {
   return { home, root, binary };
 }
 
+// The same layout plus the release's chrome-headless-shell record.
+async function managedHomeWithShell(shellRecord) {
+  const managed = await managedHome("151.0.7922.47/mac-arm64/chrome");
+  const shell = path.join(managed.root, "151.0.7922.47", "mac-arm64-headless-shell",
+    "chrome-headless-shell-mac-arm64", "chrome-headless-shell");
+  await mkdir(path.dirname(shell), { recursive: true });
+  await writeFile(shell, "#!/bin/sh\nexit 0\n", { mode: 0o755 });
+  await writeFile(path.join(managed.root, "headless-shell.json"), JSON.stringify({
+    schema: 1, version: "151.0.7922.47", platform: "mac-arm64",
+    executable: "151.0.7922.47/mac-arm64-headless-shell/chrome-headless-shell-mac-arm64/chrome-headless-shell",
+    ...shellRecord,
+  }));
+  return { ...managed, shell };
+}
+
+test("the managed release's headless shell is preferred, then its browser",
+  async () => {
+    const { home, binary, shell } = await managedHomeWithShell({});
+    try {
+      const candidates = browserCandidates({ PULP_HOME: home });
+      assert.equal(candidates[0], shell);
+      assert.equal(candidates[1], binary);
+      assert.equal(await installedBrowser({ PULP_HOME: home }), shell);
+      // An explicit pin and the CI rule are untouched by the shell.
+      assert.deepEqual(
+        browserCandidates({ PULP_HOME: home, PULP_DESIGN_BROWSER: "/pinned" }),
+        ["/pinned"]);
+      assert.deepEqual(
+        browserCandidates({ PULP_HOME: home, GITHUB_ACTIONS: "true" }), []);
+    } finally {
+      await rm(home, { recursive: true, force: true });
+    }
+  });
+
+test("a headless shell from another release is not used", async () => {
+  const { home, binary } = await managedHomeWithShell({ version: "150.0.0.1" });
+  try {
+    assert.equal(browserCandidates({ PULP_HOME: home })[0], binary);
+  } finally {
+    await rm(home, { recursive: true, force: true });
+  }
+});
+
+test("a headless shell record cannot name the browser directory", async () => {
+  const { home, binary } = await managedHomeWithShell({
+    executable: "151.0.7922.47/mac-arm64/chrome",
+  });
+  try {
+    const candidates = browserCandidates({ PULP_HOME: home });
+    assert.equal(candidates[0], binary);
+    assert.equal(candidates.filter((c) => c === binary).length, 1);
+  } finally {
+    await rm(home, { recursive: true, force: true });
+  }
+});
+
 test("an installed Chrome for Testing is preferred over system browsers",
   async () => {
     const { home, binary } = await managedHome("151.0.7922.47/mac-arm64/chrome");

@@ -692,6 +692,73 @@ TEST_CASE("managed discovery trusts only exact current json",
 #endif
 }
 
+TEST_CASE("managed discovery prefers the same-release headless shell",
+          "[import-design][browser-capture]") {
+    TempTree tree("managed-shell");
+    const auto browser = tree.write(
+        (fs::path("managed/9.9.9/host/payload") / managed_browser_name()).generic_string(),
+        "browser");
+    const auto shell =
+        tree.write("managed/9.9.9/host-headless-shell/payload/chrome-headless-shell", "shell");
+    tree.write("managed/current.json", "{\"schema\":1,\"version\":\"9.9.9\",\"platform\":\"host\","
+                                       "\"executable\":\"9.9.9/host/payload/" +
+                                           managed_browser_name().generic_string() + "\"}");
+    const std::string shell_record =
+        "{\"schema\":1,\"version\":\"9.9.9\",\"platform\":\"host\","
+        "\"executable\":\"9.9.9/host-headless-shell/payload/chrome-headless-shell\"}";
+    capture::BrowserDiscoveryOptions options;
+    options.environment_override = "";
+    options.mode_override = "managed";
+    options.managed_root = tree.root() / "managed";
+    options.include_default_system_candidates = false;
+
+    SECTION("without a shell record only the browser is offered") {
+        const auto candidates = capture::collect_browser_candidates(options);
+        REQUIRE(candidates.size() == 1);
+        CHECK(candidates[0].executable == browser);
+    }
+
+    SECTION("a shell of the current release comes first, the browser second") {
+        tree.write("managed/headless-shell.json", shell_record);
+        const auto candidates = capture::collect_browser_candidates(options);
+        REQUIRE(candidates.size() == 2);
+        CHECK(candidates[0].executable == shell);
+        CHECK(candidates[0].origin == capture::BrowserOrigin::managed);
+        CHECK(candidates[1].executable == browser);
+    }
+
+    SECTION("a shell of another release is not used") {
+        tree.write("managed/headless-shell.json",
+                   replace_once(replace_once(shell_record, "\"9.9.9\"", "\"9.9.8\""),
+                                "9.9.9/host-headless-shell", "9.9.8/host-headless-shell"));
+        tree.write("managed/9.9.8/host-headless-shell/payload/chrome-headless-shell", "old shell");
+        const auto candidates = capture::collect_browser_candidates(options);
+        REQUIRE(candidates.size() == 1);
+        CHECK(candidates[0].executable == browser);
+    }
+
+    SECTION("a shell record cannot name the browser directory") {
+        tree.write("managed/headless-shell.json",
+                   replace_once(shell_record, "host-headless-shell", "host"));
+        tree.write("managed/9.9.9/host/payload/chrome-headless-shell", "planted");
+        const auto candidates = capture::collect_browser_candidates(options);
+        REQUIRE(candidates.size() == 1);
+        CHECK(candidates[0].executable == browser);
+    }
+
+    SECTION("a shell without a current browser is not used") {
+        tree.write("managed/headless-shell.json", shell_record);
+        tree.write("managed/current.json", "{}");
+        CHECK(capture::collect_browser_candidates(options).empty());
+    }
+
+    SECTION("system mode never offers the managed shell") {
+        tree.write("managed/headless-shell.json", shell_record);
+        options.mode_override = "system";
+        CHECK(capture::collect_browser_candidates(options).empty());
+    }
+}
+
 TEST_CASE("browser capture rejects unsafe viewport allocations before launch",
           "[import-design][browser-capture]") {
     TempTree tree("unsafe-viewport");

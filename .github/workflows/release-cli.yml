@@ -1289,6 +1289,7 @@ jobs:
               "-DCMAKE_PREFIX_PATH=$VELLUM_ROOT/sdk"
               -DPULP_ENABLE_PULP_VELLUM=ON
               -DPULP_ENABLE_PULP_VELLUM_AUDIO=ON
+              -DPULP_ENABLE_PULP_VELLUM_COMPONENTS=ON
             )
           fi
           cmake -S . -B build-sdk \
