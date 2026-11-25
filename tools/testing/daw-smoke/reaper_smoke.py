@@ -471,7 +471,8 @@ class ReaperSession:
             proc.pid, guard.list_processes(), guard.list_windows(),
             idle_seconds=now - newest,
             stall_after=getattr(self.args, "stall_seconds", 30),
-            scan_budget=getattr(self.args, "scan_seconds", 60))
+            scan_budget=max(getattr(self.args, "scan_seconds", 0) or 0,
+                            getattr(self.args, "timeout", 0) or 0))
 
     def launched_at(self, proc: subprocess.Popen) -> float:
         return self.__dict__.setdefault("launch_times", {}).setdefault(proc.pid, time.time())
@@ -1765,8 +1766,9 @@ def build_parser() -> argparse.ArgumentParser:
     ap.add_argument("--stall-seconds", type=int, default=30,
                     help="No-progress budget before a launch showing only an alert-sized "
                          "window (or none) is reported as blocked.")
-    ap.add_argument("--scan-seconds", type=int, default=60,
-                    help="Budget for one REAPER scan subprocess before it is reported hung.")
+    ap.add_argument("--scan-seconds", type=int, default=0,
+                    help="Budget for one REAPER scan subprocess before it is reported hung "
+                         "(never less than --timeout).")
 
     reload_group = ap.add_argument_group("reload mode")
     reload_group.add_argument("--watched-logic",

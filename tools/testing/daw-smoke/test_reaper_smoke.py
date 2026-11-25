@@ -1208,6 +1208,13 @@ class StallClassification(unittest.TestCase):
         other = guard.Proc(300, 299, 500, self.SCAN.args)
         self.assertIsNone(self.classify([self.MAIN, other], []))
 
+    def test_a_slow_scan_under_budget_with_its_progress_window_is_not_blocked(self):
+        # The scan-progress window is alert-sized and drops to layer 0 once
+        # REAPER loses focus; a legitimate slow scan must not read as a modal.
+        slow = guard.Proc(101, 100, 45, self.SCAN.args)
+        self.assertIsNone(self.classify([self.MAIN, slow],
+                                        [guard.Window(100, 0, 476, 159, True)], idle=45))
+
     def test_ps_elapsed_times_parse(self):
         procs = guard.parse_ps("  100     1    01:05 /R -x\n  101   100 1-02:03:04 /R\n")
         self.assertEqual([p.elapsed for p in procs], [65.0, 93784.0])

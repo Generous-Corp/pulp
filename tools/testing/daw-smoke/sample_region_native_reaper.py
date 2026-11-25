@@ -6,6 +6,9 @@ from pathlib import Path
 import struct
 import sys
 import wave
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import reaper_host_guard as guard  # noqa: E402
 FORMATS=('au','vst3','clap')
 EXPECTED_BUNDLE_ID='com.pulp.sample-region-allpass'
 ROOT=Path(__file__).resolve().parent
@@ -336,8 +339,38 @@ def normalized_state(data):
         kept.append(line)
     return '\n'.join(kept).encode()
 
+def isolated_profile(bundle):
+    """A temp REAPER profile whose only plug-in scan root holds `bundle`.
+
+    The lane inserts by exact path, so the scan root only needs the one bundle
+    (a symlink keeps the inserted path the original).  Without -cfgfile REAPER
+    ran on the user's own profile and scanned every installed plug-in; one that
+    crashes on scan arms AppKit's crash-restore alert for every later launch.
+    """
+    import platform
+    portable=Path(tempfile.mkdtemp(prefix='pulp-f4-reaper-'))
+    scan=portable/'scan'; scan.mkdir()
+    (scan/bundle.name).symlink_to(bundle)
+    real=Path.home()/'Library'/'Application Support'/'REAPER'
+    license_file=real/'reaper-license.rk'
+    if license_file.is_file(): shutil.copy2(license_file, portable/license_file.name)
+    try: base=(real/'reaper.ini').read_text(encoding='utf-8',errors='replace')
+    except OSError: base=''
+    (portable/'reaper.ini').write_text(guard.isolated_ini_text(base, scan, platform.machine()),encoding='utf-8')
+    return portable
+
 def run(fmt,bundle,out,timeout):
     bundle=bundle.resolve()
+    busy=guard.busy_reason(guard.running_reaper_pids(), guard.busy_flag_path())
+    if busy: return {'format':fmt,'status':'inconclusive','reason':busy}
+    portable=isolated_profile(bundle)
+    try:
+        with guard.scoped_persistence_opt_out():
+            return _run(fmt,bundle,out,timeout,portable/'reaper.ini')
+    finally:
+        shutil.rmtree(portable, ignore_errors=True)
+
+def _run(fmt,bundle,out,timeout,cfgfile):
     executable=bundle_executable(bundle)
     if executable is None:
         return {'format':fmt,'status':'inconclusive','reason':'bundle executable missing or ambiguous','plugin_path':str(bundle)}
@@ -358,7 +391,7 @@ def run(fmt,bundle,out,timeout):
     # would make a host proof indistinguishable from a missing receipt.
     # REAPER accepts Lua files as positional scriptfile.lua arguments; there
     # is no ``-script`` switch in the installed CLI.
-    cmd=[reaper,'-newinst','-new','-nosplash',str(LUA)]
+    cmd=guard.launch_argv(reaper,cfgfile,'-new',str(LUA))
     try: p=subprocess.run(cmd,env=env,text=True,capture_output=True,timeout=timeout,check=False)
     except subprocess.TimeoutExpired: return {'format':fmt,'status':'inconclusive','reason':'REAPER timeout'}
     (out/f'{fmt}-reaper-stdout.log').write_text(p.stdout or '')
@@ -414,7 +447,7 @@ def run(fmt,bundle,out,timeout):
         envelope_residual = sum(1 for line in text.splitlines()
                                 if line.strip().startswith('<PARMENV'))
         render_project.write_text(text)
-        render_cmd=[reaper,'-newinst','-new','-nosplash','-renderproject',str(render_project)]
+        render_cmd=guard.launch_argv(reaper,cfgfile,'-new','-renderproject',str(render_project))
         try:
             render=subprocess.run(render_cmd,env=env,text=True,capture_output=True,timeout=timeout,check=False)
             (out/f'{fmt}-render-stdout.log').write_text(render.stdout or '')

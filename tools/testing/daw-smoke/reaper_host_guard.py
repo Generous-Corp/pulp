@@ -297,7 +297,9 @@ def classify_stall(root_pid: int, procs: list[Proc], windows: list[Window], *,
         if scan.elapsed > scan_budget:
             return (f"SCAN-HUNG: the scan subprocess (pid {scan.pid}) has run for "
                     f"{scan.elapsed:.0f}s: {scan.args}")
-    if idle_seconds < stall_after:
+    # A live scan subprocess is progress the file mtimes cannot see, and the
+    # scan-progress window is alert-sized, so the main-process rules wait.
+    if idle_seconds < stall_after or scans:
         return None
     mine = [w for w in windows if w.owner_pid == root_pid and w.onscreen and w.layer == 0]
     if mine and all(w.width <= MODAL_MAX_WIDTH and w.height <= MODAL_MAX_HEIGHT for w in mine):
@@ -305,7 +307,7 @@ def classify_stall(root_pid: int, procs: list[Proc], windows: list[Window], *,
         return (f"BLOCKED-MODAL: REAPER (pid {root_pid}) made no progress for "
                 f"{idle_seconds:.0f}s and shows only an alert-sized window "
                 f"({biggest.width:.0f}x{biggest.height:.0f})")
-    if not mine and not scans:
+    if not mine:
         return (f"STALLED: REAPER (pid {root_pid}) made no progress for {idle_seconds:.0f}s "
                 "and shows no window")
     return None

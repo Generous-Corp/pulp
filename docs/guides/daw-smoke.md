@@ -116,7 +116,8 @@ See [`tools/testing/daw-smoke/README.md`](../../tools/testing/daw-smoke/README.m
 ## Guarantees (so it's safe to run anywhere)
 
 - **No pollution.** VST3/CLAP scan from a temp path via a fresh REAPER portable dir —
-  never writes your REAPER config or `~/Library/Audio/Plug-Ins`. `--format au`
+  never writes your REAPER config or `~/Library/Audio/Plug-Ins`. The one exception is
+  the per-app `ApplePersistenceIgnoreState` default, set for the run and restored. `--format au`
   installs to the real Components folder and **always uninstalls** on exit.
 - **Only the plug-in under test is scanned.** Every VST3/CLAP scan key in the
   temp profile names the temp scan dir, and a run whose plug-in cache lists any
