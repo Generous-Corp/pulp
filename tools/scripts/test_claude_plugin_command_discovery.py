@@ -35,11 +35,15 @@ def discover_commands(root: Path) -> dict[str, Path]:
     return {path.stem: path for path in sorted(command_dir.glob("*.md"))}
 
 
-def parse_front_matter(text: str) -> tuple[dict[str, str], str]:
-    """Split optional front matter from the body; a file without it is all body."""
+def parse_front_matter(text: str) -> tuple[dict[str, str] | None, str]:
+    """Split optional front matter from the body; a file without it is all body.
+
+    Returns None for the fields when there is no front matter block, so an
+    empty block ({}) stays distinguishable from an absent one.
+    """
     match = FRONT_MATTER.match(text)
     if not match:
-        return {}, text
+        return None, text
     fields: dict[str, str] = {}
     for line in match.group(1).splitlines():
         key, sep, value = line.partition(":")
@@ -82,23 +86,30 @@ def problems(root: Path) -> list[str]:
             found.append(f"/{name} is not discoverable from .claude-plugin/plugin.json")
             continue
         fields, body = parse_front_matter(path.read_text(encoding="utf-8"))
-        if fields and fields.get("name") != name:
+        found.extend(check_invocations_and_metadata(name, fields, body, manifest))
+    return found
+
+
+def check_invocations_and_metadata(
+    name: str, fields: dict[str, str] | None, body: str, manifest: dict[str, set[str]]
+) -> list[str]:
+    """Validate one command's front matter and its `pulp ...` invocations."""
+    found: list[str] = []
+    if fields is not None:
+        if fields.get("name") != name:
             found.append(f"/{name}: front matter name is {fields.get('name')!r}")
-        if fields and len(fields.get("description", "")) < 10:
+        if not fields.get("description", "").strip():
             found.append(f"/{name}: front matter needs a description")
-        if not body.strip():
-            found.append(f"/{name}: empty body")
-        invocations = PULP_INVOCATION.findall(body)
-        if not any(command == name for command, _ in invocations):
-            found.append(f"/{name}: never tells the agent to run `pulp {name}`")
-        for command, sub in invocations:
-            if command not in manifest:
-                found.append(f"/{name}: `pulp {command}` is not a CLI command")
-            elif sub and manifest[command] and sub not in manifest[command]:
-                # Only a name the manifest knows as a sibling subcommand is a
-                # claim; prose after a command word is not.
-                if any(sub in subs for subs in manifest.values()):
-                    found.append(f"/{name}: `pulp {command} {sub}` is not a subcommand")
+    if not body.strip():
+        found.append(f"/{name}: empty body")
+    invocations = PULP_INVOCATION.findall(body)
+    if not any(command == name for command, _ in invocations):
+        found.append(f"/{name}: never tells the agent to run `pulp {name}`")
+    for command, sub in invocations:
+        if command not in manifest:
+            found.append(f"/{name}: `pulp {command}` is not a CLI command")
+        elif sub and manifest[command] and sub not in manifest[command]:
+            found.append(f"/{name}: `pulp {command} {sub}` is not a subcommand")
     return found
 
 
@@ -148,6 +159,33 @@ class NegativeControls(unittest.TestCase):
             path.read_text(encoding="utf-8") + "\nThen `pulp inspect instances`.\n", encoding="utf-8"
         )
         self.assertIn("`pulp inspect instances` is not a subcommand", " ".join(problems(self.tmp)))
+
+    def test_unknown_subcommand_absent_everywhere_is_reported(self) -> None:
+        path = self.tmp / ".claude/commands/inspect.md"
+        path.write_text(
+            path.read_text(encoding="utf-8") + "\nThen `pulp inspect fabricated`.\n", encoding="utf-8"
+        )
+        self.assertIn("`pulp inspect fabricated` is not a subcommand", " ".join(problems(self.tmp)))
+
+    def test_empty_front_matter_is_reported(self) -> None:
+        path = self.tmp / ".claude/commands/design.md"
+        _, body = parse_front_matter(path.read_text(encoding="utf-8"))
+        path.write_text("---\n\n---\n" + body, encoding="utf-8")
+        reported = " ".join(problems(self.tmp))
+        self.assertIn("/design: front matter name is None", reported)
+        self.assertIn("/design: front matter needs a description", reported)
+
+    def test_short_but_present_description_is_accepted(self) -> None:
+        found = check_invocations_and_metadata(
+            "design", {"name": "design", "description": "Short"}, "Run `pulp design`.", {"design": set()}
+        )
+        self.assertEqual(found, [])
+
+    def test_blank_description_is_reported(self) -> None:
+        found = check_invocations_and_metadata(
+            "design", {"name": "design", "description": " "}, "Run `pulp design`.", {"design": set()}
+        )
+        self.assertEqual(found, ["/design: front matter needs a description"])
 
     def test_missing_plugin_commands_directory_is_reported(self) -> None:
         manifest = self.tmp / ".claude-plugin/plugin.json"
