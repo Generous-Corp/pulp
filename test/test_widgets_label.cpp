@@ -782,13 +782,13 @@ TEST_CASE("Label intrinsic_width fits long text", "[view][widget][issue-928]") {
 }
 
 TEST_CASE("Label intrinsic_width scales with font size", "[view][widget][issue-928]") {
-    Label small("Hello world");
-    small.set_font_size(12.0f);
+    Label small_label("Hello world");
+    small_label.set_font_size(12.0f);
 
     Label large("Hello world");
     large.set_font_size(36.0f);
 
-    REQUIRE(large.intrinsic_width() > small.intrinsic_width());
+    REQUIRE(large.intrinsic_width() > small_label.intrinsic_width());
 }
 
 TEST_CASE("Label intrinsic_height bumps line-height multiplier for small fonts (#76)",
@@ -810,9 +810,9 @@ TEST_CASE("Label intrinsic_height bumps line-height multiplier for small fonts (
     tiny.set_font_size(10.0f);
     REQUIRE(tiny.intrinsic_height() >= 10.0f * 1.4f);
 
-    Label small("ok");
-    small.set_font_size(11.5f);
-    REQUIRE(small.intrinsic_height() >= 11.5f * 1.4f);
+    Label small_label("ok");
+    small_label.set_font_size(11.5f);
+    REQUIRE(small_label.intrinsic_height() >= 11.5f * 1.4f);
 
     // At/above the threshold — real metrics or fallback multiplier.
     Label normal("hello");
@@ -2164,9 +2164,9 @@ TEST_CASE("Label captured single-line fallback reflows attributed spans without 
 
 TEST_CASE("Label mixed-size attributed runs share measurement and paint metrics",
           "[view][widget][label-cache][attributed][metrics]") {
-    Label small("small BIG");
-    small.set_font_family("Inter");
-    small.set_font_size(10.0f);
+    Label small_label("small BIG");
+    small_label.set_font_family("Inter");
+    small_label.set_font_size(10.0f);
 
     Label mixed("small BIG");
     mixed.set_font_family("Inter");
@@ -2185,9 +2185,9 @@ TEST_CASE("Label mixed-size attributed runs share measurement and paint metrics"
     attributed.append(second);
     mixed.set_attributed_string(std::move(attributed));
 
-    CHECK(mixed.intrinsic_height() > small.intrinsic_height() * 2.0f);
-    CHECK(mixed.baseline_y() > small.baseline_y() * 2.0f);
-    CHECK(mixed.intrinsic_width() > small.intrinsic_width());
+    CHECK(mixed.intrinsic_height() > small_label.intrinsic_height() * 2.0f);
+    CHECK(mixed.baseline_y() > small_label.baseline_y() * 2.0f);
+    CHECK(mixed.intrinsic_width() > small_label.intrinsic_width());
 
     mixed.set_bounds({0, 0, 500, mixed.intrinsic_height()});
     RecordingCanvas canvas;
@@ -2207,11 +2207,11 @@ TEST_CASE("Label automatic attributed line boxes use per-line metrics",
     large.font_family = "Inter";
     large.font_size = 28.0f;
     attributed.append(large);
-    TextSpan small;
-    small.text = "small";
-    small.font_family = "Inter";
-    small.font_size = 10.0f;
-    attributed.append(small);
+    TextSpan small_label;
+    small_label.text = "small";
+    small_label.font_family = "Inter";
+    small_label.font_size = 10.0f;
+    attributed.append(small_label);
     label.set_attributed_string(std::move(attributed));
     label.set_multi_line(true);
 
@@ -3181,13 +3181,13 @@ TEST_CASE("a container re-sizes when its label is restyled under the layout gate
 
     root.layout_children();
     root.mark_layout_current();
-    const float small = box->bounds().height;
-    REQUIRE(small > 0.0f);
+    const float small_label = box->bounds().height;
+    REQUIRE(small_label > 0.0f);
 
     SECTION("restyled: the box grows without anyone forcing a pass") {
         label->set_font_size(40.0f);
         root.layout_children_if_needed();
-        CHECK(box->bounds().height > small);
+        CHECK(box->bounds().height > small_label);
         // and it is the real solved height, not merely "some larger number"
         const float gated = box->bounds().height;
         root.layout_children();
@@ -3197,6 +3197,6 @@ TEST_CASE("a container re-sizes when its label is restyled under the layout gate
     SECTION("negative control: an identical restyle leaves the box alone") {
         label->set_font_size(label->font_size());
         root.layout_children_if_needed();
-        CHECK(box->bounds().height == small);
+        CHECK(box->bounds().height == small_label);
     }
 }

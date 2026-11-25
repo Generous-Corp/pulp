@@ -1739,6 +1739,21 @@ unset(_vellum_ui_compat_test)
 unset(_vellum_ui_compat_args)
 unset(_vellum_ui_compat_labels)
 
+# The consumer modules read PULP_UI_PROVIDER, so a Vellum-backed Pulp::view
+# never has Pulp's view, render or editor-adapter sources compiled against it.
+foreach(_ui_provider_scenario provider editor no-editor bundle reload objc bytecode)
+    add_test(NAME cmake-ui-provider-${_ui_provider_scenario}
+        COMMAND ${CMAKE_COMMAND}
+            -DPULP_SOURCE_DIR=${CMAKE_SOURCE_DIR}
+            -DFIXTURE_DIR=${CMAKE_CURRENT_BINARY_DIR}/ui-provider-consumer
+            -DSCENARIO=${_ui_provider_scenario}
+            -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/test_ui_provider_consumer_modules.cmake)
+    set_tests_properties(cmake-ui-provider-${_ui_provider_scenario} PROPERTIES
+        LABELS "cmake;sdk"
+        SKIP_REGULAR_EXPRESSION "SKIP: (thin reload logic is not supported on Windows|the view ObjC cluster is macOS-only)")
+endforeach()
+unset(_ui_provider_scenario)
+
 if(UNIX)
     if(Python3_Interpreter_FOUND)
         add_test(NAME pulp.plugin-identity-contract

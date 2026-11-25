@@ -297,7 +297,7 @@ class DawnTransferCallCounter {
         return counter.original_.bufferMapAsync(buffer, mode, offset, size, callback_info);
     }
 
-    static void* count_buffer_get_mapped_range(WGPUBuffer buffer, unsigned long offset,
+    static void* count_buffer_get_mapped_range(WGPUBuffer buffer, std::size_t offset,
                                                std::size_t size) {
         auto& counter = active();
         add_saturating(counter.buffer_get_mapped_range_calls_, 1);

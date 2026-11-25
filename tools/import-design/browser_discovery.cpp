@@ -143,9 +143,19 @@ bool path_is_within(const fs::path& child, const fs::path& root) {
     return true;
 }
 
-std::optional<fs::path> managed_current_browser(const fs::path& root) {
+struct ManagedRecord {
+    std::string version;
+    std::string platform;
+    fs::path executable;
+};
+
+// Reads one managed install record (`current.json` or `headless-shell.json`)
+// and resolves its executable, which must sit under <version>/<directory>/
+// inside `root`, where `directory` is the record's platform plus `suffix`.
+std::optional<ManagedRecord> managed_record(const fs::path& root, const char* name,
+                                            std::string_view suffix) {
     if (root.empty()) return std::nullopt;
-    std::ifstream input(root / "current.json", std::ios::binary);
+    std::ifstream input(root / name, std::ios::binary);
     if (!input) return std::nullopt;
     const std::string body{
         std::istreambuf_iterator<char>(input),
@@ -163,10 +173,9 @@ std::optional<fs::path> managed_current_browser(const fs::path& root) {
     const fs::path relative(*executable);
     if (relative.is_absolute() || relative.empty()) return std::nullopt;
     const auto normalized = relative.lexically_normal();
-    if (normalized.begin() == normalized.end() ||
-        *normalized.begin() != fs::path(*version) ||
+    if (normalized.begin() == normalized.end() || *normalized.begin() != fs::path(*version) ||
         std::next(normalized.begin()) == normalized.end() ||
-        *std::next(normalized.begin()) != fs::path(*platform)) {
+        *std::next(normalized.begin()) != fs::path(*platform + std::string(suffix))) {
         return std::nullopt;
     }
     for (const auto& component : normalized) {
@@ -180,7 +189,28 @@ std::optional<fs::path> managed_current_browser(const fs::path& root) {
     const auto canonical_candidate = fs::canonical(candidate, ec);
     if (ec || !path_is_within(canonical_candidate, canonical_root))
         return std::nullopt;
-    return candidate;
+    return ManagedRecord{*version, *platform, candidate};
+}
+
+std::optional<fs::path> managed_current_browser(const fs::path& root) {
+    const auto current = managed_record(root, "current.json", "");
+    if (!current)
+        return std::nullopt;
+    return current->executable;
+}
+
+// The chrome-headless-shell `pulp tool install chrome-for-testing` installs
+// beside the browser. It is used only when it is the release and platform
+// `current.json` names, so it is never a different browser than the pinned one.
+std::optional<fs::path> managed_headless_shell(const fs::path& root) {
+    const auto current = managed_record(root, "current.json", "");
+    if (!current)
+        return std::nullopt;
+    const auto shell = managed_record(root, "headless-shell.json", "-headless-shell");
+    if (!shell || shell->version != current->version || shell->platform != current->platform) {
+        return std::nullopt;
+    }
+    return shell->executable;
 }
 
 #ifdef __APPLE__
@@ -318,6 +348,13 @@ std::vector<BrowserCandidate> collect_browser_candidates(const BrowserDiscoveryO
     if (*selection.mode != BrowserMode::system) {
         const auto root =
             options.managed_root.value_or(default_managed_root());
+        // Captures are headless, and the shell has no window-server
+        // connection, so it cannot stall behind another application's modal
+        // UI the way the full browser can. The full browser of the same
+        // release stays the fallback.
+        if (const auto shell = managed_headless_shell(root)) {
+            append_candidate(candidates, seen, *shell, BrowserOrigin::managed);
+        }
         if (const auto current = managed_current_browser(root)) {
             append_candidate(
                 candidates, seen, *current, BrowserOrigin::managed);

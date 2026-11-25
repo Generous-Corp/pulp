@@ -4984,8 +4984,22 @@ Gotchas baked into the tool: (1) the render and the captured asset PNGs are at *
   version comparison in the probe — nothing rejects a browser for being too
   new, so a discovery failure on a current Chrome is never a version-range
   problem. Selection order is `--browser` → `PULP_DESIGN_BROWSER` → managed
-  (`~/.pulp/tools/chrome-for-testing`, via its `current.json`) → system paths,
-  and the default `auto` mode prefers the pinned browser over a system one.
+  (`~/.pulp/tools/chrome-for-testing`: the release's `chrome-headless-shell`
+  via `headless-shell.json`, then the browser via `current.json`) → system
+  paths, and the default `auto` mode prefers the pinned browser over a system
+  one. The shell is accepted only when its record names the release and
+  platform `current.json` names, and only from `<platform>-headless-shell/`.
+- **Prefer the headless shell on a shared desktop.** The full Chrome for
+  Testing binary connects to the window server even with `--headless=new`;
+  on m5s it intermittently hung (`--dump-dom` of a 127.0.0.1 page never
+  returned) while `chrome-headless-shell` of the same release answered in a
+  second, sandboxed or not. The `bootstrap_look_up
+  ...MachPortRendezvousServer.1: Permission denied (1100)` line it prints is a
+  helper outliving its parent at teardown; it appears in passing runs too and
+  is not the cause. The CDP product of the shell is `HeadlessChrome`, which the
+  probe and the capture both report, so the identity check stays consistent.
+  `launchBrowser()` passes `--headless=new` only to the full browser
+  (`headlessModeArguments()`).
   `pulp config set import_design.browser {auto,managed,system}` picks the mode;
   `managed-browser-unavailable` fires only when `managed` is selected
   explicitly and nothing is installed.
@@ -5004,8 +5018,9 @@ Gotchas baked into the tool: (1) the render and the captured asset PNGs are at *
   written in JavaScript. Its order is `PULP_DESIGN_BROWSER`, then (under GitHub
   Actions) nothing, so a lane that did not provision the pinned build skips the
   real-browser cases instead of launching the runner image's Chrome; then the
-  legacy `PULP_BROWSER`, then the managed install (`managedBrowser()`, the same
-  `current.json` containment rules as `managed_current_browser`), then
+  legacy `PULP_BROWSER`, then the managed install (`managedHeadlessShell()`
+  then `managedBrowser()`, the same record containment rules as
+  `managed_headless_shell` and `managed_current_browser`), then
   hardcoded system paths. It does not read `import_design.browser` modes. On a
   developer host, run `pulp tool install chrome-for-testing` once: until then
   every local run of these suites, and every host-side `pulp import-design`,
