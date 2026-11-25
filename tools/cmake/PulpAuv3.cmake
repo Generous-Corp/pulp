@@ -412,6 +412,10 @@ function(_pulp_add_auv3_ios target name bundle_id version manufacturer manufactu
         "-fapplication-extension"
     )
     target_include_directories(${target}_AUv3 PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+    # The iOS view controller imports au_audio_unit.h and au_v3_contract_view.h
+    # from the format sources; in a source tree the controller lives elsewhere.
+    set_property(SOURCE "${_PULP_IOS_VIEW_CONTROLLER_SOURCE}" APPEND PROPERTY
+        INCLUDE_DIRECTORIES "${_PULP_FORMAT_SOURCE_DIR}")
     _pulp_apply_macho_exports(${target}_AUv3 "${target}_AUv3"
         "_OBJC_CLASS_$_PulpAUViewController"
         "_OBJC_METACLASS_$_PulpAUViewController"
