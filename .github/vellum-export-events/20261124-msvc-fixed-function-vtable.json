@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "event_id": "20261124-msvc-fixed-function-vtable",
+  "kind": "exported-path-change",
+  "created_at": "2026-11-24T22:45:52Z",
+  "receipt_export_id": "20261107-f0ac0a4ff392",
+  "paths": [
+    "core/runtime/include/pulp/runtime/fixed_function.hpp"
+  ],
+  "vellum_inherits": false,
+  "rationale": "Pulp-only MSVC portability edit to FixedFunction; Vellum's framework copy is frozen, so any equivalent change is made there separately."
+}
