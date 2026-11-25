@@ -168,6 +168,31 @@ def _member_kind(rel: str) -> str | None:
     return None
 
 
+def _member_root(rel: str) -> str | None:
+    """The MEMBERS entry (directory or file) that contains ``rel``."""
+    for members in MEMBERS.values():
+        for member in members:
+            if (member.endswith("/") and rel.startswith(member)) or rel == member:
+                return member.rstrip("/")
+    return QUARANTINE_ROOT.rstrip("/") if rel.startswith(QUARANTINE_ROOT) else None
+
+
+def _tail_names_member(rel: str, tail_start: int, whole_file: bool = False) -> bool:
+    """Whether a tail starting at ``rel[tail_start:]`` names the member itself.
+
+    A tail must reach back to the member's own name (``win``, ``linux``), so a
+    shared directory shape inside the quarantine, such as
+    ``include/pulp/view``, does not match. A member that is a single file
+    (``uia_mapping.hpp``) is named only by a tail that ends with its full name.
+    """
+    root = _member_root(rel)
+    if root is None:
+        return False
+    if root == rel and not whole_file:
+        return False
+    return tail_start <= len(root) - len(root.rsplit("/", 1)[-1])
+
+
 def _glob_member_kind(rel: str) -> str | None:
     """Like _member_kind, but ``rel`` may hold glob characters."""
     if not any(ch in rel for ch in "*?["):
@@ -273,16 +298,18 @@ class Scan:
                 return None
             for rel in self.member_paths:
                 head, name = rel.rsplit("/", 1)
-                if ("/" + head).endswith("/" + directory) and fnmatch.fnmatch(name, leaf):
+                if ("/" + head).endswith("/" + directory) and fnmatch.fnmatch(name, leaf) \
+                        and _tail_names_member(rel, len(head) - len(directory)):
                     return _member_kind(rel)
             return None
         for rel in self.member_paths:
-            if ("/" + rel).endswith("/" + tail):
+            if ("/" + rel).endswith("/" + tail) \
+                    and _tail_names_member(rel, len(rel) - len(tail), whole_file=True):
                 return _member_kind(rel)
         if len(parts) >= 3:
             for rel in self.member_paths:
                 at = ("/" + rel + "/").find("/" + tail + "/")
-                if at >= 0 and _member_kind(rel[:at + len(tail)]):
+                if at >= 0 and _tail_names_member(rel, at):
                     return _member_kind(rel)
         return None
 

@@ -104,6 +104,18 @@ class LegacyPlatformHostsGuardTests(unittest.TestCase):
         rc, text = self._check()
         self.assertEqual(rc, 0, text)
 
+    def test_shared_directory_shapes_inside_the_quarantine_do_not_match(self):
+        # The moved linux headers sit under .../linux/include/pulp/view, a shape
+        # every SDK include tree shares; only a tail naming linux/ may match.
+        self._write("test/cmake/sdk_contract.cmake",
+                    "set(_view \"${_sdk}/include/pulp/view\")\n"
+                    "file(GLOB _h \"${_sdk}/include/pulp/view/platform/*.hpp\")\n")
+        rc, text = self._check()
+        self.assertEqual(rc, 0, text)
+        self._write("test/cmake/sdk_contract.cmake",
+                    "set(_h \"${_x}/legacy-platform-hosts/linux/include/pulp/view\")\n")
+        self.assertRed(kind="path", platform="linux")
+
     def test_comments_are_not_references(self):
         self._write("core/view/CMakeLists.txt",
                     "# platform/win/plugin_view_host_win.cpp moved to the quarantine\n"
