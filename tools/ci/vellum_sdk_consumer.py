@@ -459,7 +459,7 @@ def _test_program(command: list[str]) -> str | None:
 def labelled_test_programs(build_dir: Path, label: str = LABEL_REGEX) -> list[tuple[str, Path]]:
     """(test name, executable) for each labelled ctest entry that runs a file under build_dir."""
     out = subprocess.run(["ctest", "--test-dir", str(build_dir), "-L", label, "--show-only=json-v1"],
-                         capture_output=True, text=True, check=False)
+                         capture_output=True, text=True, encoding="utf-8", check=False)
     if out.returncode != 0:
         raise LabelError(f"ctest could not list '{label}' tests: {out.stderr.strip() or out.stdout.strip()}")
     root = build_dir.resolve()
