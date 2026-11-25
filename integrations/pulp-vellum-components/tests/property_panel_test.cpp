@@ -280,3 +280,30 @@ TEST_CASE("PropertyPanel: decode_indices tolerates malformed entries",
     // 0 and 2 are valid; "not-a-num" skipped; 99 dropped; result sorted.
     REQUIRE(xs == std::vector<int>{0, 2});
 }
+
+TEST_CASE("PropertyPanel: multi_choice with no options keeps no indices",
+          "[property-panel][multi-choice][defensive]") {
+    for (int idx : {0, -1, 5}) {
+        INFO("index " << idx);
+        PropertyPanel p;
+        p.add_multi_choice("mc", "MC", {}, {idx});
+        REQUIRE(p.get_multi_choice("mc").value().empty());
+
+        REQUIRE(p.set_multi_choice("mc", {idx}));
+        REQUIRE(p.get_multi_choice("mc").value().empty());
+
+        pulp::state::PropertiesFile pf;
+        pf.set_string("mc", std::to_string(idx));
+        PropertyPanel q;
+        q.add_multi_choice("mc", "MC", {}, {});
+        q.bind_persistence(&pf);
+        REQUIRE(q.get_multi_choice("mc").value().empty());
+    }
+
+    // Control: a non-empty option list still keeps its valid indices.
+    PropertyPanel c;
+    c.add_multi_choice("mc", "MC", {"a", "b"}, {1, 0});
+    REQUIRE(c.get_multi_choice("mc") == std::vector<int>{0, 1});
+    REQUIRE(c.set_multi_choice("mc", {1, 7, -1}));
+    REQUIRE(c.get_multi_choice("mc") == std::vector<int>{1});
+}

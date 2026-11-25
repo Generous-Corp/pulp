@@ -484,7 +484,7 @@ class PropertyPanel : public View {
         std::vector<int> out;
         out.reserve(xs.size());
         for (int i : xs) {
-            if (option_count > 0 && (i < 0 || i >= static_cast<int>(option_count)))
+            if (i < 0 || i >= static_cast<int>(option_count))
                 continue;
             if (seen.insert(i).second)
                 out.push_back(i);
