@@ -23,6 +23,13 @@ modules:
     dependencies: [runtime, audio, signal, pulp_vellum]
     docs: reference/modules.md#pulp_vellum_audio
 
+  - name: pulp_vellum_components
+    path: integrations/pulp-vellum-components
+    summary: Retained Pulp view components (panic button, lasso, preferences panel) as Vellum views with a stable-id catalogue
+    status: experimental
+    dependencies: [state, format]
+    docs: reference/modules.md#pulp_vellum_components
+
   - name: playback
     summary: Master transport optional session-tempo sync immutable incrementally compiled track and automation programs bounded deterministic cursors WAV-backed arrangement audio rendering block-coherent publication and stable renderer shells
     status: experimental

@@ -151,7 +151,8 @@ Browser selection is deterministic:
 2. `PULP_DESIGN_BROWSER=<path>`
 3. `PULP_DESIGN_BROWSER_MODE=auto|managed|system`, then
    `import_design.browser` in `~/.pulp/config.toml`
-4. the explicitly installed managed Chrome for Testing
+4. the explicitly installed managed Chrome for Testing: its
+   `chrome-headless-shell` first, then the full browser of the same release
 5. system Chrome/Chromium
 
 The default `auto` mode therefore behaves exactly like system discovery until
@@ -178,7 +179,15 @@ means it lacks a capability.
 An import never downloads Chrome. The installer verifies a committed SHA-256
 pin, extracts the complete official archive transactionally under
 `$PULP_HOME/tools/chrome-for-testing/<version>/<platform>/`, and publishes the
-exact selection through `current.json`. Google currently publishes no Linux
+exact selection through `current.json`. It installs the same release's
+`chrome-headless-shell` (its own committed SHA-256 pin) under
+`<version>/<platform>-headless-shell/` and names it in `headless-shell.json`.
+Captures are headless, and the shell has no window-server connection, so on a
+shared desktop it cannot stall behind another application's dialog the way the
+full browser can. The shell is used only when `headless-shell.json` names the
+release and platform that `current.json` names; otherwise the full browser is
+used. Re-run `pulp tool install chrome-for-testing` on an existing install to
+add the shell. Google currently publishes no Linux
 arm64 Chrome-for-Testing archive; on that host install system Chromium and use
 `system` mode or set `PULP_DESIGN_BROWSER` explicitly.
 

@@ -43,6 +43,10 @@ def main() -> int:
         "sdk target": ("core/render/CMakeLists.txt", "target_link_libraries(x PRIVATE Vellum::Value)\n"),
         "option": ("core/format/CMakeLists.txt", "if(PULP_ENABLE_PULP_VELLUM)\n"),
         "audio option": ("core/format/CMakeLists.txt", "if(PULP_ENABLE_PULP_VELLUM_AUDIO)\n"),
+        "components option": ("core/format/CMakeLists.txt", "if(PULP_ENABLE_PULP_VELLUM_COMPONENTS)\n"),
+        "components target": ("core/format/CMakeLists.txt", "target_link_libraries(x PUBLIC pulp::vellum-components)\n"),
+        "components raw target": ("core/format/CMakeLists.txt", "target_link_libraries(x PRIVATE pulp-vellum-components)\n"),
+        "components header": ("core/view/src/a.cpp", '#include <pulp/vellum_components/catalogue.hpp>\n'),
     }
     for name, (rel, text) in planted.items():
         with tempfile.TemporaryDirectory(prefix="pulp-integrations-boundary-") as raw:

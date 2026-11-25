@@ -49,6 +49,10 @@ use without hard-coding macOS, Windows, Linux, iOS, or Web behavior.
 
 `MusicalTypingKeyboard` (also in `pulp_vellum_audio`) is the playable computer-typing and piano keyboard catalog component, drawn from two embedded design frames through Vellum's design-frame view. Typing keys (`a w s e d f t g y h u j k o l p`, with `z`/`x` for the octave) and clicks on either frame raise `on_note_on` / `on_note_off`, and `set_active_notes()` lights keys from a host-held note set. The overview strip is a full-range ruler whose teal window tracks the octave and can be dragged. `MusicalTypingController` is the platform-free key-to-note mapper behind it, with auto-repeat de-duplication and a per-key note record so an octave shift mid-hold releases the right note.
 
+## pulp_vellum_components
+
+`pulp::vellum_components` (`integrations/pulp-vellum-components`, optional, off unless `PULP_ENABLE_PULP_VELLUM_COMPONENTS=ON`) provides the retained Pulp view components as `vellum::view::View` subclasses: `PanicButton` (with `panic_target()` for a `format::Processor`), `LassoComponent` and `PreferencesPanel`. `make_pulp_view_component(id, context)` builds one by stable id (`pulp.panic_button`, `pulp.lasso`, `pulp.preferences_panel`); the `PulpViewComponentContext` carries the Pulp-owned services a component binds to. A preferences panel restores its stored page when the caller binds a `PropertiesFile` after adding its pages.
+
 ## simd
 
 Portable block kernels for DSP: elementwise buffer arithmetic (`add`, `sub`,
