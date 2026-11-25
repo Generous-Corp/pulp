@@ -1,5 +1,7 @@
 #include <pulp/vellum_audio/waveform_view.hpp>
 
+#include <pulp/audio/waveform_overview.hpp>
+
 #include <cctype>
 #include <cmath>
 #include <string>
@@ -110,14 +112,15 @@ void WaveformView::paint(::vellum::canvas::Canvas& canvas) {
 
     auto wave_color = resolve_color("waveform.line", ::vellum::canvas::Color::rgba8(100, 180, 250));
     auto fill_color =
-        resolve_color("waveform.fill", ::vellum::canvas::Color::rgba(wave_color.r, wave_color.g, wave_color.b,
-                                                           56.0f / 255.0f));
+        resolve_color("waveform.fill", ::vellum::canvas::Color::rgba(wave_color.r, wave_color.g,
+                                                                     wave_color.b, 56.0f / 255.0f));
 
     // Thumbnail path: render decimated min/max peaks straight from the cached
     // thumbnail without re-decoding audio.
     if (thumbnail_ != nullptr && !thumbnail_->empty()) {
         // Center line
-        auto center_color = resolve_color("waveform.grid", ::vellum::canvas::Color::rgba8(50, 50, 60));
+        auto center_color =
+            resolve_color("waveform.grid", ::vellum::canvas::Color::rgba8(50, 50, 60));
         canvas.set_stroke_color(center_color);
         canvas.set_line_width(0.5f);
         float cy = b.height * 0.5f;
@@ -129,8 +132,9 @@ void WaveformView::paint(::vellum::canvas::Canvas& canvas) {
         const std::size_t target_peaks =
             std::min<std::size_t>(static_cast<std::size_t>(std::max(1.0f, b.width)), 4096u);
         thumbnail_min_max_.assign(target_peaks * 2, 0.0f);
-        const std::size_t produced = thumbnail_->render_min_max(
-            thumbnail_channel_, static_cast<std::uint32_t>(target_peaks), thumbnail_min_max_.data());
+        const std::size_t produced =
+            thumbnail_->render_min_max(thumbnail_channel_, static_cast<std::uint32_t>(target_peaks),
+                                       thumbnail_min_max_.data());
         if (produced == 0)
             return;
 
@@ -162,7 +166,8 @@ void WaveformView::paint(::vellum::canvas::Canvas& canvas) {
     }
 
     if (samples_.empty() && preview_shape_ != PreviewShape::none) {
-        auto center_color = resolve_color("waveform.grid", ::vellum::canvas::Color::rgba8(50, 50, 60));
+        auto center_color =
+            resolve_color("waveform.grid", ::vellum::canvas::Color::rgba8(50, 50, 60));
         canvas.set_stroke_color(center_color);
         canvas.set_line_width(0.5f);
         const float cy = b.height * 0.5f;
@@ -246,6 +251,16 @@ void WaveformView::paint(::vellum::canvas::Canvas& canvas) {
 }
 
 // ── WaveformOverviewView ────────────────────────────────────────────────────
+
+static_assert(WaveformOverviewView::kAllChannels == pulp::audio::WaveformOverview::kAllChannels);
+
+bool WaveformOverviewView::has_overview() const {
+    return overview_ != nullptr && !overview_->empty();
+}
+
+std::uint64_t WaveformOverviewView::source_frames() const {
+    return overview_ ? overview_->info().num_source_frames : 0;
+}
 
 void WaveformOverviewView::set_overview(const pulp::audio::WaveformOverview* overview,
                                         std::uint32_t channel) {

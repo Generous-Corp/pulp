@@ -6,7 +6,6 @@
 // caller-set viewport. Peak data and decimation stay in pulp::audio; trim
 // handles, fades, loops and playheads belong to WaveformEditor.
 
-#include <pulp/audio/waveform_overview.hpp>
 #include <vellum/view/data_display.hpp>
 #include <vellum/view/inspector_facts.hpp>
 #include <vellum/view/view.hpp>
@@ -17,6 +16,10 @@
 #include <memory>
 #include <string_view>
 #include <vector>
+
+namespace pulp::audio {
+class WaveformOverview;
+}
 
 namespace pulp::vellum_audio {
 
@@ -115,22 +118,21 @@ class WaveformView final : public ::vellum::view::View,
 /// stroke_line). Silence collapses to a one-pixel line on the centre axis.
 class WaveformOverviewView final : public ::vellum::view::View {
   public:
+    /// Matches pulp::audio::WaveformOverview::kAllChannels: fold every channel.
+    static constexpr std::uint32_t kAllChannels = static_cast<std::uint32_t>(-1);
+
     WaveformOverviewView() = default;
 
     /// Point the view at an overview (borrowed; the caller keeps it alive or
     /// calls clear_overview). Resets the viewport to the full source range.
     void set_overview(const pulp::audio::WaveformOverview* overview,
-                      std::uint32_t channel = pulp::audio::WaveformOverview::kAllChannels);
+                      std::uint32_t channel = kAllChannels);
     void clear_overview();
 
-    bool has_overview() const {
-        return overview_ != nullptr && !overview_->empty();
-    }
+    bool has_overview() const;
 
     /// Total source frames behind the overview (0 when none is set).
-    std::uint64_t source_frames() const {
-        return overview_ ? overview_->info().num_source_frames : 0;
-    }
+    std::uint64_t source_frames() const;
 
     /// Source-frame window [start, end) to display, clamped to the overview's
     /// length. An inverted or empty range paints only the background.
@@ -167,7 +169,7 @@ class WaveformOverviewView final : public ::vellum::view::View {
 
   private:
     const pulp::audio::WaveformOverview* overview_ = nullptr;
-    std::uint32_t channel_ = pulp::audio::WaveformOverview::kAllChannels;
+    std::uint32_t channel_ = kAllChannels;
     std::uint64_t vp_start_ = 0;
     std::uint64_t vp_end_ = 0;
     ::vellum::canvas::Color line_color_ = ::vellum::canvas::Color::rgba8(100, 180, 250);
