@@ -272,6 +272,7 @@ function(pulp_add_plugin target)
         set(PULP_${target}_NO_EDITOR TRUE CACHE INTERNAL "")
         set(_pulp_core_format_target "${_PULP_FORMAT_CORE_TARGET}")
     else()
+        _pulp_refuse_view_editor_from_vellum("pulp_add_plugin(${target})")
         set(PULP_${target}_NO_EDITOR FALSE CACHE INTERNAL "")
         set(_pulp_core_format_target "${_PULP_FORMAT_TARGET}")
     endif()
@@ -753,6 +754,8 @@ endfunction()
 #   )
 function(pulp_add_plugin_bundle target)
     _pulp_resolve_consumer_targets()
+    # A bundle's plug-ins share Pulp's view editor host.
+    _pulp_refuse_view_editor_from_vellum("pulp_add_plugin_bundle(${target})")
     cmake_parse_arguments(BUNDLE
         ""
         "BUNDLE_NAME;BUNDLE_ID;VERSION;MANUFACTURER"

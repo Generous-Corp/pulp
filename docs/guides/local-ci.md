@@ -1198,6 +1198,14 @@ it, because the repository's 10 GB Actions cache is already full and a save from
 every dispatch would evict other workflows' entries. A self-hosted runner skips
 both steps and keeps its own storage.
 
+### Windows skips the source-selftest lane
+
+The Windows ctest in `cross-platform-check.yml` excludes the `source-selftest`
+label. Those registrations (`tools/ci/source_selftests.json`) only read the
+checkout, run on ubuntu-latest in the required `Enforce version & skill sync`
+job on every merge group, and many use POSIX-only fixtures. See
+`docs/guides/test-lanes.md`, "The source-selftest lane".
+
 ## The FetchContent cache had to point at a real path
 
 `build.yml` restored and saved three FetchContent paths and none of them ever

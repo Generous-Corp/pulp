@@ -491,10 +491,14 @@ jobs:
         # IMMEDIATELY after `ctest` (before `type` overwrites it), then
         # `exit /b` with that saved code so a Windows test failure
         # correctly fails the step.
+        # `source-selftest` is excluded here because those registrations read
+        # only the checkout and already run on ubuntu-latest in the required
+        # `Enforce version & skill sync` job (tools/ci/source_selftests.json);
+        # many assume POSIX tools. Linux enforces them on every merge group.
         shell: cmd
         run: |
           chcp 65001
-          ctest --test-dir "%PULP_BUILD_DIR%" --output-on-failure -C Release -LE "validation|slow" -j8 --timeout 120 --exclude-regex "STFT|VisualizationBridge|Clipboard|Toolbar add items" > test-windows.log 2>&1
+          ctest --test-dir "%PULP_BUILD_DIR%" --output-on-failure -C Release -LE "validation|slow|source-selftest" -j8 --timeout 120 --exclude-regex "STFT|VisualizationBridge|Clipboard|Toolbar add items" > test-windows.log 2>&1
           set CTEST_RC=%ERRORLEVEL%
           type test-windows.log
           echo ctest exit code: %CTEST_RC%
