@@ -2,11 +2,11 @@
 
 /// @file web_event_translate.hpp
 /// Browser-event translation and the CSS-pixel ↔ root-coordinate mapping used
-/// by the Emscripten `BrowserWindowHost` (core/view/platform/web/).
+/// by the Emscripten `BrowserWindowHost` (web/src/).
 ///
 /// Nothing here depends on Emscripten. The coordinate math, the event-shape
 /// mapping, and the View-tree routing are plain C++ so they compile and are
-/// unit-testable on a native host (test/test_window_host_web.cpp);
+/// unit-testable on a native host (tests/test_window_host_web.cpp);
 /// `web_input.cpp` only owns the DOM listener plumbing that feeds them.
 
 #include <pulp/view/input_events.hpp>

@@ -5,10 +5,10 @@
 
 #include <catch2/catch_test_macros.hpp>
 
-#include "../core/platform/platform/linux/meminfo_pressure.hpp"
-#include "../core/view/platform/linux/atspi_property_policy.hpp"
-#include "../core/view/platform/linux/atspi_text_offsets.hpp"
-#include "../core/view/platform/linux/xdnd_selection.hpp"
+#include "../../../core/platform/platform/linux/meminfo_pressure.hpp"
+#include "../linux/src/atspi_property_policy.hpp"
+#include "../linux/src/atspi_text_offsets.hpp"
+#include "../linux/src/xdnd_selection.hpp"
 #include <pulp/view/platform/atspi_geometry.hpp>
 
 #include <string>

@@ -211,6 +211,7 @@ pulp_add_test_suite(pulp-test-text-accessibility-windows GROUP pulp-test-group-v
 # Linux AccessKit backend — compile-gated on
 # __linux__ && !__ANDROID__; sentinel on other hosts.
 pulp_add_test_suite(pulp-test-text-accessibility-linux GROUP pulp-test-group-view-host
+    SOURCES ${CMAKE_SOURCE_DIR}/integrations/legacy-platform-hosts/tests/test_text_accessibility_linux.cpp
     LIBRARIES pulp::view)
 # A/B compare
 pulp_add_test_suite(pulp-test-ab-compare GROUP pulp-test-group-view-host
@@ -287,6 +288,7 @@ pulp_add_test_suite(pulp-test-pending-resize GROUP pulp-test-group-view-host
 # own last XResizeWindow, so a stale echo cannot revert the size. Serial
 # arithmetic only, so it runs on every platform.
 pulp_add_test_suite(pulp-test-x11-resize-echo GROUP pulp-test-group-view-host
+    SOURCES ${CMAKE_SOURCE_DIR}/integrations/legacy-platform-hosts/tests/test_x11_resize_echo.cpp
     LIBRARIES pulp::view)
 
 # PluginViewHost GPU-surface lifecycle notification: delayed creation (the
@@ -551,13 +553,16 @@ pulp_add_test_suite(pulp-test-plugin-info-metadata GROUP pulp-test-group-view-ho
     LIBRARIES pulp::host)
 # A11y role mapping tables — UIA + AT-SPI
 pulp_add_test_suite(pulp-test-uia-mapping GROUP pulp-test-group-view-host
+    SOURCES ${CMAKE_SOURCE_DIR}/integrations/legacy-platform-hosts/tests/test_uia_mapping.cpp
     LIBRARIES pulp::view)
 pulp_add_test_suite(pulp-test-atspi-mapping GROUP pulp-test-group-view-host
+    SOURCES ${CMAKE_SOURCE_DIR}/integrations/legacy-platform-hosts/tests/test_atspi_mapping.cpp
     LIBRARIES pulp::view)
 # The Linux backends' platform-independent helpers (UTF-8 text offsets, XDND
 # reply validation and pointer tracking, /proc/meminfo classification, AT-SPI
 # component geometry). They have no platform dependency, so they run everywhere.
 pulp_add_test_suite(pulp-test-linux-pure-helpers
+    SOURCES ${CMAKE_SOURCE_DIR}/integrations/legacy-platform-hosts/tests/test_linux_pure_helpers.cpp
     LIBRARIES pulp::view pulp::platform)
 # The Avahi and libnotify backends against fake libraries. The test includes the
 # backend sources to reach their internals, so it is built where they are.
@@ -674,13 +679,15 @@ pulp_add_test_suite(pulp-test-stationary-hover GROUP pulp-test-group-view-host
 # win_plugin_input_router.hpp carries no <windows.h> dependency precisely so its
 # re-entrancy and capture rules run on the required macOS gate.
 pulp_add_test_suite(pulp-test-win-plugin-input-router GROUP pulp-test-group-view-host
+    SOURCES ${CMAKE_SOURCE_DIR}/integrations/legacy-platform-hosts/tests/test_win_plugin_input_router.cpp
     LIBRARIES pulp::view)
 
 # Windows plug-in editor host: LPARAM coordinate unpacking, physical->logical
 # scaling, WPARAM modifier mapping, and the GPU surface attach/detach contract
-# (test/test_win_pointer_input.cpp). Deliberately NOT gated on WIN32 — the
+# (integrations/legacy-platform-hosts/tests/test_win_pointer_input.cpp). Deliberately NOT gated on WIN32 — the
 # logic is HWND-free precisely so it runs on the required macOS gate.
 pulp_add_test_suite(pulp-test-win-pointer-input GROUP pulp-test-group-view-host
+    SOURCES ${CMAKE_SOURCE_DIR}/integrations/legacy-platform-hosts/tests/test_win_pointer_input.cpp
     LIBRARIES pulp::view)
 
 # Headless characterization of the hosting/DAW input stack — mouse down/up/click
@@ -711,10 +718,11 @@ pulp_add_test_suite(pulp-test-multi-plugin-coexistence GROUP pulp-test-group-vie
 
 # Browser (Emscripten) window host: the CSS-pixel <-> root coordinate mapping,
 # the HiDPI backing-store rule, browser-event translation, and View-tree routing
-# from core/view/include/pulp/view/web/web_event_translate.hpp. Header-only and
+# from pulp/view/web/web_event_translate.hpp. Header-only and
 # Emscripten-free by design, so it runs on every native host; the live canvas
 # host is proven by the web-UI headless-Chrome pixel fixture.
 pulp_add_test_suite(pulp-test-window-host-web GROUP pulp-test-group-view-host
+    SOURCES ${CMAKE_SOURCE_DIR}/integrations/legacy-platform-hosts/tests/test_window_host_web.cpp
     LIBRARIES pulp::view)
 
 # The stage classifier behind tools/editor-open/editor_open_oop_probe.mm (what

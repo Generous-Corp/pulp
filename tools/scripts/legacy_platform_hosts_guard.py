@@ -128,15 +128,15 @@ _DEFINE_RE = re.compile(r"^(add_library|add_executable|add_custom_target|"
 _REASON_HOST = "shared target compiles the platform host until that platform builds UI-off"
 _REASON_TEST = "shared test registration or test that covers a platform helper"
 _REASON_SDK = "installed SDK ships the iOS AUv3 view controller source"
+_REASON_PACKAGE = ("the root build adds the package, which attaches the Windows, Linux and iOS "
+                   "hosts to the core/view targets")
 _REASON_DEMO = "web demo drives the browser host's event translation"
 
 # (referencing file, platform, kind) -> (count, reason). Each row is an edge
 # that exists today; when the platform's subtree is removed, its rows go too.
 ALLOWED: dict[tuple[str, str, str], tuple[int, str]] = {
     ("CMakeLists.txt", "android", "path"): (4, _REASON_HOST),
-    ("core/view/CMakeLists.txt", "ios", "path"): (3, _REASON_HOST),
-    ("core/view/CMakeLists.txt", "linux", "path"): (5, _REASON_HOST),
-    ("core/view/CMakeLists.txt", "win", "path"): (10, _REASON_HOST),
+    ("CMakeLists.txt", "root", "path"): (1, _REASON_PACKAGE),
     ("examples/web-demos/super-convolver-ui/ui_entry.cpp", "web", "include"): (1, _REASON_DEMO),
     ("test/cmake/motion_tests.cmake", "android", "path"): (1, _REASON_TEST),
     ("test/cmake/motion_tests.cmake", "tests", "path"): (1, _REASON_TEST),
@@ -145,11 +145,12 @@ ALLOWED: dict[tuple[str, str, str], tuple[int, str]] = {
     ("test/test_accessibility_tree.cpp", "linux", "include"): (1, _REASON_TEST),
     ("test/test_drag_drop.cpp", "linux", "include"): (1, _REASON_TEST),
     ("test/test_plugin_frame_renderer.cpp", "win", "include"): (1, _REASON_TEST),
+    ("test/cmake/view_host_tests.cmake", "tests", "path"): (8, _REASON_TEST),
     ("test/test_view_pool.cpp", "win", "include"): (1, _REASON_TEST),
     ("tools/cmake/PulpAndroid.cmake", "android", "path"): (6, _REASON_HOST),
-    ("tools/cmake/PulpAuv3.cmake", "ios", "path"): (1, _REASON_HOST),
     ("tools/cmake/PulpInstallRules.cmake", "ios", "path"): (1, _REASON_SDK),
-    ("tools/cmake/PulpWebUi.cmake", "web", "path"): (2, _REASON_HOST),
+    ("tools/cmake/PulpUtils.cmake", "ios", "path"): (3, _REASON_HOST),
+    ("tools/cmake/PulpWebUi.cmake", "web", "path"): (3, _REASON_HOST),
 }
 
 
@@ -166,6 +167,31 @@ def _member_kind(rel: str) -> str | None:
     if rel == QUARANTINE_ROOT.rstrip("/") or rel.startswith(QUARANTINE_ROOT):
         return "root"
     return None
+
+
+def _member_root(rel: str) -> str | None:
+    """The MEMBERS entry (directory or file) that contains ``rel``."""
+    for members in MEMBERS.values():
+        for member in members:
+            if (member.endswith("/") and rel.startswith(member)) or rel == member:
+                return member.rstrip("/")
+    return QUARANTINE_ROOT.rstrip("/") if rel.startswith(QUARANTINE_ROOT) else None
+
+
+def _tail_names_member(rel: str, tail_start: int, whole_file: bool = False) -> bool:
+    """Whether a tail starting at ``rel[tail_start:]`` names the member itself.
+
+    A tail must reach back to the member's own name (``win``, ``linux``), so a
+    shared directory shape inside the quarantine, such as
+    ``include/pulp/view``, does not match. A member that is a single file
+    (``uia_mapping.hpp``) is named only by a tail that ends with its full name.
+    """
+    root = _member_root(rel)
+    if root is None:
+        return False
+    if root == rel and not whole_file:
+        return False
+    return tail_start <= len(root) - len(root.rsplit("/", 1)[-1])
 
 
 def _glob_member_kind(rel: str) -> str | None:
@@ -273,16 +299,18 @@ class Scan:
                 return None
             for rel in self.member_paths:
                 head, name = rel.rsplit("/", 1)
-                if ("/" + head).endswith("/" + directory) and fnmatch.fnmatch(name, leaf):
+                if ("/" + head).endswith("/" + directory) and fnmatch.fnmatch(name, leaf) \
+                        and _tail_names_member(rel, len(head) - len(directory)):
                     return _member_kind(rel)
             return None
         for rel in self.member_paths:
-            if ("/" + rel).endswith("/" + tail):
+            if ("/" + rel).endswith("/" + tail) \
+                    and _tail_names_member(rel, len(rel) - len(tail), whole_file=True):
                 return _member_kind(rel)
         if len(parts) >= 3:
             for rel in self.member_paths:
                 at = ("/" + rel + "/").find("/" + tail + "/")
-                if at >= 0 and _member_kind(rel[:at + len(tail)]):
+                if at >= 0 and _tail_names_member(rel, at):
                     return _member_kind(rel)
         return None
 

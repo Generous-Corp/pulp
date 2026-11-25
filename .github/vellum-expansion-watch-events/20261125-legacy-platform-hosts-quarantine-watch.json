@@ -1,0 +1,38 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20261125-legacy-platform-hosts-quarantine-watch",
+  "created_at": "2026-11-25T20:44:06Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "render-assets-and-backends"
+  ],
+  "rationale": "Moves the Windows, Linux, iOS, Android and web UI host sources, their headers and their platform-only tests from core/ into integrations/legacy-platform-hosts/ unchanged apart from include paths and comments. The Android render shell and Choreographer pacer are among them. Every platform builds the same sources under the same conditions: the package attaches them to the core/view targets, and pulp-jni, PulpAndroid.cmake and PulpWebUi.cmake name the new paths. No renderer, design-import, Chromium or packaging behaviour changes, the installed SDK keeps the same headers and sources at the same destinations, and no authority moves.",
+  "tests": [
+    "ctest --test-dir build -R pulp-test-accessibility-tree",
+    "ctest --test-dir build -R pulp-test-atspi-mapping",
+    "ctest --test-dir build -R pulp-test-drag-drop",
+    "ctest --test-dir build -R pulp-test-linux-pure-helpers",
+    "ctest --test-dir build -R pulp-test-motion-android-bridge",
+    "ctest --test-dir build -R pulp-test-plugin-frame-renderer",
+    "ctest --test-dir build -R pulp-test-text-accessibility-linux",
+    "ctest --test-dir build -R pulp-test-uia-mapping",
+    "ctest --test-dir build -R pulp-test-view-bridge",
+    "ctest --test-dir build -R pulp-test-view-pool",
+    "ctest --test-dir build -R pulp-test-win-plugin-input-router",
+    "ctest --test-dir build -R pulp-test-win-pointer-input",
+    "ctest --test-dir build -R pulp-test-window-host-web",
+    "ctest --test-dir build -R pulp-test-x11-resize-echo",
+    "python3 tools/scripts/test_android_surface_runtime_contract.py",
+    "python3 tools/scripts/test_classify_changes.py",
+    "python3 tools/scripts/test_legacy_platform_hosts_guard.py",
+    "python3 tools/scripts/test_render_upward_edge_check.py",
+    "python3 tools/scripts/test_skill_sync.py",
+    "python3 tools/scripts/test_vellum_view_core_pulp_kept_check.py",
+    "python3 tools/scripts/vellum_expansion_watch_check.py --base <merge-base origin/main HEAD> --head <HEAD>",
+    "vellum-expansion-watch"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}

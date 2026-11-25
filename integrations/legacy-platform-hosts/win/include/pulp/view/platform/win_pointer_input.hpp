@@ -3,7 +3,7 @@
 // Windows plug-in editor host: pointer-input and surface-lifecycle decisions.
 //
 // HWND-free logic factored out of
-// core/view/platform/win/plugin_view_host_win.cpp. The platform TU keeps the
+// win/src/plugin_view_host_win.cpp. The platform TU keeps the
 // Win32 calls (GetKeyState, SetCapture, SetParent, Dawn surface creation);
 // this header keeps the decisions those calls feed, so they are testable on
 // every platform. That matters here specifically: the required Pulp CI gate is

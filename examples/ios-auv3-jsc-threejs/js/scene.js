@@ -261,7 +261,7 @@
     // tools/scripts/bundle_threejs_for_jsc.mjs), so it is exposed as
     // THREE.OrbitControls. Drag-rotate and pinch-zoom reach JS via the iOS
     // AUv3 touch→pointer-event bridge added in
-    // core/view/platform/ios/plugin_view_host_ios.mm (PulpMetalPluginView).
+    // integrations/legacy-platform-hosts/ios/src/plugin_view_host_ios.mm (PulpMetalPluginView).
     // Pass the RAW native canvas element (not the PulpCanvas wrapper): the
     // wrapper only forwards width/height/addEventListener, but OrbitControls
     // also needs `ownerDocument` (to add document-level pointermove/pointerup

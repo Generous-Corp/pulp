@@ -42,6 +42,8 @@ on:
       - "tools/cmake/PulpPortableWav.cmake"
       - "tools/scripts/*web_timeline_source_closure_check.py"
       - "tools/cmake/PulpWebUi.cmake"
+      # The browser window host PulpWebUi.cmake compiles.
+      - "integrations/legacy-platform-hosts/web/**"
       - "tools/cmake/PulpGpuWasm.cmake"
       - "tools/cmake/wasi-toolchain.cmake"
       - ".github/workflows/web-plugins.yml"

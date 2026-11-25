@@ -6,7 +6,7 @@
 // which maps them to Android AccessibilityNodeInfo objects.
 //
 // Architecture mirrors the iOS VoiceOver bridge in
-// core/view/platform/ios/accessibility_ios.mm: flatten the View tree into
+// ios/src/accessibility_ios.mm: flatten the View tree into
 // a vector, query by index. The Kotlin delegate iterates the flat list
 // and builds AccessibilityNodeInfo entries for each.
 

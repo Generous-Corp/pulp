@@ -2,7 +2,7 @@
 #
 # The smallest possible AU effect whose view renders a single animated
 # 2D primitive through Skia/Dawn on iOS, proving that the GPU plugin
-# host (`core/view/platform/ios/plugin_view_host_ios.mm`) and the Dawn
+# host (`integrations/legacy-platform-hosts/ios/src/plugin_view_host_ios.mm`) and the Dawn
 # Metal surface path (`core/render/src/gpu_surface_dawn.cpp`) work
 # end-to-end inside an AUv3 .appex.
 #

@@ -14,7 +14,7 @@
 // is covered in test_plugin_view_host_factory.cpp. Relative include keeps the
 // header off the public include path (it is a platform-private helper) without
 // adding a CMake include-dir line to the frozen test/CMakeLists.txt.
-#include "../core/view/platform/linux/xdnd_parse.hpp"
+#include "../integrations/legacy-platform-hosts/linux/src/xdnd_parse.hpp"
 
 #include <filesystem>
 #include <fstream>

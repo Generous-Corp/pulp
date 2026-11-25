@@ -2,7 +2,7 @@
 //
 // AChoreographer is Android's native vsync callback (API 24+); it pumps
 // cleanly on 60/90/120 Hz and VRR displays. The existing standalone
-// Choreographer pacer lives in core/render/platform/android/choreographer_android.cpp;
+// Choreographer pacer lives in choreographer_android.cpp, with the legacy Android host;
 // this is the RenderLoop-shaped wrapper wired into RenderLoop::create().
 //
 // AChoreographer_getInstance() is thread/looper-sensitive: it must be

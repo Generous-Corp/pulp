@@ -266,7 +266,7 @@ Java_com_pulp_render_PulpSurfaceView_nativeGetGpuAdapterInfo(
 
 // ── Accessibility (TalkBack) ─────────────────────────────────────────────
 // REMOVED: the accessibility JNI exports have moved to
-// core/view/platform/android/accessibility_android.cpp which uses the
+// android/src/accessibility_android.cpp which uses the
 // correct C++ enum values directly (no role mapping table). The old
 // code here had wrong role mappings that caused TalkBack to announce
 // controls as the wrong widget type.

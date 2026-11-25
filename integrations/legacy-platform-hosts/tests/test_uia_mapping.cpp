@@ -1,6 +1,6 @@
 // Tests for the Pulp → Windows UIA mapping table.
 // Pure-constant checks; the actual UIA provider lives in
-// core/view/platform/win/accessibility_win.cpp and is validated per platform by
+// win/src/accessibility_win.cpp and is validated per platform by
 // integration tests.
 
 #include <catch2/catch_approx.hpp>

@@ -14,7 +14,7 @@ import unittest
 
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
-ANDROID_RENDER = ROOT / "core" / "render" / "platform" / "android"
+ANDROID_RENDER = ROOT / "integrations" / "legacy-platform-hosts" / "android" / "src"
 DEMO = (ANDROID_RENDER / "gpu_surface_android.cpp").read_text(encoding="utf-8")
 RUNTIME = (ANDROID_RENDER / "surface_runtime_android.cpp").read_text(encoding="utf-8")
 INTERNAL = (ANDROID_RENDER / "gpu_surface_android_internal.hpp").read_text(encoding="utf-8")
@@ -96,7 +96,7 @@ class SurfaceRuntimeOwnershipContract(unittest.TestCase):
             self.assertIn(f"Java_com_pulp_render_PulpSurfaceView_{name}", JNI)
 
     def test_android_owner_and_callbacks_are_wired(self) -> None:
-        self.assertIn("core/render/platform/android/surface_runtime_android.cpp", CMAKE)
+        self.assertIn("integrations/legacy-platform-hosts/android/src/surface_runtime_android.cpp", CMAKE)
         for token in (
             "HandlerThread(\"PulpRenderThread\")",
             "renderHandler",

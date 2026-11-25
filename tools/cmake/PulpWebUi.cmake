@@ -26,7 +26,7 @@
 #   2. _PULP_WEBUI_RENDER_SOURCES below — the surface TU
 #   3. SkiaSurface::create_webgl / WebGlConfig in core/render/include (the
 #      factory is named for the backend it wraps)
-#   4. its one call site in core/view/platform/web/window_host_web.cpp
+#   4. its one call site in integrations/legacy-platform-hosts/web/src/window_host_web.cpp
 #
 # NOT INCLUDED, deliberately:
 #   gpu_surface_dawn.cpp / gpu_compute.cpp  — Dawn; the wasm slice has none.
@@ -137,6 +137,7 @@ set(_PULP_WEBUI_INCLUDES
     ${_PULP_WEBUI_ROOT}/core/canvas/include
     ${_PULP_WEBUI_ROOT}/core/render/include
     ${_PULP_WEBUI_ROOT}/core/view/include
+    ${_PULP_WEBUI_ROOT}/integrations/legacy-platform-hosts/web/include
     ${_PULP_WEBUI_ROOT}/core/view/audio/include
     ${_PULP_WEBUI_ROOT}/external/nanosvg
     ${PULP_WEBUI_CHOC_INCLUDE}
@@ -318,8 +319,9 @@ set(_PULP_WEBUI_STATE_SOURCES
 )
 
 # The browser WindowHost (canvas input events -> View tree, GL surface -> paint).
+# It lives with the other unported hosts in the legacy platform hosts package.
 file(GLOB _PULP_WEBUI_PLATFORM_SOURCES
-    "${_PULP_WEBUI_ROOT}/core/view/platform/web/*.cpp")
+    "${_PULP_WEBUI_ROOT}/integrations/legacy-platform-hosts/web/src/*.cpp")
 
 # The browser clipboard (navigator.clipboard write + paste-event capture). It backs the text
 # editor a selectable/editable Label opens; without it the wasm link fails on
@@ -353,7 +355,7 @@ foreach(_src IN LISTS _PULP_WEBUI_RENDER_SOURCES)
 endforeach()
 if(NOT _PULP_WEBUI_PLATFORM_SOURCES)
     list(APPEND _PULP_WEBUI_MISSING
-        "${_PULP_WEBUI_ROOT}/core/view/platform/web/ (browser WindowHost)")
+        "${_PULP_WEBUI_ROOT}/integrations/legacy-platform-hosts/web/src/ (browser WindowHost)")
 endif()
 if(_PULP_WEBUI_MISSING)
     string(REPLACE ";" "\n    " _missing_str "${_PULP_WEBUI_MISSING}")

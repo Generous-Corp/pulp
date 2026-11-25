@@ -4,7 +4,7 @@
 
 #include <catch2/catch_test_macros.hpp>
 
-#include "../core/view/platform/linux/x11_resize_echo.hpp"
+#include "../linux/src/x11_resize_echo.hpp"
 
 #include <climits>
 

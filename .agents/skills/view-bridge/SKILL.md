@@ -1739,7 +1739,7 @@ do, or it will report menu rows as dead when they are not.
    callbacks on the floor — `setTimeout(fn, 100)` queues forever and
    only fires when an unrelated event happens to pump the message loop.
    `ScriptedUiSession::poll()` does this pair on Mac/iOS standalone;
-   `core/render/platform/android/gpu_surface_android.cpp::android_render_frame()`
+   `integrations/legacy-platform-hosts/android/src/gpu_surface_android.cpp::android_render_frame()`
    does the same pair on Android. Tests live under `[issue-1412]` in
    `test/test_widget_bridge.cpp`.
 7. **Design-viewport pointTransform block holds raw `this` — clear it
@@ -2374,13 +2374,13 @@ and asserted nothing, so it passed for the entire life of the bug.
 
 ## The browser host — a fourth host, and the one with no plugin ABI
 
-`core/view/platform/web/` adds `pulp::view::web::BrowserWindowHost`: the same
+`integrations/legacy-platform-hosts/web/src/` adds `pulp::view::web::BrowserWindowHost`: the same
 `core/view` widget tree, flex layout, text shaping, and Ink & Signal theme,
 compiled to wasm and painted into a `<canvas>` by **Skia Ganesh on WebGL2**
 (*not* Graphite/Dawn — see the `skia-gpu-build` skill's wasm section), driven by
 a `requestAnimationFrame` render loop (`render_loop_emscripten.cpp`). DOM
 pointer/key events are translated into View events by
-`core/view/include/pulp/view/web/web_event_translate.hpp`.
+`integrations/legacy-platform-hosts/web/include/pulp/view/web/web_event_translate.hpp`.
 
 What is different about it, and what to keep true:
 
@@ -2627,7 +2627,7 @@ called directly from adapters):
 
 Adapters call this after the host is built. Reference wiring in:
 
-- `core/format/src/au_view_controller_ios.mm` (iOS AUv3)
+- `integrations/legacy-platform-hosts/ios/src/au_view_controller_ios.mm` (iOS AUv3)
 - `core/format/src/au_view_controller_mac.mm` (macOS AUv3)
 - `core/format/src/vst3_plug_view.cpp` (VST3)
 - `core/format/src/au_v2_cocoa_view.mm` (AU v2)

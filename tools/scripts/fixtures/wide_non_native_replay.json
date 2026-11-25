@@ -562,7 +562,7 @@
    "branch": "fix/win-frame-timer-access",
    "files": [
     ".github/vellum-expansion-watch-events/20260921-pr8699-win-frame-timer-access.json",
-    "core/view/platform/win/plugin_view_host_win.cpp"
+    "integrations/legacy-platform-hosts/win/src/plugin_view_host_win.cpp"
    ]
   },
   {

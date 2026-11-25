@@ -1,0 +1,15 @@
+{
+  "schema_version": 1,
+  "event_id": "20261125-legacy-platform-hosts-quarantine",
+  "kind": "exported-path-change",
+  "created_at": "2026-11-25T20:44:06Z",
+  "receipt_export_id": "20261107-f0ac0a4ff392",
+  "paths": [
+    "core/platform/include/pulp/platform/android/motion_bridge.h",
+    "core/view/include/pulp/view/platform/atspi_geometry.hpp",
+    "core/view/platform/win/accessibility_win_fragment_topology.cpp",
+    "core/view/platform/win/accessibility_win_fragment_topology.hpp"
+  ],
+  "vellum_inherits": false,
+  "rationale": "A Pulp-side quarantine move: the UIA topology builder and the AT-SPI geometry header move unchanged into integrations/legacy-platform-hosts, and motion_bridge.h changes only a comment. Vellum keeps its own copies of these hosts under framework/core/view/platform, so the next re-export has nothing to carry."
+}

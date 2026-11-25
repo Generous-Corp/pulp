@@ -23,7 +23,7 @@ subclass surface.
 - Touching `core/format/src/au_audio_unit.h` — the Obj-C forward
   declaration used by `au_entry.mm` and the iOS view controller.
 - Editing the iOS extension view controller
-  (`core/format/src/au_view_controller_ios.mm`) — but first read the
+  (`integrations/legacy-platform-hosts/ios/src/au_view_controller_ios.mm`) — but first read the
   `ios` and `view-bridge` skills; that file is **also** mapped to
   them.
 - An AUv3 host reports a behaviour issue — sidechain pull missing,
@@ -45,7 +45,7 @@ not edit `au_v2_adapter.cpp` as part of AU v3 work.**
 | Core adapter (Obj-C++) | `core/format/src/au_adapter.mm` |
 | Forward declaration used by entry / view | `core/format/src/au_audio_unit.h` |
 | Component entry factory | `core/format/src/au_entry.mm` |
-| iOS AUv3 extension view controller | `core/format/src/au_view_controller_ios.mm` (also mapped to `ios` + `view-bridge` skills) |
+| iOS AUv3 extension view controller | `integrations/legacy-platform-hosts/ios/src/au_view_controller_ios.mm` (also mapped to `ios` + `view-bridge` skills) |
 | Contract-editor view (both controllers) | `core/format/src/au_v3_contract_view.{h,mm}` |
 | iOS AU audio session helper | `core/format/src/ios_audio_session.cpp`, `core/format/include/pulp/format/ios_audio_session.{h,hpp}` |
 | Info.plist template (AU component bundle) | `tools/cmake/PulpInfoPlist.au.in` |

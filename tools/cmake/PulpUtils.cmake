@@ -143,6 +143,15 @@ else()
     set(_PULP_FORMAT_SOURCE_DIR "")
 endif()
 
+# The iOS AUv3 view controller lives with the iOS UI host in a source tree and
+# beside the other format sources in an installed SDK.
+if(EXISTS "${CMAKE_CURRENT_LIST_DIR}/../../integrations/legacy-platform-hosts/ios/src/au_view_controller_ios.mm")
+    set(_PULP_IOS_VIEW_CONTROLLER_SOURCE
+        "${CMAKE_CURRENT_LIST_DIR}/../../integrations/legacy-platform-hosts/ios/src/au_view_controller_ios.mm")
+else()
+    set(_PULP_IOS_VIEW_CONTROLLER_SOURCE "${_PULP_FORMAT_SOURCE_DIR}/au_view_controller_ios.mm")
+endif()
+
 # Directory holding the macOS view/window/accessibility Objective-C cluster
 # (window_host_mac*.mm, plugin_view_host_mac*.mm, drag_drop_mac.mm,
 # accessibility_mac.mm, text_accessibility_macos.mm). Probed the same way as

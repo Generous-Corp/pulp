@@ -9,9 +9,9 @@
 // shared legacy capture state. Demo paint/touch state stays private to
 // gpu_surface_android.cpp; SurfaceRuntime owns native GPU lifecycle state.
 //
-// PRIVATE: lives under core/render/platform/android/, not the public
+// PRIVATE: lives under android/src/ with the app shell, not the public
 // include tree. Not part of the installed SDK surface — do not reference
-// from headers outside core/render/platform/android/.
+// from headers outside android/src/.
 
 #pragma once
 

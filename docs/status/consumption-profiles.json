@@ -1531,14 +1531,7 @@
       "pulp/view/param_subscription.hpp",
       "pulp/view/parameter_binding.hpp",
       "pulp/view/pending_damage.hpp",
-      "pulp/view/platform/atspi_geometry.hpp",
-      "pulp/view/platform/atspi_mapping.hpp",
       "pulp/view/platform/ns_role_mapping.hpp",
-      "pulp/view/platform/uia_mapping.hpp",
-      "pulp/view/platform/win_plugin_drop_target.hpp",
-      "pulp/view/platform/win_plugin_input_router.hpp",
-      "pulp/view/platform/win_pointer_input.hpp",
-      "pulp/view/platform/win_surface_lifecycle.hpp",
       "pulp/view/plugin_frame_renderer.hpp",
       "pulp/view/plugin_key_routing.hpp",
       "pulp/view/plugin_view_host.hpp",
@@ -1615,7 +1608,6 @@
       "pulp/view/w3c_tokens.hpp",
       "pulp/view/waveform_editor.hpp",
       "pulp/view/waveform_editor_primitives.hpp",
-      "pulp/view/web/web_event_translate.hpp",
       "pulp/view/web_view.hpp",
       "pulp/view/widget_bridge.hpp",
       "pulp/view/widget_gallery.hpp",
@@ -1715,6 +1707,20 @@
       "pulp/inspect/trace_inspector.hpp",
       "pulp/inspect/tweak_store.hpp",
       "pulp/inspect/value_channel_telemetry_broker.hpp"
+    ],
+    "integrations/legacy-platform-hosts/linux/include": [
+      "pulp/view/platform/atspi_geometry.hpp",
+      "pulp/view/platform/atspi_mapping.hpp"
+    ],
+    "integrations/legacy-platform-hosts/web/include": [
+      "pulp/view/web/web_event_translate.hpp"
+    ],
+    "integrations/legacy-platform-hosts/win/include": [
+      "pulp/view/platform/uia_mapping.hpp",
+      "pulp/view/platform/win_plugin_drop_target.hpp",
+      "pulp/view/platform/win_plugin_input_router.hpp",
+      "pulp/view/platform/win_pointer_input.hpp",
+      "pulp/view/platform/win_surface_lifecycle.hpp"
     ],
     "integrations/pulp-native/include": [
       "pulp/native/frame_pump.hpp",
@@ -8577,7 +8583,10 @@
           "public_headers": {
             "roots": [
               "core/view/audio/include",
-              "core/view/include"
+              "core/view/include",
+              "integrations/legacy-platform-hosts/linux/include",
+              "integrations/legacy-platform-hosts/web/include",
+              "integrations/legacy-platform-hosts/win/include"
             ],
             "generated_include_roots": 0
           },
@@ -8846,7 +8855,10 @@
           },
           "public_headers": {
             "roots": [
-              "core/view/include"
+              "core/view/include",
+              "integrations/legacy-platform-hosts/linux/include",
+              "integrations/legacy-platform-hosts/web/include",
+              "integrations/legacy-platform-hosts/win/include"
             ],
             "generated_include_roots": 1
           },
@@ -9163,7 +9175,10 @@
           "public_headers": {
             "roots": [
               "core/view/audio/include",
-              "core/view/include"
+              "core/view/include",
+              "integrations/legacy-platform-hosts/linux/include",
+              "integrations/legacy-platform-hosts/web/include",
+              "integrations/legacy-platform-hosts/win/include"
             ],
             "generated_include_roots": 0
           },
@@ -9293,7 +9308,10 @@
           },
           "public_headers": {
             "roots": [
-              "core/view/include"
+              "core/view/include",
+              "integrations/legacy-platform-hosts/linux/include",
+              "integrations/legacy-platform-hosts/web/include",
+              "integrations/legacy-platform-hosts/win/include"
             ],
             "generated_include_roots": 0
           },
@@ -9421,7 +9439,10 @@
           },
           "public_headers": {
             "roots": [
-              "core/view/include"
+              "core/view/include",
+              "integrations/legacy-platform-hosts/linux/include",
+              "integrations/legacy-platform-hosts/web/include",
+              "integrations/legacy-platform-hosts/win/include"
             ],
             "generated_include_roots": 1
           },
@@ -9553,7 +9574,10 @@
           },
           "public_headers": {
             "roots": [
-              "core/view/include"
+              "core/view/include",
+              "integrations/legacy-platform-hosts/linux/include",
+              "integrations/legacy-platform-hosts/web/include",
+              "integrations/legacy-platform-hosts/win/include"
             ],
             "generated_include_roots": 1
           },

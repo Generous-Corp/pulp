@@ -148,7 +148,7 @@ constexpr const char* role_to_atspi_role_name(View::AccessRole role) {
 // ATSPI_STATE_SINGLE_LINE and ATSPI_STATE_TRANSIENT: every Pulp accessible
 // reported itself as neither showing nor visible (and as a single-line,
 // transient object), which is exactly the state set Orca skips over. Locked by
-// the ordinal table in test/test_atspi_mapping.cpp.
+// the ordinal table in tests/test_atspi_mapping.cpp.
 inline constexpr uint32_t kStateChecked       = 4;    // ATSPI_STATE_CHECKED
 inline constexpr uint32_t kStateEditable      = 7;    // ATSPI_STATE_EDITABLE
 inline constexpr uint32_t kStateEnabled       = 8;    // ATSPI_STATE_ENABLED

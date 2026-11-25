@@ -1653,7 +1653,7 @@ TEST_CASE("every hosted format adapter builds its editor from hosted_editor()",
         {"core/format/include/pulp/format/clap_entry.hpp", "CLAP gui_create"},
         {"core/format/src/vst3_plug_view.cpp", "VST3 IPlugView"},
         {"core/format/src/au_view_controller_mac.mm", "AU v3 macOS"},
-        {"core/format/src/au_view_controller_ios.mm", "AU v3 iOS"},
+        {"integrations/legacy-platform-hosts/ios/src/au_view_controller_ios.mm", "AU v3 iOS"},
         {"core/format/src/au_v2_cocoa_view.mm", "AU v2 Cocoa"},
         {"core/format/src/aax_effect_gui.cpp", "AAX effect GUI"},
     };

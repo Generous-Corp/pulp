@@ -1,6 +1,6 @@
 // Tests for the Pulp → Linux AT-SPI2 mapping table.
 // Pure-constant checks; the actual AT-SPI provider lives in
-// core/view/platform/linux/accessibility_linux.cpp and is validated per platform
+// linux/src/accessibility_linux.cpp and is validated per platform
 // (real AT stack) by VM integration tests.
 //
 // These lock the AtspiRole NUMBERS so a future edit can't silently regress

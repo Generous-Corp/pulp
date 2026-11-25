@@ -1,11 +1,11 @@
 // motion_bridge.h — C ABI for the Android JNI motion bridge.
 //
 // Declares the `pulp_motion_*` C entry points implemented in
-// `core/view/platform/android/jni_motion.cpp`. The Kotlin facade in
+// `jni_motion.cpp` (the legacy Android host). The Kotlin facade in
 // `com.pulp.motion.PulpMotionNative` reaches these via `external fun`
 // (through the matching `Java_com_pulp_motion_PulpMotionNative_*` JNI
 // shims). The C symbols are also reachable directly from C/C++ tests
-// (`test/test_motion_android_bridge.cpp`) so we can exercise the
+// (`test_motion_android_bridge.cpp`, with the legacy host tests) so we can exercise the
 // bridge logic without an NDK build.
 //
 // The signatures intentionally mirror `apple/Sources/PulpSwift/PulpBridge.h`

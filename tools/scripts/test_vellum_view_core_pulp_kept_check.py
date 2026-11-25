@@ -27,9 +27,9 @@ PLUGIN_VIEW_HOST_FILES = (
     "core/view/platform/mac/plugin_view_host_mac_text_input.mm",
     "core/view/platform/mac/plugin_view_host_mac_view.h",
     "core/view/platform/mac/plugin_view_host_mac_script_keys.hpp",
-    "core/view/platform/ios/plugin_view_host_ios.mm",
-    "core/view/platform/win/plugin_view_host_win.cpp",
-    "core/view/platform/linux/plugin_view_host_linux.cpp",
+    "integrations/legacy-platform-hosts/ios/src/plugin_view_host_ios.mm",
+    "integrations/legacy-platform-hosts/win/src/plugin_view_host_win.cpp",
+    "integrations/legacy-platform-hosts/linux/src/plugin_view_host_linux.cpp",
 )
 DEFERRED = {
     "path": "core/view/src/example_deferred.cpp",

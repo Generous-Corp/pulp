@@ -549,6 +549,10 @@ endif()
 # enabled. The transport itself is GPU-agnostic and builds regardless.
 add_subdirectory(core/gpu_audio)
 add_subdirectory(core/view)
+# The Windows, Linux and iOS UI hosts, kept as porting reference until each
+# platform's Vellum host lands. The package adds their sources to the
+# core/view targets, so core/view names none of them.
+add_subdirectory(integrations/legacy-platform-hosts)
 # The lite editor stack's replacement objects (see PulpLiteEditorObjects.cmake).
 # Apple only: the lite TextShaper measures through CoreText.
 if(APPLE AND NOT IOS AND PULP_HAS_SKIA AND TARGET pulp-canvas AND TARGET pulp-view-core)
@@ -1347,7 +1351,7 @@ endif()
 if(ANDROID)
     add_library(pulp-jni SHARED
         core/platform/src/android/jni_bridge.cpp
-        core/view/platform/android/jni_motion.cpp
+        integrations/legacy-platform-hosts/android/src/jni_motion.cpp
         core/audio/platform/android/audio_jni.cpp
     )
     set_target_properties(pulp-jni PROPERTIES OUTPUT_NAME "pulp")
@@ -1378,9 +1382,9 @@ if(ANDROID)
     # the closure with the JNI bridge rather than inside pulp-render.
     if(TARGET pulp-render AND PULP_ENABLE_GPU)
         target_sources(pulp-jni PRIVATE
-            core/render/platform/android/gpu_surface_android.cpp
-            core/render/platform/android/gpu_surface_android_jni.cpp
-            core/render/platform/android/surface_runtime_android.cpp
+            integrations/legacy-platform-hosts/android/src/gpu_surface_android.cpp
+            integrations/legacy-platform-hosts/android/src/gpu_surface_android_jni.cpp
+            integrations/legacy-platform-hosts/android/src/surface_runtime_android.cpp
         )
         target_link_libraries(pulp-jni PRIVATE pulp::render)
     endif()
@@ -1397,7 +1401,7 @@ if(ANDROID)
         -Wl,--no-whole-archive)
 
     # TalkBack accessibility JNI entry points live in pulp-view
-    # (core/view/platform/android/accessibility_android.cpp). pulp-view is
+    # (integrations/legacy-platform-hosts/android/src/accessibility_android.cpp). pulp-view is
     # not whole-archived — doing so pulls in SDL3's JNI_OnLoad and
     # duplicates ours. Instead, force-reference
     # each Java_com_pulp_accessibility_* symbol so the linker keeps the

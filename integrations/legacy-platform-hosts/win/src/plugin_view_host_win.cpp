@@ -19,7 +19,7 @@
 // also render through WM_PAINT. Unattached GPU repaint and explicit capture
 // remain synchronous.
 
-#include "../../src/pending_resize.hpp"
+#include "../../../../core/view/src/pending_resize.hpp"
 #include <pulp/view/frame_clock.hpp>
 #include <pulp/view/host_frame_pump.hpp>
 #include <pulp/view/platform/win_plugin_input_router.hpp>

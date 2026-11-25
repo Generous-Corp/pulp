@@ -1345,7 +1345,7 @@ Skills in `.agents/skills/` are living documents. When you discover a gotcha, fi
 2. **What to add**: Gotchas, conventions, corrected assumptions, new build/deploy recipes. Not ephemeral task state.
 3. **What NOT to add**: Things derivable from reading the code or git log. Skills capture *why* and *watch out for*, not *what exists*.
 4. **Mapping**: Match the change path to the skill:
-   - `core/render/platform/android/`, `android/`, `tools/cmake/PulpAndroid.cmake` → `android`
+   - `integrations/legacy-platform-hosts/android/src/`, `android/`, `tools/cmake/PulpAndroid.cmake` → `android`
    - `tools/cli/`, `core/format/src/standalone.cpp` → `cli-maintenance`
    - `core/format/src/aax*`, AAX SDK → `aax`
    - `ci/`, `tools/local-ci/`, `.github/workflows/` → `ci`

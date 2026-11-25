@@ -391,7 +391,7 @@ function(_pulp_add_auv3_ios target name bundle_id version manufacturer manufactu
         ${PULP_${target}_CORE_OBJECTS}
         ${_PULP_FORMAT_SOURCE_DIR}/au_adapter.mm
         ${_PULP_FORMAT_SOURCE_DIR}/au_entry.mm
-        ${_PULP_FORMAT_SOURCE_DIR}/au_view_controller_ios.mm
+        ${_PULP_IOS_VIEW_CONTROLLER_SOURCE}
         ${_PULP_FORMAT_SOURCE_DIR}/au_v3_contract_view.mm
         ${auv3_entry}
     )

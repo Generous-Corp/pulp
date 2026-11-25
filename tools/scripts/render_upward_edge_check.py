@@ -1,12 +1,11 @@
 #!/usr/bin/env python3
 """Check that pulp-render compiles nothing that reaches above the render layer.
 
-core/render holds two kinds of source. Most of it is the renderer: it includes
-only render, canvas, runtime and scene headers. The Android app shell
-(gpu_surface_android.cpp and its JNI bridge) lives under
-core/render/platform/android but drives the view hierarchy, the widget bridge,
-the state store and the demo synth, so it is compiled into the pulp-jni shared
-library instead. A render-layer extraction (a target closure manifest) must
+core/render is the renderer: it includes only render, canvas, runtime and scene
+headers. The Android app shell (gpu_surface_android.cpp and its JNI bridge)
+lives with the legacy Android host in integrations/legacy-platform-hosts/android
+and drives the view hierarchy, the widget bridge, the state store and the demo
+synth, so it is compiled into the pulp-jni shared library instead. A render-layer extraction (a target closure manifest) must
 never pick up that shell.
 
 Android sources only reach a target in an Android configure, so a desktop
@@ -33,16 +32,16 @@ from pathlib import Path
 
 RENDER_DIR = "core/render"
 
-# Sources under core/render that belong to the Android app shell, not to the
+# Sources that belong to the Android app shell, not to the
 # renderer. They may include anything; they must never be part of pulp-render.
 SHELL_SOURCES = (
-    "core/render/platform/android/gpu_surface_android.cpp",
-    "core/render/platform/android/gpu_surface_android_jni.cpp",
+    "integrations/legacy-platform-hosts/android/src/gpu_surface_android.cpp",
+    "integrations/legacy-platform-hosts/android/src/gpu_surface_android_jni.cpp",
 )
 # Shell-private headers: excluded from the include rule, never compiled alone.
 SHELL_HEADERS = (
-    "core/render/platform/android/gpu_surface_android_internal.hpp",
-    "core/render/platform/android/synth_ui.js.h",
+    "integrations/legacy-platform-hosts/android/src/gpu_surface_android_internal.hpp",
+    "integrations/legacy-platform-hosts/android/src/synth_ui.js.h",
 )
 
 ALLOWED_PULP_ROOTS = frozenset({"render", "canvas", "runtime", "scene"})

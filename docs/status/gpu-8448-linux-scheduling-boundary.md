@@ -8,7 +8,7 @@ Status: design checkpoint; no platform source edits in this slice.
 - Base: `365c0f449bdb7fb529af1791c875c09061115d15` (`origin/main` at audit time)
 - Worktree: `feature/8448-linux-scheduling-20260923`
 - Separate from #8457 capture, #8458/#8628 observability, and closed #8449 Windows scheduling.
-- Candidate implementation surface: `core/view/platform/linux/plugin_view_host_linux.cpp`.
+- Candidate implementation surface: `integrations/legacy-platform-hosts/linux/src/plugin_view_host_linux.cpp`.
 - No `core/render` or Vellum-transferred capture changes are proposed.
 
 ## Verified current behavior

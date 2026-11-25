@@ -1189,7 +1189,7 @@ install(FILES
     "${CMAKE_CURRENT_SOURCE_DIR}/core/format/src/au_v2_contract_view.mm"
     "${CMAKE_CURRENT_SOURCE_DIR}/core/format/src/au_v3_contract_view.h"
     "${CMAKE_CURRENT_SOURCE_DIR}/core/format/src/au_v3_contract_view.mm"
-    "${CMAKE_CURRENT_SOURCE_DIR}/core/format/src/au_view_controller_ios.mm"
+    "${CMAKE_CURRENT_SOURCE_DIR}/integrations/legacy-platform-hosts/ios/src/au_view_controller_ios.mm"
     "${CMAKE_CURRENT_SOURCE_DIR}/core/format/src/au_view_controller_mac.mm"
     "${CMAKE_CURRENT_SOURCE_DIR}/core/format/src/vst3_plug_view.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/core/format/src/vst3_no_editor.cpp"

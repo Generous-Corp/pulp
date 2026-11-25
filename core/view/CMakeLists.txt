@@ -133,23 +133,17 @@ endif()
 # branch on the build target.
 #
 # macOS: NSAccessibility-backed (.mm, "macos-ax").
-# Windows: UIA IRawElementProviderSimple ("windows-uia").
-# Linux: AccessKit stub ("linux-accesskit-stub").
+# Windows ("windows-uia") and Linux ("linux-accesskit-stub") get theirs from
+# the legacy platform hosts package, which adds the Windows, Linux and iOS
+# host sources to these targets.
 # Other platforms: default C++ "none" backend.
 if(APPLE)
     set(PULP_TEXT_ACCESSIBILITY_SOURCE platform/mac/text_accessibility_macos.mm)
-elseif(WIN32)
-    set(PULP_TEXT_ACCESSIBILITY_SOURCE platform/win/text_accessibility_windows.cpp)
-elseif(UNIX AND NOT APPLE AND NOT ANDROID)
-    set(PULP_TEXT_ACCESSIBILITY_SOURCE platform/linux/text_accessibility_linux.cpp)
+elseif(WIN32 OR (UNIX AND NOT APPLE AND NOT ANDROID))
+    set(PULP_TEXT_ACCESSIBILITY_SOURCE "")
 else()
     set(PULP_TEXT_ACCESSIBILITY_SOURCE src/text_accessibility.cpp)
 endif()
-
-# The pure UIA tree topology builder is compiled everywhere for normal
-# macOS/Linux unit-test coverage. Provider ownership remains Windows-private.
-target_sources(pulp-view-core PRIVATE
-    platform/win/accessibility_win_fragment_topology.cpp)
 
 # Source ownership is declarative and intentionally separate from platform/link
 # policy below. Keep this include at directory scope so engine and accessibility
@@ -167,8 +161,9 @@ include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/PulpViewSources.cmake")
 # implementing the AT-SPI2 *wire protocol* directly over D-Bus
 # (pulp::platform::DBus, libdbus-1 dlopen'd, honest-fail). There is NO
 # build-time or link-time dependency on libatk / libatspi / atk-bridge-2.0 —
-# the protocol numbers live in core/view/include/pulp/view/platform/atspi_mapping.hpp
-# and accessibility_linux.cpp exports the objects. Roles/states are unit-tested
+# the protocol numbers live in pulp/view/platform/atspi_mapping.hpp and
+# accessibility_linux.cpp exports the objects (both in the legacy platform
+# hosts package's linux/ tree). Roles/states are unit-tested
 # offline; the live AT stack is exercised in the Linux VM lane. This also keeps
 # the build MIT-clean (the ATK runtime is LGPL-adjacent). PkgConfig is still
 # discovered below for X11 / WebView.
@@ -205,11 +200,8 @@ if(PULP_BUILD_WEBVIEW)
     add_library(pulp-view-webview-backend STATIC src/web_view_backend_provider.cpp)
     add_library(pulp::view-webview-backend ALIAS pulp-view-webview-backend)
     target_link_libraries(pulp-view-webview-backend PUBLIC pulp::view-platform)
-    if(WIN32)
-        target_sources(pulp-view-webview-backend PRIVATE platform/win/webview2_backend.cpp)
-    elseif(UNIX AND NOT APPLE AND NOT ANDROID)
-        target_sources(pulp-view-webview-backend PRIVATE platform/linux/webkitgtk_backend.cpp)
-    endif()
+    # The Windows and Linux providers are added by
+    # the legacy platform hosts package.
     # In-tree builds link the lower-case alias; the installed export only defines `Pulp::`.
     target_link_libraries(pulp-view-webview PUBLIC "$<BUILD_INTERFACE:$<LINK_LIBRARY:WHOLE_ARCHIVE,pulp::view-webview-backend>>" "$<INSTALL_INTERFACE:$<LINK_LIBRARY:WHOLE_ARCHIVE,Pulp::view-webview-backend>>")
     target_include_directories(pulp-view-webview
@@ -343,9 +335,9 @@ endif()
 # Platform-specific window host and frameworks
 if(APPLE)
     if(PULP_IOS)
+        # The UIKit window host and accessibility sources are added by
+        # the legacy platform hosts package.
         target_sources(pulp-view-core PRIVATE
-            platform/ios/window_host_ios.mm
-            platform/ios/accessibility_ios.mm
             # Bridge stubs compile on iOS too. They provide
             # set_screenshot_provider / has_* registration APIs
             # unconditionally; create/render impls stay gated by
@@ -376,7 +368,6 @@ if(APPLE)
         # in pulp-view-tooling beside the factory registration it defines
         # PluginViewHost::create() against.
         target_sources(pulp-view-tooling PRIVATE
-            platform/ios/plugin_view_host_ios.mm
             src/plugin_view_host_stub.cpp
         )
         target_link_libraries(pulp-view-tooling PRIVATE
@@ -462,16 +453,9 @@ elseif(WIN32)
     target_sources(pulp-view-core PRIVATE
         src/screenshot_stub.cpp
         src/window_host_stub.cpp
-        platform/win/accessibility_win.cpp
-        platform/win/accessibility_win_events.cpp
-        platform/win/accessibility_win_fragment_lifecycle.cpp
-        platform/win/appearance_win.cpp
-        platform/win/motion_preferences_win.cpp
-        # Standalone outbound file-drag backend (free begin_file_drag via OLE).
-        # Unconditional — DoDragDrop has no Skia/GPU dependency, so a non-GPU
-        # standalone build still drags files out. ole32 is linked below.
-        platform/win/drag_drop_win.cpp
     )
+    # The UIA accessibility, appearance, motion-preference and outbound
+    # file-drag sources are added by the legacy platform hosts package.
     # Win/Linux parity. When Skia is available, add the built-in Skia raster
     # screenshot backend to view-core and the native HWND PluginViewHost to
     # pulp-view-tooling. plugin_view_host_stub.cpp stays (it owns the
@@ -482,7 +466,7 @@ elseif(WIN32)
     # (which is now compiled only when !PULP_HAS_SKIA).
     if(PULP_HAS_SKIA)
         target_sources(pulp-view-core PRIVATE src/screenshot_skia.cpp)
-        target_sources(pulp-view-tooling PRIVATE platform/win/plugin_view_host_win.cpp)
+        # The native HWND host source is added by the legacy platform hosts package.
         # OLE drag-drop on the plugin-host child HWND (WinPluginViewHost).
         target_link_libraries(pulp-view-tooling PRIVATE ole32 shell32)
         # The native HWND host supplies register_platform_plugin_view_host();
@@ -512,8 +496,8 @@ elseif(UNIX)
     target_sources(pulp-view-core PRIVATE
         src/screenshot_stub.cpp
         src/window_host_stub.cpp
-        platform/linux/accessibility_linux.cpp
     )
+    # The AT-SPI accessibility source is added by the legacy platform hosts package.
     # Win/Linux parity. Same split as the WIN32 branch: when Skia is available
     # add the built-in Skia raster screenshot backend to view-core and the
     # native X11 PluginViewHost (which registers itself via
@@ -524,16 +508,11 @@ elseif(UNIX)
         target_sources(pulp-view-core PRIVATE src/screenshot_skia.cpp)
         find_package(X11)
         if(X11_FOUND)
-            target_sources(pulp-view-core PRIVATE
-                # Standalone outbound file-drag backend (free begin_file_drag via
-                # XDND source). Gated with PULP_HAS_X11 so the drag_drop.cpp no-op
-                # drops out only when this real backend is compiled.
-                platform/linux/drag_drop_linux.cpp)
+            # The XDND file-drag backend and the X11 PluginViewHost sources are
+            # added by the legacy platform hosts package when PULP_HAS_X11 is set.
             target_link_libraries(pulp-view-core PRIVATE ${X11_LIBRARIES})
             target_include_directories(pulp-view-core PRIVATE ${X11_INCLUDE_DIR})
             target_compile_definitions(pulp-view-core PRIVATE PULP_HAS_X11=1)
-            target_sources(pulp-view-tooling PRIVATE
-                platform/linux/plugin_view_host_linux.cpp)
             target_link_libraries(pulp-view-tooling PRIVATE ${X11_LIBRARIES})
             target_include_directories(pulp-view-tooling PRIVATE ${X11_INCLUDE_DIR})
             # The native X11 host supplies register_platform_plugin_view_host();

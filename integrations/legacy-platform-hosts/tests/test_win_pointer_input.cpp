@@ -1,7 +1,7 @@
 // Windows plug-in editor host: pointer-mapping and surface-lifecycle logic.
 //
 // Covers the decisions factored out of
-// core/view/platform/win/plugin_view_host_win.cpp into
+// win/src/plugin_view_host_win.cpp into
 // pulp/view/platform/win_pointer_input.hpp. These run on EVERY platform on
 // purpose: the required Pulp CI gate is macOS, so a _WIN32-gated test of the
 // Windows host would never actually execute.
