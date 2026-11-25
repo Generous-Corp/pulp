@@ -50,6 +50,18 @@ Apply restarts audio through `StandaloneApp::apply_config()`, which saves the
 selection for the next launch. A failed Apply puts the last working config back so audio keeps running; the window, the SDK's `apply_config()` and a later Apply never report success while audio is stopped. A device or port that has disappeared is not re-applied: each row's value comes from the row's own selection. Device lists come from the audio and MIDI
 systems, so `PULP_AUDIO_DEVICE=null` shows the null device.
 
+The same standalone hosts tool windows that a UI integration supplies, such as
+a musical typing keyboard, through `pulp/format/standalone_panel.hpp`. An
+integration installs a `StandalonePanelFactory` at static initialization with
+`detail::install_standalone_panel_factory`. The standalone builds every
+installed panel before its audio starts, so a factory can decline based on the
+config. It then adds one menu item per panel and toggles the panel on Command
+plus the panel's letter from the editor window, which also works headless. The
+panel gets the editor window so it can open beside it, its MIDI is drained on
+the audio thread after the UI queue, and it is shut down after audio stops. The
+panel owns its window and draws with its own library, so format-core links no
+UI library for it.
+
 An app with its own settings UI replaces the opener:
 
 ```cpp
