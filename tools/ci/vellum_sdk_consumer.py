@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Build Pulp's Vellum SDK consumers against Vellum main's published SDK.
 
-Two subcommands back the `vellum-sdk-consumer` workflow:
+Three subcommands back the `vellum-sdk-consumer` workflow:
 
 resolve
     Find the newest successful "Locked macOS GPU proof" push run on Vellum
@@ -19,6 +19,13 @@ negative-control
     published, where it must succeed, and against a copy of the SDK's mirror
     headers with one header renamed, where it must fail naming that header.
     A failure for any other reason is INCONCLUSIVE, never a pass.
+
+labelled-targets
+    Name every executable the lane must build so `ctest -L pulp-vellum` has
+    something to run: the executables defined under integrations/pulp-vellum*/
+    plus those a labelled ctest entry runs, read from the CMake file API
+    (`--prepare` before configuring). `--verify` runs after the build and fails
+    when any of them, or any labelled test's program, is absent.
 
 Exit codes: 0 success (resolve) or CONFIRMED (negative-control); 1 the lane
 did not detect the planted break (NOT CONFIRMED); 2 inconclusive or an error.
@@ -385,6 +392,133 @@ def negative_control(args: argparse.Namespace) -> int:
     return verdict
 
 
+# --------------------------------------------------------------------------
+# labelled test targets
+#
+# `ctest -L pulp-vellum` runs only what was built, and a Catch2 executable that
+# was never built registers no tests at all (discovery runs after the build),
+# so a missing target hides from ctest while a plain add_test() entry fails
+# with "no such file". The set to build therefore comes from the CMake target
+# graph: every executable defined under integrations/pulp-vellum*/ plus every
+# executable a labelled ctest entry runs.
+
+LABEL_REGEX = "pulp-vellum"
+INTEGRATION_SOURCE_PREFIX = "integrations/pulp-vellum"
+MINIMUM_TARGETS = ("pulp-test-pulp-vellum",)
+
+
+class LabelError(RuntimeError):
+    pass
+
+
+def prepare_codemodel_query(build_dir: Path) -> Path:
+    """Ask CMake to write its codemodel on the next configure."""
+    query = build_dir / ".cmake" / "api" / "v1" / "query" / "codemodel-v2"
+    query.parent.mkdir(parents=True, exist_ok=True)
+    query.touch()
+    return query
+
+
+def codemodel_executables(build_dir: Path) -> dict[str, dict]:
+    """Executable targets from the CMake file API reply: name -> {source, artifact}."""
+    reply = build_dir / ".cmake" / "api" / "v1" / "reply"
+    indexes = sorted(reply.glob("index-*.json"))
+    if not indexes:
+        raise LabelError(f"no CMake file API reply in {reply}; run `--prepare` before configuring")
+    index = json.loads(indexes[-1].read_text(encoding="utf-8"))
+    model_files = [o["jsonFile"] for o in index.get("objects", []) if o.get("kind") == "codemodel"]
+    if not model_files:
+        raise LabelError("the CMake file API reply has no codemodel object")
+    model = json.loads((reply / model_files[0]).read_text(encoding="utf-8"))
+    found: dict[str, dict] = {}
+    for configuration in model.get("configurations", []):
+        for entry in configuration.get("targets", []):
+            target = json.loads((reply / entry["jsonFile"]).read_text(encoding="utf-8"))
+            if target.get("type") != "EXECUTABLE":
+                continue
+            artifacts = target.get("artifacts") or []
+            found[target["name"]] = {
+                "source": (target.get("paths") or {}).get("source", ""),
+                "artifact": artifacts[0]["path"] if artifacts else None,
+            }
+    return found
+
+
+def _test_program(command: list[str]) -> str | None:
+    """The program a ctest entry runs, looking through a `cmake -E env` wrapper."""
+    if not command:
+        return None
+    if Path(command[0]).name in ("cmake", "cmake.exe") and command[1:3] == ["-E", "env"]:
+        for token in command[3:]:
+            if "=" not in token and not token.startswith("-"):
+                return token
+        return None
+    return command[0]
+
+
+def labelled_test_programs(build_dir: Path, label: str = LABEL_REGEX) -> list[tuple[str, Path]]:
+    """(test name, executable) for each labelled ctest entry that runs a file under build_dir."""
+    out = subprocess.run(["ctest", "--test-dir", str(build_dir), "-L", label, "--show-only=json-v1"],
+                         capture_output=True, text=True, check=False)
+    if out.returncode != 0:
+        raise LabelError(f"ctest could not list '{label}' tests: {out.stderr.strip() or out.stdout.strip()}")
+    root = build_dir.resolve()
+    programs = []
+    for test in json.loads(out.stdout).get("tests", []):
+        program = _test_program(test.get("command") or [])
+        if program and Path(program).is_absolute() and root in Path(program).resolve().parents:
+            programs.append((test["name"], Path(program)))
+    return programs
+
+
+def vellum_test_targets(executables: dict[str, dict], programs: list[tuple[str, Path]]) -> list[str]:
+    """Every executable the lane must build, by target name."""
+    names = {name for name, info in executables.items()
+             if info["source"].startswith(INTEGRATION_SOURCE_PREFIX)}
+    names.update(path.name for _, path in programs if path.name in executables)
+    return sorted(names)
+
+
+def missing_programs(build_dir: Path, targets: list[str], executables: dict[str, dict],
+                     programs: list[tuple[str, Path]]) -> list[str]:
+    """Selected targets and labelled-test programs that were not built."""
+    problems = []
+    for name in targets:
+        artifact = executables[name]["artifact"]
+        if not artifact or not (build_dir / artifact).is_file():
+            problems.append(f"target {name}: {artifact or 'no artifact'} was not built")
+    for test, program in programs:
+        if not program.is_file():
+            problems.append(f"test {test}: {program} does not exist")
+    return problems
+
+
+def labelled_targets(args: argparse.Namespace) -> int:
+    build_dir = Path(args.build_dir)
+    try:
+        if args.prepare:
+            prepare_codemodel_query(build_dir)
+            return 0
+        executables = codemodel_executables(build_dir)
+        programs = labelled_test_programs(build_dir)
+        targets = vellum_test_targets(executables, programs)
+        absent = [t for t in MINIMUM_TARGETS if t not in targets]
+        if absent:
+            raise LabelError(f"the selection is blind: {', '.join(absent)} is missing from {targets}")
+        if args.verify:
+            problems = missing_programs(build_dir, targets, executables, programs)
+            if problems:
+                raise LabelError("labelled tests whose program was not built:\n  " + "\n  ".join(problems))
+            print(f"vellum-sdk-consumer: all {len(targets)} Vellum test executables and "
+                  f"{len(programs)} labelled test programs are built")
+        else:
+            print("\n".join(targets))
+    except LabelError as err:
+        print(f"vellum-sdk-consumer: {err}", file=sys.stderr)
+        return 2
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     sub = parser.add_subparsers(dest="command", required=True)
@@ -402,8 +536,20 @@ def main(argv: list[str] | None = None) -> int:
     n.add_argument("--target", default="pulp-slice-vellum-ui")
     n.add_argument("--source", default="test/editor_host_slice/vellum_ui/knob_panel.cpp")
     n.add_argument("--header", default="vellum/canvas/canvas.hpp")
+    t = sub.add_parser("labelled-targets",
+                       help="list (or verify built) every Vellum test executable, from the CMake target graph")
+    t.add_argument("--build-dir", required=True)
+    mode = t.add_mutually_exclusive_group()
+    mode.add_argument("--prepare", action="store_true",
+                      help="before configuring, request the CMake codemodel this command reads")
+    mode.add_argument("--verify", action="store_true",
+                      help="after building, fail if any selected target or labelled test program is absent")
     args = parser.parse_args(argv)
-    return resolve(args) if args.command == "resolve" else negative_control(args)
+    if args.command == "resolve":
+        return resolve(args)
+    if args.command == "labelled-targets":
+        return labelled_targets(args)
+    return negative_control(args)
 
 
 if __name__ == "__main__":

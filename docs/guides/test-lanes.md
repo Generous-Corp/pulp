@@ -284,6 +284,16 @@ stopped compiling and no Pulp check noticed.
   requests that touch the package, its test, or the two CMake files that own its
   option and test registration (`integrations/CMakeLists.txt` and the root
   `CMakeLists.txt`) run the lane.
+- **Every labelled test is built.** The bridge configure does not list targets
+  by hand. `tools/ci/vellum_sdk_consumer.py labelled-targets` reads the CMake
+  file API (requested with `--prepare` before the configure) and names every
+  executable defined under `integrations/pulp-vellum*/` plus every program a
+  `pulp-vellum*` ctest entry runs; the lane builds exactly that set. A Catch2
+  executable that is never built registers no ctest entry at all, so the target
+  graph, not `ctest -N`, is the source of truth. After the build, `--verify`
+  fails when a selected target or a labelled test's program is absent, and the
+  `ctest` run uses `--no-tests=error`. A new test under those directories needs
+  no workflow edit.
 - **Editor package and audio display.** The same configure also turns on
   `PULP_ENABLE_PULP_VELLUM_AUDIO` and builds `pulp-test-pulp-vellum-editor` and
   `pulp-test-pulp-vellum-audio`, whose ctest labels (`pulp-vellum-editor`,

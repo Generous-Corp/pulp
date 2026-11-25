@@ -356,5 +356,75 @@ class BridgeWiringTests(unittest.TestCase):
         self.assertIn("${PULP_ROOT_DIR}/test/test_pulp_vellum_param_bridge.cpp", tests)
 
 
+class LabelledTargetTests(unittest.TestCase):
+    EXECUTABLES = {
+        "pulp-test-pulp-vellum": {"source": "integrations/pulp-vellum/tests", "artifact": "a/pulp-test-pulp-vellum"},
+        "pulp-test-vellum-scripted-wiring": {"source": "integrations/pulp-vellum/tests",
+                                             "artifact": "a/pulp-test-vellum-scripted-wiring"},
+        "pulp-test-elsewhere": {"source": "test", "artifact": "t/pulp-test-elsewhere"},
+        "pulp-test-unrelated": {"source": "test", "artifact": "t/pulp-test-unrelated"},
+    }
+
+    def test_integration_executables_are_selected_without_a_ctest_entry(self):
+        # A Catch2 executable that was never built registers no ctest entry, so
+        # the directory rule alone must select it.
+        self.assertEqual(vsc.vellum_test_targets(self.EXECUTABLES, []),
+                         ["pulp-test-pulp-vellum", "pulp-test-vellum-scripted-wiring"])
+
+    def test_a_labelled_test_program_outside_the_integration_dirs_is_selected(self):
+        programs = [("some-test", Path("/b/t/pulp-test-elsewhere")), ("not-an-exe", Path("/b/t/script.cmake"))]
+        self.assertEqual(vsc.vellum_test_targets(self.EXECUTABLES, programs),
+                         ["pulp-test-elsewhere", "pulp-test-pulp-vellum", "pulp-test-vellum-scripted-wiring"])
+
+    def test_cmake_env_wrapper_is_looked_through(self):
+        self.assertEqual(vsc._test_program(["/usr/bin/cmake", "-E", "env", "CI=0", "DISPLAY=:0", "/b/exe"]), "/b/exe")
+        self.assertEqual(vsc._test_program(["/b/exe", "[tag]"]), "/b/exe")
+        self.assertIsNone(vsc._test_program([]))
+
+    def test_unbuilt_target_and_program_fail_verification(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            build = Path(tmp)
+            (build / "a").mkdir()
+            (build / "a/pulp-test-pulp-vellum").write_text("")
+            targets = ["pulp-test-pulp-vellum", "pulp-test-vellum-scripted-wiring"]
+            programs = [("wiring", build / "a/pulp-test-vellum-scripted-wiring")]
+            problems = vsc.missing_programs(build, targets, self.EXECUTABLES, programs)
+            self.assertEqual(len(problems), 2)
+            self.assertIn("target pulp-test-vellum-scripted-wiring", problems[0])
+            self.assertIn("test wiring", problems[1])
+            # Control: once both exist the same check is clean.
+            (build / "a/pulp-test-vellum-scripted-wiring").write_text("")
+            self.assertEqual(vsc.missing_programs(build, targets, self.EXECUTABLES, programs), [])
+
+    def test_missing_reply_is_an_error_not_an_empty_selection(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            with self.assertRaises(vsc.LabelError):
+                vsc.codemodel_executables(Path(tmp))
+
+    def test_codemodel_reply_is_read_and_non_executables_skipped(self):
+        import json
+        with tempfile.TemporaryDirectory() as tmp:
+            build = Path(tmp)
+            reply = build / ".cmake/api/v1/reply"
+            reply.mkdir(parents=True)
+            (reply / "index-1.json").write_text(json.dumps(
+                {"objects": [{"kind": "codemodel", "jsonFile": "codemodel.json"}]}))
+            (reply / "codemodel.json").write_text(json.dumps({"configurations": [{"targets": [
+                {"name": "exe", "jsonFile": "exe.json"}, {"name": "lib", "jsonFile": "lib.json"}]}]}))
+            (reply / "exe.json").write_text(json.dumps({"name": "exe", "type": "EXECUTABLE",
+                "paths": {"source": "integrations/pulp-vellum/tests"}, "artifacts": [{"path": "x/exe"}]}))
+            (reply / "lib.json").write_text(json.dumps({"name": "lib", "type": "STATIC_LIBRARY",
+                "paths": {"source": "integrations/pulp-vellum"}, "artifacts": [{"path": "x/lib.a"}]}))
+            self.assertEqual(vsc.codemodel_executables(build),
+                             {"exe": {"source": "integrations/pulp-vellum/tests", "artifact": "x/exe"}})
+
+    def test_workflow_builds_the_selection_and_verifies_it(self):
+        text = (Path(__file__).resolve().parents[2] / ".github/workflows/vellum-sdk-consumer.yml").read_text(
+            encoding="utf-8")
+        for needed in ("labelled-targets", "--prepare", "--verify", "--no-tests=error"):
+            self.assertIn(needed, text)
+        self.assertNotIn("--target pulp-test-pulp-vellum ", text)
+
+
 if __name__ == "__main__":
     unittest.main()
