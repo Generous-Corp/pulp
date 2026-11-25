@@ -53,8 +53,7 @@ NSSize pulp_auv3_initial_editor_size(AUAudioUnit* audioUnit) {
         if (auto* processor = [(PulpAudioUnit*)audioUnit pulpProcessor]) {
             const auto [width, height] = processor->editor_size();
             if (width > 0 && height > 0) {
-                return NSMakeSize(static_cast<CGFloat>(width),
-                                  static_cast<CGFloat>(height));
+                return NSMakeSize(static_cast<CGFloat>(width), static_cast<CGFloat>(height));
             }
         }
     }

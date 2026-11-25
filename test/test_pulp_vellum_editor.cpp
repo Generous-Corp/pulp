@@ -183,9 +183,7 @@ class StubHost final : public ::vellum::view::PluginViewHost {
             PluginViewHost::resume_presentation();
     }
     bool presentation_allowed() const noexcept {
-        if constexpr (requires(const StubHost& host) {
-                          host.root_presentation_allowed();
-                      })
+        if constexpr (requires(const StubHost& host) { host.root_presentation_allowed(); })
             return root_presentation_allowed();
         return true;
     }
@@ -1334,9 +1332,7 @@ template <typename Root> struct PresentationFixture {
     PresentationFixture() {
         PluginViewHost::set_factory(
             [this](::vellum::view::View&, const PluginViewHost::Options& options) {
-                if constexpr (requires(const PluginViewHost::Options& o) {
-                                  o.defer_presentation;
-                              })
+                if constexpr (requires(const PluginViewHost::Options& o) { o.defer_presentation; })
                     deferred = options.defer_presentation;
                 else
                     deferred = false;
@@ -1366,12 +1362,11 @@ struct PresentationGlobals {
 };
 
 constexpr bool has_presentation_api() {
-    return requires(::vellum::view::PluginViewHost& host) {
-               host.resume_presentation();
-           } &&
-           requires(::vellum::view::PluginViewHost::Options& options) {
-               options.defer_presentation = true;
-           };
+    return requires(::vellum::view::PluginViewHost& host) { host.resume_presentation(); }&&
+        requires(::vellum::view::PluginViewHost::Options & options)
+    {
+        options.defer_presentation = true;
+    };
 }
 
 } // namespace
