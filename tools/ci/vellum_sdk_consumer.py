@@ -49,7 +49,7 @@ import urllib.parse
 import urllib.request
 import zipfile
 from dataclasses import dataclass
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 
 VELLUM_REPO = "Generous-Corp/vellum"
 GPU_WORKFLOW_NAME = "Locked macOS GPU proof"
@@ -447,6 +447,35 @@ def prepare_codemodel_query(build_dir: Path) -> Path:
     return query
 
 
+def checkout_relative(source: str, source_root: str = "") -> str:
+    """A target's source directory as a forward-slash path relative to the checkout.
+
+    The file API reports `paths.source` relative to the top source directory in
+    some CMake versions and absolute in others, and the separators are native on
+    Windows. Absolute values are resolved against the codemodel's source root
+    (symlinks resolved on both sides) and fall back to the lexical form when the
+    path cannot be made relative.
+    """
+    text = source.replace("\\", "/")
+    if not (text.startswith("/") or PureWindowsPath(source).is_absolute()):
+        return text.removeprefix("./")
+    if not source_root:
+        return text
+    for make in (Path, PureWindowsPath):
+        try:
+            candidates = [(make(source), make(source_root))]
+            if make is Path:
+                candidates.append((Path(source).resolve(), Path(source_root).resolve()))
+            for path, root in candidates:
+                try:
+                    return path.relative_to(root).as_posix()
+                except ValueError:
+                    continue
+        except OSError:
+            continue
+    return text
+
+
 def codemodel_executables(build_dir: Path) -> dict[str, dict]:
     """Executable targets from the CMake file API reply: name -> {source, artifact}."""
     reply = build_dir / ".cmake" / "api" / "v1" / "reply"
@@ -458,6 +487,7 @@ def codemodel_executables(build_dir: Path) -> dict[str, dict]:
     if not model_files:
         raise LabelError("the CMake file API reply has no codemodel object")
     model = json.loads((reply / model_files[0]).read_text(encoding="utf-8"))
+    source_root = (model.get("paths") or {}).get("source", "")
     found: dict[str, dict] = {}
     for configuration in model.get("configurations", []):
         for entry in configuration.get("targets", []):
@@ -468,6 +498,7 @@ def codemodel_executables(build_dir: Path) -> dict[str, dict]:
             found[target["name"]] = {
                 "source": (target.get("paths") or {}).get("source", ""),
                 "artifact": artifacts[0]["path"] if artifacts else None,
+                "source_root": source_root,
             }
     return found
 
@@ -502,7 +533,7 @@ def labelled_test_programs(build_dir: Path, label: str = LABEL_REGEX) -> list[tu
 def vellum_test_targets(executables: dict[str, dict], programs: list[tuple[str, Path]]) -> list[str]:
     """Every executable the lane must build, by target name."""
     names = {name for name, info in executables.items()
-             if info["source"].startswith(INTEGRATION_SOURCE_PREFIX)}
+             if checkout_relative(info["source"], info.get("source_root", "")).startswith(INTEGRATION_SOURCE_PREFIX)}
     names.update(path.name for _, path in programs if path.name in executables)
     return sorted(names)
 

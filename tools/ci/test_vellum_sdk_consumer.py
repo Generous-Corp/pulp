@@ -407,6 +407,29 @@ class LabelledTargetTests(unittest.TestCase):
         self.assertEqual(vsc.vellum_test_targets(self.EXECUTABLES, []),
                          ["pulp-test-pulp-vellum", "pulp-test-vellum-scripted-wiring"])
 
+    def test_absolute_source_paths_are_matched_against_the_checkout(self):
+        root = "/work/checkout"
+        absolute = {
+            "in-tree": {"source": f"{root}/integrations/pulp-vellum-audio/tests/foo.cpp", "artifact": "a/in-tree",
+                        "source_root": root},
+            "elsewhere": {"source": f"{root}/test", "artifact": "a/elsewhere", "source_root": root},
+            "outside": {"source": "/other/integrations/pulp-vellum/tests", "artifact": "a/outside",
+                        "source_root": root},
+            "relative": {"source": "integrations/pulp-vellum/tests", "artifact": "a/relative", "source_root": root},
+            "windows": {"source": "C:\\work\\checkout\\integrations\\pulp-vellum\\tests", "artifact": "a/win",
+                        "source_root": "C:\\work\\checkout"},
+        }
+        self.assertEqual(vsc.vellum_test_targets(absolute, []), ["in-tree", "relative", "windows"])
+
+    def test_symlinked_checkout_root_is_resolved(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            real = Path(tmp).resolve() / "real"
+            (real / "integrations/pulp-vellum/tests").mkdir(parents=True)
+            link = Path(tmp).resolve() / "link"
+            link.symlink_to(real)
+            self.assertEqual(vsc.checkout_relative(str(real / "integrations/pulp-vellum/tests"), str(link)),
+                             "integrations/pulp-vellum/tests")
+
     def test_a_labelled_test_program_outside_the_integration_dirs_is_selected(self):
         programs = [("some-test", Path("/b/t/pulp-test-elsewhere")), ("not-an-exe", Path("/b/t/script.cmake"))]
         self.assertEqual(vsc.vellum_test_targets(self.EXECUTABLES, programs),
@@ -452,7 +475,7 @@ class LabelledTargetTests(unittest.TestCase):
             (reply / "lib.json").write_text(json.dumps({"name": "lib", "type": "STATIC_LIBRARY",
                 "paths": {"source": "integrations/pulp-vellum"}, "artifacts": [{"path": "x/lib.a"}]}), encoding="utf-8")
             self.assertEqual(vsc.codemodel_executables(build),
-                             {"exe": {"source": "integrations/pulp-vellum/tests", "artifact": "x/exe"}})
+                             {"exe": {"source": "integrations/pulp-vellum/tests", "artifact": "x/exe", "source_root": ""}})
 
     def test_workflow_builds_the_selection_and_verifies_it(self):
         text = (Path(__file__).resolve().parents[2] / ".github/workflows/vellum-sdk-consumer.yml").read_text(
