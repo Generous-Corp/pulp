@@ -313,6 +313,8 @@ elseif(SCENARIO STREQUAL "gpu-guard")
             "direct|ON|add_executable(app main.cpp)\ntarget_link_libraries(app PRIVATE Pulp::view Pulp::gpu-device)|from Pulp::gpu-device, and .* from Pulp::view\\."
             "private-static|ON|add_library(engine STATIC main.cpp)\ntarget_link_libraries(engine PRIVATE Pulp::gpu-device)\nadd_executable(app main.cpp)\ntarget_link_libraries(app PRIVATE engine Pulp::render)|from Pulp::gpu-device \\(through engine\\), and .* from Pulp::render\\."
             "host-module|ON|add_library(plug MODULE main.cpp)\ntarget_link_libraries(plug PRIVATE Pulp::host Pulp::canvas)|from Pulp::gpu-audio \\(through Pulp::host\\), and .* from Pulp::canvas\\."
+            "private-shared|ON|add_library(engine SHARED main.cpp)\ntarget_link_libraries(engine PRIVATE Pulp::gpu-device)\nadd_executable(app main.cpp)\ntarget_link_libraries(app PRIVATE engine Pulp::render)|from Pulp::gpu-device \\(through engine\\), and .* from Pulp::render\\."
+            "single-owner-shared|ON|add_library(engine SHARED main.cpp)\ntarget_link_libraries(engine PRIVATE Pulp::gpu-device)\nadd_executable(app main.cpp)\ntarget_link_libraries(app PRIVATE engine)|pass"
             "device|ON|add_library(lib SHARED main.cpp)\ntarget_link_libraries(lib PRIVATE VellumGpuRuntime::Device Vellum::MirrorView_core)|from VellumGpuRuntime::Device, and .* from Vellum::MirrorView_core\\."
             "alias|ON|add_executable(app main.cpp)\ntarget_link_libraries(app PRIVATE pulp::design-import Pulp::gpu-audio)|from Pulp::gpu-audio, and .* from pulp::design-import\\."
             "subdirectory|ON|add_subdirectory(sub)|from Pulp::gpu-device, and .* from Pulp::view-native\\."
