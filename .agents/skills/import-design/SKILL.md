@@ -349,7 +349,7 @@ alike (`ua_form_control_state()` is the shared parse). The ui.js lane emits the
 same widget and state from that parse (`design_js_capture_lowering.cpp`:
 `createRangeSlider`/`createCheckbox`, `createButtonSurface` with its label as
 children, `setUaSkin`, `setCheckboxKind`, the range, value and checked state), and every lane records the snapped paint rect
-(`setCapturedPaintRect` in ui.js); the emitter conformance gate checks all of it. Only those controls get
+(`setCapturedPaintRect` in ui.js); Vellum's emitter conformance gate checks all of it. Only those controls get
 the skin: an `author` or `unresolved` verdict, another import lane's checkbox,
 AutoUi and every hand-built widget keep `UaSkin::platform`. Chromium paints a
 theme part in its CSS-px-snapped box, so the skins paint in
@@ -380,12 +380,12 @@ both when you give it a native skin.
 
 The native materializer, the ui.js emitter (`design_codegen.cpp`), the baked C++
 exporter and the SwiftUI exporter each walk the IR on their own, so a lowering
-added to one does not reach the others. `pulp-test-design-emitter-conformance`
-builds the fixtures in `test/fixtures/emitter-conformance/` (plus the
-figma-plugin fidelity scene) through all four and compares, per anchor, the
+added to one does not reach the others. Vellum owns this gate as the
+`vellum.design-emitter-conformance` ctest (`authoring/design_pipeline`). It
+builds its spectr, kelvin, form-controls, keyed-list and fidelity-scene fixtures through all four and compares, per anchor, the
 anchored-view tree, widget kind, theme-control state, captured paint rect and
 snapped `self_paint_bounds()`, and bindings, against the native lane. The baked
-C++ is generated at build time by `pulp-emitter-conformance-gen`, never
+C++ is generated at build time by the Vellum gate, never
 committed. A divergence must match an entry in `allowlist.json`, each linked to
 an issue; an entry that matches nothing fails the gate, so delete it with the
 fix. `PULP_CONFORMANCE_REPORT=<path>` writes every divergence as JSON. When you
