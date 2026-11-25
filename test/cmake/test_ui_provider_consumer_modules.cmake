@@ -201,6 +201,12 @@ elseif(SCENARIO STREQUAL "bytecode")
     _expect_text("generator=[present]" "the generator built against Pulp::view")
     _expect_refused(vellum bytecode "${_call}"
         "pulp_add_js_bytecode(Pscripts): this Pulp SDK serves Pulp::view from Vellum")
+    _expect_refused(vellum bytecode "${_call}"
+        "this Vellum package has no vellum_add_js_bytecode()")
+    # A Vellum package that ships the helper is named as the replacement.
+    set(_stub "function(vellum_add_js_bytecode)\nendfunction()\n")
+    _expect_refused(vellum bytecode "${_stub}${_call}"
+        "Call vellum_add_js_bytecode() from the Vellum package instead")
 
 else()
     message(FATAL_ERROR "unknown SCENARIO '${SCENARIO}'")
