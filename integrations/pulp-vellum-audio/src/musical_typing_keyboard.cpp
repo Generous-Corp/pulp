@@ -615,7 +615,7 @@ int MusicalTypingKeyboard::midi_for_element(int index) const {
     // absolute MIDI note. (A magnitude threshold would misclassify a low piano
     // octave, e.g. MIDI C-1..B0, as a typing semitone.)
     if (active_frame() == kTypingFrame)
-        return controller_.base_note() + controller_.octave_shift() * 12 + note;
+        return controller_.note_for_semitone(note);
     // Piano: the 36 keys are a WINDOW over the full range. Map each key by its
     // offset from the FRAME's intrinsic low note (48), not the runtime base note,
     // so the window stays on C-2..G8 whatever the base is. (Using base_note here

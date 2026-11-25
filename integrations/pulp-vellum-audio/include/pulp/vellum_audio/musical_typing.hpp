@@ -85,7 +85,7 @@ class MusicalTypingController {
         if (e.is_down) {
             if (held_.count(kc))
                 return true; // auto-repeat — already sounding
-            const int note = std::clamp(base_note_ + octave_shift_ * 12 + semi, 0, 127);
+            const int note = note_for_semitone(semi);
             held_[kc] = note;
             if (on_note_on)
                 on_note_on(note, velocity);
@@ -98,6 +98,13 @@ class MusicalTypingController {
             }
         }
         return true;
+    }
+
+    /// MIDI note a typing key `semi` semitones above the base sounds at the current
+    /// octave shift, clamped to the valid MIDI range. Shared by the key path and
+    /// on-screen clicks so both agree at the range edges.
+    int note_for_semitone(int semi) const {
+        return std::clamp(base_note_ + octave_shift_ * 12 + semi, 0, 127);
     }
 
     /// Current octave shift (in octaves; z/x decrement/increment). Lets a view

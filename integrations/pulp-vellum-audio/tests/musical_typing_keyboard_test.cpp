@@ -423,6 +423,22 @@ TEST_CASE("MusicalTypingKeyboard: clicking a key emits its MIDI note (both modes
     REQUIRE(ons == std::vector<int>{72});
 }
 
+TEST_CASE("MusicalTypingKeyboard: typing click clamps to the MIDI range",
+          "[musical-typing][wiring]") {
+    auto kbp = make_playable_kb();
+    auto& kb = *kbp;
+    kb.set_base_note(60);
+    kb.controller().set_octave_shift(5); // 60 + 60 = 120; 'p' (+16 semitones) would be 136+
+    const int p = note_idx(kb, 16);
+    REQUIRE(p >= 0);
+    REQUIRE(kb.midi_for_element(p) == 127);
+    REQUIRE(kb.midi_for_element(note_idx(kb, 0)) == 120);
+
+    kb.set_base_note(0);
+    kb.controller().set_octave_shift(0);
+    REQUIRE(kb.midi_for_element(note_idx(kb, 0)) == 0);
+}
+
 TEST_CASE("MusicalTypingKeyboard: focus loss releases held notes + clears highlights",
           "[musical-typing][wiring]") {
     auto kbp = make_playable_kb();
