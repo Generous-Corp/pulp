@@ -11,8 +11,8 @@
 // buttons; line 2 is a full-width progress bar (only while downloading/paused) — so the
 // bar never crowds or overlaps the name.
 
-#include <pulp/vellum_components/aliases.hpp>
 #include <pulp/runtime/model_store.hpp>
+#include <pulp/vellum_components/aliases.hpp>
 
 #include <functional>
 #include <map>
@@ -21,14 +21,14 @@
 namespace pulp::vellum_components {
 
 class ModelManagerView : public View {
-public:
+  public:
     using ModelAction = std::function<void(const std::string& model_id)>;
 
     ModelManagerView() {
         flex().direction = FlexDirection::column;
         flex().padding = 20.0f;
         flex().gap = 12.0f;
-        set_background_color(canvas::Color::rgba8(32, 33, 36, 255));  // GREY_900-ish
+        set_background_color(canvas::Color::rgba8(32, 33, 36, 255)); // GREY_900-ish
         rebuild();
     }
 
@@ -52,29 +52,39 @@ public:
 
     /// Show the header "Done" (return to the editor). Off when there is no editor yet.
     void set_can_close(bool can_close) {
-        if (can_close_ == can_close) return;
+        if (can_close_ == can_close)
+            return;
         can_close_ = can_close;
         rebuild();
     }
 
-    ModelAction on_download;          ///< Download / Resume
-    ModelAction on_activate;          ///< Set default
-    ModelAction on_remove;            ///< Remove / Delete
-    ModelAction on_cancel;            ///< Cancel (mid-download)
-    std::function<void()> on_done;    ///< Done (return to the editor)
+    ModelAction on_download;       ///< Download / Resume
+    ModelAction on_activate;       ///< Set default
+    ModelAction on_remove;         ///< Remove / Delete
+    ModelAction on_cancel;         ///< Cancel (mid-download)
+    std::function<void()> on_done; ///< Done (return to the editor)
 
-private:
-    static constexpr canvas::Color kMuted() { return canvas::Color::rgba8(170, 170, 175, 255); }
-    static constexpr canvas::Color kWhite() { return canvas::Color::rgba8(235, 235, 240, 255); }
-    static constexpr canvas::Color kTeal()  { return canvas::Color::rgba8(132, 243, 237, 255); }
-    static constexpr canvas::Color kBlue()  { return canvas::Color::rgba8(127, 178, 255, 255); }
+  private:
+    static constexpr canvas::Color kMuted() {
+        return canvas::Color::rgba8(170, 170, 175, 255);
+    }
+    static constexpr canvas::Color kWhite() {
+        return canvas::Color::rgba8(235, 235, 240, 255);
+    }
+    static constexpr canvas::Color kTeal() {
+        return canvas::Color::rgba8(132, 243, 237, 255);
+    }
+    static constexpr canvas::Color kBlue() {
+        return canvas::Color::rgba8(127, 178, 255, 255);
+    }
 
-    static std::unique_ptr<Label> make_label(const std::string& text, float size, canvas::Color color,
-                                             float width = 0.0f) {
+    static std::unique_ptr<Label> make_label(const std::string& text, float size,
+                                             canvas::Color color, float width = 0.0f) {
         auto l = std::make_unique<Label>(text);
         l->set_font_size(size);
         l->set_text_color(color);
-        if (width > 0.0f) l->flex().preferred_width = width;
+        if (width > 0.0f)
+            l->flex().preferred_width = width;
         return l;
     }
 
@@ -86,7 +96,8 @@ private:
         b->flex().preferred_width = 96.0f;
         b->flex().preferred_height = 28.0f;
         b->on_click = [this, id, member] {
-            if (this->*member) (this->*member)(id);
+            if (this->*member)
+                (this->*member)(id);
         };
         return b;
     }
@@ -111,7 +122,8 @@ private:
     }
 
     void rebuild() {
-        while (child_count() > 0) remove_child(child_at(0));
+        while (child_count() > 0)
+            remove_child(child_at(0));
 
         // Header: title + (Done, right-aligned, only when there's an editor to return to).
         auto header = std::make_unique<View>();
@@ -127,13 +139,17 @@ private:
             done->set_label("Done");
             done->flex().preferred_width = 88.0f;
             done->flex().preferred_height = 28.0f;
-            done->on_toggle = [this](bool) { if (on_done) on_done(); };
+            done->on_toggle = [this](bool) {
+                if (on_done)
+                    on_done();
+            };
             header->add_child(std::move(done));
         }
         add_child(std::move(header));
 
-        add_child(make_label("Download a model to enable generation. Stored once, shared across plugins.",
-                             12.0f, kMuted()));
+        add_child(
+            make_label("Download a model to enable generation. Stored once, shared across plugins.",
+                       12.0f, kMuted()));
 
         if (models_.models.empty()) {
             add_child(make_label("No models available yet.", 14.0f, kMuted()));
@@ -158,10 +174,11 @@ private:
             line->flex().preferred_height = 30.0f;
 
             std::string name = listed.model.display_name.empty() ? id : listed.model.display_name;
-            if (listed.model.is_recommended) name = "★ " + name;  // ★
+            if (listed.model.is_recommended)
+                name = "★ " + name; // ★
             auto name_label = make_label(name, 14.0f, kWhite());
             name_label->flex().flex_grow = 1.0f;
-            name_label->flex().flex_shrink = 0.0f;  // never let the name shrink/overlap
+            name_label->flex().flex_shrink = 0.0f; // never let the name shrink/overlap
             line->add_child(std::move(name_label));
 
             if (downloading) {
@@ -170,8 +187,9 @@ private:
                 line->add_child(make_action("Cancel", id, &ModelManagerView::on_cancel));
             } else if (paused) {
                 const float frac = listed.partial_fraction < 0.0f ? 0.0f : listed.partial_fraction;
-                line->add_child(make_label("Paused " + std::to_string(static_cast<int>(frac * 100.0f + 0.5f)) + "%",
-                                           12.0f, kMuted(), 90.0f));
+                line->add_child(make_label(
+                    "Paused " + std::to_string(static_cast<int>(frac * 100.0f + 0.5f)) + "%", 12.0f,
+                    kMuted(), 90.0f));
                 line->add_child(make_action("Resume", id, &ModelManagerView::on_download));
                 line->add_child(make_action("Delete", id, &ModelManagerView::on_remove));
             } else if (listed.status == "installed") {

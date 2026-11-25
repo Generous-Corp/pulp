@@ -2,9 +2,9 @@
 // while downloading, action callbacks carrying the model id, and a real raster.
 #include <catch2/catch_test_macros.hpp>
 
+#include "render_helpers.hpp"
 #include <pulp/runtime/model_store.hpp>
 #include <pulp/vellum_components/model_manager_view.hpp>
-#include "render_helpers.hpp"
 
 #include <cstdint>
 #include <cstdlib>
@@ -33,39 +33,46 @@ ModelListResult make_models() {
     b.model.display_name = "Magenta RT2 (Small)";
     b.status = "not_installed";
 
-    r.models = {a, b};  // index 0 active+installed, index 1 available
+    r.models = {a, b}; // index 0 active+installed, index 1 available
     return r;
 }
 
 // Children are: [0] header, [1] subtitle, [2..] one block per model.
-View* model_block(View& v, size_t i) { return v.child_at(2 + i); }
+View* model_block(View& v, size_t i) {
+    return v.child_at(2 + i);
+}
 
 void fire_buttons(View* view) {
     if (auto* b = dynamic_cast<ToggleButton*>(view))
-        if (b->on_toggle) b->on_toggle(true);
-    if (auto* t = dynamic_cast<TextButton*>(view))  // action buttons are momentary TextButtons
-        if (t->on_click) t->on_click();
-    for (size_t i = 0; i < view->child_count(); ++i) fire_buttons(view->child_at(i));
+        if (b->on_toggle)
+            b->on_toggle(true);
+    if (auto* t = dynamic_cast<TextButton*>(view)) // action buttons are momentary TextButtons
+        if (t->on_click)
+            t->on_click();
+    for (size_t i = 0; i < view->child_count(); ++i)
+        fire_buttons(view->child_at(i));
 }
 
-}  // namespace
+} // namespace
 
 TEST_CASE("ModelManagerView builds a block per model", "[pulp-vellum-components][model-manager]") {
     ModelManagerView v;
     v.set_models(make_models());
-    REQUIRE(v.child_count() == 4);  // header + subtitle + 2 model blocks
+    REQUIRE(v.child_count() == 4); // header + subtitle + 2 model blocks
 }
 
-TEST_CASE("ModelManagerView adds a progress-bar line while downloading", "[pulp-vellum-components][model-manager]") {
+TEST_CASE("ModelManagerView adds a progress-bar line while downloading",
+          "[pulp-vellum-components][model-manager]") {
     ModelManagerView v;
     v.set_models(make_models());
 
-    const size_t before = model_block(v, 1)->child_count();  // mrt2_small: just the line
+    const size_t before = model_block(v, 1)->child_count(); // mrt2_small: just the line
     v.set_download_progress("mrt2_small", 0.47f);
-    REQUIRE(model_block(v, 1)->child_count() > before);  // gained the full-width bar line
+    REQUIRE(model_block(v, 1)->child_count() > before); // gained the full-width bar line
 }
 
-TEST_CASE("ModelManagerView action callbacks fire with the model id", "[pulp-vellum-components][model-manager]") {
+TEST_CASE("ModelManagerView action callbacks fire with the model id",
+          "[pulp-vellum-components][model-manager]") {
     ModelManagerView v;
     std::string downloaded;
     std::string removed;
@@ -73,20 +80,21 @@ TEST_CASE("ModelManagerView action callbacks fire with the model id", "[pulp-vel
     v.on_remove = [&](const std::string& id) { removed = id; };
     v.set_models(make_models());
 
-    fire_buttons(model_block(v, 0));  // mrt2_base installed+active → Remove
-    fire_buttons(model_block(v, 1));  // mrt2_small not installed → Download
+    fire_buttons(model_block(v, 0)); // mrt2_base installed+active → Remove
+    fire_buttons(model_block(v, 1)); // mrt2_small not installed → Download
 
     REQUIRE(downloaded == "mrt2_small");
     REQUIRE(removed == "mrt2_base");
 }
 
-TEST_CASE("ModelManagerView shows a header Done when closeable", "[pulp-vellum-components][model-manager]") {
+TEST_CASE("ModelManagerView shows a header Done when closeable",
+          "[pulp-vellum-components][model-manager]") {
     ModelManagerView v;
     bool done = false;
     v.on_done = [&] { done = true; };
     v.set_models(make_models());
     v.set_can_close(true);
-    fire_buttons(v.child_at(0));  // header contains the Done button
+    fire_buttons(v.child_at(0)); // header contains the Done button
     REQUIRE(done);
 }
 
