@@ -26,11 +26,6 @@
 #include <pulp/format/clap_editor_automation.hpp>
 #endif
 #endif
-#if defined(PULP_CLAP_GUI) && PULP_CLAP_GUI
-#include <pulp/format/editor_ui.hpp>
-#include <pulp/format/gpu_host_select.hpp>
-#include <pulp/format/editor_idle_pump.hpp>
-#endif
 #include <pulp/runtime/log.hpp>
 #include <pulp/runtime/system.hpp>
 #include <clap/clap.h>
@@ -43,6 +38,20 @@
 #include <chrono>
 #include <string>
 #include <string_view>
+
+#if defined(PULP_CLAP_GUI) && PULP_CLAP_GUI
+// The GUI extension of the create_view() editor path, for a processor with no
+// editor factory. pulp-format compiles the definitions with the view layer at
+// the end of clap_adapter.cpp, so this header names no view, canvas or render
+// type. A processor with an editor factory gets the contract GUI instead.
+namespace pulp::format::clap_adapter {
+/// The GUI extension for a processor's create_view() editor.
+const clap_plugin_gui_t* legacy_gui_extension();
+/// The timer-support extension that drives that editor's frames from the
+/// host's UI-thread timer. Linux only: elsewhere this returns null.
+const clap_plugin_timer_support_t* legacy_timer_extension();
+} // namespace pulp::format::clap_adapter
+#endif
 
 // Internal implementation — do not call directly
 namespace pulp::format::clap_generic {
@@ -547,457 +556,6 @@ inline uint32_t tail_get(const clap_plugin_t* plugin) {
 
 inline const clap_plugin_tail_t tail_ext = { .get = tail_get };
 
-// ── GUI extension (only in plugin targets that define PULP_CLAP_GUI) ──
-
-#if defined(PULP_CLAP_GUI) && PULP_CLAP_GUI
-
-inline bool gui_is_api_supported(const clap_plugin_t*, const char* api, bool is_floating) {
-    if (pulp::format::detail::editor_launch_blocked_by_environment()) return false;
-    if (is_floating) return false;
-#ifdef __APPLE__
-    return strcmp(api, CLAP_WINDOW_API_COCOA) == 0;
-#elif defined(_WIN32)
-    return strcmp(api, CLAP_WINDOW_API_WIN32) == 0;
-#elif defined(__linux__)
-    return strcmp(api, CLAP_WINDOW_API_X11) == 0;
-#else
-    (void)api;
-    return false;
-#endif
-}
-
-inline bool gui_get_preferred_api(const clap_plugin_t*, const char** api, bool* is_floating) {
-    if (pulp::format::detail::editor_launch_blocked_by_environment()) return false;
-    *is_floating = false;
-#ifdef __APPLE__
-    *api = CLAP_WINDOW_API_COCOA;
-#elif defined(_WIN32)
-    *api = CLAP_WINDOW_API_WIN32;
-#elif defined(__linux__)
-    *api = CLAP_WINDOW_API_X11;
-#else
-    return false;
-#endif
-    return true;
-}
-
-inline bool request_host_resize(
-    clap_adapter::PulpClapPlugin& plugin,
-    uint32_t width,
-    uint32_t height) {
-    const clap_host_gui_t* gui = nullptr;
-    if (plugin.host && plugin.host->get_extension) {
-        gui = static_cast<const clap_host_gui_t*>(
-            plugin.host->get_extension(plugin.host, CLAP_EXT_GUI));
-    }
-    return gui && gui->request_resize &&
-           gui->request_resize(plugin.host, width, height);
-}
-
-inline void install_editor_resize_handler(
-    clap_adapter::PulpClapPlugin& plugin) {
-    if (!plugin.processor) return;
-    plugin.processor->set_editor_resize_handler(
-        &plugin,
-        [&plugin](uint32_t width, uint32_t height) -> bool {
-            if (!plugin.bridge) return false;
-            const bool accepted = detail::negotiate_preferred_size(
-                *plugin.bridge, width, height,
-                [&plugin](uint32_t requested_width,
-                          uint32_t requested_height) {
-                    return request_host_resize(
-                        plugin, requested_width, requested_height);
-                });
-            if (!accepted) return false;
-
-            if (plugin.editor_host) {
-                commit_editor_requested_viewport(
-                    *plugin.editor_host, plugin.bridge->size_hints(),
-                    width, height);
-            }
-            return true;
-        });
-}
-
-// Native embedded CLAP editors are driven by the host's timer-support
-// extension. The callback is delivered on the host UI thread; use that thread
-// as the scheduling boundary and pass a monotonic timestamp into the Linux
-// PluginViewHost's HostFramePump. Hosts that do not expose timer-support keep
-// the honest static/input-triggered behavior and emit an unavailable receipt.
-inline void stop_native_gui_timer(clap_adapter::PulpClapPlugin& plugin) {
-    if (plugin.editor_timer_id != CLAP_INVALID_ID && plugin.editor_host_timer && plugin.host &&
-        plugin.editor_host_timer->unregister_timer) {
-        plugin.editor_host_timer->unregister_timer(plugin.host, plugin.editor_timer_id);
-    }
-    plugin.editor_timer_id = CLAP_INVALID_ID;
-    plugin.editor_host_timer = nullptr;
-}
-
-inline bool start_native_gui_timer(clap_adapter::PulpClapPlugin& plugin) {
-    if (plugin.editor_timer_id != CLAP_INVALID_ID)
-        return true;
-    if (!plugin.host || !plugin.host->get_extension)
-        return false;
-    auto* timer = static_cast<const clap_host_timer_support_t*>(
-        plugin.host->get_extension(plugin.host, CLAP_EXT_TIMER_SUPPORT));
-    if (!timer || !timer->register_timer || !timer->unregister_timer) {
-        runtime::log_warn("CLAP editor: host timer-support unavailable; "
-                          "continuous animation disabled");
-        return false;
-    }
-    clap_id id = CLAP_INVALID_ID;
-    if (!timer->register_timer(plugin.host, 16, &id) || id == CLAP_INVALID_ID) {
-        runtime::log_warn("CLAP editor: host refused the 16 ms frame timer; "
-                          "continuous animation disabled");
-        return false;
-    }
-    plugin.editor_host_timer = timer;
-    plugin.editor_timer_id = id;
-    return true;
-}
-
-inline void native_gui_on_timer(const clap_plugin_t* plugin, clap_id timer_id) {
-    auto* p = static_cast<clap_adapter::PulpClapPlugin*>(plugin->plugin_data);
-    if (!p || !p->editor_host || !p->editor_parent_attached || !p->editor_visible ||
-        p->editor_timer_id != timer_id)
-        return;
-    const double now =
-        std::chrono::duration<double>(std::chrono::steady_clock::now().time_since_epoch()).count();
-    p->editor_host->advance_frame(now);
-}
-
-inline const clap_plugin_timer_support_t native_timer_ext = {
-    .on_timer = native_gui_on_timer,
-};
-
-inline bool gui_create(const clap_plugin_t* plugin, const char*, bool) {
-    auto* p = static_cast<clap_adapter::PulpClapPlugin*>(plugin->plugin_data);
-    if (pulp::format::detail::editor_launch_blocked_by_environment()) {
-        runtime::log_info("CLAP editor: disabled in headless/CI/test environment");
-        return false;
-    }
-    if (!p->processor || !p->processor->has_editor()) return false;
-
-    std::string editor_error;
-    p->bridge = std::make_unique<ViewBridge>(
-        *p->processor, p->store, p->owner_alive.capture(),
-        ViewBridge::Options::hosted_editor());
-    if (!p->bridge->open(&editor_error)) {
-        runtime::log_error("CLAP editor: bridge->open failed ({})", editor_error);
-        p->bridge.reset();
-        return false;
-    }
-
-    const auto& hints = p->bridge->size_hints();
-    const auto gpu = decide_gpu_host(*p->bridge);
-    const auto opts = editor_host_options(
-        *p->bridge, gpu, {hints.preferred_width, hints.preferred_height});
-
-    p->editor_host = view::PluginViewHost::create(*p->bridge->view(), opts);
-    if (p->editor_host) {
-        // Run editor automation, restore/reload, and scripted work per vsync.
-        p->editor_host->set_idle_callback(make_editor_idle_pump(*p->bridge));
-        // Route navigator.gpu / canvas.getContext('webgpu') through the host's
-        // live GpuSurface instead of the JS mock path — and keep following it.
-        // The Windows host does not have a surface until gui_set_parent()
-        // reparents its HWND, so the one-shot read this replaces was null on
-        // every Windows CLAP editor. The subscription also carries the detach
-        // edge, and owns the CPU-fallback diagnostic.
-        p->gpu_surface_binding = bind_gpu_surface(
-            *p->editor_host, p->bridge->scripted_ui(), gpu, "CLAP");
-        // Resize contract (ViewSize), mirroring the VST3 adapter:
-        //   - not resizable (min==0): pin the viewport at preferred so an
-        //     off-size pane letterbox-scales the content (today's behavior).
-        //   - resizable + aspect_ratio>0: pin viewport + lock aspect; the
-        //     adjust_size / get_resize_hints path enforces the aspect on drag.
-        //   - resizable + aspect_ratio==0: honor "free drag within [min,max]" —
-        //     NO viewport, NO aspect lock; the root reflows via Yoga at the host
-        //     size and adjust_size only clamps min/max.
-        // `resizable` follows gui_can_resize's convention (min>0 on both axes).
-        configure_native_viewport(*p->editor_host, hints);
-        // Editor-INITIATED resize: let the editor ask the DAW to resize the
-        // plugin window (e.g. a chrome-hiding mode wanting a smaller shape).
-        // Publish the new hints optimistically because a host may synchronously
-        // query them from inside request_resize. A refusal rolls them back and
-        // leaves the live viewport untouched, so the old host window cannot
-        // render against the rejected mode's aspect. Captures the plugin struct
-        // `p`; gui_destroy clears the handler before tearing the editor down.
-        install_editor_resize_handler(*p);
-        runtime::log_info("CLAP editor: created ({}x{}, mode={}, gpu={})",
-                          hints.preferred_width, hints.preferred_height,
-                          gpu.mode, p->editor_host->is_gpu_backed());
-    } else {
-        runtime::log_error("CLAP editor: failed to create host");
-        p->bridge->close();
-        p->bridge.reset();
-    }
-    return p->editor_host != nullptr;
-}
-
-inline void gui_destroy(const clap_plugin_t* plugin) {
-    auto* p = static_cast<clap_adapter::PulpClapPlugin*>(plugin->plugin_data);
-    // Drop the editor→host resize handler BEFORE the bridge / editor host it
-    // captures, so a late call can never dereference freed editor state.
-    if (p->processor) p->processor->set_editor_resize_handler(p, nullptr);
-    // Unsubscribe BEFORE the host publishes its teardown and before the bridge
-    // that owns the scripted session goes away: no callback after teardown.
-    stop_native_gui_timer(*p);
-    p->editor_parent_attached = false;
-    p->gpu_surface_binding.reset();
-    p->editor_host.reset();
-    if (p->bridge) {
-        p->bridge->close();
-        p->bridge.reset();
-    }
-    p->editor_visible = false;
-}
-
-inline bool gui_set_scale(const clap_plugin_t*, double) {
-    return false;  // Cocoa uses logical pixels — no explicit scaling needed
-}
-
-inline bool gui_get_size(const clap_plugin_t* plugin, uint32_t* width, uint32_t* height) {
-    auto* p = static_cast<clap_adapter::PulpClapPlugin*>(plugin->plugin_data);
-    if (!p->processor) return false;
-    if (p->bridge) {
-        const auto& h = p->bridge->size_hints();
-        *width = h.preferred_width;
-        *height = h.preferred_height;
-    } else {
-        auto [w, ht] = p->processor->editor_size();
-        *width = w;
-        *height = ht;
-    }
-    return true;
-}
-
-// Editor resize negotiation: the plugin advertises proportional resize
-// locked to the editor's design aspect. The host's design viewport
-// (set in gui_create) scales content to fit the host window without
-// re-layout — so any (w, h) the DAW lands on still looks correct.
-// Resize capability is declared by non-zero min_width/min_height in
-// view_size() — the same bounds gui_get_resize_hints exposes. Plugins
-// that use the base-class default (min_width=0, min_height=0) are not
-// resizable; plugins that declare bounds (e.g. GpuEditorSmoke {320,240})
-// are. This check works before gui_create (no bridge needed).
-inline bool gui_can_resize(const clap_plugin_t* plugin) {
-    auto* p = static_cast<clap_adapter::PulpClapPlugin*>(plugin->plugin_data);
-    if (!p->processor) return false;
-    const auto vs = p->processor->view_size();
-    return vs.min_width > 0 && vs.min_height > 0;
-}
-
-inline bool gui_get_resize_hints(const clap_plugin_t* plugin,
-                                 clap_gui_resize_hints_t* hints) {
-    if (!hints) return false;
-    auto* p = static_cast<clap_adapter::PulpClapPlugin*>(plugin->plugin_data);
-    if (!p->bridge) return false;
-    const auto& size_hints = p->bridge->size_hints();
-    if (size_hints.preferred_width == 0 || size_hints.preferred_height == 0) {
-        return false;
-    }
-    hints->can_resize_horizontally = true;
-    hints->can_resize_vertically = true;
-    // preserve_aspect_ratio tracks the resize contract: a resizable editor with
-    // aspect_ratio==0 drags freely (no lock); otherwise the aspect is held.
-    const bool resizable =
-        size_hints.min_width > 0 && size_hints.min_height > 0;
-    const bool free_resize = resizable && size_hints.aspect_ratio <= 0.0;
-    hints->preserve_aspect_ratio = !free_resize;
-    hints->aspect_ratio_width = size_hints.preferred_width;
-    hints->aspect_ratio_height = size_hints.preferred_height;
-    return true;
-}
-
-inline bool gui_adjust_size(const clap_plugin_t* plugin,
-                            uint32_t* width, uint32_t* height) {
-    if (!width || !height || *width == 0 || *height == 0) return false;
-    auto* p = static_cast<clap_adapter::PulpClapPlugin*>(plugin->plugin_data);
-    if (!p->bridge) return false;
-    const auto& size_hints = p->bridge->size_hints();
-    if (size_hints.preferred_width == 0 || size_hints.preferred_height == 0) {
-        return false;
-    }
-    // Free-resize contract: resizable (min>0) with aspect_ratio==0 means "any
-    // ratio; drag freely within [min,max]". Clamp each axis independently — NO
-    // aspect snap — matching gui_get_resize_hints.preserve_aspect_ratio=false.
-    const bool resizable =
-        size_hints.min_width > 0 && size_hints.min_height > 0;
-    const bool free_resize = resizable && size_hints.aspect_ratio <= 0.0;
-    if (free_resize) {
-        if (size_hints.min_width > 0 && *width < size_hints.min_width)
-            *width = size_hints.min_width;
-        if (size_hints.min_height > 0 && *height < size_hints.min_height)
-            *height = size_hints.min_height;
-        if (size_hints.max_width > 0 && *width > size_hints.max_width)
-            *width = size_hints.max_width;
-        if (size_hints.max_height > 0 && *height > size_hints.max_height)
-            *height = size_hints.max_height;
-        return true;
-    }
-    // Snap to the design aspect ratio — pick the largest box with the
-    // design aspect that fits within the requested rectangle. Same shape
-    // the standalone host's drag-to-resize lands on.
-    const double design_aspect =
-        static_cast<double>(size_hints.preferred_width) /
-        static_cast<double>(size_hints.preferred_height);
-    const double req_aspect =
-        static_cast<double>(*width) /
-        static_cast<double>(*height);
-    if (req_aspect > design_aspect) {
-        // Requested rect is too wide → shrink width to height * aspect.
-        *width = static_cast<uint32_t>(
-            static_cast<double>(*height) * design_aspect + 0.5);
-    } else if (req_aspect < design_aspect) {
-        // Requested rect is too tall → shrink height to width / aspect.
-        *height = static_cast<uint32_t>(
-            static_cast<double>(*width) / design_aspect + 0.5);
-    }
-    // Respect plugin min/max constraints when defined. A naive clamp
-    // after the aspect snap would re-introduce off-aspect rects (e.g.
-    // design 2:1, request (500,1000) snaps to (500,250); if min_height
-    // is 400, a naive clamp gives (500,400) — no longer 2:1). After
-    // any clamp, re-snap by EXPANDING the other dimension to restore
-    // the design aspect. The advertised preserve_aspect_ratio=true
-    // contract MUST hold.
-    auto resnap = [&]() {
-        // Use whichever dimension expanded by the clamp; expand the
-        // other to match the design aspect.
-        const double aspect_now =
-            static_cast<double>(*width) / static_cast<double>(*height);
-        if (aspect_now > design_aspect) {
-            *height = static_cast<uint32_t>(
-                static_cast<double>(*width) / design_aspect + 0.5);
-        } else if (aspect_now < design_aspect) {
-            *width = static_cast<uint32_t>(
-                static_cast<double>(*height) * design_aspect + 0.5);
-        }
-    };
-    if (size_hints.min_width > 0 && *width < size_hints.min_width) {
-        *width = size_hints.min_width;
-        resnap();
-    }
-    if (size_hints.min_height > 0 && *height < size_hints.min_height) {
-        *height = size_hints.min_height;
-        resnap();
-    }
-    if (size_hints.max_width > 0 && *width > size_hints.max_width) {
-        *width = size_hints.max_width;
-        resnap();
-    }
-    if (size_hints.max_height > 0 && *height > size_hints.max_height) {
-        *height = size_hints.max_height;
-        resnap();
-    }
-    return true;
-}
-
-inline bool gui_set_size(const clap_plugin_t* plugin, uint32_t width, uint32_t height) {
-    auto* p = static_cast<clap_adapter::PulpClapPlugin*>(plugin->plugin_data);
-    if (p->bridge) p->bridge->resize(width, height);
-    if (p->editor_host) {
-        p->editor_host->set_size(width, height);
-        return true;
-    }
-    return false;
-}
-
-inline bool gui_set_parent(const clap_plugin_t* plugin, const clap_window_t* window) {
-    auto* p = static_cast<clap_adapter::PulpClapPlugin*>(plugin->plugin_data);
-    if (!p->editor_host) return false;
-
-    // A reparent is a lifecycle boundary. Stop any queued timer before
-    // attaching the new native parent; the callback checks attachment again,
-    // but unregistering here avoids keeping a hidden editor alive between
-    // parent transactions.
-    stop_native_gui_timer(*p);
-    p->editor_parent_attached = false;
-
-    bool attached = false;
-#ifdef __APPLE__
-    if (strcmp(window->api, CLAP_WINDOW_API_COCOA) == 0) {
-        attached = p->editor_host->try_attach_to_parent(window->cocoa);
-    }
-#elif defined(_WIN32)
-    if (strcmp(window->api, CLAP_WINDOW_API_WIN32) == 0) {
-        attached = p->editor_host->try_attach_to_parent(window->win32);
-    }
-#elif defined(__linux__)
-    if (strcmp(window->api, CLAP_WINDOW_API_X11) == 0) {
-        attached = p->editor_host->try_attach_to_parent(reinterpret_cast<void*>(window->x11));
-    }
-#endif
-    if (attached && p->bridge) {
-        p->editor_parent_attached = true;
-        p->bridge->notify_attached();
-        // Content-first: the first frame the host composites is the mounted
-        // document (ViewBridge::prepare_first_frame()).
-        p->bridge->prepare_first_frame(*p->editor_host);
-#if defined(__linux__)
-        // CLAP normally calls show() after set_parent(), but tolerate hosts
-        // that make the calls in the opposite order without leaving a visible
-        // editor permanently unscheduled.
-        if (p->editor_visible)
-            start_native_gui_timer(*p);
-#endif
-    }
-    return attached;
-}
-
-inline bool gui_set_transient(const clap_plugin_t*, const clap_window_t*) {
-    return false;  // No floating window support
-}
-
-inline void gui_suggest_title(const clap_plugin_t*, const char*) {
-    // No-op for embedded windows
-}
-
-inline bool gui_show(const clap_plugin_t* plugin) {
-    auto* p = static_cast<clap_adapter::PulpClapPlugin*>(plugin->plugin_data);
-    if (p->editor_host) {
-        p->editor_visible = true;
-#if defined(__linux__)
-        start_native_gui_timer(*p);
-#endif
-        p->editor_host->repaint();
-        return true;
-    }
-    return false;
-}
-
-inline bool gui_hide(const clap_plugin_t* plugin) {
-    auto* p = static_cast<clap_adapter::PulpClapPlugin*>(plugin->plugin_data);
-    p->editor_visible = false;
-#if defined(__linux__)
-    stop_native_gui_timer(*p);
-#endif
-    // A hidden editor keeps its host and surfaces for gui_show, but nothing it
-    // is not drawing should keep holding GPU memory meanwhile.
-    if (p->editor_host)
-        p->editor_host->release_gpu_caches();
-    return true;
-}
-
-inline const clap_plugin_gui_t gui_ext = {
-    .is_api_supported = gui_is_api_supported,
-    .get_preferred_api = gui_get_preferred_api,
-    .create = gui_create,
-    .destroy = gui_destroy,
-    .set_scale = gui_set_scale,
-    .get_size = gui_get_size,
-    .can_resize = gui_can_resize,
-    .get_resize_hints = gui_get_resize_hints,
-    .adjust_size = gui_adjust_size,
-    .set_size = gui_set_size,
-    .set_parent = gui_set_parent,
-    .set_transient = gui_set_transient,
-    .suggest_title = gui_suggest_title,
-    .show = gui_show,
-    .hide = gui_hide,
-};
-
-#endif // PULP_CLAP_GUI
-
 // ── Extension dispatch ─────────────────────────────────────────────────
 inline const void* get_static_extension(const clap_plugin_t* plugin, const char* id) {
     if (!id) return nullptr;
@@ -1010,7 +568,7 @@ inline const void* get_static_extension(const clap_plugin_t* plugin, const char*
 #endif
 #if defined(PULP_CLAP_GUI) && PULP_CLAP_GUI
         if (pulp::format::detail::editor_launch_blocked_by_environment()) return nullptr;
-        return &gui_ext;
+        return clap_adapter::legacy_gui_extension();
 #else
         return nullptr;
 #endif
@@ -1032,7 +590,7 @@ inline const void* get_static_extension(const clap_plugin_t* plugin, const char*
 #endif
 #if defined(PULP_CLAP_GUI) && PULP_CLAP_GUI && defined(__linux__)
     if (strcmp(id, CLAP_EXT_TIMER_SUPPORT) == 0)
-        return &native_timer_ext;
+        return clap_adapter::legacy_timer_extension();
 #endif
     if (strcmp(id, CLAP_EXT_AUDIO_PORTS) == 0) return &audio_ports_ext;
     if (strcmp(id, CLAP_EXT_AUDIO_PORTS_CONFIG) == 0)
