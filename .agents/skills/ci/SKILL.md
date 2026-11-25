@@ -1502,6 +1502,13 @@ line reads `cacheable 0`, check for `-- Building for: Visual Studio` in its
 configure log before checking the cache. The bake and server steps are in
 `docs/guides/local-ci.md`, "Windows build caches".
 
+A GitHub-hosted Windows leg is the opposite case: it starts empty with no remote
+ccache, so `cross-platform-check.yml` restores and saves a `.ccache` directory
+with `actions/cache` there (skipped on a self-hosted runner). A cold hosted
+build is about 2.5 hours and the suite 30 minutes, so its `timeout-minutes` is
+300; when a hosted Windows run is cancelled at the limit, read the step timings
+before blaming the test step.
+
 ## Android minimum-API allocation check
 
 The Android workflow compiles and links the public aligned DSP buffer for both
