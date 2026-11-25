@@ -13,6 +13,7 @@ namespace pulp::format::detail {
 /// ASCII codes, and the rest are numbered as below. Declared here rather than
 /// taken from the view layer so the view-free standalone can parse and drive a
 /// sequence.
+// clang-format off
 enum class SequenceKey : int {
     unknown = 0,
 
@@ -34,6 +35,7 @@ enum class SequenceKey : int {
 
     f1 = 290, f2, f3, f4, f5, f6, f7, f8, f9, f10, f11, f12,
 };
+// clang-format on
 
 /// Modifier bits in KeySequenceStep::modifiers, with view::Modifier's values.
 enum SequenceModifier : uint16_t {
@@ -61,9 +63,12 @@ struct KeySequenceStep {
 inline uint16_t key_sequence_modifier_from_name(std::string_view name) {
     if (name == "cmd" || name == "command" || name == "meta" || name == "super")
         return kSequenceModCmd;
-    if (name == "shift") return kSequenceModShift;
-    if (name == "ctrl" || name == "control") return kSequenceModCtrl;
-    if (name == "alt" || name == "opt" || name == "option") return kSequenceModAlt;
+    if (name == "shift")
+        return kSequenceModShift;
+    if (name == "ctrl" || name == "control")
+        return kSequenceModCtrl;
+    if (name == "alt" || name == "opt" || name == "option")
+        return kSequenceModAlt;
     return 0;
 }
 

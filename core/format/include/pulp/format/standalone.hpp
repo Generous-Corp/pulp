@@ -248,8 +248,12 @@ public:
     bool audio_skipped_for_capture() const { return audio_skipped_for_capture_; }
 
     TestSignalSource& test_signal() { return test_signal_; }
-    dataplane::AudioBridge& input_meter_bridge() { return input_meter_bridge_; }
-    dataplane::AudioBridge& output_meter_bridge() { return output_meter_bridge_; }
+    dataplane::AudioBridge& input_meter_bridge() {
+        return input_meter_bridge_;
+    }
+    dataplane::AudioBridge& output_meter_bridge() {
+        return output_meter_bridge_;
+    }
 
 #if PULP_ENABLE_AUDIO_PROBES
     /// Realtime output-boundary probe. Observes the processor output

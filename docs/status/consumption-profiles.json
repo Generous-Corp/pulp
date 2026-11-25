@@ -7945,10 +7945,7 @@
           },
           "public_headers": {
             "roots": [
-              "core/canvas/include",
-              "core/format/include",
-              "core/view/audio/include",
-              "core/view/include"
+              "core/format/include"
             ],
             "generated_include_roots": 0
           },

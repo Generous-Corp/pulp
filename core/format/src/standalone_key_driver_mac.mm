@@ -86,10 +86,14 @@ NSString* characters_for_key_code(SequenceKey key) {
 
 NSEventModifierFlags ns_flags_from_modifiers(uint16_t mods) {
     NSEventModifierFlags flags = 0;
-    if (mods & kSequenceModShift) flags |= NSEventModifierFlagShift;
-    if (mods & kSequenceModCtrl)  flags |= NSEventModifierFlagControl;
-    if (mods & kSequenceModAlt)   flags |= NSEventModifierFlagOption;
-    if (mods & (kSequenceModCmd | kSequenceModMeta)) flags |= NSEventModifierFlagCommand;
+    if (mods & kSequenceModShift)
+        flags |= NSEventModifierFlagShift;
+    if (mods & kSequenceModCtrl)
+        flags |= NSEventModifierFlagControl;
+    if (mods & kSequenceModAlt)
+        flags |= NSEventModifierFlagOption;
+    if (mods & (kSequenceModCmd | kSequenceModMeta))
+        flags |= NSEventModifierFlagCommand;
     return flags;
 }
 
@@ -139,7 +143,8 @@ bool synthetic_key_delivery_supported() { return true; }
 
 bool deliver_synthetic_key(void* native_content_view, const KeySequenceStep& step) {
     if (!native_content_view) return false;
-    if (step.key == SequenceKey::unknown) return false;
+    if (step.key == SequenceKey::unknown)
+        return false;
 
     @autoreleasepool {
         NSView* view = (__bridge NSView*)native_content_view;

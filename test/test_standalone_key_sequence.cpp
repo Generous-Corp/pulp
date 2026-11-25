@@ -42,7 +42,8 @@ TEST_CASE("key sequence parses modifier chords", "[standalone][keyboard]") {
     CHECK(steps[1].modifiers == pulp::format::detail::kSequenceModShift);
 
     CHECK(steps[2].key == KC::f7);
-    CHECK(steps[2].modifiers == (pulp::format::detail::kSequenceModCtrl | pulp::format::detail::kSequenceModAlt));
+    CHECK(steps[2].modifiers ==
+          (pulp::format::detail::kSequenceModCtrl | pulp::format::detail::kSequenceModAlt));
 }
 
 TEST_CASE("key sequence normalizes case and whitespace", "[standalone][keyboard]") {
