@@ -491,6 +491,27 @@ TEST_CASE("MCP shell_quote keeps shell arguments atomic", "[mcp][shell]") {
 #endif
 }
 
+TEST_CASE("MCP exec runs a quoted executable that takes a quoted argument", "[mcp][shell]") {
+    // A directory with a space forces quotes around the program; the argument
+    // needs them too, which is the shape cmd.exe mangles without an outer pair.
+    TempDir project;
+    const auto dir = project.path / "tool dir";
+    std::filesystem::create_directories(dir);
+#if defined(_WIN32)
+    const auto script = dir / "say args.cmd";
+    std::ofstream(script) << "@echo off\r\necho got:%~1\r\n";
+#else
+    const auto script = dir / "say args.sh";
+    std::ofstream(script) << "#!/bin/sh\necho got:\"$1\"\n";
+    std::filesystem::permissions(script, std::filesystem::perms::owner_all,
+                                 std::filesystem::perm_options::add);
+#endif
+    const auto run = pulp_mcp::exec_with_status(shell_quote(script.string()) + " " +
+                                                shell_quote("two words"));
+    REQUIRE(run.status == 0);
+    REQUIRE(run.output.find("got:two words") != std::string::npos);
+}
+
 TEST_CASE("MCP CLI resolver finds Windows multi-config delegates", "[mcp][shell]") {
     TempDir project;
     const auto cli = project.path / "build" / "tools" / "cli" / "Release" / "pulp-cpp.exe";
