@@ -2497,7 +2497,7 @@ Per-format wiring:
   `host->set_design_viewport(...)`.
 - **macOS AUv3** — no CLAP/VST3-style drag constraint callback.
   `PulpAUMacViewController` must create its initial root view at the
-  bound processor's `view_size()` when the unit is bound before the view
+  bound processor's `editor_size()` when the unit is bound before the view
   loads, else at the compile-time design size when `PULP_PLUGIN_DESIGN_W/H`
   are available, then call `host->set_design_viewport(...)` after `ViewBridge` opens.
   `supportedViewConfigurations:` should return aspect-correct host

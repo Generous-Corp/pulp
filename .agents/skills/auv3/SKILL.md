@@ -903,12 +903,12 @@ size.
 
 Most hosts bind the audio unit first and load the view after. Then
 `loadView` and `viewDidLoad` size the root and the first
-`preferredContentSize` from the bound processor's `view_size()`, never the
+`preferredContentSize` from the bound processor's `editor_size()`, never the
 placeholder: a host that observes `preferredContentSize` opens its window
 at the first value it reads, so a 400x300 placeholder followed by the
 editor's real size shows a small empty window that then grows. A
 processor whose editor is a UI package should therefore declare the same
-size from `view_size()` / `editor_size()` that its editor reports.
+size from `editor_size()` that its editor reports.
 
 REAPER can also shrink the controller view after the first editor build
 on its in-process AUv3 path. The macOS controller has a one-shot initial
