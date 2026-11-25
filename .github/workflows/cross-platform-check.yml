@@ -68,6 +68,13 @@ concurrency:
   group: cross-platform-check-${{ github.ref }}${{ (inputs.windows_only || inputs.windows_runner_selector_json) && format('-dispatch-{0}', github.run_id) || '' }}
   cancel-in-progress: false
 
+# Linux and Windows build UI-off: their UI hosts are quarantined in
+# integrations/legacy-platform-hosts until their Vellum hosts land. "on"
+# restores the Skia/Dawn fetch, the software Vulkan adapter and the
+# software-GPU render proof; the Configure steps then need GPU back on.
+env:
+  PULP_LEGACY_DESKTOP_UI: "off"
+
 jobs:
   # ── Linux build + test ─────────────────────────────────────────────────
   # Mirrors build.yml's Linux matrix leg: same apt dependency set, same
@@ -111,6 +118,7 @@ jobs:
         shell: bash
 
       - name: Fetch pinned Skia/Dawn (Linux software-GPU proof)
+        if: env.PULP_LEGACY_DESKTOP_UI == 'on'
         shell: bash
         run: |
           set -euo pipefail
@@ -121,6 +129,7 @@ jobs:
           test -s external/skia-build/build/linux-gpu/lib/Release/libdawn_combined.a
 
       - name: Select lavapipe (software Vulkan)
+        if: env.PULP_LEGACY_DESKTOP_UI == 'on'
         shell: bash
         run: |
           set -euo pipefail
@@ -140,9 +149,10 @@ jobs:
           # cancelled build instead of the cross-platform signal it exists to
           # provide. Example compile coverage stays with nightly-full-build
           # (macOS, examples ON) and examples-validation.
+          # UI-off: the Linux UI host is quarantined in
+          # integrations/legacy-platform-hosts until its Vellum host lands.
           cmake -S . -B "$PULP_BUILD_DIR" -DCMAKE_BUILD_TYPE=Release \
-            -DPULP_BUILD_EXAMPLES=OFF -DPULP_ENABLE_GPU=ON \
-            -DPULP_ENABLE_SCENE3D=ON -DSKIA_DIR="$GITHUB_WORKSPACE/external/skia-build"
+            -DPULP_BUILD_EXAMPLES=OFF -DPULP_ENABLE_GPU=OFF
 
       - name: Build
         shell: bash
@@ -173,6 +183,7 @@ jobs:
             2>&1 | tee test-linux.log
 
       - name: Software-GPU render proof + break-confirm (advisory)
+        if: env.PULP_LEGACY_DESKTOP_UI == 'on'
         shell: bash
         run: |
           set -euo pipefail
@@ -234,6 +245,7 @@ jobs:
         shell: bash
 
       - name: Select lavapipe (software Vulkan)
+        if: env.PULP_LEGACY_DESKTOP_UI == 'on'
         shell: bash
         run: |
           set -euo pipefail
@@ -253,7 +265,9 @@ jobs:
           # cancelled build instead of the cross-platform signal it exists to
           # provide. Example compile coverage stays with nightly-full-build
           # (macOS, examples ON) and examples-validation.
-          cmake -S . -B "$PULP_BUILD_DIR" -DCMAKE_BUILD_TYPE=Release -DPULP_BUILD_EXAMPLES=OFF
+          # UI-off, as on the x64 leg: the Linux UI host is quarantined.
+          cmake -S . -B "$PULP_BUILD_DIR" -DCMAKE_BUILD_TYPE=Release -DPULP_BUILD_EXAMPLES=OFF \
+            -DPULP_ENABLE_GPU=OFF
 
       - name: Build
         shell: bash
@@ -396,6 +410,7 @@ jobs:
       # receipt there and downloads only on a miss. Unset, the archive is
       # fetched into the checkout as before.
       - name: Fetch pinned Skia/Dawn (Windows software-GPU proof)
+        if: env.PULP_LEGACY_DESKTOP_UI == 'on'
         shell: bash
         run: |
           set -euo pipefail
@@ -428,8 +443,7 @@ jobs:
           # (macOS, examples ON) and examples-validation.
           cmake -S . -B "$PULP_BUILD_DIR" -G Ninja -DCMAKE_BUILD_TYPE=Release \
             -DCMAKE_C_COMPILER=cl -DCMAKE_CXX_COMPILER=cl \
-            -DPULP_BUILD_EXAMPLES=OFF -DPULP_ENABLE_GPU=ON \
-            -DPULP_ENABLE_SCENE3D=ON -DSKIA_DIR="$PULP_WINDOWS_SKIA_DIR"
+            -DPULP_BUILD_EXAMPLES=OFF -DPULP_ENABLE_GPU=OFF
 
       - name: Build
         shell: bash
@@ -505,6 +519,7 @@ jobs:
           exit /b %CTEST_RC%
 
       - name: Software-GPU render proof + break-confirm (advisory)
+        if: env.PULP_LEGACY_DESKTOP_UI == 'on'
         shell: bash
         run: |
           set -euo pipefail

@@ -3387,6 +3387,19 @@ the two `scene3d-native-slice-handoff` tests, only one names the plan file in
 its ctest arguments; the other reaches it through a verifier that hardcodes the
 path, so excluding the obvious one alone leaves a permanent red.
 
+## Platform lanes build UI-off while their hosts are quarantined
+
+The Windows, Linux, iOS, Android and web UI hosts live in
+`integrations/legacy-platform-hosts/` until their Vellum hosts land (owner
+decision, pulp-planning `vellum-move/DECISIONS.md`, 2026-11-25). Their lanes
+prove the audio side only. `build.yml` adds `-DPULP_ENABLE_GPU=OFF` to its
+non-macOS legs, `cross-platform-check.yml` configures GPU-off and skips the
+software-GPU render proof while `PULP_LEGACY_DESKTOP_UI` is `off`, and
+`test/cmake/test_ios_compile_gate.sh` has no GPU or editor leg. The macOS
+configure is unchanged, so the required gate is unaffected apart from the iOS
+leg. A red Linux or Windows UI test after this is a lane that should not run
+it, not a regression to chase.
+
 ## The iOS gate is skipped on a trusted digest receipt — watch the control
 
 The Build step skips the iOS compile gate when `tools/ci/ios_gate_digest.py

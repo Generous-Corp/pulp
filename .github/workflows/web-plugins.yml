@@ -58,6 +58,13 @@ concurrency:
   group: web-plugins-${{ github.ref }}
   cancel-in-progress: true
 
+# The browser UI host (PulpWebUi.cmake) is quarantined in
+# integrations/legacy-platform-hosts until the web Vellum host lands, so this
+# lane proves the DSP-only WAM and WebCLAP builds. "on" restores the Pulp UI
+# wasm module, its browser fixture and the shipped GPU demo page.
+env:
+  PULP_LEGACY_WEB_UI: "off"
+
 jobs:
   # The timeline conformance runner, compiled to WASM and actually RUN.
   # `core/interchange/tools/fixture_runner_main.cpp` says the same binary runs
@@ -404,6 +411,7 @@ jobs:
       # once. The fixture asserts on real pixels and a real pointer gesture —
       # nothing a native unit test can reach.
       - name: Build the Pulp UI wasm module
+        if: env.PULP_LEGACY_WEB_UI == 'on'
         run: |
           set -euo pipefail
           emcmake cmake -S examples/web-demos/super-convolver-ui -B build-webui \
@@ -413,6 +421,7 @@ jobs:
           tools/ci/governed-build.sh cmake --build build-webui
 
       - name: Pulp UI browser fixture (headless Chrome)
+        if: env.PULP_LEGACY_WEB_UI == 'on'
         env:
           CHROME_PATH: ${{ steps.chrome.outputs.chrome-path }}
         run: |
@@ -654,6 +663,7 @@ jobs:
       # copy left in $HOME is not trusted: choc is fetched at an exact commit (the
       # pulp-webview-dnd-poc2 tag) into this job's own temp dir.
       - name: Vendor choc for the UI build
+        if: env.PULP_LEGACY_WEB_UI == 'on'
         env:
           CHOC_COMMIT: b586f33d1c9e8bee98c2b420a5b20bf525c3c7be
         run: |
@@ -667,6 +677,7 @@ jobs:
           echo "PULP_WAM_CHOC_INCLUDE=$dest" >> "$GITHUB_ENV"
 
       - name: Assemble the GPU demo page (the real one, from the real modules)
+        if: env.PULP_LEGACY_WEB_UI == 'on'
         run: |
           set -euo pipefail
           # The page's status strip is a Label in Pulp's own view tree, so the GPU page
@@ -690,6 +701,7 @@ jobs:
             --gpu-build "$GITHUB_WORKSPACE/build-gpu-dsp"
 
       - name: The shipped page runs its GPU engine (WebGPU REQUIRED)
+        if: env.PULP_LEGACY_WEB_UI == 'on'
         env:
           PULP_REQUIRE_WEBGPU: "1"
           CHROME_PATH: ${{ steps.chrome-macos.outputs.chrome-path }}
@@ -699,7 +711,7 @@ jobs:
             --site examples/web-demos/wclap-build/cloudflare/public
 
       - name: Upload the proof screenshot
-        if: always()
+        if: always() && env.PULP_LEGACY_WEB_UI == 'on'
         uses: actions/upload-artifact@v7.0.2
         with:
           name: gpu-audio-macos

@@ -2981,6 +2981,12 @@ jobs:
           # (tools/cmake/PulpLinkMaps.cmake). The map is a side output, the
           # linked bytes are unchanged, and it does nothing off Apple linkers.
           cmake_args=(-DCMAKE_BUILD_TYPE=Release -DPULP_BUILD_EXAMPLES=OFF -DPULP_RECORD_LINK_MAPS=ON)
+          # Linux and Windows build UI-off: their UI hosts are quarantined in
+          # integrations/legacy-platform-hosts until their Vellum hosts land.
+          # macOS is untouched, so the required gate configures as before.
+          if [ "${RUNNER_OS}" != "macOS" ]; then
+            cmake_args+=(-DPULP_ENABLE_GPU=OFF)
+          fi
           # Compile, never run, the GPU-audio hardware-evidence targets: the
           # arm64 gate has the GPU, tests and the pinned Skia/Dawn, so exact
           # provider proof configures here, and the `gpu-proof` label keeps the

@@ -463,6 +463,16 @@ natively and still fails every web UI module with `wasm-ld: undefined symbol`.
 Add the file to that list in the same change, and build one web UI target
 (the `WAMv2 + WebCLAP` lane builds `super-convolver-ui`) before pushing.
 
+## The Pulp UI wasm module is off in CI while the web host is quarantined
+
+The browser UI host (`PulpWebUi.cmake` and its window host) lives in
+`integrations/legacy-platform-hosts/web/` until the web Vellum host lands.
+`web-plugins.yml` sets `PULP_LEGACY_WEB_UI: "off"`, which skips the
+`super-convolver-ui` build, its browser fixture and the shipped GPU demo page;
+the WAM and WebCLAP plug-ins still build and validate DSP-only. A change to the
+UI module is therefore not exercised by CI: flip the variable to `on` in a
+throwaway branch to prove one.
+
 ## Landmines that make a *rendering* build fail silently
 
 Both live in the `skia-gpu-build` skill's wasm section; know they exist:

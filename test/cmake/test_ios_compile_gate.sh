@@ -78,9 +78,7 @@ run_logged() {
 
     echo "iOS compile: $label"
     # Elapsed seconds per leg step, so a gate log attributes its wall time to
-    # the step that spent it (the GPU leg runs in the background and its log
-    # is only echoed once it has finished, so without this line its cost is
-    # invisible in the job log).
+    # the step that spent it.
     local started=$SECONDS
     local status=0
     if [[ ${#timeout_cmd[@]} -gt 0 ]]; then
@@ -103,111 +101,18 @@ mkdir -p "$build_root"
 # produces as faithfully as Xcode. Ninja configures in about a minute where the
 # Xcode generator takes seven to eight, and it honours the compiler launcher, so
 # a CI host's persistent ccache turns a repeat build into cache hits (the Xcode
-# generator ignores CMAKE_<LANG>_COMPILER_LAUNCHER). The GPU leg below stays on
-# Xcode: its AUv3 .appex and host-app embedding use Xcode product types, and a
-# Ninja configure of that tree fails CMake's Swift compiler check for iOS.
+# generator ignores CMAKE_<LANG>_COMPILER_LAUNCHER).
 if command -v ninja >/dev/null 2>&1; then
     sdk_generator=Ninja
 else
     sdk_generator=Xcode
 fi
 
-# GPU leg: compile examples/ios-auv3-gpu-smoke with PULP_ENABLE_GPU=ON.
-# The SDK legs configure GPU OFF, and the example is added under
-# if(IOS) with a documented GPU-ON configure, so without this leg nothing
-# in CI compiles its Skia/Dawn code path. The simulator slice is enough for
-# a compile gate — no device rendering. The slice is fetched into the build
-# tree (never the source checkout); FindSkia.cmake then selects the
-# simulator-arm64 subdir from the SDK + arch settings.
-#
-# The leg runs in the background while the two SDK legs build: its Xcode
-# configure is minutes of mostly serial try-compile work, so overlapping it with
-# the SDK builds takes it off the critical path. Its output goes to its own
-# logs; the gate waits for it and fails on its status before the Simulator
-# phase.
-gpu_leg() {
-    gpu_sdk=iphonesimulator
-    gpu_build_dir="$build_root/$gpu_sdk-gpu"
-    gpu_skia_dir="$build_root/skia-build-ios-simulator"
-
-    run_logged "iOS simulator Skia GPU slice fetch" 900 "$build_root/fetch-skia-ios-simulator.log" \
-        python3 "$root/tools/scripts/fetch_skia_for_release.py" \
-        ios-simulator-arm64-x86_64 --dest "$gpu_skia_dir" || return
-
-    gpu_skia_lib="$gpu_skia_dir/build/ios-gpu/lib/Release/simulator-arm64/libskia.a"
-    if [[ ! -f "$gpu_skia_lib" ]]; then
-        echo "ERROR: iOS simulator Skia slice missing at $gpu_skia_lib" >&2
-        return 1
-    fi
-
-    run_logged "$gpu_sdk GPU configure" 1200 "$build_root/configure-$gpu_sdk-gpu.log" \
-        cmake -S "$root" -B "$gpu_build_dir" -G Xcode \
-        -DCMAKE_SYSTEM_NAME=iOS \
-        -DCMAKE_OSX_SYSROOT="$gpu_sdk" \
-        -DCMAKE_OSX_ARCHITECTURES=arm64 \
-        -DCMAKE_OSX_DEPLOYMENT_TARGET=16.4 \
-        -DCMAKE_TRY_COMPILE_TARGET_TYPE=STATIC_LIBRARY \
-        -DCMAKE_BUILD_TYPE=Release \
-        -DPULP_BUILD_TESTS=OFF \
-        -DPULP_BUILD_EXAMPLES=ON \
-        -DPULP_ENABLE_GPU=ON \
-        -DPULP_REQUIRE_GPU_FOR_SDK=ON \
-        -DSKIA_DIR="$gpu_skia_dir" || return
-
-    if ! grep -q '^PULP_HAS_SKIA:INTERNAL=TRUE' "$gpu_build_dir/CMakeCache.txt"; then
-        echo "ERROR: $gpu_sdk GPU configure did not resolve Skia (PULP_HAS_SKIA != TRUE)" >&2
-        grep -i 'skia' "$build_root/configure-$gpu_sdk-gpu.log" >&2 || true
-        return 1
-    fi
-
-    run_logged "$gpu_sdk GPU example build" 1800 "$build_root/build-$gpu_sdk-gpu.log" \
-        "$root/tools/ci/governed-build.sh" \
-        cmake --build "$gpu_build_dir" --config Release \
-        --target PulpGpuSmoke_AUv3 --target PulpGpuSmoke_HostApp_Embed \
-        -- -sdk "$gpu_sdk" CODE_SIGNING_ALLOWED=NO || return
-
-    local gpu_appex gpu_host_app
-    gpu_appex=$(find "$gpu_build_dir" -type d -name "PulpGpuSmoke.appex" \
-        -not -path "*/PlugIns/*" -print -quit)
-    if [[ -z "$gpu_appex" ]]; then
-        echo "ERROR: $gpu_sdk GPU leg did not produce PulpGpuSmoke.appex" >&2
-        return 1
-    fi
-    echo "OK: iOS GPU smoke example compiled with PULP_ENABLE_GPU=ON (simulator Skia slice)"
-
-    # The build above runs with CODE_SIGNING_ALLOWED=NO, which hides any bundle
-    # layout that codesign rejects. Sign copies ad hoc, the way Xcode signs the
-    # products, so an extension that could never be installed fails here.
-    gpu_host_app=$(find "$gpu_build_dir" -type d -name "PulpGpuSmoke.app" -print -quit)
-    if [[ -z "$gpu_host_app" ]]; then
-        echo "ERROR: $gpu_sdk GPU leg did not produce PulpGpuSmoke.app" >&2
-        return 1
-    fi
-    run_logged "$gpu_sdk AUv3 ad-hoc signing" 300 "$build_root/sign-$gpu_sdk-gpu.log" \
-        bash "$root/tools/scripts/check_apple_bundle_signing.sh" \
-        "$gpu_appex" "$gpu_host_app" || return
-    echo "OK: iOS AUv3 extension and host app sign ad hoc and verify strictly"
-}
-
-# Stop each process before walking its children so it cannot spawn a new one
-# between the listing and the kill, then terminate and resume it.
-kill_tree() {
-    local child
-    kill -STOP "$1" 2>/dev/null || return 0
-    for child in $(pgrep -P "$1" 2>/dev/null); do
-        kill_tree "$child"
-    done
-    kill -TERM "$1" 2>/dev/null || true
-    kill -CONT "$1" 2>/dev/null || true
-}
-
-gpu_leg_started=$SECONDS
-gpu_leg >"$build_root/gpu-leg.log" 2>&1 &
-gpu_leg_pid=$!
-# Never leave the background leg (or the cmake/xcodebuild it spawned) running
-# past an SDK-leg failure.
-trap 'kill_tree "$gpu_leg_pid"' EXIT
-
+# No GPU or editor leg: the iOS UI host is quarantined in
+# integrations/legacy-platform-hosts until the iOS Vellum host lands, and the
+# required gate builds only the non-UI iOS targets above. A UI leg returns with
+# that host.
+sdk_legs_started=$SECONDS
 for sdk in iphonesimulator iphoneos; do
     build_dir="$build_root/$sdk"
     configure_log="$build_root/configure-$sdk.log"
@@ -257,18 +162,7 @@ for sdk in iphonesimulator iphoneos; do
     fi
 done
 
-sdk_legs_done=$SECONDS
-echo "iOS compile: SDK legs total ($((sdk_legs_done - gpu_leg_started))s)"
-gpu_leg_status=0
-wait "$gpu_leg_pid" || gpu_leg_status=$?
-trap - EXIT
-cat "$build_root/gpu-leg.log"
-# The GPU leg is the gate's critical path whenever this wait is non-zero.
-echo "iOS compile: GPU leg total ($((SECONDS - gpu_leg_started))s, waited $((SECONDS - sdk_legs_done))s after the SDK legs)"
-if [[ $gpu_leg_status -ne 0 ]]; then
-    echo "ERROR: iOS GPU leg failed (status $gpu_leg_status)" >&2
-    exit "$gpu_leg_status"
-fi
+echo "iOS compile: SDK legs total ($((SECONDS - sdk_legs_started))s)"
 
 simulator_udid=$(xcrun simctl list devices available -j | python3 -c '
 import json, re, sys
