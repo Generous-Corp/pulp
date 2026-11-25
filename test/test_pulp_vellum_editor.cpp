@@ -177,12 +177,17 @@ class StubHost final : public ::vellum::view::PluginViewHost {
         ++fixed_aspect_calls;
         aspect_ratio = ratio;
     }
-    void resume_presentation() override {
+    void resume_presentation() {
         ++resume_presentation_calls;
-        PluginViewHost::resume_presentation();
+        if constexpr (requires(PluginViewHost& host) { host.resume_presentation(); })
+            PluginViewHost::resume_presentation();
     }
     bool presentation_allowed() const noexcept {
-        return root_presentation_allowed();
+        if constexpr (requires(const StubHost& host) {
+                          host.root_presentation_allowed();
+                      })
+            return root_presentation_allowed();
+        return true;
     }
 
     int resume_presentation_calls = 0;
@@ -1329,7 +1334,12 @@ template <typename Root> struct PresentationFixture {
     PresentationFixture() {
         PluginViewHost::set_factory(
             [this](::vellum::view::View&, const PluginViewHost::Options& options) {
-                deferred = options.defer_presentation;
+                if constexpr (requires(const PluginViewHost::Options& o) {
+                                  o.defer_presentation;
+                              })
+                    deferred = options.defer_presentation;
+                else
+                    deferred = false;
                 auto stub = std::make_unique<StubHost>(options.size);
                 host = stub.get();
                 return stub;
@@ -1355,10 +1365,21 @@ struct PresentationGlobals {
     }
 };
 
+constexpr bool has_presentation_api() {
+    return requires(::vellum::view::PluginViewHost& host) {
+               host.resume_presentation();
+           } &&
+           requires(::vellum::view::PluginViewHost::Options& options) {
+               options.defer_presentation = true;
+           };
+}
+
 } // namespace
 
 TEST_CASE("A Vellum root that defers presentation presents nothing until its content is ready",
           "[pulp-vellum][editor][presentation]") {
+    if constexpr (!has_presentation_api())
+        SKIP("installed Vellum SDK has no deferred-presentation host API");
     PresentationGlobals globals;
     PresentationFixture<DeferredView> f;
     REQUIRE(f.deferred == std::optional<bool>{true});
@@ -1388,6 +1409,8 @@ TEST_CASE("A Vellum root that defers presentation presents nothing until its con
 
 TEST_CASE("A deferred Vellum root that never reports ready still presents after its timeout",
           "[pulp-vellum][editor][presentation]") {
+    if constexpr (!has_presentation_api())
+        SKIP("installed Vellum SDK has no deferred-presentation host API");
     PresentationGlobals globals;
     g_presentation_timeout = std::chrono::milliseconds{0};
     PresentationFixture<DeferredView> f;
@@ -1400,6 +1423,8 @@ TEST_CASE("A deferred Vellum root that never reports ready still presents after 
 
 TEST_CASE("A detached deferred Vellum root does not present from a stale timeout",
           "[pulp-vellum][editor][presentation]") {
+    if constexpr (!has_presentation_api())
+        SKIP("installed Vellum SDK has no deferred-presentation host API");
     PresentationGlobals globals;
     g_presentation_timeout = std::chrono::milliseconds{0};
     PresentationFixture<DeferredView> f;
@@ -1411,6 +1436,8 @@ TEST_CASE("A detached deferred Vellum root does not present from a stale timeout
 
 TEST_CASE("A deferring Vellum root without a readiness hook presents at attach",
           "[pulp-vellum][editor][presentation]") {
+    if constexpr (!has_presentation_api())
+        SKIP("installed Vellum SDK has no deferred-presentation host API");
     PresentationFixture<DeferredNativeView> f;
     REQUIRE(f.deferred == std::optional<bool>{true});
     CHECK(f.host->resume_presentation_calls == 0);
@@ -1420,6 +1447,8 @@ TEST_CASE("A deferring Vellum root without a readiness hook presents at attach",
 
 TEST_CASE("A Vellum root that does not opt in keeps immediate presentation",
           "[pulp-vellum][editor][presentation]") {
+    if constexpr (!has_presentation_api())
+        SKIP("installed Vellum SDK has no deferred-presentation host API");
     PresentationFixture<TestView> f;
     REQUIRE(f.deferred == std::optional<bool>{false});
     REQUIRE(f.attach());

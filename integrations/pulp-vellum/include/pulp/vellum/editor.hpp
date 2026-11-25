@@ -327,7 +327,11 @@ class Editor final : public format::Editor, public format::EditorAttachDiagnosti
             return;
         presentation_pending_ = false;
         presentation_resumed_ = true;
-        host_->resume_presentation();
+        if constexpr (requires(::vellum::view::PluginViewHost& host) {
+                          host.resume_presentation();
+                      }) {
+            host_->resume_presentation();
+        }
     }
 
     bool has_design_viewport() const {
