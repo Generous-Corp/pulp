@@ -5,6 +5,7 @@
 #include <pulp/render/gpu_compute.hpp>
 
 #include "harness/rt_allocation_probe.hpp"
+#include "support/gpu_software_adapter.hpp"
 
 #include <chrono>
 #include <cmath>
@@ -89,6 +90,15 @@ void require_close(const std::vector<float>& got, const std::vector<float>& want
         REQUIRE(std::abs(got[i] - want[i]) < 1e-5f);
 }
 
+// The async path is compared with the blocking path to 1e-5. A software
+// rasterizer rounds the float FFT differently and lands just outside that
+// bound, which measures the rasterizer rather than the overlap-add.
+std::string software_adapter(const pulp::render::GpuCompute& gpu) {
+    return pulp::test::software_adapter_skip_reason(
+        gpu.capabilities(),
+        "float FFT rounding on a CPU rasterizer exceeds the 1e-5 agreement bound");
+}
+
 constexpr auto kGenerous = std::chrono::microseconds(2'000'000);
 
 }  // namespace
@@ -107,6 +117,8 @@ TEST_CASE("WebGpuConvolver matches the blocking GpuConvolver", "[gpu_audio][web]
 
     auto gpu = make_device();
     if (!gpu) SKIP(kNoGpu);
+    if (const auto why = software_adapter(*gpu); !why.empty())
+        SKIP(why);
 
     WebGpuConvolver conv;
     REQUIRE(conv.prepare(gpu.get(), static_cast<int>(kSr), static_cast<int>(kBlock),
@@ -157,6 +169,8 @@ TEST_CASE("WebGpuConvolver delivers pipelined blocks in order", "[gpu_audio][web
 
     auto gpu = make_device();
     if (!gpu) SKIP(kNoGpu);
+    if (const auto why = software_adapter(*gpu); !why.empty())
+        SKIP(why);
 
     WebGpuConvolver conv;
     REQUIRE(conv.prepare(gpu.get(), static_cast<int>(kSr), static_cast<int>(kBlock),
@@ -197,6 +211,8 @@ TEST_CASE("WebGpuConvolver expiry does not corrupt the overlap-add history",
 
     auto gpu = make_device();
     if (!gpu) SKIP(kNoGpu);
+    if (const auto why = software_adapter(*gpu); !why.empty())
+        SKIP(why);
 
     WebGpuConvolver conv;
     REQUIRE(conv.prepare(gpu.get(), static_cast<int>(kSr), static_cast<int>(kBlock),
