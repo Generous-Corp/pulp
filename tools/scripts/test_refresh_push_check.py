@@ -799,6 +799,58 @@ def case_a_not_checked_merge_tree_is_recorded_and_named_in_the_verdict(fx: Fixtu
     assert "merge-tree script-state NOT CHECKED" in only_mt and "gates clean" not in only_mt, only_mt
 
 
+def _families_fast_path_run(fx: Fixture, merge_tree_rc: int, families_rc: int = 0, allow: str = "0"):
+    """Run the hook's real merge-tree exit handling and then its real families
+    step, with stubbed gates. Returns (families_ran, prepush_failed, exited_early)."""
+    hook = (ROOT / ".githooks/pre-push").read_text(encoding="utf-8")
+    c0 = hook.index('case "$_merge_tree_rc" in')
+    case = hook[c0:hook.index("\n        esac", c0) + len("\n        esac")]
+    f0 = hook.index('if [ -f "$SURFACE_FAMILIES" ]')
+    f1 = hook.index('gate_could_not_run "changed_surface_script_families_static"', f0)
+    fam = hook[f0:hook.index("\nfi\n", f1) + 4]
+    marker = fx.tmp / "families-ran"
+    marker.unlink(missing_ok=True)
+    script = f"""
+prepush_receipt_note() {{ :; }}
+run_gate_captured() {{ echo ran >> {str(marker)!r}; return {families_rc}; }}
+prepush_fail() {{ echo PREPUSH_FAIL; }}
+gate_could_not_run() {{ echo COULD_NOT_RUN; }}
+SURFACE_FAMILIES={str(marker.parent / "families.py")!r}; : > "$SURFACE_FAMILIES"
+PYTHON=py; ROOT=.; BASE=origin/main; MERGE_TREE_BASE=origin/main; MERGE_TREE_BOUND=30
+PULP_PREPUSH_ALLOW_NOT_CHECKED={allow}
+_merge_tree_clean=0; _prepush_merge_tree_not_checked=0; _merge_tree_rc={merge_tree_rc}
+{case}
+{fam}
+echo DONE
+"""
+    res = subprocess.run(["bash", "-c", script], capture_output=True, text=True, encoding="utf-8")
+    return marker.exists(), "PREPUSH_FAIL" in res.stdout, "DONE" not in res.stdout
+
+
+def case_a_clean_merge_tree_suppresses_the_duplicate_families_check(fx: Fixture) -> None:
+    ran, failed, early = _families_fast_path_run(fx, 0)
+    assert (ran, failed, early) == (False, False, False), (ran, failed, early)
+
+
+def case_every_other_merge_tree_outcome_keeps_the_families_check(fx: Fixture) -> None:
+    # 2 internal error (advisory), 3 conflict (advisory), 4 not checked with the
+    # override, 5 bound ran out (advisory), and an unknown code.
+    for rc, allow in ((2, "0"), (3, "0"), (4, "1"), (5, "0"), (9, "0")):
+        ran, failed, early = _families_fast_path_run(fx, rc, allow=allow)
+        assert ran and not failed and not early, (rc, ran, failed, early)
+
+
+def case_a_failing_families_fallback_refuses_the_push(fx: Fixture) -> None:
+    for rc in (3, 5):
+        ran, failed, early = _families_fast_path_run(fx, rc, families_rc=1)
+        assert ran and failed, (rc, ran, failed)
+    ran, failed, _ = _families_fast_path_run(fx, 5, families_rc=2)
+    assert ran and failed
+    # After a clean merge-tree the duplicate is not run, so it cannot refuse.
+    ran, failed, _ = _families_fast_path_run(fx, 0, families_rc=1)
+    assert not ran and not failed
+
+
 def case_the_check_timeout_scales_with_load(fx: Fixture) -> None:
     """60 s floor, scaled up past one runnable task per core, capped."""
     from unittest import mock
@@ -892,7 +944,7 @@ def main() -> int:
                 failures.append(case.__name__)
                 print(f"FAIL {case.__name__}: {exc}")
     # Control: a suite that collected nothing would pass vacuously.
-    if len(CASES) < 21:
+    if len(CASES) < 24:
         print(f"FAIL collected only {len(CASES)} cases")
         return 1
     print(f"{len(CASES) - len(failures)}/{len(CASES)} passed")
