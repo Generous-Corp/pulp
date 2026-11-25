@@ -25,9 +25,9 @@ modules:
 
   - name: pulp_vellum_components
     path: integrations/pulp-vellum-components
-    summary: Retained Pulp view components (panic button, lasso, preferences panel, model manager) as Vellum views with a stable-id catalogue
+    summary: Retained Pulp view components (panic button, lasso, preferences panel, model manager, timeline arranger) as Vellum views with a stable-id catalogue
     status: experimental
-    dependencies: [state, format]
+    dependencies: [state, format, timeline, timeline_editor, timebase]
     docs: reference/modules.md#pulp_vellum_components
 
   - name: playback
