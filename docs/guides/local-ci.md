@@ -1184,6 +1184,28 @@ Such a dispatch also gets its own concurrency group per run, so a long proof on
 This is a deliberate trade: up to ~24 h of latency on a Windows regression, in
 exchange for merge-queue capacity and spend. Revisit if Windows parity becomes an
 active workstream rather than a background one.
+
+### Hosted Windows budget and compiler cache
+
+On a GitHub-hosted `windows-latest` runner (4 vCPUs, no remote ccache storage) a
+cold `cross-platform-check.yml` Windows build takes about 2 h 25 min and the
+suite about 30 min more, so the job's `timeout-minutes` is 300 (the hosted
+ceiling is 360). The job restores a ccache directory with `actions/cache/restore`
+(`.ccache` in the workspace, key prefix `ccache-windows-x64-`, newest entry from
+this branch first, then main) and saves it after the build with
+`actions/cache/save`, even when a test fails, so a repeat run recompiles only
+what changed. A self-hosted runner skips both steps and keeps its own storage.
+A pull request branch cannot write a cache entry that another branch reads, so
+it cannot poison main's cache.
+
+### Windows skips the source-selftest lane
+
+The Windows ctest in `cross-platform-check.yml` excludes the `source-selftest`
+label. Those registrations (`tools/ci/source_selftests.json`) only read the
+checkout, run on ubuntu-latest in the required `Enforce version & skill sync`
+job on every merge group, and many use POSIX-only fixtures. See
+`docs/guides/test-lanes.md`, "The source-selftest lane".
+
 ## The FetchContent cache had to point at a real path
 
 `build.yml` restored and saved three FetchContent paths and none of them ever

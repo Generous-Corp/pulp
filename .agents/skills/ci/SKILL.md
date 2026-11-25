@@ -1502,6 +1502,21 @@ line reads `cacheable 0`, check for `-- Building for: Visual Studio` in its
 configure log before checking the cache. The bake and server steps are in
 `docs/guides/local-ci.md`, "Windows build caches".
 
+A GitHub-hosted Windows leg is the opposite case: it starts empty with no remote
+ccache, so `cross-platform-check.yml` restores and saves a `.ccache` directory
+with `actions/cache` there (skipped on a self-hosted runner). A cold hosted
+build is about 2.5 hours and the suite 30 minutes, so its `timeout-minutes` is
+300; when a hosted Windows run is cancelled at the limit, read the step timings
+before blaming the test step.
+
+## The Windows nightly skips the source-selftest lane
+
+`cross-platform-check.yml`'s Windows ctest excludes the `source-selftest` label.
+Those Python registrations read only the checkout and run on ubuntu-latest in
+the required `Enforce version & skill sync` job, so the Windows copy added
+failures from POSIX-only fixtures and about 48 minutes of serial time, not
+coverage. A Windows-specific script belongs outside that manifest.
+
 ## Android minimum-API allocation check
 
 The Android workflow compiles and links the public aligned DSP buffer for both

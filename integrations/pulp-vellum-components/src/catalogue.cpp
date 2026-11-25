@@ -1,6 +1,7 @@
 #include <pulp/vellum_components/catalogue.hpp>
 
 #include <pulp/vellum_components/lasso.hpp>
+#include <pulp/vellum_components/model_manager_view.hpp>
 #include <pulp/vellum_components/preferences_panel.hpp>
 
 #include <functional>
@@ -31,6 +32,8 @@ const std::vector<Entry>& entries() {
              // binding restores the stored page, which needs the pages to exist.
              return std::make_unique<PreferencesPanel>();
          }},
+        {"pulp.model_manager",
+         [](const PulpViewComponentContext&) { return std::make_unique<ModelManagerView>(); }},
     };
     return table;
 }
