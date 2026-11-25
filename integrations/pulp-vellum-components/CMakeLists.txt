@@ -10,5 +10,7 @@ add_library(pulp::vellum-components ALIAS pulp-vellum-components)
 target_include_directories(pulp-vellum-components PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>)
 target_compile_features(pulp-vellum-components PUBLIC cxx_std_20)
+# pulp::state and pulp::format-core are PUBLIC because the installed headers
+# (preferences_panel.hpp, panic_target.hpp) include their headers.
 target_link_libraries(pulp-vellum-components PUBLIC
-    pulp::runtime pulp::state pulp::format-core Vellum::MirrorView_core)
+    pulp::state pulp::format-core Vellum::MirrorView_core)

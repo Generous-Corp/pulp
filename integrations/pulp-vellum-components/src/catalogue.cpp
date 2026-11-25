@@ -26,10 +26,10 @@ const std::vector<Entry>& entries() {
         {"pulp.lasso",
          [](const PulpViewComponentContext&) { return std::make_unique<LassoComponent>(); }},
         {"pulp.preferences_panel",
-         [](const PulpViewComponentContext& ctx) {
-             auto panel = std::make_unique<PreferencesPanel>();
-             panel->bind_persistence(ctx.preferences);
-             return panel;
+         [](const PulpViewComponentContext&) {
+             // Persistence is bound by the caller after the pages are added:
+             // binding restores the stored page, which needs the pages to exist.
+             return std::make_unique<PreferencesPanel>();
          }},
     };
     return table;

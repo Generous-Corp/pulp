@@ -256,6 +256,8 @@ TEST_CASE("the button's face is drawn when serviced and gone when hidden",
     const auto shown = testing::render(tree.root, 200, 100);
     // Inside the button face the pixels differ from the page background.
     CHECK_FALSE(testing::near(shown.at(14, 14), 10, 10, 10, 2));
+    // Below the button the page background shows through.
+    CHECK(testing::near(shown.at(150, 80), 10, 10, 10, 2));
     testing::maybe_write_png(tree.root, 200, 100, "panic-button-voices-and-midi.png");
 
     scripted.availability = PanicAvailability::unavailable;

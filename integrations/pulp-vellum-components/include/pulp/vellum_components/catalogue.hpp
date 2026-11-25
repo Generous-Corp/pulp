@@ -8,8 +8,11 @@
 /// `dynamic_cast` for callers that need its API. The context carries the
 /// Pulp-owned services a component binds to, so Vellum headers never name a
 /// Pulp state type.
+///
+/// This is not a `register_data_display` registration: data displays are
+/// built from a value feed alone, while these components need a context of
+/// Pulp-owned services, so the catalogue takes one at construction.
 
-#include <pulp/state/properties_file.hpp>
 #include <pulp/vellum_components/aliases.hpp>
 #include <pulp/vellum_components/panic_button.hpp>
 
@@ -24,9 +27,6 @@ namespace pulp::vellum_components {
 struct PulpViewComponentContext {
     /// Where the panic button raises its request. Empty means unavailable.
     PanicTarget panic;
-    /// Persistence for the preferences panel's active page. Not owned; must
-    /// outlive the panel.
-    state::PropertiesFile* preferences = nullptr;
 };
 
 /// Ids accepted by `make_pulp_view_component`, in catalogue order.

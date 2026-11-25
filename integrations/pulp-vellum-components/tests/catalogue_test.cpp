@@ -68,20 +68,23 @@ TEST_CASE("the context reaches the panic button", "[pulp-vellum-components][cata
     CHECK_FALSE(inert->trigger());
 }
 
-TEST_CASE("the context's properties file restores the preferences page",
+TEST_CASE("a catalogue preferences panel restores the stored page once bound",
           "[pulp-vellum-components][catalogue]") {
     pulp::state::PropertiesFile props;
-    props.set_string("preferences.active_page", "Stale");
-    PulpViewComponentContext ctx;
-    ctx.preferences = &props;
+    props.set_string("preferences.active_page", "Audio");
 
-    auto view = make_pulp_view_component("pulp.preferences_panel", ctx);
+    auto view = make_pulp_view_component("pulp.preferences_panel", {});
     auto* panel = dynamic_cast<PreferencesPanel*>(view.get());
     REQUIRE(panel);
-    CHECK(panel->has_persistence());
     panel->add_page("General", "gear", std::make_unique<::vellum::view::View>());
     panel->add_page("Audio", "audio", std::make_unique<::vellum::view::View>());
-    CHECK(panel->set_active_page(std::string_view("Audio")));
-    // Selections write back through the context's properties file.
-    CHECK(props.get_string("preferences.active_page") == std::optional<std::string>("Audio"));
+    CHECK(panel->active_page_title() == "General");
+
+    // Binding after the pages exist selects the stored one.
+    panel->bind_persistence(&props);
+    CHECK(panel->active_page_title() == "Audio");
+
+    // Later selections write back.
+    CHECK(panel->set_active_page(std::string_view("General")));
+    CHECK(props.get_string("preferences.active_page") == std::optional<std::string>("General"));
 }

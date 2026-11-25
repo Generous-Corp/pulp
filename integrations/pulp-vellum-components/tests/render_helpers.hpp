@@ -24,6 +24,9 @@ struct Frame {
     std::uint32_t height = 0;
 
     Pixel at(std::uint32_t x, std::uint32_t y) const {
+        REQUIRE(!pixels.empty());
+        REQUIRE(x < width);
+        REQUIRE(y < height);
         const auto o = (static_cast<std::size_t>(y) * width + x) * 4;
         return {pixels[o], pixels[o + 1], pixels[o + 2], pixels[o + 3]};
     }

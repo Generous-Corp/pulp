@@ -121,6 +121,7 @@ class ReleaseWorkflowWiringTests(unittest.TestCase):
         for flag in (
             "-DPULP_ENABLE_PULP_VELLUM=ON",
             "-DPULP_ENABLE_PULP_VELLUM_AUDIO=ON",
+            "-DPULP_ENABLE_PULP_VELLUM_COMPONENTS=ON",
             '-DCMAKE_PREFIX_PATH=$VELLUM_ROOT/sdk',
         ):
             self.assertIn(flag, WORKFLOW)
@@ -144,7 +145,7 @@ class ReleaseWorkflowWiringTests(unittest.TestCase):
         )
         self.assertEqual(
             sorted(matrix["platform_library_stems"]["darwin-arm64"]),
-            ["pulp-vellum", "pulp-vellum-audio", "pulp-vellum-scripted"],
+            ["pulp-vellum", "pulp-vellum-audio", "pulp-vellum-components", "pulp-vellum-scripted"],
         )
 
     def test_config_hints_staged_vellum_and_stays_optional(self) -> None:

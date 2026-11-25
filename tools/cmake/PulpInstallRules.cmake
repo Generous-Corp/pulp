@@ -215,6 +215,15 @@ if(TARGET pulp-vellum-audio)
         DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/pulp"
         FILES_MATCHING PATTERN "*.hpp" PATTERN "*.h")
 endif()
+# The optional retained view components link Vellum::MirrorView_core PUBLIC for
+# the same reason.
+if(TARGET pulp-vellum-components)
+    list(APPEND PULP_SDK_TARGETS pulp-vellum-components)
+    set(PULP_SDK_HAS_VELLUM_BRIDGE ON)
+    install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/integrations/pulp-vellum-components/include/pulp/"
+        DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/pulp"
+        FILES_MATCHING PATTERN "*.hpp" PATTERN "*.h")
+endif()
 
 # pulp-canvas links pulp-bundled-fonts privately when Skia is on.
 # CMake exports the canvas target through PulpTargets, and refuses unless
