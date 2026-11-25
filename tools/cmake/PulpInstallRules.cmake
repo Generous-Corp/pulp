@@ -203,6 +203,20 @@ if(TARGET pulp-vellum)
     list(APPEND PULP_SDK_TARGETS pulp-vellum)
     set(PULP_SDK_HAS_VELLUM_BRIDGE ON)
 endif()
+# The Vellum version the bridge was compiled against. PulpConfig requires it
+# exactly, so a consumer never pairs these archives with another Vellum ABI.
+get_property(PULP_SDK_VELLUM_VERSION GLOBAL PROPERTY PULP_VELLUM_SDK_VERSION)
+# Whether the installed Pulp::view, Pulp::canvas, Pulp::render,
+# Pulp::view-native and Pulp::design-import come from Vellum
+# (PulpVellumUiCompat.cmake). Off while Pulp builds its own UI libraries; the
+# change that removes them turns it on. It needs the bridge and must not
+# coexist with Pulp's own view core.
+set(PULP_SDK_UI_FROM_VELLUM OFF)
+if(PULP_SDK_UI_FROM_VELLUM AND (NOT TARGET pulp-vellum OR TARGET pulp-view-core))
+    message(FATAL_ERROR
+        "PULP_SDK_UI_FROM_VELLUM needs the Vellum bridge (pulp-vellum) and no "
+        "Pulp view core (pulp-view-core) in the same SDK")
+endif()
 if(TARGET pulp-vellum-scripted)
     list(APPEND PULP_SDK_TARGETS pulp-vellum-scripted)
 endif()

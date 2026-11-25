@@ -116,7 +116,17 @@ if(PULP_SDK_HAS_VELLUM_BRIDGE)
     file(GLOB _pulp_vellum_sdk_hints LIST_DIRECTORIES true
         "${PACKAGE_PREFIX_DIR}/share/pulp/vellum-sdk/*/sdk")
     list(SORT _pulp_vellum_sdk_hints COMPARE NATURAL ORDER DESCENDING)
-    find_package(Vellum CONFIG QUIET PATHS ${_pulp_vellum_sdk_hints})
+    # HINTS, not PATHS: the staged copy wins over a Vellum elsewhere on the
+    # system. The exact version this SDK's bridge was built against is
+    # required when it is known, so a different Vellum is not found at all
+    # rather than linked against archives compiled for another ABI.
+    set(_pulp_vellum_version "@PULP_SDK_VELLUM_VERSION@")
+    if(_pulp_vellum_version)
+        find_package(Vellum ${_pulp_vellum_version} EXACT CONFIG QUIET HINTS ${_pulp_vellum_sdk_hints})
+    else()
+        find_package(Vellum CONFIG QUIET HINTS ${_pulp_vellum_sdk_hints})
+    endif()
+    unset(_pulp_vellum_version)
     unset(_pulp_vellum_sdk_hints)
 endif()
 
@@ -268,11 +278,33 @@ unset(_pulp_sdk_export_targets)
 # This runs after the Skia attach above, so a Vellum-backed Pulp::canvas never
 # gains a second Skia beside the one in Vellum's provider, and before the
 # PULP_HAS_* / PULP_ENABLE_GPU facts below, which read the final target set.
-# An SDK without the bridge, or a consumer whose Vellum find failed, gets none.
+# One SDK-wide fact decides it: PULP_SDK_UI_FROM_VELLUM is on only in an SDK
+# whose UI libraries were removed in favour of Vellum's. An SDK that builds
+# Pulp's own UI, or a partial one (GPU or design import off), defines nothing,
+# so a missing Pulp::render never turns into a Vellum renderer.
+set(PULP_SDK_UI_FROM_VELLUM "@PULP_SDK_UI_FROM_VELLUM@")
 set(PULP_SDK_VELLUM_UI_COMPAT_TARGETS "")
-if(PULP_SDK_HAS_VELLUM_BRIDGE AND Vellum_FOUND)
-    include("${CMAKE_CURRENT_LIST_DIR}/PulpVellumUiCompat.cmake")
-    pulp_define_vellum_ui_compat_targets()
+if(PULP_SDK_UI_FROM_VELLUM AND PULP_SDK_HAS_VELLUM_BRIDGE)
+    if(Vellum_FOUND)
+        include("${CMAKE_CURRENT_LIST_DIR}/PulpVellumUiCompat.cmake")
+        pulp_define_vellum_ui_compat_targets()
+    else()
+        set(_pulp_ui_unexported "")
+        foreach(_pulp_ui_name IN ITEMS view canvas render view-native design-import)
+            if(NOT TARGET "Pulp::${_pulp_ui_name}")
+                list(APPEND _pulp_ui_unexported "Pulp::${_pulp_ui_name}")
+            endif()
+        endforeach()
+        if(_pulp_ui_unexported)
+            message(WARNING
+                "Pulp: this SDK serves ${_pulp_ui_unexported} from Vellum, but the "
+                "Vellum package was not found (looked for version "
+                "'@PULP_SDK_VELLUM_VERSION@' under ${PACKAGE_PREFIX_DIR}/share/pulp/vellum-sdk "
+                "and the usual search paths), so those targets are not defined.")
+        endif()
+        unset(_pulp_ui_name)
+        unset(_pulp_ui_unexported)
+    endif()
 endif()
 
 if(TARGET Pulp::yogacore)

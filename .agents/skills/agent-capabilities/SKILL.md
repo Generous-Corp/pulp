@@ -1693,13 +1693,20 @@ the bypass trailer by reflex:
   from `integrations/pulp-vellum/cmake/`, because `core_vellum_direction.py`
   rejects `Vellum::` target names under `tools/cmake`) defines
   `Pulp::view|canvas|render|view-native|design-import` as INTERFACE IMPORTED
-  targets over Vellum's mirror targets, but only for names the SDK no longer
-  exports itself. It installs no header and adds no archive, so no covered root
+  targets over Vellum's mirror targets, only in an SDK configured with
+  `PULP_SDK_UI_FROM_VELLUM` (off until Pulp's UI libraries are removed). Never
+  key that off one name's absence: a GPU-off or design-import-off bridge SDK
+  lacks `Pulp::render` or `Pulp::design-import` while still shipping Pulp's own
+  view. It installs no header and adds no archive, so no covered root
   or release-matrix stem moves. The headers consumers reach through those names
   are Vellum's (`vellum/...`), whose surface Vellum owns; note that the installed
   mirror refuses `vellum/render/gpu_surface.hpp` and `skia_surface.hpp` with an
   `#error`, so a probe or test reaching `Pulp::render` must use a supported
-  render header such as `render/texture_atlas.hpp`.
+  render header such as `render/texture_atlas.hpp`. Before the flag turns on:
+  a Vellum `Pulp::view` beside `Pulp::gpu-*` loads two GPU stacks, the mapped
+  `Pulp::view-native` carries JS, `view-audio`/`view-tooling` have no mirror
+  target, and PulpUtils/PulpReload/PulpJsBytecode/PulpPluginFormats branch on
+  `TARGET Pulp::view` and must read `PULP_UI_PROVIDER` instead.
 
 ## A platform header installed for per-binary recompilation is not capability surface
 

@@ -1705,30 +1705,39 @@ add_test(NAME cmake-canvas-fontconfig-link
 set_tests_properties(cmake-canvas-fontconfig-link PROPERTIES
     LABELS "cmake;format" TIMEOUT 60)
 
-# The installed package config serves Pulp's UI target names from Vellum for
-# any name the SDK does not export itself. Every scenario but `real` uses
-# stand-in targets and runs everywhere; `real` builds and runs the installed
-# consumer against the Vellum SDK this build found, and skips without one.
-foreach(_vellum_ui_compat_scenario wiring shape shadowed missing no-bridge no-vellum real)
+# The installed package config serves Pulp's UI target names from Vellum in an
+# SDK built without Pulp's own UI libraries, and defines nothing otherwise. The
+# stand-in scenarios run everywhere. `real` and `wrong-version` need a Vellum
+# SDK: in a build that found one (PULP_ENABLE_PULP_VELLUM=ON, as the Vellum SDK
+# consumer lane configures) they carry the pulp-vellum label that lane runs and
+# must not skip; elsewhere they report SKIP.
+foreach(_vellum_ui_compat_scenario
+        wiring shape pulp-ui partial-ui view-core missing twice no-bridge
+        no-vellum real wrong-version)
     set(_vellum_ui_compat_test "cmake-vellum-ui-compat-${_vellum_ui_compat_scenario}")
-    set(_vellum_ui_compat_vellum_dir "")
-    if(_vellum_ui_compat_scenario STREQUAL "real" AND Vellum_DIR)
-        set(_vellum_ui_compat_vellum_dir "${Vellum_DIR}")
+    set(_vellum_ui_compat_args "")
+    set(_vellum_ui_compat_labels "cmake;sdk")
+    if(_vellum_ui_compat_scenario STREQUAL "real" OR _vellum_ui_compat_scenario STREQUAL "wrong-version")
+        if(Vellum_DIR)
+            set(_vellum_ui_compat_args -DVELLUM_DIR=${Vellum_DIR} -DREQUIRE_VELLUM=ON)
+            set(_vellum_ui_compat_labels "cmake;sdk;pulp-vellum")
+        endif()
     endif()
     add_test(NAME ${_vellum_ui_compat_test}
         COMMAND ${CMAKE_COMMAND}
             -DPULP_SOURCE_DIR=${CMAKE_SOURCE_DIR}
             -DFIXTURE_DIR=${CMAKE_CURRENT_BINARY_DIR}/vellum-ui-compat
             -DSCENARIO=${_vellum_ui_compat_scenario}
-            -DVELLUM_DIR=${_vellum_ui_compat_vellum_dir}
+            ${_vellum_ui_compat_args}
             -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/test_vellum_ui_compat_package.cmake)
     set_tests_properties(${_vellum_ui_compat_test} PROPERTIES
-        LABELS "cmake;sdk"
+        LABELS "${_vellum_ui_compat_labels}"
         SKIP_REGULAR_EXPRESSION "SKIP: no installed Vellum SDK")
 endforeach()
 unset(_vellum_ui_compat_scenario)
 unset(_vellum_ui_compat_test)
-unset(_vellum_ui_compat_vellum_dir)
+unset(_vellum_ui_compat_args)
+unset(_vellum_ui_compat_labels)
 
 if(UNIX)
     if(Python3_Interpreter_FOUND)
