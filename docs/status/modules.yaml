@@ -18,14 +18,14 @@ modules:
 
   - name: pulp_vellum_audio
     path: integrations/pulp-vellum-audio
-    summary: A lock-free TripleBuffer provider that publishes Pulp audio-thread meter and scope frames to Vellum value feeds, plus Vellum MultiMeter, CorrelationMeter, SpectrogramView, WaveformView and WaveformOverviewView displays over pulp::signal and pulp::audio data
+    summary: A lock-free TripleBuffer provider that publishes Pulp audio-thread meter and scope frames to Vellum value feeds, plus Vellum MultiMeter, CorrelationMeter, SpectrogramView, WaveformView, WaveformOverviewView and EqCurveView displays over pulp::signal and pulp::audio data
     status: experimental
     dependencies: [runtime, audio, signal, pulp_vellum]
     docs: reference/modules.md#pulp_vellum_audio
 
   - name: pulp_vellum_components
     path: integrations/pulp-vellum-components
-    summary: Retained Pulp view components (panic button, lasso, preferences panel) as Vellum views with a stable-id catalogue
+    summary: Retained Pulp view components (panic button, lasso, preferences panel, model manager) as Vellum views with a stable-id catalogue
     status: experimental
     dependencies: [state, format]
     docs: reference/modules.md#pulp_vellum_components

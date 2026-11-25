@@ -1509,15 +1509,13 @@ build is about 2.5 hours and the suite 30 minutes, so its `timeout-minutes` is
 300; when a hosted Windows run is cancelled at the limit, read the step timings
 before blaming the test step.
 
-## Hosted Windows checkouts need LF bytes
+## The Windows nightly skips the source-selftest lane
 
-Git for Windows defaults to `core.autocrlf=true`, so a hosted Windows checkout
-turns every committed text file into CRLF. A test that diffs a committed
-artifact against a regenerated one, or hashes a file against a pinned digest,
-then fails on bytes nobody committed (the timeline schema drift checks and the
-`pulp help` registry digest were the first). Set `core.autocrlf=false` and
-`core.eol=lf` before `actions/checkout`, as `release-cli.yml` and the Windows
-job in `cross-platform-check.yml` do.
+`cross-platform-check.yml`'s Windows ctest excludes the `source-selftest` label.
+Those Python registrations read only the checkout and run on ubuntu-latest in
+the required `Enforce version & skill sync` job, so the Windows copy added
+failures from POSIX-only fixtures and about 48 minutes of serial time, not
+coverage. A Windows-specific script belongs outside that manifest.
 
 ## Android minimum-API allocation check
 

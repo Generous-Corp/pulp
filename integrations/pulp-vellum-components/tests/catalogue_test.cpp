@@ -3,6 +3,7 @@
 
 #include <pulp/vellum_components/catalogue.hpp>
 #include <pulp/vellum_components/lasso.hpp>
+#include <pulp/vellum_components/model_manager_view.hpp>
 #include <pulp/vellum_components/preferences_panel.hpp>
 
 #include <catch2/catch_test_macros.hpp>
@@ -33,7 +34,7 @@ TEST_CASE("every catalogue id constructs a Vellum view of its component type",
     const auto ctx = serviced_context(&requests);
 
     const std::vector<std::string_view> expected = {"pulp.panic_button", "pulp.lasso",
-                                                    "pulp.preferences_panel"};
+                                                    "pulp.preferences_panel", "pulp.model_manager"};
     REQUIRE(pulp_view_component_ids() == expected);
 
     auto panic = make_pulp_view_component("pulp.panic_button", ctx);
@@ -41,7 +42,10 @@ TEST_CASE("every catalogue id constructs a Vellum view of its component type",
     auto prefs = make_pulp_view_component("pulp.preferences_panel", ctx);
     REQUIRE(panic);
     REQUIRE(lasso);
+    auto models = make_pulp_view_component("pulp.model_manager", ctx);
     REQUIRE(prefs);
+    REQUIRE(models);
+    CHECK(dynamic_cast<ModelManagerView*>(models.get()));
     CHECK(dynamic_cast<PanicButton*>(panic.get()));
     CHECK(dynamic_cast<LassoComponent*>(lasso.get()));
     CHECK(dynamic_cast<PreferencesPanel*>(prefs.get()));
