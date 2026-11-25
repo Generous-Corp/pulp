@@ -121,36 +121,59 @@ export function rgbaPixel(png, x, y) {
 // way the C++ capture backend resolves it (browser_discovery.cpp): the
 // executable named by <PULP_HOME or ~/.pulp>/tools/chrome-for-testing/
 // current.json, which must sit under <version>/<platform>/ inside that root.
-export function managedBrowser(environment = process.env) {
+function managedRoot(environment) {
   const home = environment.PULP_HOME
     || (environment.HOME ? path.join(environment.HOME, ".pulp") : "");
-  if (!home) return "";
-  const root = path.join(home, "tools", "chrome-for-testing");
-  let current;
+  return home ? path.join(home, "tools", "chrome-for-testing") : "";
+}
+
+// One managed install record, resolved only under <version>/<platform+suffix>/.
+function managedRecord(root, name, suffix) {
+  let record;
   try {
-    current = JSON.parse(readFileSync(path.join(root, "current.json"), "utf8"));
+    record = JSON.parse(readFileSync(path.join(root, name), "utf8"));
   } catch {
-    return "";
+    return null;
   }
-  const { schema, version, platform, executable } = current ?? {};
+  const { schema, version, platform, executable } = record ?? {};
   if (schema !== 1 || typeof version !== "string" || typeof platform !== "string"
       || typeof executable !== "string" || !executable || path.isAbsolute(executable)) {
-    return "";
+    return null;
   }
   const parts = path.normalize(executable).split(path.sep);
-  if (parts.length < 3 || parts[0] !== version || parts[1] !== platform
+  if (parts.length < 3 || parts[0] !== version || parts[1] !== platform + suffix
       || parts.includes("..")) {
-    return "";
+    return null;
   }
   const candidate = path.join(root, executable);
   try {
-    if (!statSync(candidate).isFile()) return "";
+    if (!statSync(candidate).isFile()) return null;
     const realRoot = realpathSync(root);
-    if (!realpathSync(candidate).startsWith(realRoot + path.sep)) return "";
+    if (!realpathSync(candidate).startsWith(realRoot + path.sep)) return null;
   } catch {
+    return null;
+  }
+  return { version, platform, executable: candidate };
+}
+
+export function managedBrowser(environment = process.env) {
+  const root = managedRoot(environment);
+  if (!root) return "";
+  return managedRecord(root, "current.json", "")?.executable ?? "";
+}
+
+// The chrome-headless-shell installed beside the managed browser, accepted
+// only for the release and platform current.json names (browser_discovery.cpp).
+export function managedHeadlessShell(environment = process.env) {
+  const root = managedRoot(environment);
+  if (!root) return "";
+  const current = managedRecord(root, "current.json", "");
+  const shell = managedRecord(root, "headless-shell.json", "-headless-shell");
+  if (!current || !shell || shell.version !== current.version
+      || shell.platform !== current.platform) {
     return "";
   }
-  return candidate;
+  return shell.executable;
 }
 
 export function browserCandidates(environment = process.env) {
@@ -170,7 +193,10 @@ export function browserCandidates(environment = process.env) {
     // it when the canonical product setting is absent.
     environment.PULP_BROWSER,
     // The pinned build a developer installed, before any mutable system
-    // browser, so a local run measures the same Chrome as the product.
+    // browser, so a local run measures the same Chrome as the product. Its
+    // headless shell comes first: captures are headless, and the shell cannot
+    // stall on the window server the way the full browser can.
+    managedHeadlessShell(environment),
     managedBrowser(environment),
     "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
     "/Applications/Chromium.app/Contents/MacOS/Chromium",

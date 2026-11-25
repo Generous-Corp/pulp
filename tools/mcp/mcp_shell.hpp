@@ -47,7 +47,17 @@ struct ExecResult {
 /// success. An agent reading that result would conclude the plugin passed.
 inline ExecResult exec_with_status(const std::string& cmd) {
     ExecResult result;
+#if defined(_WIN32)
+    // _popen runs `cmd.exe /c <cmd>`. When the command line starts with a quote
+    // and holds more than two quotes (a quoted executable followed by a quoted
+    // argument), cmd strips the first and the last quote and runs the
+    // remainder, which is no longer a command. One extra outer pair is what
+    // `cmd /?` prescribes; cmd removes exactly that pair.
+    const std::string wrapped = "\"" + cmd + "\"";
+    FILE* pipe = PULP_MCP_POPEN(wrapped.c_str(), "r");
+#else
     FILE* pipe = PULP_MCP_POPEN(cmd.c_str(), "r");
+#endif
     if (!pipe) {
         result.status = -1;
         result.output = "Error: failed to run command";

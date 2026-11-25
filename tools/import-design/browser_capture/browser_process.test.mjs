@@ -20,6 +20,7 @@ import {
   recoverStaleBrowserProfiles,
   resolveOwnedBrowserIdentity,
   terminateBrowser,
+  headlessModeArguments,
 } from "./browser_process.mjs";
 
 function processExists(pid) {
@@ -748,3 +749,13 @@ while :; do sleep 1; done
       await rm(root, { recursive: true, force: true });
     }
   });
+
+test("only the full browser receives the headless-mode flag", () => {
+  assert.deepEqual(headlessModeArguments(
+    "/cache/151/mac-arm64-headless-shell/chrome-headless-shell-mac-arm64/chrome-headless-shell"), []);
+  assert.deepEqual(headlessModeArguments("/cft/chrome-headless-shell-win64/chrome-headless-shell.exe"), []);
+  assert.deepEqual(headlessModeArguments(
+    "/cache/151/mac-arm64/chrome-mac-arm64/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing"),
+    ["--headless=new"]);
+  assert.deepEqual(headlessModeArguments("/usr/bin/chromium"), ["--headless=new"]);
+});

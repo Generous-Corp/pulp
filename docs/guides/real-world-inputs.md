@@ -228,6 +228,32 @@ non-blocking after preparation.
   platform-owned. AUv3 or other mobile plugin sandboxes may require an app or
   companion process to provide the input.
 
+### Camera access from audio-plugin hosts
+
+An AUv2 component normally runs inside the host process. Its bundle cannot add
+the host's camera usage description or change the host's camera authorization.
+If a host has no camera usage description, or its sandbox and TCC policy deny
+camera access, a plugin must treat the camera as unavailable. A host that scans
+or isolates components in another process still owns that process's permission
+decision. An AUv2 bundle's own `Info.plist` is therefore not evidence that a
+DAW can grant it camera access.
+
+AUv3 and other mobile plugin extensions have the same product boundary from the
+consumer's perspective. The containing app owns camera permission, lifecycle,
+and model loading. The extension should receive normalized frames or ordered
+interaction events through an application-owned handoff. A standalone app or
+editor host can own the camera when its own `Info.plist` declares
+`NSCameraUsageDescription` and it requests access on a non-audio thread.
+
+Use two acceptance receipts when evaluating camera-driven audio. First prove
+the installed plugin with replay, MIDI, OSC, or IPC input and verify its audio
+or MIDI output in the target host. Then prove camera permission, capture, and
+inference in the standalone app or companion process and record the resulting
+provider frames. Do not call the AU or AUv3 camera path supported because an
+AU bundle loads or `auval` passes. This split keeps the plugin useful when a
+host denies camera access and makes the same mapping reusable by a browser,
+Swift app, Android app, or another provider.
+
 ### Mobile adapter recipe
 
 The mobile adapter can stay small because it only translates a platform event
