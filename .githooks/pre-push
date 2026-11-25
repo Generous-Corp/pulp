@@ -532,6 +532,7 @@ _prepush_merge_tree_not_checked=0
 if [ "${PULP_DISABLE_PREPUSH_GATES:-0}" = "1" ]; then
     echo "[pre-push] PULP_DISABLE_PREPUSH_GATES=1 — merge-tree script-state check DEMOTED to advisory." >&2
     prepush_receipt_note demoted merge-tree-script-state "PULP_DISABLE_PREPUSH_GATES=1"
+    _prepush_merge_tree_not_checked=1
 elif [ -f "$MERGE_TREE_SCRIPT_STATE" ]; then
     if git remote get-url origin >/dev/null 2>&1 && ! git fetch --quiet origin main; then
         echo "[pre-push] merge-tree script-state: could not refresh $MERGE_TREE_BASE; advisory, continuing with the local base." >&2
