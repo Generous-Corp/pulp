@@ -1502,6 +1502,21 @@ line reads `cacheable 0`, check for `-- Building for: Visual Studio` in its
 configure log before checking the cache. The bake and server steps are in
 `docs/guides/local-ci.md`, "Windows build caches".
 
+A GitHub-hosted Windows leg is the opposite case: it starts empty with no remote
+ccache, so `cross-platform-check.yml` restores and saves a `.ccache` directory
+with `actions/cache` there (skipped on a self-hosted runner). It is capped at 1 GB, keyed on toolchain plus dependency pins, and saved only by the nightly on main, because the repository's 10 GB Actions cache is already full. A cold hosted
+build is about 2.5 hours and the suite 30 minutes, so its `timeout-minutes` is
+300; when a hosted Windows run is cancelled at the limit, read the step timings
+before blaming the test step.
+
+## The Windows nightly skips the source-selftest lane
+
+`cross-platform-check.yml`'s Windows ctest excludes the `source-selftest` label.
+Those Python registrations read only the checkout and run on ubuntu-latest in
+the required `Enforce version & skill sync` job, so the Windows copy added
+failures from POSIX-only fixtures and about 48 minutes of serial time, not
+coverage. A Windows-specific script belongs outside that manifest.
+
 ## Android minimum-API allocation check
 
 The Android workflow compiles and links the public aligned DSP buffer for both
@@ -13944,3 +13959,12 @@ merge: that once emptied a PR's diff. Use the helper instead:
 
 Review the printed stat before pushing; push once. Tests:
 `tools/scripts/test_regen_agent_capability_after_merge.py`.
+
+## The Vellum SDK consumer lane builds every optional Vellum package
+
+`vellum-sdk-consumer.yml` configures `PULP_ENABLE_PULP_VELLUM`, `_AUDIO` and
+`_COMPONENTS` together and builds each package's test target against Vellum
+main's SDK. A new optional Vellum integration package needs its option, its
+`pulp-test-*` target and a `paths:` entry added there, or no lane compiles it
+against main. The tests' ctest label should start with `pulp-vellum` so the
+lane's `-L pulp-vellum` filter runs them.

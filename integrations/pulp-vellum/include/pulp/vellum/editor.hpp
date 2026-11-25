@@ -22,6 +22,7 @@
 #include <pulp/format/processor.hpp>
 #include <pulp/runtime/log.hpp>
 #include <pulp/vellum/editor_env.hpp>
+#include <pulp/vellum/editor_keys.hpp>
 #include <pulp/vellum/param_port_model.hpp>
 #include <pulp/vellum/visual_port_feed.hpp>
 
@@ -258,6 +259,15 @@ class Editor final : public format::Editor, public format::EditorAttachDiagnosti
         }
         if (published)
             host_->request_frame();
+    }
+
+    // Space reaches a focused text field instead of the host's transport;
+    // every other key, and Space with nothing to take it, goes back to the
+    // host. See editor_keys.hpp.
+    format::KeyDisposition offer_key(const format::EditorKeyEvent& event) override {
+        if (invalidated_ || root_ == nullptr)
+            return format::KeyDisposition::forward;
+        return offer_editor_key(*root_, event);
     }
 
     format::EditorAutomation* automation() override {
