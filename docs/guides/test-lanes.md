@@ -312,6 +312,14 @@ stopped compiling and no Pulp check noticed.
   retained Pulp view components against Vellum main's view layer and renders
   them offscreen. PRs touching `integrations/pulp-vellum-components/**` run the
   lane.
+- **Scene3d renderer.** The same configure turns on `PULP_ENABLE_SCENE3D` and
+  `PULP_ENABLE_PULP_VELLUM_RENDERER3D`. `pulp-test-pulp-vellum-renderer3d`
+  (ctest label `pulp-vellum-renderer3d`, also matched by `-L pulp-vellum`)
+  renders through gpu-runtime's device and, while `core/render` still has the
+  legacy renderer, renders each frame with both and requires identical pixels.
+  On Metal it also checks the frame fingerprint that `renderer3d-goldens.json`
+  records. PRs touching
+  `integrations/pulp-vellum-renderer3d/**` run the lane.
 - **Vellum-backed UI target names.** The `pulp-vellum` filter also runs
   `cmake-vellum-ui-compat-real` and `cmake-vellum-ui-compat-wrong-version`. In a
   configure that found Vellum they get that label and `REQUIRE_VELLUM`, so they

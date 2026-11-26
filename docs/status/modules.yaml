@@ -30,6 +30,13 @@ modules:
     dependencies: [state, format]
     docs: reference/modules.md#pulp_vellum_components
 
+  - name: pulp_vellum_renderer3d
+    path: integrations/pulp-vellum-renderer3d
+    summary: The native scene3d renderer on gpu-runtime, Vellum's GPU device layer, with no pulp::render; it draws offscreen and reads back RGBA, a frame census and a PNG
+    status: experimental
+    dependencies: [scene]
+    docs: reference/modules.md#pulp_vellum_renderer3d
+
   - name: playback
     summary: Master transport optional session-tempo sync immutable incrementally compiled track and automation programs bounded deterministic cursors WAV-backed arrangement audio rendering block-coherent publication and stable renderer shells
     status: experimental
