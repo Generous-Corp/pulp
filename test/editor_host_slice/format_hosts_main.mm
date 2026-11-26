@@ -319,7 +319,9 @@ void run_au(void* parent) {
             CFRelease(info.mCocoaAUViewBundleLocation);
             CFRelease(info.mCocoaAUViewClass[0]);
             id<AUCocoaUIBase> factory = [[factory_class alloc] init];
-            NSView* view = [factory uiViewForAudioUnit:au withSize:NSMakeSize(320, 200)];
+            // Created smaller than the size it is then resized to, so the check
+            // below sees the resize reach the editor, not the creation size.
+            NSView* view = [factory uiViewForAudioUnit:au withSize:NSMakeSize(300, 180)];
             check(f, view != nil, "attach to a real NSView");
             if (view == nil)
                 break;
@@ -360,6 +362,164 @@ void run_au(void* parent) {
     AudioComponentInstanceDispose(au);
 }
 
+// ── Fixed-size control ───────────────────────────────────────────────────────
+//
+// The slice's editors declare a minimum, so they are resizable. These runs use
+// editors that declare none: the host's resize call succeeds (or, for AU v2, is
+// only a frame change), `set_size()` is never called, and the editor keeps the
+// size it opened at.
+
+constexpr std::uint32_t kFixedHostWidth = 400;
+constexpr std::uint32_t kFixedHostHeight = 260;
+
+class FixedSizeScope {
+  public:
+    FixedSizeScope() {
+        slice_set_fixed_size_editors(true);
+    }
+    ~FixedSizeScope() {
+        slice_set_fixed_size_editors(false);
+    }
+};
+
+// Checks that a resize to the host size left a fixed-size editor alone.
+void check_fixed_size_kept(const char* format, const format::Editor* editor,
+                           const format::EditorSize& opened, std::uint32_t calls_before) {
+    check(format, slice_fixed_editor_set_size_calls() == calls_before,
+          "a fixed-size editor's set_size is never called");
+    check(format,
+          editor != nullptr && editor->size().width == opened.width &&
+              editor->size().height == opened.height,
+          "a fixed-size editor keeps the size it opened at");
+}
+
+void run_vst3_fixed(void* parent) {
+    const char* f = "vst3-fixed";
+    FixedSizeScope fixed;
+    Vst3HostApp app;
+    Vst3Handler handler;
+    format::vst3::PulpVst3Processor vst3(GainMeterProcessor::create);
+    check(f, vst3.initialize(&app) == Steinberg::kResultOk, "the component initializes");
+    vst3.setComponentHandler(&handler);
+    auto* view = dynamic_cast<format::vst3::ContractPlugView*>(
+        vst3.createView(Steinberg::Vst::ViewType::kEditor));
+    check(f, view != nullptr, "createView returns the contract view");
+    if (view == nullptr)
+        return;
+    check(f, view->attached(parent, Steinberg::kPlatformTypeNSView) == Steinberg::kResultTrue,
+          "attach to a real NSView");
+    check(f, view->canResize() == Steinberg::kResultFalse, "the view reports itself not resizable");
+    const auto opened = view->editor()->size();
+    check(f, opened.width != kFixedHostWidth, "the control resizes to a different size");
+    const auto calls = slice_fixed_editor_set_size_calls();
+    Steinberg::ViewRect rect(0, 0, kFixedHostWidth, kFixedHostHeight);
+    check(f, view->onSize(&rect) == Steinberg::kResultTrue, "the host's resize call succeeds");
+    check_fixed_size_kept(f, view->editor(), opened, calls);
+    view->removed();
+    view->release();
+    vst3.terminate();
+}
+
+void run_clap_fixed(void* parent) {
+    const char* f = "clap-fixed";
+    FixedSizeScope fixed;
+    clap_host_t host{};
+    host.clap_version = CLAP_VERSION;
+    host.name = "pulp-slice-formats";
+    host.vendor = "Pulp";
+    host.url = "";
+    host.version = "1";
+    host.get_extension = [](const clap_host_t*, const char*) -> const void* { return nullptr; };
+    host.request_restart = [](const clap_host_t*) {};
+    host.request_process = [](const clap_host_t*) {};
+    host.request_callback = [](const clap_host_t*) {};
+
+    check(f, clap_entry.init("pulp-slice-formats"), "the entry initializes");
+    auto* factory =
+        static_cast<const clap_plugin_factory_t*>(clap_entry.get_factory(CLAP_PLUGIN_FACTORY_ID));
+    const auto* desc = factory->get_plugin_descriptor(factory, 0);
+    const clap_plugin_t* plugin = factory->create_plugin(factory, &host, desc->id);
+    check(f, plugin != nullptr && plugin->init(plugin), "the plug-in instantiates");
+    if (plugin == nullptr)
+        return;
+    const auto* gui =
+        static_cast<const clap_plugin_gui_t*>(plugin->get_extension(plugin, CLAP_EXT_GUI));
+    if (gui != nullptr) {
+        check(f, gui->create(plugin, CLAP_WINDOW_API_COCOA, false), "gui create");
+        clap_window_t window{};
+        window.api = CLAP_WINDOW_API_COCOA;
+        window.cocoa = parent;
+        check(f, gui->set_parent(plugin, &window), "attach to a real NSView");
+        check(f, !gui->can_resize(plugin), "the GUI reports itself not resizable");
+        auto* session = format::clap_adapter::contract_gui_session(plugin);
+        auto* editor = session != nullptr ? session->editor() : nullptr;
+        check(f, editor != nullptr, "the GUI's contract session is reachable");
+        if (editor != nullptr) {
+            const auto opened = editor->size();
+            check(f, opened.width != kFixedHostWidth, "the control resizes to a different size");
+            const auto calls = slice_fixed_editor_set_size_calls();
+            check(f, gui->set_size(plugin, kFixedHostWidth, kFixedHostHeight),
+                  "the host's resize call succeeds");
+            check_fixed_size_kept(f, editor, opened, calls);
+        }
+        gui->destroy(plugin);
+    } else {
+        check(f, false, "the plug-in offers its contract GUI");
+    }
+    plugin->destroy(plugin);
+    clap_entry.deinit();
+}
+
+void run_au_fixed(void* parent) {
+    const char* f = "au-fixed";
+    FixedSizeScope fixed;
+    AudioComponentDescription desc{kAudioUnitType_Effect, 'SlFm', 'PlSf', 0, 0};
+    AudioComponent comp = AudioComponentRegister(
+        &desc, CFSTR("Pulp: editor-host slice formats, fixed size"), 1,
+        reinterpret_cast<AudioComponentFactoryFunction>(PulpSliceFormatsAUFactory));
+    AudioUnit au = nullptr;
+    check(f, comp != nullptr && AudioComponentInstanceNew(comp, &au) == noErr,
+          "the audio unit instantiates");
+    if (au == nullptr)
+        return;
+    NSView* host_view = (__bridge NSView*)parent;
+    const int baseline = host_view_subview_count(parent);
+    @autoreleasepool {
+        AudioUnitCocoaViewInfo info{};
+        UInt32 size = sizeof(info);
+        const bool advertised =
+            AudioUnitGetProperty(au, kAudioUnitProperty_CocoaUI, kAudioUnitScope_Global, 0, &info,
+                                 &size) == noErr;
+        check(f, advertised, "the unit advertises its Cocoa view");
+        if (advertised) {
+            Class factory_class = NSClassFromString((__bridge NSString*)info.mCocoaAUViewClass[0]);
+            CFRelease(info.mCocoaAUViewBundleLocation);
+            CFRelease(info.mCocoaAUViewClass[0]);
+            id<AUCocoaUIBase> factory = [[factory_class alloc] init];
+            NSView* view = [factory uiViewForAudioUnit:au withSize:NSMakeSize(300, 180)];
+            check(f, view != nil, "attach to a real NSView");
+            if (view != nil) {
+                [host_view addSubview:view];
+                auto* session = format::au::contract_view_session((__bridge void*)view);
+                auto* editor = session != nullptr ? session->editor() : nullptr;
+                check(f, editor != nullptr, "the view's contract session is reachable");
+                if (editor != nullptr) {
+                    const auto opened = editor->size();
+                    check(f, opened.width != kFixedHostWidth,
+                          "the control resizes to a different size");
+                    const auto calls = slice_fixed_editor_set_size_calls();
+                    [view setFrameSize:NSMakeSize(kFixedHostWidth, kFixedHostHeight)];
+                    check_fixed_size_kept(f, editor, opened, calls);
+                }
+                [view removeFromSuperview];
+            }
+        }
+    }
+    host_pump_events();
+    check(f, host_view_subview_count(parent) == baseline, "closing removed every subview");
+    AudioComponentInstanceDispose(au);
+}
+
 } // namespace
 
 int main() {
@@ -373,6 +533,9 @@ int main() {
     run_vst3(parent);
     run_clap(parent);
     run_au(parent);
+    run_vst3_fixed(parent);
+    run_clap_fixed(parent);
+    run_au_fixed(parent);
     host_window_destroy(window);
     std::printf("[%s/formats] %s\n", SLICE_KIND, g_failures == 0 ? "PASS" : "FAIL");
     return g_failures == 0 ? 0 : 1;
