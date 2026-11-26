@@ -43,3 +43,48 @@ TEST_CASE("import-design reports a source Vellum cannot import yet", "[cli][impo
     CHECK(err.str().find("now\nlives in the Vellum CLI") != std::string::npos);
     CHECK(err.str().find("Vellum has no import route for this source yet.") != std::string::npos);
 }
+
+TEST_CASE("import-design translates a baked emit in full", "[cli][import]") {
+    using Args = std::vector<std::string>;
+    CHECK(vellum_import_spelling(Args{"--from", "figma", "--file", "d.json", "--mode", "baked",
+                                      "--emit", "cpp", "--output", "ui.cpp"}) ==
+          "vellum import --source-type figma d.json --mode baked --emit cpp --out ui.cpp");
+    CHECK(vellum_import_spelling(Args{"--from", "pencil", "--file", "p.pen", "--mode", "baked",
+                                      "--emit", "swiftui", "--output", "Panel.swift"}) ==
+          "vellum import pencil p.pen --mode baked --emit swiftui --out Panel.swift");
+    CHECK(vellum_import_spelling(Args{"--from", "jsx", "--file", "b.js", "--mode", "baked",
+                                      "--emit", "ir-json", "--output", "ui.json"}) ==
+          "vellum import jsx b.js --mode baked --emit ir-json --out ui.json");
+}
+
+TEST_CASE("import-design names an argument vellum import cannot express", "[cli][import]") {
+    using Args = std::vector<std::string>;
+    const Args project_output{"--from", "figma", "--file", "d.json", "--output", "ui.js"};
+    CHECK(vellum_import_spelling(project_output).empty());
+    CHECK(pulp::cli::unsupported_import_design_option(project_output) == "--output");
+    CHECK(pulp::cli::unsupported_import_design_option(
+              Args{"--from", "figma", "--file", "d.json", "--tokens", "t.json"}) == "--tokens");
+    CHECK(pulp::cli::unsupported_import_design_option(Args{"--url", "https://example.invalid"}) ==
+          "--url");
+    CHECK(pulp::cli::unsupported_import_design_option(
+              Args{"--from", "jsx", "--file", "b.js", "--mode", "baked", "--emit", "cpp"}) ==
+          "--emit cpp --from jsx");
+    CHECK(pulp::cli::unsupported_import_design_option(Args{"--from", "pencil", "--file", "p.pen"})
+              .empty());
+
+    std::ostringstream err;
+    auto* old = std::cerr.rdbuf(err.rdbuf());
+    const int code = report_import_design_moved(project_output);
+    std::cerr.rdbuf(old);
+    CHECK(code == 2);
+    CHECK(err.str().find("`vellum import` has no equivalent for --output.") != std::string::npos);
+    CHECK(err.str().find("Equivalent:") == std::string::npos);
+}
+
+TEST_CASE("import-design quotes shell metacharacters in the spelling", "[cli][import]") {
+    using Args = std::vector<std::string>;
+    CHECK(vellum_import_spelling(Args{"--from", "pencil", "--file", "a;b(1)*.pen"}) ==
+          "vellum import pencil 'a;b(1)*.pen'");
+    CHECK(vellum_import_spelling(Args{"--from", "pencil", "--file", "x|y&z>w"}) ==
+          "vellum import pencil 'x|y&z>w'");
+}
