@@ -31,6 +31,7 @@ on:
       - 'integrations/pulp-vellum/**'
       - 'integrations/pulp-vellum-audio/**'
       - 'integrations/pulp-vellum-components/**'
+      - 'integrations/pulp-vellum-renderer3d/**'
       - 'integrations/pulp-vellum-graph/**'
       - 'integrations/pulp-vellum/cmake/PulpVellumEditorPackage.cmake'
       - 'test/test_pulp_vellum_editor.cpp'
@@ -168,6 +169,8 @@ jobs:
             -DPULP_ENABLE_PULP_VELLUM=ON \
             -DPULP_ENABLE_PULP_VELLUM_AUDIO=ON \
             -DPULP_ENABLE_PULP_VELLUM_COMPONENTS=ON \
+            -DPULP_ENABLE_SCENE3D=ON \
+            -DPULP_ENABLE_PULP_VELLUM_RENDERER3D=ON \
             -DPULP_ENABLE_PULP_VELLUM_GRAPH=ON \
             -DCMAKE_PREFIX_PATH="${{ steps.sdk.outputs.prefix }}"
           # Every executable under integrations/pulp-vellum*/ and every program
