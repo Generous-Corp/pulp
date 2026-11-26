@@ -27,6 +27,7 @@
    "test/cmake/motion_tests.cmake",
    "test/cmake/script_canvas_render_tests.cmake",
    "test/cmake/test_pulp_install_format_sources.cmake",
+   "test/cmake/test_sdk_provenance_contract.cmake",
    "test/cmake/view_host_tests.cmake",
    "test/test_accessibility_tree.cpp",
    "test/test_drag_drop.cpp",
