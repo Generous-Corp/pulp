@@ -312,6 +312,14 @@ stopped compiling and no Pulp check noticed.
   retained Pulp view components against Vellum main's view layer and renders
   them offscreen. PRs touching `integrations/pulp-vellum-components/**` run the
   lane.
+- **Graph editor.** `PULP_ENABLE_PULP_VELLUM_GRAPH` is on in the same
+  configure. `pulp-test-pulp-vellum-graph` (ctest label `pulp-vellum-graph`,
+  also matched by `-L pulp-vellum`) drives the SignalGraph node editor through
+  Vellum's pointer routing and renders it offscreen, and
+  `pulp-vellum-graph-link-edges` checks that the package links `pulp::host` and
+  Vellum's view layer and names no Pulp view target; its negative control runs
+  the same check over a closure with `pulp::view-core` added and must fail.
+  PRs touching `integrations/pulp-vellum-graph/**` run the lane.
 - **Vellum-backed UI target names.** The `pulp-vellum` filter also runs
   `cmake-vellum-ui-compat-real` and `cmake-vellum-ui-compat-wrong-version`. In a
   configure that found Vellum they get that label and `REQUIRE_VELLUM`, so they
