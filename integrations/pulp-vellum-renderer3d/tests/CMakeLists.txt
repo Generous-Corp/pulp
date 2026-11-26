@@ -1,7 +1,11 @@
 find_package(Threads REQUIRED)
 if(PULP_BUILD_TESTS AND TARGET Catch2::Catch2WithMain)
     add_executable(pulp-test-pulp-vellum-renderer3d
-        ${CMAKE_CURRENT_SOURCE_DIR}/renderer3d_cube_test.cpp)
+        ${CMAKE_CURRENT_SOURCE_DIR}/renderer3d_cube_test.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/renderer3d_scene_test.cpp)
+    # The CPU module tests include the package's private headers.
+    target_include_directories(pulp-test-pulp-vellum-renderer3d PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/../src)
     target_link_libraries(pulp-test-pulp-vellum-renderer3d PRIVATE
         pulp::vellum-renderer3d Catch2::Catch2WithMain Threads::Threads)
     target_compile_definitions(pulp-test-pulp-vellum-renderer3d PRIVATE
