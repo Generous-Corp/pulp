@@ -1,0 +1,715 @@
+{
+ "schema_version": 1,
+ "description": "Disposition of every directory under examples/ for the phased Vellum cut (macOS first). The classification follows what each example links and includes, not its name. tools/scripts/examples_manifest_guard.py keeps this file and the directory in step.",
+ "classes": {
+  "audio-only": "Retained in Pulp. No link to pulp::view, pulp::render or pulp::canvas and no include from pulp/view, pulp/render or pulp/canvas. A plug-in here has either no editor or only the framework-default editor, which it does not write code for.",
+  "moves-to-vellum": "Retained, with its UI consumed from Vellum. The example links or includes the view, render or canvas layers, or sets a GPU or full editor stack, so it is rebuilt against the Vellum SDK when those layers leave Pulp.",
+  "quarantined": "UI-off on the platform until that platform's Vellum host exists. The example moves under the legacy platform hosts with the code it needs and is deleted in the named later phase.",
+  "deleted": "Removed. The entry must give the reason."
+ },
+ "examples": {
+  "a10-routing-hosting-consumer": {
+   "class": "audio-only",
+   "platform": "cross",
+   "evidence": "SDK consumer project (find_package(Pulp)) with no view, render or canvas reference",
+   "editor": "none"
+  },
+  "a2-modular-instrument-consumer": {
+   "class": "audio-only",
+   "platform": "cross",
+   "evidence": "SDK consumer project (find_package(Pulp)) with no view, render or canvas reference",
+   "editor": "none"
+  },
+  "a3-spectral-replay-consumer": {
+   "class": "audio-only",
+   "platform": "cross",
+   "evidence": "SDK consumer project (find_package(Pulp)) with no view, render or canvas reference",
+   "editor": "none"
+  },
+  "agent-toolkit-synth": {
+   "class": "audio-only",
+   "platform": "cross",
+   "evidence": "SDK consumer project (find_package(Pulp)) with no view, render or canvas reference",
+   "editor": "none",
+   "gate": "APPLE AND PULP_ENABLE_GPU"
+  },
+  "android-synth": {
+   "class": "quarantined",
+   "platform": "android",
+   "quarantine": "C4b-android",
+   "evidence": "scripted GPU synth; README only, built by android/app"
+  },
+  "ara-pitch-tracker": {
+   "class": "audio-only",
+   "platform": "cross",
+   "evidence": "no pulp::view, pulp::render or pulp::canvas link and no pulp/{view,render,canvas} include; framework-default editor only (no editor code of its own)",
+   "editor": "framework-default",
+   "gate": "NOT ANDROID AND NOT IOS"
+  },
+  "audio-inspector-demo": {
+   "class": "moves-to-vellum",
+   "platform": "cross",
+   "evidence": "StandaloneApp::run_with_editor() hosts the generated editor window next to continuous audio",
+   "gate": "NOT IOS"
+  },
+  "audio-rate-processor-node": {
+   "class": "audio-only",
+   "platform": "cross",
+   "evidence": "SDK consumer project (find_package(Pulp)) with no view, render or canvas reference",
+   "editor": "none"
+  },
+  "capability-control": {
+   "class": "audio-only",
+   "platform": "cross",
+   "evidence": "no CMake target; source-only or script-only files with no view reference",
+   "editor": "none"
+  },
+  "clap-identity-consumer": {
+   "class": "audio-only",
+   "platform": "cross",
+   "evidence": "SDK consumer project (find_package(Pulp)) with no view, render or canvas reference",
+   "editor": "none"
+  },
+  "cmajor-gain": {
+   "class": "audio-only",
+   "platform": "cross",
+   "evidence": "no CMake target; source-only or script-only files with no view reference",
+   "editor": "none"
+  },
+  "combined-bundle-demo": {
+   "class": "audio-only",
+   "platform": "cross",
+   "evidence": "no pulp::view, pulp::render or pulp::canvas link and no pulp/{view,render,canvas} include",
+   "editor": "none"
+  },
+  "component-shots": {
+   "class": "moves-to-vellum",
+   "platform": "cross",
+   "evidence": "links pulp::view; includes pulp/view",
+   "gate": "PULP_ENABLE_DESIGN_IMPORT"
+  },
+  "cv-control": {
+   "class": "audio-only",
+   "platform": "cross",
+   "evidence": "no pulp::view, pulp::render or pulp::canvas link and no pulp/{view,render,canvas} include",
+   "editor": "none"
+  },
+  "design-import-standalone": {
+   "class": "moves-to-vellum",
+   "platform": "cross",
+   "evidence": "links pulp::canvas, pulp::view; includes pulp/view",
+   "gate": "PULP_ENABLE_DESIGN_IMPORT"
+  },
+  "design-panel-instrument": {
+   "class": "moves-to-vellum",
+   "platform": "cross",
+   "evidence": "links pulp::view; includes pulp/view"
+  },
+  "design-panel-midi-effect": {
+   "class": "moves-to-vellum",
+   "platform": "cross",
+   "evidence": "links pulp::view; includes pulp/view"
+  },
+  "design-panel-plugin": {
+   "class": "moves-to-vellum",
+   "platform": "cross",
+   "evidence": "links pulp::view; includes pulp/view"
+  },
+  "design-tool": {
+   "class": "moves-to-vellum",
+   "platform": "cross",
+   "evidence": "links pulp::canvas, pulp::view; includes pulp/view",
+   "gate": "PULP_ENABLE_DESIGN_IMPORT"
+  },
+  "eq-curve-demo": {
+   "class": "moves-to-vellum",
+   "platform": "cross",
+   "evidence": "links pulp::view; includes pulp/view"
+  },
+  "faust-filter": {
+   "class": "audio-only",
+   "platform": "cross",
+   "evidence": "no pulp::view, pulp::render or pulp::canvas link and no pulp/{view,render,canvas} include",
+   "editor": "none"
+  },
+  "faust-gain": {
+   "class": "audio-only",
+   "platform": "cross",
+   "evidence": "no pulp::view, pulp::render or pulp::canvas link and no pulp/{view,render,canvas} include",
+   "editor": "none"
+  },
+  "faust-rt-sdk-consumer": {
+   "class": "audio-only",
+   "platform": "cross",
+   "evidence": "SDK consumer project (find_package(Pulp)) with no view, render or canvas reference",
+   "editor": "none"
+  },
+  "faust-tremolo": {
+   "class": "audio-only",
+   "platform": "cross",
+   "evidence": "no pulp::view, pulp::render or pulp::canvas link and no pulp/{view,render,canvas} include",
+   "editor": "none"
+  },
+  "forge-modular": {
+   "class": "moves-to-vellum",
+   "platform": "cross",
+   "evidence": "links pulp::canvas, pulp::render, pulp::view; includes pulp/canvas|view",
+   "gate": "PULP_HAS_RACK"
+  },
+  "g10-routed-consumer": {
+   "class": "audio-only",
+   "platform": "cross",
+   "evidence": "SDK consumer project (find_package(Pulp)) with no view, render or canvas reference",
+   "editor": "none"
+  },
+  "g11-live-retune-consumer": {
+   "class": "audio-only",
+   "platform": "cross",
+   "evidence": "SDK consumer project (find_package(Pulp)) with no view, render or canvas reference",
+   "editor": "none"
+  },
+  "g11-recording-publication": {
+   "class": "audio-only",
+   "platform": "cross",
+   "evidence": "SDK consumer project (find_package(Pulp)) with no view, render or canvas reference",
+   "editor": "none"
+  },
+  "g11-tuning-cookbook": {
+   "class": "audio-only",
+   "platform": "cross",
+   "evidence": "SDK consumer project (find_package(Pulp)) with no view, render or canvas reference",
+   "editor": "none"
+  },
+  "g2-processor-restore-consumer": {
+   "class": "audio-only",
+   "platform": "cross",
+   "evidence": "SDK consumer project (find_package(Pulp)) with no view, render or canvas reference",
+   "editor": "none"
+  },
+  "g3-d4-prepared-export-consumer": {
+   "class": "audio-only",
+   "platform": "cross",
+   "evidence": "SDK consumer project (find_package(Pulp)) with no view, render or canvas reference",
+   "editor": "none"
+  },
+  "g3-io-gain-consumer": {
+   "class": "audio-only",
+   "platform": "cross",
+   "evidence": "no CMake target; source-only or script-only files with no view reference",
+   "editor": "none"
+  },
+  "g3-resolved-identity-consumer": {
+   "class": "audio-only",
+   "platform": "cross",
+   "evidence": "SDK consumer project (find_package(Pulp)) with no view, render or canvas reference",
+   "editor": "none"
+  },
+  "g4-voice-bank-consumer": {
+   "class": "audio-only",
+   "platform": "cross",
+   "evidence": "SDK consumer project (find_package(Pulp)) with no view, render or canvas reference",
+   "editor": "none"
+  },
+  "g5-control-index-filter": {
+   "class": "audio-only",
+   "platform": "cross",
+   "evidence": "SDK consumer project (find_package(Pulp)) with no view, render or canvas reference",
+   "editor": "none"
+  },
+  "g5-event-consumer": {
+   "class": "audio-only",
+   "platform": "cross",
+   "evidence": "no CMake target; source-only or script-only files with no view reference",
+   "editor": "none"
+  },
+  "g5-host-event-consumer": {
+   "class": "audio-only",
+   "platform": "cross",
+   "evidence": "SDK consumer project (find_package(Pulp)) with no view, render or canvas reference",
+   "editor": "none"
+  },
+  "g5-trigger-admission-consumer": {
+   "class": "audio-only",
+   "platform": "cross",
+   "evidence": "SDK consumer project (find_package(Pulp)) with no view, render or canvas reference",
+   "editor": "none"
+  },
+  "g5-trigger-runtime-consumer": {
+   "class": "audio-only",
+   "platform": "cross",
+   "evidence": "SDK consumer project (find_package(Pulp)) with no view, render or canvas reference",
+   "editor": "none"
+  },
+  "g6-voice-bank-consumer": {
+   "class": "audio-only",
+   "platform": "cross",
+   "evidence": "SDK consumer project (find_package(Pulp)) with no view, render or canvas reference",
+   "editor": "none"
+  },
+  "g6-voice-contract-consumer": {
+   "class": "audio-only",
+   "platform": "cross",
+   "evidence": "SDK consumer project (find_package(Pulp)) with no view, render or canvas reference",
+   "editor": "none"
+  },
+  "g7-latency-pdc-consumer": {
+   "class": "audio-only",
+   "platform": "cross",
+   "evidence": "SDK consumer project (find_package(Pulp)) with no view, render or canvas reference",
+   "editor": "none"
+  },
+  "g9-isolated-clap-consumer": {
+   "class": "audio-only",
+   "platform": "cross",
+   "evidence": "SDK consumer project (find_package(Pulp)) with no view, render or canvas reference",
+   "editor": "none"
+  },
+  "gesture-touch-demo": {
+   "class": "moves-to-vellum",
+   "platform": "cross",
+   "evidence": "links pulp::view; includes pulp/view"
+  },
+  "gpu-demo": {
+   "class": "moves-to-vellum",
+   "platform": "cross",
+   "evidence": "links pulp::canvas, pulp::render, pulp::view; includes pulp/canvas|view"
+  },
+  "gpu-fault-continuity": {
+   "class": "moves-to-vellum",
+   "platform": "cross",
+   "evidence": "GPU_UI plug-in linking pulp::view/render/canvas; test-only GPU fault injector",
+   "gate": "PULP_GPU_AUDIO_FAULT_HOOKS"
+  },
+  "graph-agent-loop": {
+   "class": "audio-only",
+   "platform": "cross",
+   "evidence": "SDK consumer project (find_package(Pulp)) with no view, render or canvas reference",
+   "editor": "none"
+  },
+  "graph-agent-loop-replay": {
+   "class": "audio-only",
+   "platform": "cross",
+   "evidence": "SDK consumer project (find_package(Pulp)) with no view, render or canvas reference",
+   "editor": "none"
+  },
+  "graph-control-event-probe": {
+   "class": "audio-only",
+   "platform": "cross",
+   "evidence": "SDK consumer project (find_package(Pulp)) with no view, render or canvas reference",
+   "editor": "none"
+  },
+  "graph-edge-probe": {
+   "class": "audio-only",
+   "platform": "cross",
+   "evidence": "SDK consumer project (find_package(Pulp)) with no view, render or canvas reference",
+   "editor": "none"
+  },
+  "graph-file-reload-consumer": {
+   "class": "audio-only",
+   "platform": "cross",
+   "evidence": "SDK consumer project (find_package(Pulp)) with no view, render or canvas reference",
+   "editor": "none"
+  },
+  "graph-hello": {
+   "class": "audio-only",
+   "platform": "cross",
+   "evidence": "SDK consumer project (find_package(Pulp)) with no view, render or canvas reference",
+   "editor": "none"
+  },
+  "graph-named-bus-cookbook": {
+   "class": "audio-only",
+   "platform": "cross",
+   "evidence": "SDK consumer project (find_package(Pulp)) with no view, render or canvas reference",
+   "editor": "none"
+  },
+  "graph-patch-consumer": {
+   "class": "audio-only",
+   "platform": "cross",
+   "evidence": "SDK consumer project (find_package(Pulp)) with no view, render or canvas reference",
+   "editor": "none"
+  },
+  "graph-spatial-cookbook": {
+   "class": "audio-only",
+   "platform": "cross",
+   "evidence": "SDK consumer project (find_package(Pulp)) with no view, render or canvas reference",
+   "editor": "none"
+  },
+  "host-bench-plugin": {
+   "class": "audio-only",
+   "platform": "cross",
+   "evidence": "no pulp::view, pulp::render or pulp::canvas link and no pulp/{view,render,canvas} include; framework-default editor only (no editor code of its own)",
+   "editor": "framework-default"
+  },
+  "hot-reload-demo": {
+   "class": "audio-only",
+   "platform": "cross",
+   "evidence": "no pulp::view, pulp::render or pulp::canvas link and no pulp/{view,render,canvas} include; framework-default editor only (no editor code of its own)",
+   "editor": "framework-default"
+  },
+  "hot-reload-morph": {
+   "class": "moves-to-vellum",
+   "platform": "cross",
+   "evidence": "links pulp::view; includes pulp/canvas|view"
+  },
+  "hot-reload-synth": {
+   "class": "audio-only",
+   "platform": "cross",
+   "evidence": "no pulp::view, pulp::render or pulp::canvas link and no pulp/{view,render,canvas} include; framework-default editor only (no editor code of its own)",
+   "editor": "framework-default"
+  },
+  "ink-signal-sampler": {
+   "class": "moves-to-vellum",
+   "platform": "cross",
+   "evidence": "links pulp::design, pulp::view; includes pulp/view",
+   "gate": "PULP_ENABLE_DESIGN_IMPORT"
+  },
+  "ink-signal-showcase": {
+   "class": "moves-to-vellum",
+   "platform": "cross",
+   "evidence": "links pulp::view; includes pulp/view",
+   "gate": "PULP_ENABLE_DESIGN_IMPORT"
+  },
+  "ios-auv3-chainer": {
+   "class": "quarantined",
+   "platform": "ios",
+   "quarantine": "C4b-ios",
+   "evidence": "includes pulp/canvas|view; registered only under if(IOS)",
+   "gate": "IOS"
+  },
+  "ios-auv3-gpu-smoke": {
+   "class": "quarantined",
+   "platform": "ios",
+   "quarantine": "C4b-ios",
+   "evidence": "includes pulp/canvas|view; registered only under if(IOS)",
+   "gate": "IOS"
+  },
+  "ios-auv3-jsc-threejs": {
+   "class": "quarantined",
+   "platform": "ios",
+   "quarantine": "C4b-ios",
+   "evidence": "links pulp::view; includes pulp/view; registered only under if(IOS)",
+   "gate": "IOS"
+  },
+  "ios-auv3-synth": {
+   "class": "audio-only",
+   "platform": "ios",
+   "evidence": "no pulp::view, pulp::render or pulp::canvas link and no pulp/{view,render,canvas} include",
+   "editor": "none",
+   "gate": "IOS"
+  },
+  "jsfx-delay": {
+   "class": "audio-only",
+   "platform": "cross",
+   "evidence": "no CMake target; source-only or script-only files with no view reference",
+   "editor": "none"
+  },
+  "jsfx-gain": {
+   "class": "audio-only",
+   "platform": "cross",
+   "evidence": "no CMake target; source-only or script-only files with no view reference",
+   "editor": "none"
+  },
+  "jsfx-tremolo": {
+   "class": "audio-only",
+   "platform": "cross",
+   "evidence": "no CMake target; source-only or script-only files with no view reference",
+   "editor": "none"
+  },
+  "midi-learn-demo": {
+   "class": "moves-to-vellum",
+   "platform": "cross",
+   "evidence": "midi_learn_demo_ui.hpp includes pulp/view/{midi_learn_menu,parameter_binding,view,widgets}.hpp"
+  },
+  "modal-specs": {
+   "class": "audio-only",
+   "platform": "cross",
+   "evidence": "no CMake target; source-only or script-only files with no view reference",
+   "editor": "none"
+  },
+  "moonbase-activation": {
+   "class": "moves-to-vellum",
+   "platform": "cross",
+   "evidence": "links pulp::view; includes pulp/view",
+   "gate": "PULP_BUILD_MOONBASE_EXAMPLE"
+  },
+  "mpe-synth": {
+   "class": "audio-only",
+   "platform": "cross",
+   "evidence": "no pulp::view, pulp::render or pulp::canvas link and no pulp/{view,render,canvas} include; framework-default editor only (no editor code of its own)",
+   "editor": "framework-default"
+  },
+  "mtk-demo": {
+   "class": "moves-to-vellum",
+   "platform": "cross",
+   "evidence": "links pulp::view; includes pulp/view",
+   "gate": "PULP_ENABLE_DESIGN_IMPORT"
+  },
+  "native-ui-phase-f-preview": {
+   "class": "deleted",
+   "platform": "macos",
+   "reason": "configure gate names planning/artifacts/native-ui/nv0/reports/generated/chainer-phase-f-hybrid.cpp, a file that does not exist in the planning tree, so the example has never configured; planning origin/main holds no generated/ directory under artifacts/native-ui/nv0/reports",
+   "evidence": "links pulp::view; includes pulp/view; plug-in keywords GPU_UI",
+   "gate": "PULP_ENABLE_DESIGN_IMPORT AND APPLE AND generated source"
+  },
+  "offline-stretch": {
+   "class": "audio-only",
+   "platform": "cross",
+   "evidence": "no pulp::view, pulp::render or pulp::canvas link and no pulp/{view,render,canvas} include",
+   "editor": "none"
+  },
+  "p1-event-admission-consumer": {
+   "class": "audio-only",
+   "platform": "cross",
+   "evidence": "SDK consumer project (find_package(Pulp)) with no view, render or canvas reference",
+   "editor": "none"
+  },
+  "plugin-host-demo": {
+   "class": "moves-to-vellum",
+   "platform": "cross",
+   "evidence": "links pulp::view; window that lists and loads plugins",
+   "gate": "NOT IOS"
+  },
+  "process-timing-consumer": {
+   "class": "audio-only",
+   "platform": "cross",
+   "evidence": "SDK consumer project (find_package(Pulp)) with no view, render or canvas reference",
+   "editor": "none"
+  },
+  "pulp-compressor": {
+   "class": "audio-only",
+   "platform": "cross",
+   "evidence": "no pulp::view, pulp::render or pulp::canvas link and no pulp/{view,render,canvas} include; framework-default editor only (no editor code of its own)",
+   "editor": "framework-default"
+  },
+  "pulp-delay": {
+   "class": "moves-to-vellum",
+   "platform": "cross",
+   "evidence": "links pulp::view; includes pulp/canvas|view"
+  },
+  "pulp-effect": {
+   "class": "moves-to-vellum",
+   "platform": "cross",
+   "evidence": "FULL_EDITOR plug-in: holds the full editor stack as the footprint and editor-stack control"
+  },
+  "pulp-gain": {
+   "class": "audio-only",
+   "platform": "cross",
+   "evidence": "no pulp::view, pulp::render or pulp::canvas link and no pulp/{view,render,canvas} include; NO_EDITOR variant present",
+   "editor": "framework-default"
+  },
+  "pulp-multi-out": {
+   "class": "audio-only",
+   "platform": "cross",
+   "evidence": "no pulp::view, pulp::render or pulp::canvas link and no pulp/{view,render,canvas} include; framework-default editor only (no editor code of its own)",
+   "editor": "framework-default"
+  },
+  "pulp-pluck": {
+   "class": "audio-only",
+   "platform": "cross",
+   "evidence": "no pulp::view, pulp::render or pulp::canvas link and no pulp/{view,render,canvas} include; framework-default editor only (no editor code of its own)",
+   "editor": "framework-default"
+  },
+  "pulp-tone": {
+   "class": "audio-only",
+   "platform": "cross",
+   "evidence": "no pulp::view, pulp::render or pulp::canvas link and no pulp/{view,render,canvas} include; framework-default editor only (no editor code of its own)",
+   "editor": "framework-default"
+  },
+  "pulp-transpose": {
+   "class": "audio-only",
+   "platform": "cross",
+   "evidence": "no pulp::view, pulp::render or pulp::canvas link and no pulp/{view,render,canvas} include; framework-default editor only (no editor code of its own)",
+   "editor": "framework-default"
+  },
+  "PulpDrums": {
+   "class": "audio-only",
+   "platform": "cross",
+   "evidence": "no pulp::view, pulp::render or pulp::canvas link and no pulp/{view,render,canvas} include; framework-default editor only (no editor code of its own)",
+   "editor": "framework-default"
+  },
+  "PulpSampler": {
+   "class": "audio-only",
+   "platform": "cross",
+   "evidence": "no pulp::view, pulp::render or pulp::canvas link and no pulp/{view,render,canvas} include",
+   "editor": "none"
+  },
+  "PulpSequence": {
+   "class": "audio-only",
+   "platform": "cross",
+   "evidence": "no pulp::view, pulp::render or pulp::canvas link and no pulp/{view,render,canvas} include; framework-default editor only (no editor code of its own)",
+   "editor": "framework-default"
+  },
+  "PulpSynth": {
+   "class": "audio-only",
+   "platform": "cross",
+   "evidence": "no pulp::view, pulp::render or pulp::canvas link and no pulp/{view,render,canvas} include; framework-default editor only (no editor code of its own)",
+   "editor": "framework-default"
+  },
+  "PulpTempoSampler": {
+   "class": "moves-to-vellum",
+   "platform": "cross",
+   "evidence": "GPU_UI plug-in; links pulp::view and includes pulp/view and pulp/canvas headers"
+  },
+  "rust-gain": {
+   "class": "audio-only",
+   "platform": "cross",
+   "evidence": "no pulp::view, pulp::render or pulp::canvas link and no pulp/{view,render,canvas} include",
+   "editor": "none",
+   "gate": "PULP_BUILD_NATIVE_COMPONENT_RUST_TESTS"
+  },
+  "sample-region-allpass": {
+   "class": "audio-only",
+   "platform": "cross",
+   "evidence": "SDK consumer project (find_package(Pulp)) with no view, render or canvas reference",
+   "editor": "none"
+  },
+  "sdf-effects-demo": {
+   "class": "moves-to-vellum",
+   "platform": "cross",
+   "evidence": "links pulp::canvas; includes pulp/canvas"
+  },
+  "sdf-text-demo": {
+   "class": "moves-to-vellum",
+   "platform": "cross",
+   "evidence": "links pulp::canvas, pulp::render, pulp::view; includes pulp/canvas|view"
+  },
+  "sdf-vs-msdf-demo": {
+   "class": "moves-to-vellum",
+   "platform": "cross",
+   "evidence": "links pulp::canvas; includes pulp/canvas"
+  },
+  "showcase": {
+   "class": "moves-to-vellum",
+   "platform": "cross",
+   "evidence": "script-only widget board run by ui-preview (--script); no target of its own"
+  },
+  "spectral-frame-codec-consumer": {
+   "class": "audio-only",
+   "platform": "cross",
+   "evidence": "SDK consumer project (find_package(Pulp)) with no view, render or canvas reference",
+   "editor": "none"
+  },
+  "spectral-lab": {
+   "class": "moves-to-vellum",
+   "platform": "cross",
+   "evidence": "links pulp::canvas, pulp::render, pulp::view; includes pulp/canvas|render|view"
+  },
+  "spectral-resynthesis-consumer": {
+   "class": "audio-only",
+   "platform": "cross",
+   "evidence": "SDK consumer project (find_package(Pulp)) with no view, render or canvas reference",
+   "editor": "none"
+  },
+  "StepSequencer": {
+   "class": "audio-only",
+   "platform": "cross",
+   "evidence": "no pulp::view, pulp::render or pulp::canvas link and no pulp/{view,render,canvas} include; framework-default editor only (no editor code of its own)",
+   "editor": "framework-default"
+  },
+  "stream-demo": {
+   "class": "audio-only",
+   "platform": "cross",
+   "evidence": "no pulp::view, pulp::render or pulp::canvas link and no pulp/{view,render,canvas} include",
+   "editor": "none"
+  },
+  "super-convolver": {
+   "class": "moves-to-vellum",
+   "platform": "cross",
+   "evidence": "links pulp::canvas, pulp::render, pulp::view; includes pulp/canvas|render|view"
+  },
+  "text-input-test": {
+   "class": "moves-to-vellum",
+   "platform": "cross",
+   "evidence": "links pulp::canvas, pulp::view; includes pulp/view"
+  },
+  "threejs-native-demo": {
+   "class": "moves-to-vellum",
+   "platform": "cross",
+   "evidence": "links pulp::render, pulp::view; includes pulp/render|view"
+  },
+  "timeline-phase1": {
+   "class": "audio-only",
+   "platform": "cross",
+   "evidence": "no pulp::view, pulp::render or pulp::canvas link and no pulp/{view,render,canvas} include",
+   "editor": "none",
+   "gate": "NOT IOS"
+  },
+  "timeline-plugin-proof": {
+   "class": "moves-to-vellum",
+   "platform": "cross",
+   "evidence": "links pulp::view; piano roll editor through create_view()"
+  },
+  "timeline-sdk-consumer": {
+   "class": "audio-only",
+   "platform": "cross",
+   "evidence": "SDK consumer project (find_package(Pulp)) with no view, render or canvas reference",
+   "editor": "none"
+  },
+  "timeline-session": {
+   "class": "audio-only",
+   "platform": "cross",
+   "evidence": "no pulp::view, pulp::render or pulp::canvas link and no pulp/{view,render,canvas} include",
+   "editor": "none"
+  },
+  "trace-demo": {
+   "class": "audio-only",
+   "platform": "cross",
+   "evidence": "no pulp::view, pulp::render or pulp::canvas link and no pulp/{view,render,canvas} include",
+   "editor": "none",
+   "gate": "PULP_TRACING"
+  },
+  "trace-plugin-chain": {
+   "class": "audio-only",
+   "platform": "cross",
+   "evidence": "no pulp::view, pulp::render or pulp::canvas link and no pulp/{view,render,canvas} include",
+   "editor": "none",
+   "gate": "PULP_TRACING"
+  },
+  "ui-preview": {
+   "class": "moves-to-vellum",
+   "platform": "cross",
+   "evidence": "links pulp::canvas, pulp::render, pulp::view; includes pulp/canvas|render|view",
+   "gate": "PULP_ENABLE_DESIGN_IMPORT"
+  },
+  "view-bridge-demo": {
+   "class": "moves-to-vellum",
+   "platform": "cross",
+   "evidence": "links pulp::view; includes pulp/view"
+  },
+  "virtual-list-sample-manager": {
+   "class": "moves-to-vellum",
+   "platform": "cross",
+   "evidence": "links pulp::view; includes pulp/canvas|view"
+  },
+  "web-demos": {
+   "class": "quarantined",
+   "platform": "web",
+   "quarantine": "C4b-web",
+   "evidence": "includes pulp/canvas|render|view"
+  },
+  "webview-monaco": {
+   "class": "moves-to-vellum",
+   "platform": "cross",
+   "evidence": "links pulp::view; Monaco WebView (PULP_BUILD_WEBVIEW, prebundled assets)",
+   "gate": "PULP_BUILD_WEBVIEW"
+  },
+  "webview-palette": {
+   "class": "moves-to-vellum",
+   "platform": "cross",
+   "evidence": "links pulp::view; floating WebView palette (PULP_BUILD_WEBVIEW)",
+   "gate": "PULP_BUILD_WEBVIEW"
+  },
+  "webview-plugin": {
+   "class": "moves-to-vellum",
+   "platform": "macos",
+   "evidence": "links pulp::view; WebView editor (macOS)",
+   "gate": "APPLE"
+  },
+  "widget-gallery": {
+   "class": "moves-to-vellum",
+   "platform": "cross",
+   "evidence": "links pulp::view; includes pulp/view",
+   "gate": "PULP_ENABLE_DESIGN_IMPORT"
+  }
+ }
+}
