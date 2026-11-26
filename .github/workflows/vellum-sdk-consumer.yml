@@ -43,6 +43,9 @@ on:
       - 'test/cmake/editor_host_slice_tests.cmake'
       - 'tools/scripts/editor_host_acceptance.py'
       - 'tools/ci/vellum_sdk_consumer.py'
+      # Yoga layout fixtures run on Vellum's layout through the SDK's app host.
+      - 'tools/harness/visual/vellum_layout.py'
+      - 'tools/harness/visual/runner.py'
       # The Vellum-backed UI target names: the package config that defines
       # them, their scenario driver and the installed consumer it builds. The
       # `real` and `wrong-version` scenarios carry the pulp-vellum label.
@@ -178,6 +181,20 @@ jobs:
             --build-dir build-vellum-bridge --verify
           ctest --test-dir build-vellum-bridge -L pulp-vellum --no-tests=error --output-on-failure \
             | tee "$RUNNER_TEMP/vellum-sdk/bridge.log"
+
+      # Layout fixtures on Vellum's layout, through the SDK's vellum-app-host.
+      # The runner exits 3 when nothing was measured, so a run that skipped
+      # every fixture fails here instead of passing.
+      - name: Yoga layout fixtures on Vellum's layout
+        if: steps.sdk.outputs.unchanged != 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          host="${{ steps.sdk.outputs.prefix }}/bin/vellum-app-host"
+          test -x "$host"
+          export VELLUM_APP_HOST="$host" MTL_DEBUG_LAYER=0
+          python3 -m tools.harness.visual.runner --verify --engine vellum
+          python3 -m unittest tools.harness.visual.tests.test_vellum_layout -v
 
       - name: Negative control (a renamed SDK header must fail the build)
         if: steps.sdk.outputs.unchanged != 'true'

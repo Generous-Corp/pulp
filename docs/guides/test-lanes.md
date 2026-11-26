@@ -283,6 +283,11 @@ stopped compiling and no Pulp check noticed.
   not contain the given Vellum commit (checked through Vellum's compare endpoint
   before any download). The workflow sets it to the commit that introduced the
   `ParamModel` surface that `integrations/pulp-vellum` builds on.
+- **Yoga layout on Vellum.** `runner.py --verify --engine vellum` maps the Yoga
+  layout fixtures onto a Vellum bundle, runs the SDK's `vellum-app-host
+  --dump-tree` and compares node rectangles with the Yoga goldens. Fixtures that
+  use a property Vellum's authoring layout has no equivalent for are skipped by
+  name; the runner exits 3 when it measured nothing.
 - **Parameter bridge.** The same SDK also builds `integrations/pulp-vellum` in a
   separate configure (`PULP_ENABLE_PULP_VELLUM=ON`) and runs its `pulp-vellum`
   ctest label, so a Vellum change that breaks the bridge shows up here. Pull

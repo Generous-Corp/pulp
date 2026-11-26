@@ -13975,3 +13975,8 @@ main's SDK. A new optional Vellum integration package needs its option, its
 `pulp-test-*` target and a `paths:` entry added there, or no lane compiles it
 against main. The tests' ctest label should start with `pulp-vellum` so the
 lane's `-L pulp-vellum` filter runs them.
+
+The lane also runs the Yoga layout fixtures on Vellum's layout (`runner.py
+--verify --engine vellum`, `VELLUM_APP_HOST` set to the SDK's `bin/vellum-app-host`).
+Keep it a parallel mode: the `pulp-test-visual` lane stays until the UI cutover,
+and exit 3 (nothing measured) must keep failing the step.
