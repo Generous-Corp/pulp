@@ -456,11 +456,13 @@ TEST_CASE("the typing panel factory follows the standalone config and installs o
           "[standalone-typing-panel]") {
     const format::StandaloneConfig disabled;
     format::StandaloneConfig config;
-    const format::StandalonePanelContext off{disabled, [](const midi::MidiEvent&) { return true; }};
+    const format::StandalonePanelContext off{
+        disabled, [](const midi::MidiEvent&) { return true; }, {}};
     CHECK(pulp::vellum_audio::make_standalone_typing_panel(off) == nullptr);
 
     config.enable_musical_typing_keyboard = true;
-    const format::StandalonePanelContext on{config, [](const midi::MidiEvent&) { return true; }};
+    const format::StandalonePanelContext on{
+        config, [](const midi::MidiEvent&) { return true; }, {}};
     auto panel = pulp::vellum_audio::make_standalone_typing_panel(on);
     REQUIRE(panel);
     CHECK(panel->menu_title() == "Musical Typing Keyboard");
