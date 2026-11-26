@@ -7,7 +7,8 @@ if(PULP_BUILD_TESTS AND TARGET Catch2::Catch2WithMain)
         ${CMAKE_CURRENT_SOURCE_DIR}/preferences_panel_test.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/catalogue_test.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/overlay_geometry_test.cpp
-        ${CMAKE_CURRENT_SOURCE_DIR}/inspector_overlay_test.cpp)
+        ${CMAKE_CURRENT_SOURCE_DIR}/inspector_overlay_test.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/inspector_window_test.cpp)
     target_link_libraries(pulp-test-pulp-vellum-components PRIVATE
         pulp::vellum-components Catch2::Catch2WithMain Threads::Threads)
     include(Catch)
