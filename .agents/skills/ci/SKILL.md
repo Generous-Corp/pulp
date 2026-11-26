@@ -13957,6 +13957,13 @@ with `-k 0`, and uploads a JSON report grouped by capability-ledger row. Notes:
   (`cmake-vellum-ui-compat-real`, `-wrong-version`) take the label only when the
   configure found Vellum, and with `REQUIRE_VELLUM` they fail instead of
   printing SKIP, which ctest reports as skipped and leaves the lane green.
+- **The installed-SDK smoke is a separate configure and build.** `cmake
+  --install` aborts on any unbuilt target, and the labelled build above builds
+  only test targets, so the smoke step configures `build-vellum-install` with
+  the release profile and builds everything before running
+  `test/cmake/test_vellum_installed_sdk_smoke.cmake` (an install to an empty
+  prefix, then a from-scratch consumer). Its control configures the same
+  consumer with Vellum unfindable and must be refused.
 
 ## Exporting a platform's Vellum closure
 
