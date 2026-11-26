@@ -8,7 +8,7 @@ include(${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpMacOsArch.cmake)  # macOS ar
 include(${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpMinOs.cmake)
 
 project(Pulp
-    VERSION 1.210.0
+    VERSION 1.215.0
     DESCRIPTION "Cross-platform audio plugin and application framework"
     HOMEPAGE_URL "https://github.com/Generous-Corp/pulp"
     LANGUAGES CXX C
@@ -627,16 +627,13 @@ add_library(pulp-standalone-native STATIC ${_pulp_standalone_sources})
 add_library(pulp::standalone-native ALIAS pulp-standalone-native)
 # The standalone of a UI package plug-in (pulp_add_plugin(... UI <package>)):
 # the core alone, with no Pulp view, canvas or render code, so Dawn reaches the
-# app only through its UI package. It still reads a few header-only view types
-# (the meter AudioBridge, key codes), hence the include paths without a link.
+# app only through its UI package. Its sources read no view, canvas or render
+# header either, so it compiles with none of their include roots.
 add_library(pulp-standalone-contract STATIC
     ${_pulp_standalone_core_sources} core/format/src/standalone_view_layer_none.cpp)
 add_library(pulp::standalone-contract ALIAS pulp-standalone-contract)
 target_include_directories(pulp-standalone-contract PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/core/format/include>
-    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/core/view/include>
-    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/core/view/audio/include>
-    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/core/canvas/include>
     $<INSTALL_INTERFACE:include>)
 target_link_libraries(pulp-standalone-contract PUBLIC pulp::format-core)
 target_compile_definitions(pulp-standalone-contract PRIVATE PULP_ENABLE_INSPECTOR=0)

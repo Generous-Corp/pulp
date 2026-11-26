@@ -72,6 +72,11 @@ def terminate_group(
     except ProcessLookupError:
         process.wait()
         return
+    except PermissionError:
+        # macOS refuses to signal a group whose only members are exiting or
+        # already-dead processes. The leader has been reaped; fall through to
+        # the bounded wait below rather than crash a passing gate.
+        pass
 
     deadline = time.monotonic() + grace_seconds
     while time.monotonic() < deadline:
@@ -83,7 +88,7 @@ def terminate_group(
 
     try:
         os.killpg(process_group, signal.SIGKILL)
-    except ProcessLookupError:
+    except (ProcessLookupError, PermissionError):
         pass
     process.wait()
 
@@ -132,7 +137,7 @@ def main(argv: list[str]) -> int:
     def remember_signal(signum: int, _frame: object) -> None:
         nonlocal pending_signal
         pending_signal = signum
-        # Python may restart time.sleep() after a handled signal. Do the
+        # Python may restart a wait after a handled signal. Do the
         # bounded teardown in the handler once the gate exists so an external
         # TERM->KILL escalation cannot kill this supervisor during that sleep
         # and strand the isolated gate group.
@@ -197,7 +202,13 @@ def main(argv: list[str]) -> int:
                     gate_log.flush()
                     terminate_group(process)
                     return 128 + signal.SIGTERM
-                time.sleep(POLL_SECONDS)
+                # Wait on the child itself so a gate that exits wakes the
+                # supervisor at once; the timeout only bounds how often the
+                # ownership and signal checks above run.
+                try:
+                    process.wait(timeout=POLL_SECONDS)
+                except subprocess.TimeoutExpired:
+                    pass
 
             status = process.wait()
             # A successful gate leader must not be allowed to daemonize a
