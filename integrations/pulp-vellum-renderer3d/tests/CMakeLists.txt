@@ -6,6 +6,7 @@ if(PULP_BUILD_TESTS AND TARGET Catch2::Catch2WithMain)
         ${CMAKE_CURRENT_SOURCE_DIR}/renderer3d_scene_test.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/suite_loading_test.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/suite_materials_a_test.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/suite_materials_b_test.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/suite_scene_test.cpp)
     # The CPU module tests include the package's private headers.
     target_include_directories(pulp-test-pulp-vellum-renderer3d PRIVATE
