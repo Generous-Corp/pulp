@@ -2723,7 +2723,7 @@ capabilities over new virtual methods.
 
 ## host
 
-The host module owns plugin hosting and the `SignalGraph` binding. Its bounded
+The host module owns plugin hosting and the `SignalGraph` binding. `pulp::host` links `pulp::format-core`, not the `pulp::format` umbrella, so a host consumer does not inherit Pulp's view stack; link `pulp::format` for the format adapters and the editor bridge. Its bounded
 sample-region surface declares scalar kernels, explicit `UnitDelay` causal
 boundaries, promoted parameter contracts, and immutable prepared snapshots.
 `SampleRegionExecutionDomain` prevents an old binding and a newly adopted
