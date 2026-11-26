@@ -43,6 +43,9 @@ on:
       - 'test/cmake/editor_host_slice_tests.cmake'
       - 'tools/scripts/editor_host_acceptance.py'
       - 'tools/ci/vellum_sdk_consumer.py'
+      # The GPU adapter probe built by the bridge configure.
+      - 'tools/cli/gpu_probe/src/adapter_probe.cpp'
+      - 'tools/cli/gpu_probe/include/pulp_tooling/gpu_probe/adapter_probe.hpp'
       # The Vellum-backed UI target names: the package config that defines
       # them, their scenario driver and the installed consumer it builds. The
       # `real` and `wrong-version` scenarios carry the pulp-vellum label.
