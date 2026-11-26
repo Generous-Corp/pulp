@@ -51,6 +51,11 @@ Rect bounds_in_root(const View* view, const View& root);
 /// subtree.
 float effective_scale_in_root(const View* view, const View& root);
 
+/// True when `view` is `root` or one of its descendants. It compares
+/// pointers down from `root` and never reads `view`, so it is safe on a view
+/// a tree rebuild has already freed.
+bool tree_contains(const View& root, const View* view);
+
 /// True when `ancestor` is `view` or one of its ancestors.
 bool is_self_or_ancestor(const View* ancestor, const View* view);
 

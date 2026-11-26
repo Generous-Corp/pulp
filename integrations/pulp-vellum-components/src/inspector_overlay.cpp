@@ -46,6 +46,8 @@ InspectorOverlay::~InspectorOverlay() {
 }
 
 void InspectorOverlay::set_active(bool active) {
+    if (!active)
+        cancel_field_edit();
     active_ = active;
     if (!active) {
         selected_ = nullptr;
@@ -84,6 +86,11 @@ bool InspectorOverlay::handle_key_event(const ::vellum::view::KeyEvent& event) {
     }
     if (!active_ || !event.is_down)
         return false;
+    // An open edit owns the keyboard, so a letter typed into it can never
+    // flip a mode: whatever the edit does not take falls through to the view
+    // tree.
+    if (field_edit_.active())
+        return handle_edit_key(event);
     if (event.key == KeyCode::escape) {
         // Deselect and stay on, so hovering and clicking keep working without
         // reopening the overlay. Escape never dismisses it.
@@ -185,6 +192,10 @@ void InspectorOverlay::drop_stale_views() {
         distance_anchor_ = nullptr;
     if (!in_tree(alt_hover_target_))
         alt_hover_target_ = nullptr;
+    // A freed edit target is dropped without a write: there is nothing left
+    // to restore.
+    if (field_target_ && !overlay::tree_contains(root_, field_target_))
+        clear_field_edit();
 }
 
 void InspectorOverlay::paint(canvas::Canvas& canvas) {

@@ -25,6 +25,17 @@ float effective_scale_in_root(const View* view, const View& root) {
     return scale;
 }
 
+bool tree_contains(const View& root, const View* view) {
+    if (!view)
+        return false;
+    if (&root == view)
+        return true;
+    for (std::size_t i = 0; i < root.child_count(); ++i)
+        if (tree_contains(*root.child_at(i), view))
+            return true;
+    return false;
+}
+
 bool is_self_or_ancestor(const View* ancestor, const View* view) {
     for (const View* cur = view; cur; cur = cur->parent())
         if (cur == ancestor)

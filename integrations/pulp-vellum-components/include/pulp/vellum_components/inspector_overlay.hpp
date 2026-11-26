@@ -12,11 +12,27 @@
 /// `set_selected_view`.
 
 #include <pulp/vellum_components/aliases.hpp>
+#include <pulp/vellum_components/field_edit.hpp>
 #include <pulp/vellum_components/overlay_geometry.hpp>
 
 #include <vellum/view/input_events.hpp>
 
+#include <cstddef>
+#include <functional>
+#include <string>
+#include <string_view>
+#include <variant>
+
 namespace pulp::vellum_components {
+
+/// The value of a committed property edit: a number for a layout or opacity
+/// field, text for a view's copy.
+using EditValue = std::variant<float, std::string>;
+
+/// Receives each committed edit: the edited view's anchor id, the dotted
+/// property path ("layout.padding"), the new value and what produced it.
+using EditSink = std::function<void(std::string_view anchor, std::string_view path,
+                                    const EditValue& value, std::string_view source)>;
 
 /// Where to put a badge so it stays readable.
 struct BadgePlacement {
@@ -113,10 +129,58 @@ class InspectorOverlay {
     /// or -1 to keep the cursor of the view under the pointer.
     int cursor_style_for(Point pos) const;
 
-    /// Offer a key to the overlay. Cmd+I (Ctrl+I elsewhere) toggles it; while
-    /// active, Escape deselects and keeps the overlay on, and M flips the
-    /// selection mode, and Z toggles the loupe. Returns true when the key was
-    /// consumed.
+    /// Where committed edits go. The overlay edits the live view itself and
+    /// reports the change here for whatever persists it; with no sink the live
+    /// edit still happens and nothing is reported. Only views with an anchor
+    /// id are reported.
+    void set_edit_sink(EditSink sink) {
+        edit_sink_ = std::move(sink);
+    }
+    bool has_edit_sink() const {
+        return static_cast<bool>(edit_sink_);
+    }
+
+    /// True while a numeric field is being edited.
+    bool is_editing() const {
+        return field_edit_.active();
+    }
+    /// The property path being edited ("layout.padding"), or empty.
+    const std::string& editing_field() const {
+        return field_edit_.path();
+    }
+    /// The text typed so far, and the caret's index into it.
+    const std::string& edit_buffer() const {
+        return field_edit_.text();
+    }
+    std::size_t edit_caret_pos() const {
+        return field_edit_.caret();
+    }
+
+    /// Start editing `field_path` ("style.opacity", "layout.width",
+    /// "layout.height", "layout.padding" or "layout.margin") on the selection,
+    /// showing `initial_value`. False, and no edit, with no selection or an
+    /// empty path. The edit keeps going to the view it began on even if the
+    /// selection moves.
+    bool begin_field_edit(std::string field_path, float initial_value);
+
+    /// Apply the typed text, report it to the edit sink and stop editing.
+    /// True when a value was reported: false for an empty or non-numeric
+    /// buffer, a view without an anchor id, or no sink. Editing stops either
+    /// way.
+    bool commit_field_edit();
+
+    /// Stop editing and restore the value the field had when the edit began.
+    void cancel_field_edit();
+
+    /// Offer a key to the overlay. Cmd+I (Ctrl+I elsewhere) toggles it. While
+    /// a field is being edited the edit owns the keyboard: digits extend the
+    /// buffer, Up and Down nudge by 1 (10 with Shift, 100 with Cmd), Left,
+    /// Right, Home and End move the caret, Backspace trims, Enter commits, Esc
+    /// cancels and Tab commits and moves to the next field (Shift+Tab to the
+    /// previous); every other key falls through to the view tree untouched.
+    /// Otherwise, while active, Escape deselects and keeps the overlay on, M
+    /// flips the selection mode and Z toggles the loupe. Returns true when the
+    /// key was consumed.
     bool handle_key_event(const ::vellum::view::KeyEvent& event);
 
     /// Offer a mouse event, in root space, to the overlay. A press selects the
@@ -176,6 +240,12 @@ class InspectorOverlay {
 
   private:
     void drop_stale_views();
+    bool handle_edit_key(const ::vellum::view::KeyEvent& event);
+    void apply_edit_buffer_to_view();
+    void start_field_edit(View& target, std::string field_path, float initial_value);
+    void clear_field_edit();
+    bool emit_edit(const View& target, std::string_view path, EditValue value,
+                   std::string_view source) const;
     void paint_highlight(canvas::Canvas& canvas);
     void paint_distance_lines(canvas::Canvas& canvas);
     void paint_box_model(canvas::Canvas& canvas, const View& view);
@@ -193,6 +263,9 @@ class InspectorOverlay {
     View* alt_hover_target_ = nullptr;
     SelectionMode selection_mode_ = SelectionMode::follows_focus;
     bool dragging_enabled_ = false;
+    EditSink edit_sink_;
+    overlay::FieldEditBuffer field_edit_;
+    View* field_target_ = nullptr; ///< the view the open field edit writes to
 
     static constexpr float kFontSize = 11.0f;
     bool zoom_active_ = false;

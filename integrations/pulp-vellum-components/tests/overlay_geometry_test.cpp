@@ -183,3 +183,16 @@ TEST_CASE("point_in_panel is the docked right strip, and nothing in the bare lay
     REQUIRE_FALSE(point_in_panel({699.9f, 10}, 1000, 300, false));
     REQUIRE_FALSE(point_in_panel({900, 10}, 1000, 300, true));
 }
+
+TEST_CASE("tree_contains finds the root and descendants by pointer and nothing else",
+          "[pulp-vellum-components][overlay-geometry]") {
+    Tree t;
+    View stranger;
+    REQUIRE(tree_contains(t.root, &t.root));
+    REQUIRE(tree_contains(t.root, t.panel));
+    REQUIRE(tree_contains(t.root, t.child));
+    REQUIRE_FALSE(tree_contains(t.root, &stranger));
+    REQUIRE_FALSE(tree_contains(t.root, nullptr));
+    // A subtree does not contain its ancestors.
+    REQUIRE_FALSE(tree_contains(*t.panel, &t.root));
+}
