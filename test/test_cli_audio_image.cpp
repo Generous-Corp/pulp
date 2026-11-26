@@ -368,3 +368,30 @@ TEST_CASE("audio image verbs render a 70-minute WAV that decode_wav refuses",
     CHECK(json_number_after(json2, "start_frame") == 3600.0 * kRate);
     CHECK(has_png_signature(ws / "long-spec.png"));
 }
+
+TEST_CASE("audio scope writes an offline PNG of the trace", "[cli][shellout][audio-image]") {
+    if (!binary_exists())
+        SKIP("pulp not built");
+    Workspace ws;
+    const auto wav = write_sine_wav(ws / "tone.wav", 440.0, 48000.0, 24000, 0.5f, 1,
+                                    pulp::audio::WavBitDepth::Int16);
+    const auto png = ws / "scope.png";
+    auto scope = run_pulp({"audio", "scope", "--input-wav", wav.string(), "--window", "1024",
+                           "--json", (ws / "scope.json").string(), "--png", png.string()},
+                          120000);
+    INFO(scope.stderr_output);
+    REQUIRE(scope.exit_code == 0);
+    REQUIRE(has_png_signature(png));
+
+    // IHDR follows the signature: length, "IHDR", then width and height.
+    const std::string bytes = read_file(png);
+    auto be32 = [&](std::size_t at) {
+        return (std::uint32_t(std::uint8_t(bytes[at])) << 24) |
+               (std::uint32_t(std::uint8_t(bytes[at + 1])) << 16) |
+               (std::uint32_t(std::uint8_t(bytes[at + 2])) << 8) |
+               std::uint32_t(std::uint8_t(bytes[at + 3]));
+    };
+    CHECK(bytes.substr(12, 4) == "IHDR");
+    CHECK(be32(16) == 900);
+    CHECK(be32(20) == 360);
+}

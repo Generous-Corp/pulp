@@ -2105,12 +2105,13 @@ class PrepushHookWiringTests(unittest.TestCase):
         self.assertIn("prepush_receipt_note skipped fixture-tests", block)
         self.assertRegex(block, r"\n\s+3\)\n")
         self.assertIn('"$_prepush_source_update_mode" = "no-source"', block)
-        verdict = text[text.index("_prepush_fixtures_verdict=\"\""):]
-        self.assertIn("gates passed except $_prepush_fixtures_verdict", verdict)
-        # "gates clean" is never printed beside a fixture NOT CHECKED.
-        for line in verdict[:verdict.index("exit 0")].splitlines():
-            if "gates clean" in line:
-                self.assertNotIn("_prepush_fixtures_verdict", line)
+        verdict = text[text.index("_prepush_final_verdict_line() {"):]
+        verdict = verdict[:verdict.index("\n}\n")]
+        self.assertIn('fixture tests: $_prepush_fixtures_not_checked NOT CHECKED', verdict)
+        self.assertIn("gates passed except $skipped", verdict)
+        # "gates clean" is only printed when nothing was skipped.
+        self.assertEqual(verdict.count('gates clean.'), 1)
+        self.assertIn('elif [ -n "$skipped" ]', verdict)
 
 
 if __name__ == "__main__":

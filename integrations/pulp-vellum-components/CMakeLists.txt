@@ -5,7 +5,10 @@
 # through the catalogue's context. Core never links it.
 find_package(Vellum CONFIG REQUIRED)
 
-add_library(pulp-vellum-components STATIC src/arranger_view.cpp src/catalogue.cpp)
+add_library(pulp-vellum-components STATIC
+    src/arranger_view.cpp
+    src/catalogue.cpp
+    src/inspector_window.cpp)
 add_library(pulp::vellum-components ALIAS pulp-vellum-components)
 target_include_directories(pulp-vellum-components PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>)

@@ -515,8 +515,8 @@ cannot spam events in production.
   `PulpMotionGeometryProbe`.
 - `apple/Tests/PulpSwiftTests/PulpMotionTests.swift` — Swift facade
   XCTest coverage.
-- `test/test_motion_swift_bridge.cpp` — Catch2 round-trip test for the
-  C ABI shims and Coordinator integration.
+- `integrations/pulp-vellum/tests/test_motion_swift_bridge.cpp`: Catch2
+  round-trip test for the C ABI shims and Coordinator integration.
 
 ## Path H — Android native (Kotlin / Compose / View)
 
