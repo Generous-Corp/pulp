@@ -77,6 +77,9 @@ if(PULP_BUILD_TESTS AND TARGET Catch2::Catch2WithMain)
                 SKIP_REGULAR_EXPRESSION "renderer_probe_golden_not_applicable=")
         endif()
     endforeach()
+    if(Python3_Interpreter_FOUND)
+        include("${CMAKE_CURRENT_SOURCE_DIR}/probe_route_tests.cmake")
+    endif()
 
     include(Catch)
     # The suite_* files are copies of core's test_renderer3d_* suites, so the
