@@ -276,9 +276,9 @@ stopped compiling and no Pulp check noticed.
   artifact. Any lookup or digest failure fails the step; nothing falls back.
 - **Runs without an SDK are passed over.** A green push run whose change the
   classifier skipped (an observatory-only commit, for example) builds and
-  uploads nothing. `resolve` therefore walks Vellum main's newest successful
-  runs (at most 10) and takes the first with an unexpired evidence artifact;
-  if none of them has one the step fails and says so.
+  uploads nothing. `resolve` therefore walks the full page of Vellum main's
+  newest successful runs and takes the first with an unexpired evidence
+  artifact. If none of the returned runs has one, the step fails and says so.
 - **Pinned minimum.** `resolve --min-vellum-sha` refuses a run whose head does
   not contain the given Vellum commit (checked through Vellum's compare endpoint
   before any download). The workflow sets it to the commit that introduced the
