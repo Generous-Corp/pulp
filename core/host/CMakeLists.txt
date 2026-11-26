@@ -105,7 +105,11 @@ target_sources(pulp-host PRIVATE
     src/bounded_delay_descriptor.cpp
 )
 
-target_link_libraries(pulp-host PUBLIC pulp::audio pulp::format pulp::graph pulp::midi pulp::playback pulp::runtime pulp::state)
+# pulp::format-core, not the pulp::format umbrella: the umbrella carries
+# pulp::format-view and with it Pulp's view stack, which a host consumer must
+# not inherit. A consumer that wants the format adapters or the editor bridge
+# links pulp::format itself (test/cmake/host_link_edge_tests.cmake checks this).
+target_link_libraries(pulp-host PUBLIC pulp::audio pulp::format-core pulp::graph pulp::midi pulp::playback pulp::runtime pulp::state)
 target_link_libraries(pulp-host PUBLIC pulp::native-components)
 # GraphEditorView, the audio-UI consumer of the host graph, lives in
 # pulp-view-graph-editor (core/view/audio), so the host does not depend on view-core.

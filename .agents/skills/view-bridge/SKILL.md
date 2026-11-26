@@ -4023,6 +4023,24 @@ for exactly that, and a linker applies no predicate.
 definition in that file: it is compiled per-plugin, so the symbol resolves the
 same way `PulpPlugView`'s constructor always did.
 
+## Tool windows in the view-free standalone are panels
+
+`pulp::standalone-contract` (a UI package plug-in's Standalone) cannot own a
+Pulp view, so tool windows such as the musical typing keyboard reach it as
+`StandalonePanel`s (`pulp/format/standalone_panel.hpp`) that a UI integration
+installs at static init. Things that are easy to get wrong:
+
+- The registrar must be linked into the Standalone. A static-init object in an
+  archive member that nothing references is dropped, so an integration needs a
+  generated per-target source that calls its install function.
+- The shortcut toggle runs from the editor content view's
+  `performKeyEquivalent:`, not only from the menu. A headless run has no menu,
+  and the key driver offers `performKeyEquivalent:` first, so
+  `PULP_TEST_KEY_SEQUENCE=cmd+k` reaches it.
+- `drain_midi_into` runs on the audio thread until the standalone destroys the
+  panel, which happens after audio stops. A panel must not free what drain reads
+  in `shutdown()`.
+
 ## The standalone harness can press keys, not just move a pointer
 
 `core/format/src/standalone.cpp` arms three harness hooks off `StandaloneConfig`

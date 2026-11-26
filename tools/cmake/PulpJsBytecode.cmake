@@ -60,11 +60,18 @@ function(pulp_add_js_bytecode target)
     if(TARGET Pulp::view)
         get_target_property(_pulp_js_bytecode_provider Pulp::view PULP_UI_PROVIDER)
         if(_pulp_js_bytecode_provider STREQUAL "vellum")
+            if(COMMAND vellum_add_js_bytecode)
+                message(FATAL_ERROR
+                    "pulp_add_js_bytecode(${target}): this Pulp SDK serves Pulp::view "
+                    "from Vellum. Call vellum_add_js_bytecode() from the Vellum "
+                    "package instead and hand its blobs to "
+                    "register_embedded_script_bytecode().")
+            endif()
             message(FATAL_ERROR
                 "pulp_add_js_bytecode(${target}): this Pulp SDK serves Pulp::view "
-                "from Vellum, which has no embedded-bytecode registration. Remove "
-                "the call; a Vellum editor (UI_ENGINE vellum) compiles its scripts "
-                "from source at run time.")
+                "from Vellum, and this Vellum package has no vellum_add_js_bytecode(). "
+                "Remove the call; a Vellum editor (UI_ENGINE vellum) compiles its "
+                "scripts from source at run time.")
         endif()
     endif()
     if(NOT JSBC_SOURCES)
