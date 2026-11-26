@@ -192,6 +192,18 @@ host implementation. Build both `pulp-host` and the focused header-compile
 target so the dependency reduction does not silently break existing umbrella
 consumers.
 
+`pulp::host` links `pulp::format-core`, not the `pulp::format` umbrella, so
+linking the host no longer brings in `pulp::format-view` and Pulp's view,
+canvas and render stack. A target that includes a view-coupled format header
+(the CLAP, VST3 or AU adapter headers, `view_bridge.hpp`, the standalone
+chrome) must link `pulp::format` itself. Such a target fails to compile with
+`pulp/view/...` not found rather than at link time, and it fails only in the
+configurations that build it: `PULP_HAS_VST3`, `PULP_HAS_AUSDK` and examples
+are off in a fresh worktree, so grep the gated suites' sources for the headers
+listed in `VIEW_HEADERS` (`tools/scripts/format_header_view_boundary.py`)
+before trusting a green default build. `pulp-host-link-edges`
+walks the host's link closure and fails when the umbrella returns.
+
 ## Mental model
 
 The bounded G6 in-process voice bank is `voice_bank_binding.hpp` plus one

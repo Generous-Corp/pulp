@@ -8644,3 +8644,13 @@ generated-JS emitter in `design_codegen.cpp` and the native lowering in
 `apply_layout` (`design_import_native_common.cpp`). Change them together;
 `design import screenshot parity compares live and baked native fixtures`
 (the `clipped-stack` fixture) fails when only one lane keeps the height.
+
+## The import CLI needs Skia's ICU data beside it on Windows
+
+`pulp-import-design` shapes text through SkParagraph, whose ICU-backed
+`SkUnicode` is null without `icudtl.dat` and traps on its `fUnicode` check
+(`SkIcuLoader: datafile missing: <dir>\icudtl.dat`). Plug-ins and apps get the
+file from `pulp_stage_runtime_dependencies()`; a command-line tool or test
+executable that renders text calls `pulp_stage_skia_icu_data(<target>)` itself.
+A hosted Windows run that aborts every import test with that message is this,
+not an importer regression.

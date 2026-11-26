@@ -10,6 +10,7 @@
    "${CMAKE_BINARY_DIR}/tools/cli/generated/migration_index.cpp",
    "tools/cli/atomic_text_file.cpp",
    "tools/cli/au_info_plist.cpp",
+   "tools/cli/audio_png_encoder.cpp",
    "tools/cli/authority_navigation.cpp",
    "tools/cli/build_plan.cpp",
    "tools/cli/cli_common.cpp",
