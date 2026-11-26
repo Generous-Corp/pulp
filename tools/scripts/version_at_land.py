@@ -1101,6 +1101,21 @@ def _marker_line(text: str) -> str | None:
     return None
 
 
+def _normalise_bump_body(text: str) -> str:
+    """Use one representation when comparing or writing a PR description."""
+    return text.strip() + "\n"
+
+
+def _report_body_reconcile_failure(action: str, number: str, detail: str) -> None:
+    """Make a PR-description failure visible to both Actions and the log."""
+    detail = " ".join(detail.split()) or "no error detail"
+    line = (f"version-at-land: could not {action} the body of bump PR "
+            f"#{number}: {detail}")
+    print(f"::error title=version-at-land::{line}")
+    _write_step_summary(f"- {line}")
+    sys.stderr.write(line + "\n")
+
+
 def _set_bump_pr_body(repo: Path, number: str, body: str) -> bool:
     """Replace the bump PR's description through the REST pulls endpoint.
 
@@ -1113,13 +1128,13 @@ def _set_bump_pr_body(repo: Path, number: str, body: str) -> bool:
               "-f", f"body={body}", check=False)
     if res.returncode != 0:
         detail = (res.stderr or res.stdout or "").strip()
-        sys.stderr.write(f"version-at-land: could not refresh the body of bump "
-                         f"PR #{number} (exit {res.returncode}): {detail}\n")
+        _report_body_reconcile_failure(
+            "refresh", number, f"exit {res.returncode}: {detail}")
         return False
     return True
 
 
-def _reconcile_bump_pr_body(repo: Path, number: str, tip: str) -> None:
+def _reconcile_bump_pr_body(repo: Path, number: str, tip: str) -> bool:
     """Make the standing bump PR's description describe its current head.
 
     Reviewers read the assigned versions from the description, so one that
@@ -1128,17 +1143,17 @@ def _reconcile_bump_pr_body(repo: Path, number: str, tip: str) -> None:
     want = _git(repo, "log", "-1", "--format=%B", tip, check=False).stdout
     marker = _marker_line(want)
     if marker is None:
-        return
+        return True
     got = _gh(repo, "api", f"repos/{{owner}}/{{repo}}/pulls/{number}",
               "--jq", ".body", check=False)
     if got.returncode != 0:
         detail = (got.stderr or got.stdout or "").strip()
-        sys.stderr.write(f"version-at-land: could not read the body of bump "
-                         f"PR #{number} (exit {got.returncode}): {detail}\n")
-        return
-    if _marker_line(got.stdout) == marker:
-        return
-    _set_bump_pr_body(repo, number, want.strip() + "\n")
+        _report_body_reconcile_failure(
+            "read", number, f"exit {got.returncode}: {detail}")
+        return False
+    if _normalise_bump_body(got.stdout) == _normalise_bump_body(want):
+        return True
+    return _set_bump_pr_body(repo, number, _normalise_bump_body(want))
 
 
 def _tip_age_minutes(repo: Path, tip: str, now: int) -> int | None:
@@ -1239,15 +1254,28 @@ def _list_open_bump_pr(repo: Path) -> tuple[bool, str | None]:
     The tri-state is load-bearing: a force-reclaim must never run on an UNKNOWN
     PR state (an API error must not be read as "no PR" and clobber a queued
     PR)."""
-    res = _gh(repo, "pr", "list", "--head", BUMP_BRANCH, "--state", "open",
-              "--json", "number", check=False)
+    remote_url = _git(repo, "remote", "get-url", "origin",
+                      check=False).stdout.strip()
+    match = re.search(r"github\.com[:/]([^/]+)/", remote_url)
+    owner = match.group(1) if match else None
+    head_filter = f"{owner}:{BUMP_BRANCH}" if owner else BUMP_BRANCH
+    res = _gh(repo, "pr", "list", "--head", head_filter, "--state", "open",
+              "--json", "number,headRepositoryOwner", check=False)
     if res.returncode != 0:
         return False, None
     try:
         prs = json.loads(res.stdout or "[]")
     except json.JSONDecodeError:
         return False, None
-    return True, (str(prs[0]["number"]) if prs else None)
+    for pr in prs:
+        if owner:
+            head_owner = ((pr.get("headRepositoryOwner") or {}).get("login")
+                          if isinstance(pr, dict) else None)
+            if not head_owner or head_owner.lower() != owner.lower():
+                continue
+        if isinstance(pr, dict) and "number" in pr:
+            return True, str(pr["number"])
+    return True, None
 
 
 def _remote_sha(repo: Path, remote: str, ref: str) -> str | None:
@@ -1366,7 +1394,8 @@ def _update_standing_pr(
             f"{pushed.returncode}); the branch moved under us.\n"
             f"{(pushed.stderr or pushed.stdout or '').strip()}\n")
         return "exhausted"
-    _set_bump_pr_body(repo, number, message)
+    if not _set_bump_pr_body(repo, number, message):
+        return "body-reconcile-failed"
     return "pr-updated"
 
 
@@ -1443,6 +1472,9 @@ def apply_via_pr(
                      (one compare-and-swap push; the PR stays). This is also
                      how a dead or red head is repaired with `heal_stale`:
                      replacing it clears the verdict and reruns the checks.
+      "body-reconcile-failed" — the standing PR branch was left in place, but
+                     its description could not be read or refreshed; the run
+                     fails so the next drain retries the reconciliation.
       "standing-held" — an update is due but `coalesce_window` has not passed
                      since the standing head was built, no surface needs a
                      higher version, and no capability landing has outgrown
@@ -1527,12 +1559,14 @@ def apply_via_pr(
             base=base, head=head, heal_stale=heal_stale,
             window=coalesce_window, release_now=release_now, now=stamp,
             report=report)
-        if status not in ("pr-updated", "exhausted") and tip is not None:
+        if (status not in ("pr-updated", "exhausted", "body-reconcile-failed")
+                and tip is not None):
             # An update writes its own description, and a lost push means the
             # head is no longer `tip`. Every other outcome keeps the head, so
             # a description an earlier drain failed to refresh is repaired
             # here.
-            _reconcile_bump_pr_body(repo, existing, tip)
+            if not _reconcile_bump_pr_body(repo, existing, tip):
+                status = "body-reconcile-failed"
         return status, plan
 
     edited = _write_plan(repo, config, plan)
@@ -1790,6 +1824,12 @@ def main(argv: list[str]) -> int:
             sys.stderr.write(
                 "version-at-land: bump PR opened but auto-merge could not be "
                 "armed. Failing so it retries; the next drain re-arms it.\n")
+            return 1
+        elif status == "body-reconcile-failed":
+            sys.stderr.write(
+                "version-at-land: bump PR branch changed but its description "
+                "was not reconciled; the next drain will retry.\n")
+            _write_assignment_summary(status, plan)
             return 1
         else:  # "exhausted"
             sys.stderr.write(

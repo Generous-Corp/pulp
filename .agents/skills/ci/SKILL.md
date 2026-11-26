@@ -188,6 +188,12 @@ on a real PR. Do them in order.
    `git fetch origin main -q && git merge-base --is-ancestor <merge-sha> origin/main`.
    A `wait` exit code is not merge proof.
 
+The PR route of `version-at-land` keeps the standing bump description aligned
+with its commit. It compares the complete normalized body, filters the bump
+branch to this repository's head owner, and emits an Actions error plus a
+failing status when the description GET or PATCH fails; the next drain retries
+the reconciliation.
+
 ## A `run:` step stops at the first failing command
 
 GitHub's default shell for `run:` is `bash -e {0}` (no pipefail), so a step

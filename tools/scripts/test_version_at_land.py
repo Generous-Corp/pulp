@@ -522,7 +522,9 @@ class _FakeGh:
                  in_queue: bool = False, graphql_rc: int = 0,
                  close_rc: int = 0, ejected: bool = False,
                  checks: list[dict] | None = None, hold: bool = False,
-                 body: str = "") -> None:
+                 body: str = "", body_get_rc: int = 0,
+                 body_get_stderr: str = "", body_patch_rc: int = 0,
+                 body_patch_stderr: str = "") -> None:
         # In-flight state of the open bump PR, read by the stale-PR liveness
         # check. The default (armed, never ejected, no check reported yet) is a
         # PR still on its way to landing. `checks` is the head commit's
@@ -550,6 +552,10 @@ class _FakeGh:
         # REST PATCH replaces it; `pr edit` fails, as it does for the release
         # bot's token in the workflow.
         self.body = body
+        self.body_get_rc = body_get_rc
+        self.body_get_stderr = body_get_stderr
+        self.body_patch_rc = body_patch_rc
+        self.body_patch_stderr = body_patch_stderr
         self.calls: list[tuple[str, ...]] = []
 
     def __call__(self, repo, *args, check: bool = True):
@@ -575,10 +581,18 @@ class _FakeGh:
                 args, 1, stdout="", stderr="GraphQL: edit refused")
         if (args[:3] == ("api", "--method", "PATCH")
                 and "/pulls/" in args[3]):
+            if self.body_patch_rc:
+                return subprocess.CompletedProcess(
+                    args, self.body_patch_rc, stdout="",
+                    stderr=self.body_patch_stderr)
             field = next(a for a in args if a.startswith("body="))
             self.body = field[len("body="):]
             return subprocess.CompletedProcess(args, 0, stdout="{}", stderr="")
         if args[:1] == ("api",) and "/pulls/" in args[1] and ".body" in args:
+            if self.body_get_rc:
+                return subprocess.CompletedProcess(
+                    args, self.body_get_rc, stdout="",
+                    stderr=self.body_get_stderr)
             return subprocess.CompletedProcess(
                 args, 0, stdout=self.body + "\n", stderr="")
         if head == ("pr", "view"):
@@ -1244,6 +1258,37 @@ class PrRouteTest(unittest.TestCase):
         self.assertEqual(status, "pending")
         self.assertFalse(fake.did("pr", "merge"))
 
+    def test_open_bump_pr_query_rejects_a_fork_head(self) -> None:
+        original_git, original_gh = val._git, val._gh
+        calls: list[tuple[str, ...]] = []
+
+        def fake_git(repo, *args, check=False):
+            if args == ("remote", "get-url", "origin"):
+                return subprocess.CompletedProcess(
+                    args, 0, stdout="git@github.com:Generous-Corp/pulp.git\n",
+                    stderr="")
+            return original_git(repo, *args, check=check)
+
+        def fake_gh(repo, *args, check=False):
+            calls.append(tuple(args))
+            return subprocess.CompletedProcess(
+                args, 0, stdout=json.dumps([
+                    {"number": 1, "headRepositoryOwner": {"login": "fork"}},
+                    {"number": 2, "headRepositoryOwner": {"login": "Generous-Corp"}},
+                ]), stderr="")
+
+        val._git, val._gh = fake_git, fake_gh
+        try:
+            ok, number = val._list_open_bump_pr(self.clone)
+        finally:
+            val._git, val._gh = original_git, original_gh
+        self.assertTrue(ok)
+        self.assertEqual(number, "2")
+        self.assertIn("--head", calls[0])
+        self.assertEqual(calls[0][calls[0].index("--head") + 1],
+                         "Generous-Corp:" + val.BUMP_BRANCH)
+        self.assertIn("number,headRepositoryOwner", calls[0])
+
     def test_pr_route_preserves_draft_hold_and_fails_closed(self) -> None:
         _git(self.clone, "checkout", "-q", "-b", val.BUMP_BRANCH)
         (self.clone / "STALE_BUMP.txt").write_text("held draft head\n")
@@ -1603,9 +1648,8 @@ class StandingBumpPrTest(unittest.TestCase):
         the next drain that keeps the head, and left alone once it matches."""
         self.assertEqual(self._drain(_FakeGh(open_prs=0))[0], "pr-opened")
         built = self._tip()
-        stale = ("chore: bump versions\n\nAssigned from Version-Bump intent "
-                 "on 0000..1111.\nplugin 0.1.0->0.1.1 (patch)\n\n"
-                 f"{val.APPLIED_MARKER}: {'1' * 40}\n")
+        marker = val._marker_line(self._message(built))
+        stale = f"manually edited release text\n\n{marker}\n"
         fake = _FakeGh(open_prs=1, covers=True, body=stale)
         status, _ = self._drain(fake, heal_stale=True)
         self.assertEqual(status, "pending")
@@ -1616,6 +1660,52 @@ class StandingBumpPrTest(unittest.TestCase):
         again = _FakeGh(open_prs=1, covers=True, body=fake.body)
         self.assertEqual(self._drain(again, heal_stale=True)[0], "pending")
         self.assertEqual(again.body_writes(), 0)
+
+    def test_description_patch_failure_is_a_visible_failed_reconcile(self) -> None:
+        self.assertEqual(self._drain(_FakeGh(open_prs=0))[0], "pr-opened")
+        self._land("feature", "core/runtime/src/new.cpp", "feat(core): new")
+        fake = _FakeGh(open_prs=1, covers=False, body_patch_rc=1,
+                       body_patch_stderr="PATCH refused")
+        summary = self.root / "body-patch-summary.md"
+        previous = os.environ.get("GITHUB_STEP_SUMMARY")
+        os.environ["GITHUB_STEP_SUMMARY"] = str(summary)
+        try:
+            with contextlib.redirect_stdout(io.StringIO()) as out:
+                status, _ = self._drain(fake)
+        finally:
+            if previous is None:
+                os.environ.pop("GITHUB_STEP_SUMMARY", None)
+            else:
+                os.environ["GITHUB_STEP_SUMMARY"] = previous
+        self.assertEqual(status, "body-reconcile-failed")
+        self.assertIn("::error title=version-at-land::", out.getvalue())
+        self.assertIn("PATCH refused", summary.read_text())
+        patch = next(c for c in fake.calls
+                     if c[:3] == ("api", "--method", "PATCH"))
+        self.assertTrue(patch[3].endswith("/pulls/1"), patch)
+
+    def test_description_get_failure_is_a_visible_failed_reconcile(self) -> None:
+        self.assertEqual(self._drain(_FakeGh(open_prs=0))[0], "pr-opened")
+        self._land("feature", "core/runtime/src/new.cpp", "feat(core): new")
+        fake = _FakeGh(open_prs=1, covers=True, body_get_rc=1,
+                       body_get_stderr="GET refused")
+        summary = self.root / "body-get-summary.md"
+        previous = os.environ.get("GITHUB_STEP_SUMMARY")
+        os.environ["GITHUB_STEP_SUMMARY"] = str(summary)
+        try:
+            with contextlib.redirect_stdout(io.StringIO()) as out:
+                status, _ = self._drain(fake, heal_stale=True)
+        finally:
+            if previous is None:
+                os.environ.pop("GITHUB_STEP_SUMMARY", None)
+            else:
+                os.environ["GITHUB_STEP_SUMMARY"] = previous
+        self.assertEqual(status, "body-reconcile-failed")
+        self.assertIn("::error title=version-at-land::", out.getvalue())
+        self.assertIn("GET refused", summary.read_text())
+        get = next(c for c in fake.calls
+                   if c[:1] == ("api",) and ".body" in c)
+        self.assertTrue(get[1].endswith("/pulls/1"), get)
 
 
 class CoalesceDecisionTest(unittest.TestCase):
