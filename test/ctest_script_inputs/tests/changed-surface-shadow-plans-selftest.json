@@ -37,6 +37,7 @@
    "test/mac_objc_coload_probe.cpp",
    "test/support",
    "test/test_agent_capability_compile.cpp",
+   "test/test_au_v2_contract_view.mm",
    "test/test_control_phase15_aggregate_e2e.cpp",
    "test/test_coremidi_shared_client.cpp",
    "test/test_isolated_clap_launch_budget.cpp",
