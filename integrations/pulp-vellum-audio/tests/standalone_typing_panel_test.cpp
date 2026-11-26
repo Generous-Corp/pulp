@@ -73,7 +73,8 @@ struct Harness {
                   host->gpu_backed = host_gpu_backed;
                   window = host.get();
                   return host;
-              }) {}
+              },
+              [this] { return text_focused; }) {}
 
     vv::KeyEvent key(vv::KeyCode code, bool down = true, std::uint16_t modifiers = vv::kModNone,
                      bool repeat = false) {
@@ -91,6 +92,7 @@ struct Harness {
     bool reject_pitch = false;
     bool reject_sustain_off = false;
     bool host_gpu_backed = true;
+    bool text_focused = false;
     TestWindowHost* window = nullptr;
     vv::WindowOptions created_options;
     StandaloneTypingPanel typing;
@@ -544,4 +546,18 @@ TEST_CASE("vellum typing panel keyboard lights a pressed key in its own render",
     const auto released = pixel_at(*keyboard, x, y);
     CHECK(released.r > 200);
     CHECK(released.g > 200);
+}
+
+TEST_CASE("vellum typing panel leaves keys to a focused text field", "[standalone-typing-panel]") {
+    Harness harness;
+    REQUIRE(harness.typing.show());
+
+    harness.text_focused = true;
+    CHECK_FALSE(harness.typing.route_app_key(harness.key(vv::KeyCode::a)));
+    CHECK(harness.events.empty());
+
+    harness.text_focused = false;
+    CHECK(harness.typing.route_app_key(harness.key(vv::KeyCode::a)));
+    REQUIRE(harness.events.size() == 1);
+    CHECK(harness.events[0].is_note_on());
 }

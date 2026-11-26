@@ -62,8 +62,10 @@ class NativeWindowRef final : public vv::WindowHost {
 
 } // namespace
 
-StandaloneTypingPanel::StandaloneTypingPanel(MidiSink midi_sink, HostFactory host_factory)
-    : midi_sink_(std::move(midi_sink)), host_factory_(std::move(host_factory)) {
+StandaloneTypingPanel::StandaloneTypingPanel(MidiSink midi_sink, HostFactory host_factory,
+                                             TextFocusProbe text_focus)
+    : midi_sink_(std::move(midi_sink)), host_factory_(std::move(host_factory)),
+      text_focus_(std::move(text_focus)) {
     if (!host_factory_) {
         host_factory_ = [](vv::View& root, const vv::WindowOptions& options) {
             return vv::WindowHost::create(root, options);
@@ -373,6 +375,8 @@ bool StandaloneTypingPanel::route_app_key(const vv::KeyEvent& event) {
         release.modifiers = vv::kModNone;
         return keyboard_->on_key_event(release);
     }
+    if (text_focus_ && text_focus_())
+        return false;
     auto* focused = keyboard_->interaction().focused_input;
     if (focused && focused->accepts_text_input())
         return false;
@@ -387,7 +391,8 @@ std::unique_ptr<format::StandalonePanel>
 make_standalone_typing_panel(const format::StandalonePanelContext& context) {
     if (!context.config.enable_musical_typing_keyboard)
         return nullptr;
-    return std::make_unique<StandaloneTypingPanel>(context.midi_sink);
+    return std::make_unique<StandaloneTypingPanel>(
+        context.midi_sink, StandaloneTypingPanel::HostFactory{}, context.text_input_focused);
 }
 
 bool install_standalone_typing_panel() noexcept {

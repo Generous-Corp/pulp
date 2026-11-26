@@ -32,7 +32,12 @@ class StandaloneTypingPanel final : public format::StandalonePanel {
         ::vellum::view::View&, const ::vellum::view::WindowOptions&)>;
 
     /// `host_factory` defaults to `WindowHost::create`; tests pass their own.
-    explicit StandaloneTypingPanel(MidiSink midi_sink, HostFactory host_factory = {});
+    /// Answers whether an editable text field anywhere in the app has keyboard
+    /// focus; the panel then leaves typed keys to the field. Empty: never.
+    using TextFocusProbe = std::function<bool()>;
+
+    explicit StandaloneTypingPanel(MidiSink midi_sink, HostFactory host_factory = {},
+                                   TextFocusProbe text_focus = {});
     ~StandaloneTypingPanel() override;
 
     StandaloneTypingPanel(const StandaloneTypingPanel&) = delete;
@@ -71,6 +76,7 @@ class StandaloneTypingPanel final : public format::StandalonePanel {
 
     MidiSink midi_sink_;
     HostFactory host_factory_;
+    TextFocusProbe text_focus_;
     void* primary_native_window_ = nullptr;
     std::unique_ptr<MusicalTypingKeyboard> keyboard_;
     std::unique_ptr<::vellum::view::WindowHost> window_;
