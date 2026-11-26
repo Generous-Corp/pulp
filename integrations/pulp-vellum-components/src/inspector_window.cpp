@@ -1,10 +1,13 @@
 #include <pulp/vellum_components/inspector_window.hpp>
 
+#include <pulp/vellum_components/view_inspector.hpp>
+
 #include <vellum/view/inspector_facts.hpp>
 #include <vellum/view/ui_components.hpp>
 #include <vellum/view/widgets.hpp>
 
 #include <algorithm>
+#include <chrono>
 #include <cstdio>
 #include <functional>
 
@@ -22,6 +25,11 @@ static const Color kTextPrimary = Color::rgba8(220, 220, 230);
 static const Color kTextMuted = Color::rgba8(140, 140, 160);
 static const Color kBorder = Color::rgba8(60, 60, 80);
 static const Color kAccent = Color::rgba8(80, 160, 255); // active tool
+static const Color kLogColor = Color::rgba8(180, 180, 200);
+static const Color kWarnColor = Color::rgba8(255, 200, 60);
+static const Color kErrorColor = Color::rgba8(255, 80, 80);
+static const Color kInfoColor = Color::rgba8(80, 180, 255);
+static const Color kDebugColor = Color::rgba8(120, 220, 120);
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -146,6 +154,50 @@ void CollapsableSection::on_mouse_event(const MouseEvent& event) {
     if (event.position.y < kHeaderHeight) {
         set_expanded(!expanded_);
     }
+}
+
+// ── ConsoleEntryView ───────────────────────────────────────────────────────
+
+void ConsoleEntryView::set_entry(const ConsoleRow& entry) {
+    level_ = entry.level;
+    message_ = entry.message;
+
+    // Seconds since the clock's epoch, wrapped to five digits.
+    const auto ms =
+        std::chrono::duration_cast<std::chrono::milliseconds>(entry.time.time_since_epoch())
+            .count();
+    char buf[32];
+    std::snprintf(buf, sizeof(buf), "%lld.%03lld", static_cast<long long>((ms / 1000) % 100000),
+                  static_cast<long long>(ms % 1000));
+    timestamp_ = buf;
+}
+
+void ConsoleEntryView::paint(canvas::Canvas& canvas) {
+    auto b = local_bounds();
+
+    Color badge_color = kLogColor;
+    if (level_ == "warn")
+        badge_color = kWarnColor;
+    else if (level_ == "error")
+        badge_color = kErrorColor;
+    else if (level_ == "info")
+        badge_color = kInfoColor;
+    else if (level_ == "debug")
+        badge_color = kDebugColor;
+
+    canvas.set_font("system", 9);
+    canvas.set_fill_color(badge_color.with_alpha(0.2f));
+    canvas.fill_rect(b.x + 4, b.y + 3, 36, 16);
+    canvas.set_fill_color(badge_color);
+    canvas.fill_text(level_, b.x + 8, b.y + 15);
+
+    canvas.set_font("system", 9);
+    canvas.set_fill_color(kTextMuted);
+    canvas.fill_text(timestamp_, b.x + 46, b.y + 15);
+
+    canvas.set_font("system", 11);
+    canvas.set_fill_color(kTextPrimary);
+    canvas.fill_text(message_, b.x + 100, b.y + 15);
 }
 
 InspectorWindow::~InspectorWindow() {
@@ -315,6 +367,9 @@ InspectorWindow::InspectorWindow() {
     tabs_ = tab_panel.get();
 
     tab_panel->add_tab("Elements", build_elements_tab());
+    tab_panel->add_tab("Console", build_console_tab());
+    tab_panel->add_tab("Performance", build_performance_tab());
+    tab_panel->add_tab("State", build_state_tab());
 
     tab_panel->set_active_tab(0);
     tab_panel->flex().flex_grow = 1;
@@ -493,13 +548,156 @@ std::unique_ptr<View> InspectorWindow::build_elements_tab() {
     return root;
 }
 
+std::unique_ptr<View> InspectorWindow::build_console_tab() {
+    auto root = std::make_unique<View>();
+    root->flex().direction = FlexDirection::column;
+    root->flex().flex_grow = 1;
+    root->set_background_color(kBgPanel);
+
+    // Header bar
+    auto header = std::make_unique<View>();
+    header->flex().direction = FlexDirection::row;
+    header->flex().preferred_height = 28;
+    header->flex().flex_shrink = 0;
+    header->flex().padding = 4;
+    header->set_background_color(kBgSection);
+
+    auto title = std::make_unique<Label>("Console Output");
+    title->set_font_size(11);
+    title->flex().flex_grow = 1;
+    header->add_child(std::move(title));
+
+    root->add_child(std::move(header));
+
+    // Scrolling log list
+    auto scroll = std::make_unique<ScrollView>();
+    scroll->flex().flex_grow = 1;
+    scroll->set_direction(ScrollView::Direction::vertical);
+    console_scroll_ = scroll.get();
+
+    auto list = std::make_unique<View>();
+    list->flex().direction = FlexDirection::column;
+    list->flex().flex_shrink = 0;
+    console_list_ = list.get();
+    scroll->add_child(std::move(list));
+
+    root->add_child(std::move(scroll));
+    return root;
+}
+
+std::unique_ptr<View> InspectorWindow::build_performance_tab() {
+    auto root = std::make_unique<View>();
+    root->flex().direction = FlexDirection::column;
+    root->flex().flex_grow = 1;
+    root->flex().padding = 8;
+    root->flex().gap = 4;
+    root->set_background_color(kBgPanel);
+
+    // FPS
+    auto fps = make_prop_label("FPS: —", 13);
+    fps_label_ = fps.get();
+    root->add_child(std::move(fps));
+
+    // Frame time
+    auto ft = make_prop_label("Frame time: —", 13);
+    frame_time_label_ = ft.get();
+    root->add_child(std::move(ft));
+
+    // GPU render time (whole-recording, from Skia Graphite GpuStats).
+    auto gpu = make_prop_label("GPU render: —", 13);
+    gpu_render_label_ = gpu.get();
+    root->add_child(std::move(gpu));
+
+    // Budget
+    auto bgt = make_prop_label("Budget: —", 13);
+    budget_label_ = bgt.get();
+    root->add_child(std::move(bgt));
+
+    // View count
+    auto vc = make_prop_label("View count: —", 13);
+    view_count_label_ = vc.get();
+    root->add_child(std::move(vc));
+
+    // Separator
+    auto sep = std::make_unique<View>();
+    sep->flex().preferred_height = 1;
+    sep->flex().flex_shrink = 0;
+    sep->set_background_color(kBorder);
+    root->add_child(std::move(sep));
+
+    // Pass breakdown header
+    auto ph = make_prop_label("Per-Pass Breakdown", 12);
+    root->add_child(std::move(ph));
+
+    // Pass list container
+    auto pl = std::make_unique<View>();
+    pl->flex().direction = FlexDirection::column;
+    pl->flex().gap = 2;
+    pl->flex().flex_shrink = 0;
+    pass_list_ = pl.get();
+    root->add_child(std::move(pl));
+
+    return root;
+}
+
+std::unique_ptr<View> InspectorWindow::build_state_tab() {
+    auto root = std::make_unique<View>();
+    root->flex().direction = FlexDirection::column;
+    root->flex().flex_grow = 1;
+    root->set_background_color(kBgPanel);
+
+    // Header
+    auto header = std::make_unique<View>();
+    header->flex().direction = FlexDirection::row;
+    header->flex().preferred_height = 28;
+    header->flex().flex_shrink = 0;
+    header->flex().padding = 4;
+    header->set_background_color(kBgSection);
+
+    auto title = std::make_unique<Label>("Parameters");
+    title->set_font_size(11);
+    title->flex().flex_grow = 1;
+    header->add_child(std::move(title));
+    root->add_child(std::move(header));
+
+    // Scrolling param list
+    auto scroll = std::make_unique<ScrollView>();
+    scroll->flex().flex_grow = 1;
+    scroll->set_direction(ScrollView::Direction::vertical);
+    state_scroll_ = scroll.get();
+
+    auto list = std::make_unique<View>();
+    list->flex().direction = FlexDirection::column;
+    list->flex().flex_shrink = 0;
+    state_list_ = list.get();
+    scroll->add_child(std::move(list));
+
+    root->add_child(std::move(scroll));
+    return root;
+}
+
 void InspectorWindow::set_inspected_root(View* root) {
     inspected_root_ = root;
     refresh_elements();
 }
 
 void InspectorWindow::refresh() {
-    refresh_elements();
+    if (!tabs_)
+        return;
+    switch (tabs_->active_tab()) {
+    case 0:
+        refresh_elements();
+        break;
+    case 1:
+        refresh_console();
+        break;
+    case 2:
+        refresh_performance();
+        break;
+    case 3:
+        refresh_state();
+        break;
+    }
 }
 
 void InspectorWindow::select_tab(std::string_view title) {
@@ -763,6 +961,117 @@ void InspectorWindow::show_properties_for(View* view) {
             prop_widget_value_label_->set_text(widget_value);
         }
     }
+}
+
+// ── Console refresh ─────────────────────────────────────────────────────────
+
+void InspectorWindow::refresh_console() {
+    if (!console_list_ || !console_source_)
+        return;
+
+    const auto entries = console_source_();
+    while (console_list_->child_count() > 0)
+        console_list_->remove_child(console_list_->child_at(0));
+
+    for (const auto& entry : entries) {
+        auto row = std::make_unique<ConsoleEntryView>();
+        row->set_entry(entry);
+        row->flex().preferred_height = 22;
+        row->flex().flex_shrink = 0;
+        console_list_->add_child(std::move(row));
+    }
+
+    if (console_scroll_)
+        console_scroll_->set_content_size({300, static_cast<float>(entries.size()) * 22.0f});
+}
+
+// ── Performance refresh ─────────────────────────────────────────────────────
+
+void InspectorWindow::refresh_performance() {
+    const auto frame = performance_source_ ? performance_source_() : std::nullopt;
+    if (!frame) {
+        if (fps_label_)
+            fps_label_->set_text("FPS: (no data)");
+        return;
+    }
+
+    const float fps = frame->total_ms > 0 ? 1000.0f / frame->total_ms : 0.0f;
+    if (fps_label_)
+        fps_label_->set_text("FPS: " + format_float(fps, 1));
+    if (frame_time_label_)
+        frame_time_label_->set_text("Frame time: " + format_float(frame->total_ms, 2) + " ms");
+    if (gpu_render_label_) {
+        // Honest about availability: an adapter without timing, or no sample
+        // yet, reads "unavailable", never a made-up 0.
+        gpu_render_label_->set_text(frame->gpu_timing_available
+                                        ? "GPU render: " + format_float(frame->gpu_render_ms, 2) +
+                                              " ms"
+                                        : "GPU render: unavailable");
+    }
+    if (budget_label_) {
+        std::string text = "Budget: " + format_float(frame->budget_ms, 1) + " ms";
+        if (frame->over_budget)
+            text += "  [OVER BUDGET]";
+        budget_label_->set_text(text);
+    }
+    if (view_count_label_ && inspected_root_)
+        view_count_label_->set_text("View count: " +
+                                    std::to_string(ViewInspector::count_views(*inspected_root_)));
+
+    if (pass_list_) {
+        while (pass_list_->child_count() > 0)
+            pass_list_->remove_child(pass_list_->child_at(0));
+        for (const auto& pass : frame->passes) {
+            pass_list_->add_child(make_prop_label(pass.name + ": " + format_float(pass.time_ms, 2) +
+                                                      " ms, " + std::to_string(pass.draw_calls) +
+                                                      " draws",
+                                                  11));
+        }
+    }
+}
+
+// ── State refresh ───────────────────────────────────────────────────────────
+
+void InspectorWindow::refresh_state() {
+    if (!state_list_ || !param_source_)
+        return;
+
+    const auto params = param_source_();
+    while (state_list_->child_count() > 0)
+        state_list_->remove_child(state_list_->child_at(0));
+
+    for (const auto& p : params) {
+        auto row = std::make_unique<View>();
+        row->flex().direction = FlexDirection::column;
+        row->flex().preferred_height = 48;
+        row->flex().flex_shrink = 0;
+        row->flex().padding = 4;
+        row->set_background_color(kBgSection);
+
+        std::string line1 = p.name + ": " + format_float(p.value, 3);
+        if (!p.display_value.empty())
+            line1 += " (" + p.display_value + ")";
+        row->add_child(make_prop_label(line1, 11));
+
+        std::string line2 =
+            "Range: [" + format_float(p.min, 2) + ", " + format_float(p.max, 2) + "]";
+        if (p.step > 0)
+            line2 += " step=" + format_float(p.step, 3);
+        if (!p.unit.empty())
+            line2 += "  Unit: " + p.unit;
+        row->add_child(make_prop_label(line2, 10));
+
+        auto sep = std::make_unique<View>();
+        sep->flex().preferred_height = 1;
+        sep->flex().flex_shrink = 0;
+        sep->set_background_color(kBorder);
+
+        state_list_->add_child(std::move(row));
+        state_list_->add_child(std::move(sep));
+    }
+
+    if (state_scroll_)
+        state_scroll_->set_content_size({300, static_cast<float>(params.size()) * 49.0f});
 }
 
 } // namespace pulp::vellum_components

@@ -165,7 +165,11 @@ TEST_CASE("InspectorWindow lists the tree and shows the selected view's properti
     REQUIRE(window.child_count() == 2);
     auto* tabs = first_of<TabPanel>(window);
     REQUIRE(tabs != nullptr);
-    REQUIRE(tabs->tab_count() == 1);
+    REQUIRE(tabs->tab_count() == 4);
+    REQUIRE(tabs->tab_title(0) == "Elements");
+    REQUIRE(tabs->tab_title(1) == "Console");
+    REQUIRE(tabs->tab_title(2) == "Performance");
+    REQUIRE(tabs->tab_title(3) == "State");
     REQUIRE(tabs->active_tab() == 0);
 
     auto* tree = tree_of(window);
@@ -472,4 +476,164 @@ TEST_CASE("CollapsableSection paints its title and toggles from a real header cl
     REQUIRE_FALSE(identity->is_expanded());
     window.simulate_click({abs.x + 30.0f, abs.y + 8.0f});
     REQUIRE(identity->is_expanded());
+}
+
+TEST_CASE("InspectorWindow console tab lists the source's rows and colours the level badge",
+          "[pulp-vellum-components][inspector-window]") {
+    Fixture fx;
+    InspectorWindow window(fx.root);
+    window.set_bounds({0, 0, 480, 300});
+    const auto now = std::chrono::steady_clock::now();
+    window.set_console_source([&] {
+        return std::vector<ConsoleRow>{
+            {"warn", "careful", now}, {"error", "boom", now}, {"debug", "trace", now}};
+    });
+    window.select_tab("Console");
+    window.layout_children();
+    window.refresh();
+
+    auto* tabs = first_of<TabPanel>(window);
+    REQUIRE(tabs->active_tab() == 1);
+    std::vector<ConsoleEntryView*> rows;
+    collect(*tabs->child_at(1), rows);
+    REQUIRE(rows.size() == 3);
+
+    RecordingCanvas canvas;
+    window.paint_all(canvas);
+    bool saw_message = false;
+    for (const auto& c : canvas.commands())
+        if (c.type == DrawCommand::Type::fill_text && c.text == "boom")
+            saw_message = true;
+    REQUIRE(saw_message);
+
+    // The error badge is red: the row's badge is a translucent fill of
+    // rgb(255, 80, 80) over the panel, so its red channel clearly leads.
+    window.layout_children();
+    const auto frame = render(window, 480, 300);
+    const auto abs = absolute_bounds(*rows[1]);
+    const auto badge =
+        frame.at(static_cast<std::uint32_t>(abs.x + 38), static_cast<std::uint32_t>(abs.y + 5));
+    REQUIRE(badge.r > badge.g + 20);
+    REQUIRE(badge.r > badge.b + 20);
+    maybe_write_png(window, 480, 300, "inspector-console.png");
+
+    // Rows follow the source: a shorter list drops the stale rows.
+    window.set_console_source([&] { return std::vector<ConsoleRow>{{"log", "only", now}}; });
+    window.refresh();
+    rows.clear();
+    collect(*tabs->child_at(1), rows);
+    REQUIRE(rows.size() == 1);
+}
+
+TEST_CASE("InspectorWindow performance tab reads its source",
+          "[pulp-vellum-components][inspector-window]") {
+    Fixture fx;
+    InspectorWindow window(fx.root);
+    window.select_tab("Performance");
+    auto* tabs = first_of<TabPanel>(window);
+    View* page = tabs->child_at(2);
+
+    // No source, or a source with no frame yet, says so.
+    window.refresh();
+    REQUIRE(has_label_containing(*page, "FPS: (no data)"));
+    window.set_performance_source([] { return std::optional<PerformanceFrame>{}; });
+    window.refresh();
+    REQUIRE(has_label_containing(*page, "FPS: (no data)"));
+
+    window.set_performance_source([] {
+        PerformanceFrame frame;
+        frame.total_ms = 2.5f;
+        frame.budget_ms = 1.0f;
+        frame.over_budget = true;
+        frame.passes = {{"background", 0.75f, 3}, {"overlay", 1.75f, 7}};
+        return std::optional<PerformanceFrame>{frame};
+    });
+    window.refresh();
+    REQUIRE(has_label_containing(*page, "FPS: 400.0"));
+    REQUIRE(has_label_containing(*page, "Frame time: 2.50 ms"));
+    REQUIRE(has_label_containing(*page, "Budget: 1.0 ms  [OVER BUDGET]"));
+    REQUIRE(has_label_containing(*page, "View count: 3"));
+    REQUIRE(has_label_containing(*page, "background: 0.75 ms, 3 draws"));
+    REQUIRE(has_label_containing(*page, "overlay: 1.75 ms, 7 draws"));
+    // Without a GPU timing sample the line says unavailable, never 0.00 ms.
+    REQUIRE(has_label_containing(*page, "GPU render: unavailable"));
+
+    window.set_performance_source([] {
+        PerformanceFrame frame;
+        frame.total_ms = 4.0f;
+        frame.budget_ms = 8.0f;
+        frame.gpu_timing_available = true;
+        frame.gpu_render_ms = 1.25f;
+        return std::optional<PerformanceFrame>{frame};
+    });
+    window.refresh();
+    REQUIRE(has_label_containing(*page, "GPU render: 1.25 ms"));
+    REQUIRE_FALSE(has_label_containing(*page, "[OVER BUDGET]"));
+    // The pass list is rebuilt, not appended to.
+    REQUIRE_FALSE(has_label_containing(*page, "overlay: 1.75 ms"));
+
+    window.set_bounds({0, 0, 320, 300});
+    window.layout_children();
+    maybe_write_png(window, 320, 300, "inspector-performance.png");
+}
+
+TEST_CASE("InspectorWindow state tab lists each parameter with its range and unit",
+          "[pulp-vellum-components][inspector-window]") {
+    Fixture fx;
+    InspectorWindow window(fx.root);
+    window.select_tab("State");
+    auto* tabs = first_of<TabPanel>(window);
+    View* page = tabs->child_at(3);
+
+    // Without a source the tab stays empty.
+    REQUIRE_NOTHROW(window.refresh());
+    REQUIRE_FALSE(has_label_containing(*page, "Range: ["));
+
+    window.set_param_source([] {
+        ParamRow gain;
+        gain.name = "Gain";
+        gain.unit = "dB";
+        gain.display_value = "-6 dB";
+        gain.value = -6.0f;
+        gain.min = -60.0f;
+        gain.max = 12.0f;
+        gain.step = 0.5f;
+        ParamRow mix;
+        mix.name = "Mix";
+        mix.max = 1.0f;
+        mix.value = 0.25f;
+        return std::vector<ParamRow>{gain, mix};
+    });
+    window.refresh();
+    REQUIRE(has_label_containing(*page, "Gain: -6.000 (-6 dB)"));
+    REQUIRE(has_label_containing(*page, "Range: [-60.00, 12.00] step=0.500  Unit: dB"));
+    // No display value, no step and no unit leave those parts out.
+    REQUIRE(has_label_containing(*page, "Mix: 0.250"));
+    REQUIRE_FALSE(has_label_containing(*page, "Mix: 0.250 ("));
+    REQUIRE(has_label_containing(*page, "Range: [0.00, 1.00]"));
+    REQUIRE_FALSE(has_label_containing(*page, "Range: [0.00, 1.00] step"));
+
+    window.set_bounds({0, 0, 320, 300});
+    window.layout_children();
+    maybe_write_png(window, 320, 300, "inspector-state.png");
+}
+
+TEST_CASE("InspectorWindow refreshes only the active tab",
+          "[pulp-vellum-components][inspector-window]") {
+    Fixture fx;
+    InspectorWindow window(fx.root);
+    int console_reads = 0;
+    window.set_console_source([&] {
+        ++console_reads;
+        return std::vector<ConsoleRow>{};
+    });
+    window.refresh();
+    REQUIRE(console_reads == 0);
+    window.select_tab("Console");
+    REQUIRE(console_reads == 1);
+    window.refresh();
+    REQUIRE(console_reads == 2);
+    window.select_tab("Missing");
+    window.refresh();
+    REQUIRE(console_reads == 3);
 }
