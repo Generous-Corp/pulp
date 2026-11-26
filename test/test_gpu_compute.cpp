@@ -5,6 +5,8 @@
 #include <pulp/signal/convolver.hpp>
 #include <pulp/signal/fft.hpp>
 
+#include "support/gpu_software_adapter.hpp"
+
 #include <random>
 #include <string>
 
@@ -33,16 +35,44 @@ constexpr const char* kNoGpu =
 // that measures the rasterizer, not the kernel. Those blocks skip on a
 // software adapter, saying which one; every smaller route still runs there.
 std::string software_adapter(const GpuCompute& compute) {
-    const auto caps = compute.capabilities();
-    if (caps.adapter_type != "cpu")
-        return {};
-    return "software adapter " + (caps.name.empty() ? std::string("(unnamed)") : caps.name) + " (" +
-           caps.backend +
-           "): the maximum-block grid-stride dispatch outruns the "
-           "2 s blocking read-back deadline on a CPU rasterizer";
+    return pulp::test::software_adapter_skip_reason(
+        compute.capabilities(),
+        "the maximum-block grid-stride dispatch outruns the 2 s blocking read-back deadline on a "
+        "CPU rasterizer");
 }
 
 }  // namespace
+
+TEST_CASE("software adapter classification names CPU rasterizers and spares hardware",
+          "[render][gpu][compute]") {
+    using Caps = GpuCompute::CapabilityReport;
+    auto caps = [](const char* type, const char* name, const char* vendor, const char* arch) {
+        Caps c;
+        c.backend = "D3D12";
+        c.adapter_type = type;
+        c.name = name;
+        c.vendor = vendor;
+        c.architecture = arch;
+        return c;
+    };
+    // WARP reports an integrated adapter class, so only its identity gives it away.
+    const auto warp = caps("integrated-gpu", "Microsoft Basic Render Driver", "microsoft", "warp");
+    CHECK(pulp::test::is_software_adapter(warp));
+    CHECK(pulp::test::is_software_adapter(caps("cpu", "anything", "", "")));
+    CHECK(pulp::test::is_software_adapter(caps("unknown", "llvmpipe (LLVM 15)", "mesa", "")));
+    CHECK(pulp::test::is_software_adapter(caps("unknown", "SwiftShader Device", "google", "")));
+    CHECK_FALSE(
+        pulp::test::is_software_adapter(caps("integrated-gpu", "Apple M3 Max", "apple", "metal3")));
+    CHECK_FALSE(pulp::test::is_software_adapter(
+        caps("discrete-gpu", "NVIDIA GeForce RTX 4090", "nvidia", "ada")));
+    CHECK_FALSE(pulp::test::is_software_adapter(caps("unknown", "", "", "")));
+
+    CHECK(pulp::test::software_adapter_skip_reason(warp, "tolerance")
+              .find("Microsoft Basic Render Driver") != std::string::npos);
+    CHECK(pulp::test::software_adapter_skip_reason(caps("discrete-gpu", "NVIDIA", "nvidia", "ada"),
+                                                   "tolerance")
+              .empty());
+}
 
 // ── Correctness Tests ───────────────────────────────────────────────────────
 

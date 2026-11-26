@@ -66,3 +66,11 @@ if(PULP_ENABLE_PULP_VELLUM_COMPONENTS)
     set_property(GLOBAL APPEND PROPERTY PULP_INTEGRATION_TEST_DIRS
         "${CMAKE_CURRENT_SOURCE_DIR}/pulp-vellum-components/tests")
 endif()
+
+option(PULP_ENABLE_PULP_VELLUM_GRAPH
+    "Build integrations/pulp-vellum-graph (the SignalGraph node editor as a Vellum view; links pulp::host)" OFF)
+if(PULP_ENABLE_PULP_VELLUM_GRAPH)
+    add_subdirectory(pulp-vellum-graph)
+    set_property(GLOBAL APPEND PROPERTY PULP_INTEGRATION_TEST_DIRS
+        "${CMAKE_CURRENT_SOURCE_DIR}/pulp-vellum-graph/tests")
+endif()

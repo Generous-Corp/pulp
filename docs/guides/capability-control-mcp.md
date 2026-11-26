@@ -112,8 +112,8 @@ phase:
   It is an authoring/workspace operation, not an operation against a live plugin
   instance, so it remains outside the instance capability model.
 - `pulp_screenshot`, `pulp_simulate_click`, `pulp_get_view_tree`, and the Motion
-  fixture/visual-analysis paths operate on built-in demos, scripts, or explicit
-  fixture files. They remain outside live-instance authority. Live capture,
+  fixture/visual-analysis paths operate on built-in demos, scripts, Vellum
+  authoring bundles run on the Vellum app host, or explicit fixture files. They remain outside live-instance authority. Live capture,
   input, and Motion control use the corresponding generated
   `pulp_control_ui_*`, `pulp_control_trace_control`, or other canonical tools.
 

@@ -270,6 +270,17 @@ if(APPLE)
 elseif(UNIX)
     target_link_options(pulp-test-popover-row-template-1147 PRIVATE -Wl,-z,stacksize=16777216)
 endif()
+# SkParagraph needs ICU data beside the executable on Windows.
+pulp_stage_skia_icu_data(pulp-test-popover-row-template-1147)
+if(WIN32 AND SKIA_FOUND)
+    add_test(NAME windows-icu-beside-popover-test
+        COMMAND ${CMAKE_COMMAND}
+            "-DEXE_DIR=$<TARGET_FILE_DIR:pulp-test-popover-row-template-1147>"
+            -P ${CMAKE_SOURCE_DIR}/test/cmake/test_icu_beside_executable.cmake)
+    set_tests_properties(windows-icu-beside-popover-test PROPERTIES
+        LABELS "cmake;skia;windows;runtime" TIMEOUT 30
+        PASS_REGULAR_EXPRESSION "icu_beside_executable_verified=true")
+endif()
 catch_discover_tests(pulp-test-popover-row-template-1147)
 
 # SVG primitives other than <path> (rect / line / circle) route through the
