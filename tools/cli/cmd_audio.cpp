@@ -17,7 +17,6 @@
 #include <pulp/audio/audio_scope.hpp>
 #include <pulp/audio/audio_scope_json.hpp>
 #include <pulp/audio/buffer.hpp>
-#include <pulp/render/headless_surface.hpp>
 #include <pulp/tools/audio/excerpt_service.hpp>
 #include <pulp/tools/audio/model_store.hpp>
 #include <pulp/tools/audio/service.hpp>
@@ -26,6 +25,7 @@
 #include "cmd_audio_formats.hpp"
 #include "cmd_audio_heritage.hpp"
 #include "cmd_audio_plugin_inspect.hpp"
+#include "audio_png_encoder.hpp"
 #include "cmd_audio_png.hpp"
 #include "cmd_audio_render.hpp"
 #include "cmd_audio_inspect.hpp"
@@ -134,10 +134,12 @@ std::vector<std::uint8_t> render_scope_png(const pulp::audio::AudioScopeAcquisit
                                            std::string* error_out) {
     constexpr std::uint32_t width = 900;
     constexpr std::uint32_t height = 360;
-    pulp::render::HeadlessSurface::Rgba rgba;
-    rgba.width = width;
-    rgba.height = height;
-    rgba.pixels.assign(static_cast<std::size_t>(width) * height * 4, 0);
+    struct Pixels {
+        std::uint32_t width;
+        std::uint32_t height;
+        std::vector<std::uint8_t> pixels;
+    } rgba{width, height,
+           std::vector<std::uint8_t>(static_cast<std::size_t>(width) * height * 4, 0)};
 
     auto put = [&](int x, int y, std::uint8_t r, std::uint8_t g, std::uint8_t b,
                    std::uint8_t a = 255) {
@@ -204,7 +206,7 @@ std::vector<std::uint8_t> render_scope_png(const pulp::audio::AudioScopeAcquisit
         }
     }
 
-    return pulp::render::HeadlessSurface::encode_png(rgba, error_out);
+    return pulp_cli::encode_png_rgba8(rgba.width, rgba.height, rgba.pixels, error_out);
 }
 
 } // namespace
@@ -212,11 +214,7 @@ std::vector<std::uint8_t> render_scope_png(const pulp::audio::AudioScopeAcquisit
 std::vector<std::uint8_t> encode_png_rgba(std::uint32_t width, std::uint32_t height,
                                           const std::vector<std::uint8_t>& rgba,
                                           std::string* error_out) {
-    pulp::render::HeadlessSurface::Rgba surface;
-    surface.width = width;
-    surface.height = height;
-    surface.pixels = rgba;
-    return pulp::render::HeadlessSurface::encode_png(surface, error_out);
+    return pulp_cli::encode_png_rgba8(width, height, rgba, error_out);
 }
 
 namespace {

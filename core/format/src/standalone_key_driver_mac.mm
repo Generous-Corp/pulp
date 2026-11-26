@@ -10,12 +10,12 @@
 namespace pulp::format::detail {
 namespace {
 
-/// Inverse of mac_geometry::key_code_from_ns: a portable KeyCode back to the
+/// Inverse of mac_geometry::key_code_from_ns: a portable SequenceKey back to the
 /// virtual keycode AppKit would report for that physical key. The host reads
 /// `event.keyCode`, so a synthesized event carrying the wrong number is a
 /// different key press than the one the caller asked for.
-unsigned short vk_from_key_code(view::KeyCode key) {
-    using KC = view::KeyCode;
+unsigned short vk_from_key_code(SequenceKey key) {
+    using KC = SequenceKey;
     switch (key) {
         case KC::a: return kVK_ANSI_A;   case KC::b: return kVK_ANSI_B;
         case KC::c: return kVK_ANSI_C;   case KC::d: return kVK_ANSI_D;
@@ -58,8 +58,8 @@ unsigned short vk_from_key_code(view::KeyCode key) {
 /// The `characters` string AppKit would attach. interpretKeyEvents: and any
 /// text-input consumer read this rather than the keycode, so an arrow key
 /// needs its private-use function-key character, not an empty string.
-NSString* characters_for_key_code(view::KeyCode key) {
-    using KC = view::KeyCode;
+NSString* characters_for_key_code(SequenceKey key) {
+    using KC = SequenceKey;
     switch (key) {
         case KC::up:    return [NSString stringWithFormat:@"%C", (unichar)NSUpArrowFunctionKey];
         case KC::down:  return [NSString stringWithFormat:@"%C", (unichar)NSDownArrowFunctionKey];
@@ -86,21 +86,25 @@ NSString* characters_for_key_code(view::KeyCode key) {
 
 NSEventModifierFlags ns_flags_from_modifiers(uint16_t mods) {
     NSEventModifierFlags flags = 0;
-    if (mods & view::kModShift) flags |= NSEventModifierFlagShift;
-    if (mods & view::kModCtrl)  flags |= NSEventModifierFlagControl;
-    if (mods & view::kModAlt)   flags |= NSEventModifierFlagOption;
-    if (mods & (view::kModCmd | view::kModMeta)) flags |= NSEventModifierFlagCommand;
+    if (mods & kSequenceModShift)
+        flags |= NSEventModifierFlagShift;
+    if (mods & kSequenceModCtrl)
+        flags |= NSEventModifierFlagControl;
+    if (mods & kSequenceModAlt)
+        flags |= NSEventModifierFlagOption;
+    if (mods & (kSequenceModCmd | kSequenceModMeta))
+        flags |= NSEventModifierFlagCommand;
     return flags;
 }
 
 /// True for the arrow keys, which AppKit additionally flags as numeric-pad.
-bool is_arrow_key(view::KeyCode key) {
-    using KC = view::KeyCode;
+bool is_arrow_key(SequenceKey key) {
+    using KC = SequenceKey;
     return key == KC::up || key == KC::down || key == KC::left || key == KC::right;
 }
 
-bool is_function_key(view::KeyCode key) {
-    using KC = view::KeyCode;
+bool is_function_key(SequenceKey key) {
+    using KC = SequenceKey;
     switch (key) {
         case KC::up: case KC::down: case KC::left: case KC::right:
         case KC::home: case KC::end_: case KC::page_up: case KC::page_down:
@@ -139,7 +143,8 @@ bool synthetic_key_delivery_supported() { return true; }
 
 bool deliver_synthetic_key(void* native_content_view, const KeySequenceStep& step) {
     if (!native_content_view) return false;
-    if (step.key == view::KeyCode::unknown) return false;
+    if (step.key == SequenceKey::unknown)
+        return false;
 
     @autoreleasepool {
         NSView* view = (__bridge NSView*)native_content_view;
