@@ -143,7 +143,16 @@ target_sources(pulp-view-core PRIVATE
 # a Vellum-backed Pulp::view-tooling can link it without Pulp's view libraries.
 # The attach_native_runtime overloads that name view-script types stay in
 # pulp-view-tooling (editor_bridge_native_runtime.cpp).
+add_library(pulp-editor-bridge)
+add_library(pulp::editor-bridge ALIAS pulp-editor-bridge)
 target_sources(pulp-editor-bridge PRIVATE src/editor_bridge.cpp)
+target_include_directories(pulp-editor-bridge PUBLIC
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+    $<BUILD_INTERFACE:${choc_SOURCE_DIR}>
+    $<INSTALL_INTERFACE:include>)
+target_compile_features(pulp-editor-bridge PUBLIC cxx_std_20)
+target_link_libraries(pulp-editor-bridge PUBLIC pulp::runtime)
+target_link_libraries(pulp-view-tooling PUBLIC pulp::editor-bridge)
 
 # Pulp-kept plugin-host and editor facilities: the component inspector and the
 # editor bridge attachments. They stay outside pulp-view-core's extractable closure; their

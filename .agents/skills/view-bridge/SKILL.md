@@ -1974,6 +1974,16 @@ Key invariants:
   the framework explicitly does NOT carry `EditorBridgeState`-style
   per-session state. Capture it on `[this]` instead.
 
+EditorBridge's dispatch core (`core/view/src/editor_bridge.cpp`: handlers,
+`dispatch`, `dispatch_json`, `dispatch_webview_message`, the response and
+`get_*` helpers) is its own view-free target, `pulp-editor-bridge`, which needs
+only CHOC and the runtime. The `attach_native_runtime` / `detach_native_runtime`
+overloads name view-script types, so they stay in `pulp-view-tooling`
+(`editor_bridge_native_runtime.cpp`), which links the core. Keep any new
+dispatch code free of view-script includes; in an SDK that serves its UI names
+from Vellum, `Pulp::view-tooling` links the core and nothing else of Pulp's
+view, so a WebView editor's bridge comes from it.
+
 When you change `core/view/src/editor_bridge.cpp` or its header, the
 skill-sync gate requires updates to either *this* skill or the
 `import-design` skill (or both). The path map maps both to the file.

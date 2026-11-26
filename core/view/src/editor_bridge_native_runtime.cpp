@@ -22,19 +22,17 @@ void EditorBridge::attach_native_runtime(JsRuntime& /*runtime*/,
     // plugs in without designing a parallel dispatch model.
 }
 
-void EditorBridge::attach_native_runtime(ScriptEngine& engine,
-                                         std::string_view handler_name) {
+void EditorBridge::attach_native_runtime(ScriptEngine& engine, std::string_view handler_name) {
     if (handler_name.empty())
         throw std::invalid_argument("native editor bridge handler name must not be empty");
 
-    engine.register_function(std::string(handler_name),
-        [this](const choc::value::Value* args, std::size_t num_args) {
-            if (num_args != 1 || args == nullptr || !args[0].isString()) {
-                return choc::value::Value(
-                    err_response("native editor bridge expects one JSON string"));
-            }
-            return choc::value::Value(dispatch_json(args[0].getString()));
-        });
+    engine.register_function(std::string(handler_name), [this](const choc::value::Value* args,
+                                                               std::size_t num_args) {
+        if (num_args != 1 || args == nullptr || !args[0].isString()) {
+            return choc::value::Value(err_response("native editor bridge expects one JSON string"));
+        }
+        return choc::value::Value(dispatch_json(args[0].getString()));
+    });
 }
 
 void EditorBridge::attach_native_runtime(ScriptedUiSession& session,
@@ -44,9 +42,7 @@ void EditorBridge::attach_native_runtime(ScriptedUiSession& session,
 
     session.attach_native_message_handler(
         std::string(handler_name),
-        [this](std::string_view envelope_json) {
-            return dispatch_json(envelope_json);
-        });
+        [this](std::string_view envelope_json) { return dispatch_json(envelope_json); });
 }
 
 void EditorBridge::detach_native_runtime(ScriptedUiSession& session,
