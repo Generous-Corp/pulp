@@ -121,6 +121,15 @@ on a real PR. Do them in order.
    Commit the event(s) before re-running — both checkers read the commit
    range, never the working tree. Run `python3 tools/scripts/vellum_watch_preflight.py --enforce`
    on its own for just the Vellum verdict.
+
+   A new `integrations/pulp-vellum-*` package is built and tested by the
+   `Vellum SDK consumer` lane only: add its directory to that workflow's
+   `paths:` list and its `PULP_ENABLE_*` flag to the bridge configure line, and
+   give its ctest targets a label that starts with `pulp-vellum` so
+   `labelled-targets` selects them. Any new TU that includes a tracked core
+   header (for example `pulp/host/signal_graph.hpp`) trips the header fan-out
+   guard; the package needs a `Fanout-Grow: all reason="..."` trailer naming
+   the legacy TU it replaces.
 2. **Know the required contexts, and only those.** They come from branch
    protection, not from the check list on the PR page:
 
