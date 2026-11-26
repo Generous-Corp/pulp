@@ -224,21 +224,27 @@ class GpuRuntimePrefixTests(unittest.TestCase):
 
 class RepositoryLockTests(unittest.TestCase):
     def test_repository_lock_tracks_published_vellum_release(self) -> None:
-        vellum = pulp_lock.load(LOCK_FILE)["vellum"]
-        self.assertEqual(vellum["tag"], "v0.2.2")
-        self.assertEqual(vellum["sha"], "2a01d9d61855c8682db44b96ec27ca3d2566ed81")
+        lock = pulp_lock.load(LOCK_FILE)
+        vellum = lock["vellum"]
+        self.assertEqual(vellum["tag"], "v0.2.3")
+        self.assertEqual(vellum["sha"], "2191e8a3ee823ba1946b83e466c2fd20c3494e4d")
         self.assertEqual(
             vellum["sdk_url"],
             "https://github.com/Generous-Corp/vellum/releases/download/"
-            "v0.2.2/vellum-sdk-0.2.2-darwin-arm64.tar.gz",
+            "v0.2.3/vellum-sdk-0.2.3-darwin-arm64.tar.gz",
         )
         self.assertEqual(
             vellum["sdk_digest"],
-            "d87655d847987a6aa50992b2e90c91cceb9ec15e84ca01d8ef69265275d048f2",
+            "16ccadc10cb464a573e518de7406571da9b46e5cea731dc1c8f3899dd0d47b0a",
         )
         self.assertEqual(
             vellum["gpu_runtime_digest"],
-            "c368786555cdfd28c44af6dc336b107d475de8bf493f25230ca297733f2a7c59",
+            "ee7391c267398ded016075593eb21ee4de7f2da34f49a349facb545a94441694",
+        )
+        # sha256 of gpu-runtime/renderer-lock.json at the pinned commit.
+        self.assertEqual(
+            lock["render_toolchain"]["lock_digest"],
+            "330cc21b917fc0e1cadb8f6e34117bfb9fbf13688a398c09072dce66ea436836",
         )
 
     def test_repository_lock_validates(self) -> None:

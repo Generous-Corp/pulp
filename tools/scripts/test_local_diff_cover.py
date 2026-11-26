@@ -1506,8 +1506,21 @@ class GateHostSkipTests(unittest.TestCase):
         self.assertIn("[gate-host] REFUSED pre-push diff-coverage configure/build", result.stderr)
         self.assertIn("TARTCI_ROLE=dedicated-builder", result.stderr)
         self.assertIn("Run tools/scripts/local_diff_cover.sh from", result.stderr)
+        # The fixture demotes the merge-tree check (PULP_DISABLE_PREPUSH_GATES=1),
+        # and the final line names every skipped item, so it never says clean.
+        self.assertIn("[pre-push] gates passed except diff coverage: NOT CHECKED", result.stderr)
+        self.assertIn("merge-tree script-state NOT CHECKED", result.stderr)
+        self.assertNotIn("[pre-push] gates clean", result.stderr)
+
+    def test_a_gate_host_with_nothing_else_skipped_still_says_clean_except_diff_cover(self) -> None:
+        # Run the hook's verdict function with only diff coverage skipped.
+        hook = PRE_PUSH.read_text(encoding="utf-8")
+        start = hook.index("_prepush_final_verdict_line() {")
+        func = hook[start:hook.index("\n}\n", start) + 3]
+        result = subprocess.run(["bash", "-c", func + "\n_prepush_final_verdict_line\n"],
+                                capture_output=True, text=True, encoding="utf-8",
+                                env={"PATH": os.environ["PATH"], "_prepush_diff_cover_refused": "1"})
         self.assertIn("[pre-push] gates clean except diff coverage: NOT CHECKED", result.stderr)
-        self.assertNotIn("[pre-push] gates clean.", result.stderr)
 
     def test_gate_host_with_skip_diff_cover_reports_not_checked_and_allows_push(self) -> None:
         for knob in ("PULP_SKIP_DIFF_COVER", "PULP_DISABLE_PREPUSH_DIFF_COVER"):

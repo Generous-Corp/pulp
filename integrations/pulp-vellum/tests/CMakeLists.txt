@@ -5,8 +5,11 @@
 find_package(Threads REQUIRED)
 
 if(PULP_BUILD_TESTS AND TARGET Catch2::Catch2WithMain)
+    # test_reload_capabilities_vellum.cpp checks Pulp's reload capability names
+    # against Vellum's and runs the remote UX update gate with no Pulp view.
     add_executable(pulp-test-pulp-vellum
-        ${PULP_ROOT_DIR}/test/test_pulp_vellum_param_bridge.cpp)
+        ${PULP_ROOT_DIR}/test/test_pulp_vellum_param_bridge.cpp
+        test_reload_capabilities_vellum.cpp)
     target_link_libraries(pulp-test-pulp-vellum PRIVATE
         pulp::vellum Catch2::Catch2WithMain Threads::Threads)
     include(Catch)
@@ -38,6 +41,8 @@ if(PULP_BUILD_TESTS AND TARGET Catch2::Catch2WithMain)
             target_link_libraries(pulp-test-pulp-vellum-editor PRIVATE Vellum::MirrorView_script)
             target_compile_definitions(pulp-test-pulp-vellum-editor PRIVATE
                 PULP_TEST_VELLUM_SCRIPTED_UI=1)
+            # The live-swap UI stage over a real Vellum scripted session.
+            target_sources(pulp-test-pulp-vellum-editor PRIVATE test_scripted_ui_swap_unit.cpp)
         endif()
         if(TARGET pulp-vellum-scripted)
             add_executable(pulp-test-vellum-scripted-wiring test_scripted_editor_wiring.cpp)
@@ -85,6 +90,11 @@ if(PULP_BUILD_TESTS AND TARGET Catch2::Catch2WithMain)
         if(PULP_HAS_VST3)
             target_compile_definitions(pulp-test-pulp-vellum-editor PRIVATE
                 PULP_TEST_VELLUM_VST3=1)
+            # The capture case decodes the host's back buffer with ImageIO.
+            if(APPLE)
+                target_link_libraries(pulp-test-pulp-vellum-editor PRIVATE
+                    "-framework CoreGraphics" "-framework ImageIO")
+            endif()
         endif()
 
         add_executable(pulp-test-pulp-vellum-about-notices

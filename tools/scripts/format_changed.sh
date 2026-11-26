@@ -210,6 +210,20 @@ is_untracked() {
     printf '%s\n' "$untracked" | grep -Fxq -- "$1"
 }
 
+# A moved file is an edited file, not a new one: its hunks are the lines that
+# differ from its source path at the base, so a `git mv` with a one-line fix-up
+# is judged on that one line rather than reformatted whole.
+# shellcheck disable=SC2086  # $paths is a deliberate word list
+if [ -n "$rev" ]; then
+    renames="$(git diff --name-status --find-renames --diff-filter=R "$base_mb" "$rev" -- $paths)"
+else
+    renames="$(git diff --name-status --find-renames --diff-filter=R "$base_mb" -- $paths)"
+fi
+
+renamed_from() {
+    printf '%s\n' "$renames" | awk -F '\t' -v f="$1" '$3 == f { print $2; exit }'
+}
+
 # The line a hunk starting at $2 in file $1 must be formatted from. clang-format
 # indents the first declaration under an access specifier relative to where that
 # specifier actually sits, not where the config would put it. So when the
@@ -237,10 +251,13 @@ anchor_start() {
 # file holding the content those hunks number (the blob under --rev).
 hunk_ranges() {
     content="${2:-$1}"
+    # Name the source path too, or the pathspec hides it and the rename reads
+    # as a whole new file.
+    origin="$(renamed_from "$1")"
     if [ -n "$rev" ]; then
-        git diff -U0 --find-renames "$base_mb" "$rev" -- "$1"
+        git diff -U0 --find-renames "$base_mb" "$rev" -- ${origin:+"$origin"} "$1"
     else
-        git diff -U0 --find-renames "$base_mb" -- "$1"
+        git diff -U0 --find-renames "$base_mb" -- ${origin:+"$origin"} "$1"
     fi | sed -n 's/^@@ -[0-9][0-9,]* +\([0-9][0-9,]*\) @@.*/\1/p' | while IFS= read -r range; do
         start="${range%%,*}"
         if [ "$range" = "$start" ]; then
@@ -276,7 +293,8 @@ printf 'SCANNED\n' > "$report"
     else
         [ -f "$f" ] || continue
     fi
-    if is_untracked "$f" || ! git cat-file -e "$base_mb:$f" 2>/dev/null; then
+    if is_untracked "$f" || { ! git cat-file -e "$base_mb:$f" 2>/dev/null \
+            && [ -z "$(renamed_from "$f")" ]; }; then
         ranges=""
     else
         ranges="$(hunk_ranges "$f" "$src")"
