@@ -479,6 +479,45 @@ TEST_CASE("midi learn menu: changing a row sends the full settings with that fie
     CHECK(rec.calls.size() == 4);
 }
 
+TEST_CASE("midi learn menu: settings rows apply themselves and are not routed commands",
+          "[midi-learn][menu][options]") {
+    Scripted s;
+    OptionCalls rec;
+    auto t = s.target();
+    t.set_options = [&](state::ParamID id, const vc::MidiLearnMappingOptions& o) {
+        rec.calls.push_back({id, o});
+        s.st.options = o;
+    };
+    s.st.phase = Phase::mapped;
+    s.st.mapping_label = "CC 74 ch 1";
+    s.st.feedback_supported = true;
+
+    // The setting rows carry their own change callbacks, so routing their
+    // ids through the command function does nothing and never applies twice.
+    for (int id : {vc::kMidiLearnCommandInvert, vc::kMidiLearnCommandRelativeMode,
+                   vc::kMidiLearnCommandTakeover, vc::kMidiLearnCommandFeedback})
+        CHECK_FALSE(vc::run_midi_learn_menu_command(t, kCut, id));
+    CHECK(rec.calls.empty());
+
+    // Activating the Invert row in a live menu applies it exactly once and
+    // leaves the learn commands untouched.
+    vv::View root;
+    root.set_bounds({0, 0, 400, 300});
+    auto* menu = vc::show_midi_learn_menu(&root, {10, 10}, t, kCut);
+    REQUIRE(menu != nullptr);
+    int guard = 0;
+    while (menu->hovered_index() != 2 && guard++ < 8)
+        REQUIRE(menu->on_key_event(key(vv::KeyCode::down)));
+    REQUIRE(menu->hovered_index() == 2);
+    REQUIRE(menu->items()[2].label == "Invert");
+    REQUIRE(menu->on_key_event(key(vv::KeyCode::enter)));
+    REQUIRE(rec.calls.size() == 1);
+    CHECK(rec.calls[0].second.invert);
+    CHECK(s.begun.empty());
+    CHECK(s.cleared.empty());
+    CHECK(s.cancels == 0);
+}
+
 TEST_CASE("midi learn session: settings change the mapping, route correctly and undo",
           "[midi-learn][session][options]") {
     state::StateStore store;

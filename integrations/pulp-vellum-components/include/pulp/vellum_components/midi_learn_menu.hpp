@@ -117,14 +117,18 @@ enum MidiLearnMenuCommand : int {
 std::vector<ContextMenu::Item> midi_learn_menu_items(const MidiLearnTarget& target,
                                                      state::ParamID param);
 
-/// Carry out one of the rows above. Returns false for an unknown id or an
-/// unavailable target.
+/// Carry out one of the commands among the rows above: begin, cancel and
+/// clear. The Invert, Relative mode, Takeover and Send feedback rows are
+/// controls that apply themselves through `target.set_options` when changed,
+/// so their ids are not commands: this returns false for them (and for any
+/// unknown id or an unavailable target) and changes nothing.
 bool run_midi_learn_menu_command(const MidiLearnTarget& target, state::ParamID param, int command);
 
 /// Show the MIDI Learn rows alone as a context menu at a root-local point.
 /// Returns the menu, or nullptr when there is nothing to show. A parameter
 /// menu that builds its own rows should append `midi_learn_menu_items()`
-/// instead and route the ids to `run_midi_learn_menu_command()`.
+/// instead and route the chosen id to `run_midi_learn_menu_command()`; the
+/// settings controls need no routing.
 ContextMenu* show_midi_learn_menu(View* root, Point root_pos, const MidiLearnTarget& target,
                                   state::ParamID param);
 
