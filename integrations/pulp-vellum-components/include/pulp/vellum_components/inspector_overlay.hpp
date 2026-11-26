@@ -4,7 +4,7 @@
 /// The inspector's canvas overlay for a Vellum view tree: hover and selection
 /// state, the selection box with its handles, the type badge, and the
 /// measurements (padding and margin bands, distances to the parent and
-/// between views), painted over the inspected root.
+/// between views), and a pixel loupe, painted over the inspected root.
 ///
 /// The overlay paints no side panel, so the whole canvas stays live for
 /// picking. The inspector window is the tree and property surface; a host
@@ -115,7 +115,8 @@ class InspectorOverlay {
 
     /// Offer a key to the overlay. Cmd+I (Ctrl+I elsewhere) toggles it; while
     /// active, Escape deselects and keeps the overlay on, and M flips the
-    /// selection mode. Returns true when the key was consumed.
+    /// selection mode, and Z toggles the loupe. Returns true when the key was
+    /// consumed.
     bool handle_key_event(const ::vellum::view::KeyEvent& event);
 
     /// Offer a mouse event, in root space, to the overlay. A press selects the
@@ -128,9 +129,41 @@ class InspectorOverlay {
     /// root: the highlight, then a line with its pixel distance from the
     /// measurement anchor, and from the Alt-hover target, to the selection,
     /// then the selection's padding and margin bands and its distances to its
-    /// parent. Selection and hover that no longer point into the tree are
-    /// dropped first. A no-op while inactive.
+    /// parent, then the loupe on top of everything. Selection and hover that
+    /// no longer point into the tree are dropped first. A no-op while
+    /// inactive.
     void paint(canvas::Canvas& canvas);
+
+    /// The pixel loupe: a bottom-left panel magnifying the pixels around the
+    /// pointer, with the sampled pixel outlined and its position and colour
+    /// read out. The `Z` key toggles it while the overlay is active, and
+    /// turning the overlay off closes it. It re-centres on every mouse event
+    /// while open and consumes none.
+    bool zoom_active() const {
+        return zoom_active_;
+    }
+    void set_zoom_active(bool active);
+    void toggle_zoom() {
+        set_zoom_active(!zoom_active_);
+    }
+
+    /// Panel pixels per source pixel, clamped to [4, 40]. 20 by default.
+    int zoom_factor() const {
+        return zoom_factor_;
+    }
+    void set_zoom_factor(int factor);
+
+    /// The root-space point the loupe last sampled.
+    Point zoom_sample_center() const {
+        return zoom_sample_center_;
+    }
+
+    /// The colour at that point from the last paint: read back from the
+    /// surface when it can, else the declared background of the view under
+    /// it, else fully transparent.
+    canvas::Color zoom_center_color() const {
+        return zoom_center_color_;
+    }
 
     /// The view the Alt-hover measurement currently reaches toward, or null.
     const View* alt_hover_target() const {
@@ -146,6 +179,9 @@ class InspectorOverlay {
     void paint_highlight(canvas::Canvas& canvas);
     void paint_distance_lines(canvas::Canvas& canvas);
     void paint_box_model(canvas::Canvas& canvas, const View& view);
+    void paint_zoom_panel(canvas::Canvas& canvas);
+    void update_zoom_sample(canvas::Canvas& canvas);
+    bool resolve_view_color_at(Point p, canvas::Color& out) const;
     bool select_with_mouse(const ::vellum::view::MouseEvent& event, bool is_press,
                            bool is_drag_tick, bool is_release);
 
@@ -159,6 +195,16 @@ class InspectorOverlay {
     bool dragging_enabled_ = false;
 
     static constexpr float kFontSize = 11.0f;
+    bool zoom_active_ = false;
+    int zoom_factor_ = 20;
+    Point zoom_sample_center_{};
+    canvas::Color zoom_center_color_{};
+
+    static constexpr int kZoomGridCells = 11; ///< odd, so the sampled cell is exact
+    static constexpr int kZoomFactorMin = 4;
+    static constexpr int kZoomFactorMax = 40;
+    static constexpr float kZoomReadoutHeight = 36.0f;
+    static constexpr float kZoomPanelMargin = 12.0f;
     static constexpr float kEdgeFontSize = 9.0f;
     static constexpr float kBadgeHeight = 16.0f;
     static constexpr float kHandleHalfSide = 4.0f;

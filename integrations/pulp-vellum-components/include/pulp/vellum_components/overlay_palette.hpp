@@ -22,4 +22,13 @@ inline const Color kDistanceLine = Color::rgba(1.0f, 0.2f, 0.3f, 0.8f);
 inline const Color kPaddingColor = Color::rgba(0.2f, 0.8f, 0.3f, 0.15f);
 inline const Color kMarginColor = Color::rgba(1.0f, 0.6f, 0.1f, 0.15f);
 
+inline const Color kZoomPanelBackground = Color::rgba(0.06f, 0.06f, 0.08f, 0.97f);
+inline const Color kZoomBorder = Color::rgba(0.25f, 0.5f, 1.0f, 0.9f);
+inline const Color kZoomGridLine = Color::rgba(0.0f, 0.0f, 0.0f, 0.25f);
+inline const Color kZoomCrosshair = Color::rgba(1.0f, 0.5f, 0.0f, 0.95f);
+inline const Color kZoomReadoutText = Color::rgba(0.9f, 0.9f, 0.95f, 1.0f);
+inline const Color kZoomReadoutDim = Color::rgba(0.55f, 0.55f, 0.6f, 1.0f);
+inline const Color kZoomCheckerA = Color::rgba(0.22f, 0.22f, 0.26f, 1.0f);
+inline const Color kZoomCheckerB = Color::rgba(0.30f, 0.30f, 0.34f, 1.0f);
+
 } // namespace pulp::vellum_components::overlay

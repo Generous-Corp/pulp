@@ -8,6 +8,7 @@ find_package(Vellum CONFIG REQUIRED)
 add_library(pulp-vellum-components STATIC
     src/catalogue.cpp
     src/inspector_overlay.cpp
+    src/inspector_overlay_zoom.cpp
     src/inspector_window.cpp
     src/overlay_geometry.cpp)
 add_library(pulp::vellum-components ALIAS pulp-vellum-components)

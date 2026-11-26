@@ -52,6 +52,7 @@ void InspectorOverlay::set_active(bool active) {
         hovered_ = nullptr;
         alt_hover_target_ = nullptr;
         distance_anchor_ = nullptr;
+        zoom_active_ = false;
     }
 }
 
@@ -97,12 +98,21 @@ bool InspectorOverlay::handle_key_event(const ::vellum::view::KeyEvent& event) {
         toggle_selection_mode();
         return true;
     }
+    if (event.key == KeyCode::z && event.modifiers == 0) {
+        toggle_zoom();
+        return true;
+    }
     return false;
 }
 
 bool InspectorOverlay::handle_mouse_event(const ::vellum::view::MouseEvent& event) {
     if (!active_)
         return false;
+
+    // The loupe follows every mouse event, not just moves, so it stays under
+    // the pointer through a press and a drag. It never consumes one.
+    if (zoom_active_)
+        zoom_sample_center_ = event.position;
 
     // A host that sets an explicit phase says what the event is. Otherwise
     // the button-down flag marks a press, and nothing here is mid-gesture.
@@ -185,6 +195,9 @@ void InspectorOverlay::paint(canvas::Canvas& canvas) {
     paint_distance_lines(canvas);
     if (selected_)
         paint_box_model(canvas, *selected_);
+    // Last, so the magnified grid sits on top of the highlights.
+    if (zoom_active_)
+        paint_zoom_panel(canvas);
 }
 
 void InspectorOverlay::paint_highlight(canvas::Canvas& canvas) {
