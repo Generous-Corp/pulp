@@ -332,6 +332,54 @@ inline CanonicalHistory exercise_device_drag(PointerType pointer_type) {
     return {baseline, edited, undone, redone, std::move(intents)};
 }
 
+/// One gesture driven through a view and a document session: what the view
+/// emitted, what it refused, and the document before, after, undone and redone.
+struct GestureRun {
+    std::vector<ValidatedNoteEditIntent> intents;
+    std::vector<PianoRollRefusal> refusals;
+    std::vector<NoteEvent> baseline_notes;
+    std::vector<NoteEvent> edited_notes;
+    std::vector<NoteEvent> undone_notes;
+    std::string baseline;
+    std::string edited;
+    std::string undone;
+    std::string redone;
+};
+
+/// Runs `drive` against a view over `project`, then lowers and commits every
+/// emitted intent in one undo group, undoes and redoes it. The view is gone
+/// before the document changes, as a shell's rebind would leave it.
+inline GestureRun run_gesture(Project project, const std::function<void(PianoRollView&)>& drive,
+                              const PianoRollView::NoteFactory& factory = {}) {
+    auto session = Session::create(std::move(project));
+    GestureRun run;
+    run.baseline = canonical_project(session.project());
+    run.baseline_notes = notes_after_round_trip(session.project());
+    ScriptedUiHost<ValidatedNoteEditIntent> host;
+    {
+        PianoRollView view;
+        configure(view, session.project(), host);
+        if (factory)
+            view.set_note_factory(factory);
+        drive(view);
+        run.refusals = view.refusals();
+    }
+    run.intents.assign(host.intents().begin(), host.intents().end());
+    run.edited = run.undone = run.redone = run.baseline;
+    run.edited_notes = run.undone_notes = run.baseline_notes;
+    if (run.intents.empty())
+        return run;
+    REQUIRE(session.apply_continuous(run.intents));
+    run.edited = canonical_project(session.project());
+    run.edited_notes = notes_after_round_trip(session.project());
+    REQUIRE(session.session->undo(session.writer));
+    run.undone = canonical_project(session.project());
+    run.undone_notes = notes_after_round_trip(session.project());
+    REQUIRE(session.session->redo(session.writer));
+    run.redone = canonical_project(session.project());
+    return run;
+}
+
 inline const NoteEvent* find_note(std::span<const NoteEvent> notes, ItemId id) {
     const auto found =
         std::find_if(notes.begin(), notes.end(), [&](const NoteEvent& n) { return n.id == id; });

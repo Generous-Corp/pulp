@@ -6,6 +6,7 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
 #include <cstdint>
 #include <cstdlib>
 #include <string>
@@ -247,4 +248,227 @@ TEST_CASE("Piano roll fixture draws each note on its pitch row over the shaded l
     CHECK(near(300, 230, 28, 31, 36));           // pitch 60 row where no note sounds
     CHECK(near(60, 190, 28, 31, 36));            // note B's row is clear at note A's time
     CHECK(near(130, 230, 28, 31, 36));           // note A ends at x = 120
+}
+
+namespace {
+
+using pulp::timeline_editor::IntentStatus;
+using pulp::timeline_editor::NoteEditIntentKind;
+using ::vellum::view::HitMetrics;
+using ::vellum::view::PointerType;
+
+const NoteEvent& note_in(const std::vector<NoteEvent>& notes, ItemId id) {
+    const auto* found = find_note(notes, id);
+    REQUIRE(found != nullptr);
+    return *found;
+}
+
+bool same_notes(const std::vector<NoteEvent>& left, const std::vector<NoteEvent>& right) {
+    return std::equal(left.begin(), left.end(), right.begin(), right.end(),
+                      [](const NoteEvent& a, const NoteEvent& b) {
+                          return a.id == b.id && a.start == b.start && a.duration == b.duration &&
+                                 a.velocity == b.velocity && a.pitch == b.pitch &&
+                                 a.channel == b.channel;
+                      });
+}
+
+std::vector<GesturePhase> phases_of(const GestureRun& run) {
+    std::vector<GesturePhase> phases;
+    for (const auto& intent : run.intents)
+        phases.push_back(intent.value().phase);
+    return phases;
+}
+
+::vellum::view::View::SimulatedPointer pointer_of(PointerType type) {
+    ::vellum::view::View::SimulatedPointer pointer;
+    pointer.type = type;
+    return pointer;
+}
+
+} // namespace
+
+TEST_CASE("Piano roll move drag commits one grouped edit that round-trips and undoes",
+          "[timeline][piano-roll][gesture]") {
+    for (const auto type : {PointerType::mouse, PointerType::touch}) {
+        const auto run = run_gesture(make_note_project(), [&](PianoRollView& view) {
+            view.set_hit_metrics(HitMetrics::for_pointer(type));
+            view.simulate_drag({250.0f, y_of(62)}, {370.0f, y_of(64)}, 4, pointer_of(type));
+        });
+
+        REQUIRE(run.intents.size() == 4);
+        CHECK(phases_of(run) == std::vector<GesturePhase>{GesturePhase::Begin, GesturePhase::Update,
+                                                          GesturePhase::Update, GesturePhase::End});
+        for (const auto& intent : run.intents)
+            CHECK(intent.value().kind == NoteEditIntentKind::Move);
+
+        // The press landed 10 ticks into the note, so a release at x=370 puts
+        // its start at 360.
+        const auto& before = note_in(run.baseline_notes, kNoteB);
+        const auto& after = note_in(run.edited_notes, kNoteB);
+        CHECK(before.start.value == 240);
+        CHECK(before.pitch == 62);
+        CHECK(after.start.value == 360);
+        CHECK(after.pitch == 64);
+        CHECK(after.duration.value == before.duration.value);
+        CHECK(note_in(run.edited_notes, kNoteA).start.value == 0);
+
+        CHECK(run.edited != run.baseline);
+        CHECK(run.undone == run.baseline);
+        CHECK(run.redone == run.edited);
+    }
+}
+
+TEST_CASE("Piano roll resize drag changes only the duration", "[timeline][piano-roll][gesture]") {
+    const auto run = run_gesture(make_note_project(), [](PianoRollView& view) {
+        // Note A ends at x=120, so a press there grabs its trailing edge.
+        view.simulate_drag({120.0f, y_of(60)}, {200.0f, y_of(60)}, 4);
+    });
+
+    REQUIRE_FALSE(run.intents.empty());
+    for (const auto& intent : run.intents)
+        CHECK(intent.value().kind == NoteEditIntentKind::Resize);
+    CHECK(run.intents.back().value().phase == GesturePhase::End);
+
+    const auto& before = note_in(run.baseline_notes, kNoteA);
+    const auto& after = note_in(run.edited_notes, kNoteA);
+    CHECK(before.duration.value == 120);
+    CHECK(after.duration.value == 200);
+    CHECK(after.start.value == before.start.value);
+    CHECK(after.pitch == before.pitch);
+    CHECK(run.undone == run.baseline);
+    CHECK(run.redone == run.edited);
+}
+
+TEST_CASE("Piano roll shift drag sets velocity from the vertical distance",
+          "[timeline][piano-roll][gesture]") {
+    const auto run = run_gesture(make_note_project(), [](PianoRollView& view) {
+        auto pointer = pointer_of(PointerType::mouse);
+        pointer.modifiers = ::vellum::view::kModShift;
+        // Two pixels up is 256 velocity units.
+        view.simulate_drag({60.0f, y_of(60)}, {60.0f, y_of(60) - 2.0f}, 2, pointer);
+    });
+
+    REQUIRE_FALSE(run.intents.empty());
+    for (const auto& intent : run.intents)
+        CHECK(intent.value().kind == NoteEditIntentKind::SetVelocity);
+
+    const auto& before = note_in(run.baseline_notes, kNoteA);
+    const auto& after = note_in(run.edited_notes, kNoteA);
+    CHECK(before.velocity == 1000);
+    CHECK(after.velocity == 1256);
+    CHECK(after.start.value == before.start.value);
+    CHECK(after.pitch == before.pitch);
+    CHECK(run.undone == run.baseline);
+    CHECK(run.redone == run.edited);
+}
+
+TEST_CASE("Piano roll click on empty lattice inserts the factory's note",
+          "[timeline][piano-roll][gesture]") {
+    const auto run = run_gesture(
+        make_note_project(), [](PianoRollView& view) { view.simulate_click({700.0f, y_of(66)}); },
+        factory_for({100}, 60));
+
+    REQUIRE(run.intents.size() == 1);
+    CHECK(run.intents.front().value().kind == NoteEditIntentKind::Insert);
+    CHECK(run.intents.front().value().phase == GesturePhase::Single);
+    CHECK(run.baseline_notes.size() == 3);
+    REQUIRE(run.edited_notes.size() == 4);
+    const auto& created = note_in(run.edited_notes, {100});
+    CHECK(created.start.value == 700);
+    CHECK(created.pitch == 66);
+    CHECK(created.duration.value == 60);
+    // The document's id allocator does not step back, so undo is checked on
+    // the notes, not on the whole document.
+    CHECK(same_notes(run.undone_notes, run.baseline_notes));
+    CHECK(run.redone == run.edited);
+}
+
+TEST_CASE("Piano roll refuses an inserted note that runs past the clip",
+          "[timeline][piano-roll][gesture]") {
+    const auto run = run_gesture(
+        make_note_project(), [](PianoRollView& view) { view.simulate_click({900.0f, y_of(66)}); },
+        factory_for({100}, 300));
+
+    CHECK(run.intents.empty());
+    CHECK(run.refusals == std::vector<PianoRollRefusal>{PianoRollRefusal::OutsideClip});
+    CHECK(run.edited == run.baseline);
+}
+
+TEST_CASE("Piano roll right click erases the note under it", "[timeline][piano-roll][gesture]") {
+    const auto run = run_gesture(make_note_project(), [](PianoRollView& view) {
+        auto pointer = pointer_of(PointerType::mouse);
+        pointer.button = ::vellum::view::MouseButton::right;
+        view.simulate_click({500.0f, y_of(64)}, pointer);
+    });
+
+    REQUIRE(run.intents.size() == 1);
+    CHECK(run.intents.front().value().kind == NoteEditIntentKind::Erase);
+    CHECK(run.baseline_notes.size() == 3);
+    REQUIRE(run.edited_notes.size() == 2);
+    CHECK(find_note(run.edited_notes, kNoteC) == nullptr);
+    CHECK(find_note(run.edited_notes, kNoteA) != nullptr);
+    CHECK(find_note(run.edited_notes, kNoteB) != nullptr);
+    CHECK(run.undone == run.baseline);
+    CHECK(run.redone == run.edited);
+}
+
+TEST_CASE("Piano roll cancel restores the note an open drag had moved",
+          "[timeline][piano-roll][gesture]") {
+    const auto run = run_gesture(make_note_project(), [](PianoRollView& view) {
+        view.on_mouse_down({250.0f, y_of(62)});
+        view.on_mouse_drag({300.0f, y_of(62)});
+        view.on_mouse_drag({350.0f, y_of(62)});
+        view.on_mouse_cancel({350.0f, y_of(62)});
+    });
+
+    REQUIRE(run.intents.size() >= 2);
+    CHECK(run.intents.front().value().phase == GesturePhase::Begin);
+    CHECK(run.intents.back().value().phase == GesturePhase::Cancel);
+    // The stream moved the note and then put it back.
+    CHECK(same_notes(run.edited_notes, run.baseline_notes));
+}
+
+TEST_CASE("Piano roll refuses a move that would leave the clip on either side",
+          "[timeline][piano-roll][gesture]") {
+    // The drag passes through valid positions, so a stream opens; releasing
+    // outside the clip must close it by restoring the note, never by ending on
+    // a position the pointer did not ask for.
+    const auto check_refused = [](const GestureRun& run) {
+        REQUIRE_FALSE(run.refusals.empty());
+        CHECK(run.refusals.back() == PianoRollRefusal::OutsideClip);
+        const auto phases = phases_of(run);
+        CHECK(std::count(phases.begin(), phases.end(), GesturePhase::End) == 0);
+        CHECK(same_notes(run.edited_notes, run.baseline_notes));
+        CHECK(note_in(run.edited_notes, kNoteB).start.value == 240);
+    };
+
+    // Past the right edge: note B is 120 ticks long, so a start of 930 ends at
+    // 1050 in a 960-tick clip.
+    check_refused(run_gesture(make_note_project(), [](PianoRollView& view) {
+        view.simulate_drag({250.0f, y_of(62)}, {940.0f, y_of(62)}, 4);
+    }));
+
+    // Past the left edge: the press is 10 ticks into the note, so a release at
+    // x=5 asks for a start of -5. It is refused, not parked at tick zero.
+    check_refused(run_gesture(make_note_project(), [](PianoRollView& view) {
+        view.simulate_drag({250.0f, y_of(62)}, {5.0f, y_of(62)}, 4);
+    }));
+}
+
+TEST_CASE("Piano roll leaves the document alone when the host rejects a drag",
+          "[timeline][piano-roll][gesture]") {
+    auto session = Session::create(make_note_project());
+    const auto baseline = canonical_project(session.project());
+    ScriptedUiHost<ValidatedNoteEditIntent> host;
+    host.set_intent_status(IntentStatus::Rejected);
+    {
+        PianoRollView view;
+        configure(view, session.project(), host);
+        view.simulate_drag({250.0f, y_of(62)}, {370.0f, y_of(64)}, 4);
+        CHECK_FALSE(view.gesture_open());
+    }
+    // Nothing the view emitted reached the document, because the host refused
+    // it; the view neither throws nor leaves a stream half open.
+    CHECK_FALSE(host.intents().empty());
+    CHECK(canonical_project(session.project()) == baseline);
 }
