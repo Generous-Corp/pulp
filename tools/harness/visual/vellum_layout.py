@@ -94,7 +94,8 @@ def _map_node(node: dict[str, Any], parent_box: tuple[float, float], root: bool)
         elif key in ("left", "top"):
             if not absolute or root:
                 raise Unsupported(f"{key} without position absolute")
-            mapped["x" if key == "left" else "y"] = _length(value, parent_box[0], key)
+            basis = parent_box[0] if key == "left" else parent_box[1]
+            mapped["x" if key == "left" else "y"] = _length(value, basis, key)
         elif key == "overflow":
             mapped["overflow"] = value
         else:

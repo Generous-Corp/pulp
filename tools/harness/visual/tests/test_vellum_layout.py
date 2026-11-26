@@ -42,6 +42,17 @@ class MappingTests(unittest.TestCase):
         child = next(c for c in tree["children"] if c["id"] == "absolute-child")
         self.assertEqual((child["style"]["x"], child["style"]["y"]), (30.0, 20.0))
 
+    def test_percent_offsets_resolve_against_the_matching_parent_axis(self) -> None:
+        raw = {
+            "viewport": {"w": 200, "h": 100},
+            "tree": {"id": "root", "style": {}, "children": [
+                {"id": "pinned", "style": {"position": "absolute", "left": "50%", "top": "50%",
+                                           "width": 10, "height": 10}},
+            ]},
+        }
+        child = next(c for c in vellum_layout.map_fixture(raw)["children"] if c["id"] == "pinned")
+        self.assertEqual((child["style"]["x"], child["style"]["y"]), (100.0, 50.0))
+
     def test_properties_without_an_equivalent_are_refused_by_name(self) -> None:
         for name, needle in (("aspect-ratio", "aspect_ratio"), ("box-sizing", "border_width"),
                              ("flex-grow-shrink", "align_items")):
