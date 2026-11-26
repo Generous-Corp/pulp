@@ -30,6 +30,8 @@ on:
       - 'test/editor_host_slice/**'
       - 'integrations/pulp-vellum/**'
       - 'integrations/pulp-vellum-audio/**'
+      - 'integrations/pulp-vellum-scene/**'
+      - 'test/fixtures/scene3d/DracoTriangle/**'
       - 'integrations/pulp-vellum-components/**'
       - 'integrations/pulp-vellum-renderer3d/**'
       - 'integrations/pulp-vellum-graph/**'
@@ -42,6 +44,9 @@ on:
       - 'integrations/CMakeLists.txt'
       - 'CMakeLists.txt'
       - 'test/test_pulp_vellum_param_bridge.cpp'
+      # The view-free DAW reload shell that pulp-test-vellum-reload-shell drives
+      # under the Vellum scripted editor.
+      - 'core/format/include/pulp/format/reload/reloadable_shell_core.hpp'
       - 'test/cmake/editor_host_slice_tests.cmake'
       - 'tools/scripts/editor_host_acceptance.py'
       - 'tools/ci/vellum_sdk_consumer.py'
@@ -170,6 +175,8 @@ jobs:
           cmake -S . -B build-vellum-bridge -G Ninja -DCMAKE_BUILD_TYPE=Release \
             -DPULP_BUILD_EXAMPLES=OFF -DPULP_BUILD_TESTS=ON \
             -DPULP_ENABLE_PULP_VELLUM=ON \
+            -DPULP_ENABLE_SCENE3D=ON \
+            -DPULP_ENABLE_PULP_VELLUM_SCENE=ON \
             -DPULP_ENABLE_PULP_VELLUM_AUDIO=ON \
             -DPULP_ENABLE_PULP_VELLUM_COMPONENTS=ON \
             -DPULP_ENABLE_SCENE3D=ON \

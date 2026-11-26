@@ -73,6 +73,35 @@ if(PULP_BUILD_TESTS AND TARGET Catch2::Catch2WithMain)
                     $<TARGET_FILE:pulp-test-vellum-scripted-wiring>)
             set_tests_properties(pulp-vellum-scripted-wiring PROPERTIES
                 LABELS pulp-vellum-editor TIMEOUT 30)
+            # The view-free reload shell under the Vellum scripted editor. It
+            # links format-core and Vellum only, so a Pulp view include in the
+            # shell fails this build, and it hot-swaps the logic fixtures that
+            # test/cmake/format_reload_tests.cmake builds.
+            if(TARGET pulp-reload-logic-unity AND NOT WIN32)
+                add_executable(pulp-test-vellum-reload-shell test_reloadable_shell_editor.cpp)
+                target_link_libraries(pulp-test-vellum-reload-shell PRIVATE
+                    pulp-vellum-scripted Vellum::MirrorView_script Catch2::Catch2WithMain
+                    Threads::Threads ${CMAKE_DL_LIBS})
+                add_dependencies(pulp-test-vellum-reload-shell
+                    pulp-reload-logic-unity pulp-reload-logic-compat pulp-reload-logic-incompat)
+                target_compile_definitions(pulp-test-vellum-reload-shell PRIVATE
+                    RELOAD_LOGIC_UNITY="$<TARGET_FILE:pulp-reload-logic-unity>"
+                    RELOAD_LOGIC_COMPATIBLE="$<TARGET_FILE:pulp-reload-logic-compat>"
+                    RELOAD_LOGIC_INCOMPATIBLE="$<TARGET_FILE:pulp-reload-logic-incompat>"
+                    # In the build tree: macOS dyld refuses an unsigned image
+                    # from a world-writable temp directory.
+                    RELOAD_WATCH_DIR="${CMAKE_CURRENT_BINARY_DIR}")
+                # The real scripted editor, opened through a host-driven editor
+                # session, reads the knob-and-label fixture script.
+                _pulp_vellum_scripted_package("reload shell editor fixture" _reload_package)
+                target_link_libraries(pulp-test-vellum-reload-shell PRIVATE "${_reload_package}")
+                _pulp_apply_ui_script_definition(pulp-test-vellum-reload-shell
+                    "${PULP_ROOT_DIR}/test/fixtures/scripted-editor/main-core.js")
+                set_property(TARGET pulp-test-vellum-reload-shell
+                    PROPERTY PULP_VELLUM_SCRIPTED_EDITOR TRUE)
+                catch_discover_tests(pulp-test-vellum-reload-shell PROPERTIES
+                    LABELS pulp-vellum-editor TIMEOUT 60)
+            endif()
             target_compile_definitions(pulp-test-pulp-vellum-editor PRIVATE
                 PULP_TEST_VELLUM_SCRIPTED_EDITOR=1)
             if(TARGET pulp-vellum-audio)

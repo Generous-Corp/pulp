@@ -276,9 +276,9 @@ stopped compiling and no Pulp check noticed.
   artifact. Any lookup or digest failure fails the step; nothing falls back.
 - **Runs without an SDK are passed over.** A green push run whose change the
   classifier skipped (an observatory-only commit, for example) builds and
-  uploads nothing. `resolve` therefore walks Vellum main's newest successful
-  runs (at most 10) and takes the first with an unexpired evidence artifact;
-  if none of them has one the step fails and says so.
+  uploads nothing. `resolve` therefore walks the full page of Vellum main's
+  newest successful runs and takes the first with an unexpired evidence
+  artifact. If none of the returned runs has one, the step fails and says so.
 - **Pinned minimum.** `resolve --min-vellum-sha` refuses a run whose head does
   not contain the given Vellum commit (checked through Vellum's compare endpoint
   before any download). The workflow sets it to the commit that introduced the
@@ -316,6 +316,12 @@ stopped compiling and no Pulp check noticed.
   tests need Vellum's view layer (`Vellum::MirrorView_core`), which is in Vellum
   main's SDK but not in the v0.2.0 release, so this lane, which builds against
   main, is where they run until `pulp.lock` pins a release that ships it.
+- **Reload shell under the Vellum editor.** `pulp-test-vellum-reload-shell`
+  (label `pulp-vellum-editor`) builds the view-free DAW reload shell
+  (`reloadable_shell_core.hpp`) into a target that cannot see Pulp's view
+  headers and hot-swaps real logic libraries under the Vellum scripted editor
+  root, so a view include in the shell or a lost reload edge fails here. PRs
+  touching that header run the lane.
 - **View components.** `PULP_ENABLE_PULP_VELLUM_COMPONENTS` is on in the same
   configure, and `pulp-test-pulp-vellum-components` (ctest label
   `pulp-vellum-components`, also matched by `-L pulp-vellum`) builds the
@@ -338,6 +344,14 @@ stopped compiling and no Pulp check noticed.
   Vellum's view layer and names no Pulp view target; its negative control runs
   the same check over a closure with `pulp::view-core` added and must fail.
   PRs touching `integrations/pulp-vellum-graph/**` run the lane.
+- **Draco and glTF scene loading.** The same configure turns on
+  `PULP_ENABLE_SCENE3D` and `PULP_ENABLE_PULP_VELLUM_SCENE`, and
+  `pulp-test-pulp-vellum-scene` (ctest label `pulp-vellum-scene`, also matched
+  by `-L pulp-vellum`) loads the BoxTextured and DracoTriangle fixtures through
+  `pulp::scene` with Vellum's installed Draco decoder behind the loader hook.
+  An SDK whose decoder was built without Draco is reported by name and the
+  fixture is then refused with `gltf.draco_unavailable`; it is never loaded as
+  an empty mesh. PRs touching `integrations/pulp-vellum-scene/**` run the lane.
 - **Vellum-backed UI target names.** The `pulp-vellum` filter also runs
   `cmake-vellum-ui-compat-real` and `cmake-vellum-ui-compat-wrong-version`. In a
   configure that found Vellum they get that label and `REQUIRE_VELLUM`, so they
