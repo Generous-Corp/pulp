@@ -5,8 +5,11 @@
 find_package(Threads REQUIRED)
 
 if(PULP_BUILD_TESTS AND TARGET Catch2::Catch2WithMain)
+    # test_reload_capabilities_vellum.cpp checks Pulp's reload capability names
+    # against Vellum's and runs the remote UX update gate with no Pulp view.
     add_executable(pulp-test-pulp-vellum
-        ${PULP_ROOT_DIR}/test/test_pulp_vellum_param_bridge.cpp)
+        ${PULP_ROOT_DIR}/test/test_pulp_vellum_param_bridge.cpp
+        test_reload_capabilities_vellum.cpp)
     target_link_libraries(pulp-test-pulp-vellum PRIVATE
         pulp::vellum Catch2::Catch2WithMain Threads::Threads)
     include(Catch)

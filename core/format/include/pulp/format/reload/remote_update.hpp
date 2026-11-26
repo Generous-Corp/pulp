@@ -12,7 +12,7 @@
 
 #include <pulp/format/reload/revocation.hpp>
 #include <pulp/format/reload/swap_pack.hpp>
-#include <pulp/view/reload_capabilities.hpp>
+#include <pulp/runtime/reload_capabilities.hpp>
 
 #include <cstdint>
 #include <filesystem>
@@ -45,7 +45,7 @@ struct RemoteUpdateResult {
 inline RemoteUpdateResult evaluate_remote_ux_update(
     const std::filesystem::path& pack_root, const SwapPackManifest& m,
     const std::vector<std::uint8_t>& trusted_public_key,
-    std::uint64_t installed_pack_version, const view::CapabilitySet& host_granted,
+    std::uint64_t installed_pack_version, const runtime::CapabilitySet& host_granted,
     bool srl_fresh, const SignedRevocationList* srl) {
     // 1. Authenticity first — nothing else means anything without it.
     if (auto v = verify_swap_pack(pack_root, m, trusted_public_key); !v.ok())
@@ -74,17 +74,17 @@ inline RemoteUpdateResult evaluate_remote_ux_update(
                     " does not exceed installed " + std::to_string(installed_pack_version)};
 
     // 5. A pushed UX may not request more than the installed plugin was granted.
-    view::CapabilitySet requested;
-    if (!view::CapabilitySet::parse(m.declared_capabilities, requested))
+    runtime::CapabilitySet requested;
+    if (!runtime::CapabilitySet::parse(m.declared_capabilities, requested))
         return {RemoteUpdateVerdict::RejectCapabilityEscalation,
                 "declared capabilities include an unknown token"};
-    for (auto c : {view::ReloadCapability::Exec, view::ReloadCapability::Clipboard,
-                   view::ReloadCapability::Filesystem, view::ReloadCapability::Storage,
-                   view::ReloadCapability::Ai, view::ReloadCapability::RuntimeImport,
-                   view::ReloadCapability::Network}) {
+    for (auto c : {runtime::ReloadCapability::Exec, runtime::ReloadCapability::Clipboard,
+                   runtime::ReloadCapability::Filesystem, runtime::ReloadCapability::Storage,
+                   runtime::ReloadCapability::Ai, runtime::ReloadCapability::RuntimeImport,
+                   runtime::ReloadCapability::Network}) {
         if (requested.has(c) && !host_granted.has(c))
             return {RemoteUpdateVerdict::RejectCapabilityEscalation,
-                    "pushed UX requests capability '" + std::string(view::capability_name(c)) +
+                    "pushed UX requests capability '" + std::string(runtime::capability_name(c)) +
                         "' the host did not grant"};
     }
 
