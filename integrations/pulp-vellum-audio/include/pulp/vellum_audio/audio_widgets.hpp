@@ -105,7 +105,8 @@ class LevelMeter final : public ::vellum::view::View,
 
 /// Vellum counterpart of Pulp's piano keyboard. Note callbacks are intentionally
 /// the same seam used by existing editors to reach Processor note methods.
-class MidiKeyboard final : public ::vellum::view::View {
+/// Not final: the piano roll pitch ruler specialises it.
+class MidiKeyboard : public ::vellum::view::View {
   public:
     MidiKeyboard();
     void set_range(int first_note, int last_note);
