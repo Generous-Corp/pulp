@@ -17,7 +17,7 @@
 #include <pulp/runtime/spsc_queue.hpp>
 #include <pulp/runtime/seqlock.hpp>
 #include <pulp/runtime/triple_buffer.hpp>
-#include <pulp/view/audio_bridge.hpp>
+#include <pulp/dataplane/audio_bridge.hpp>
 
 #include <atomic>
 #include <array>
@@ -248,8 +248,12 @@ public:
     bool audio_skipped_for_capture() const { return audio_skipped_for_capture_; }
 
     TestSignalSource& test_signal() { return test_signal_; }
-    view::AudioBridge& input_meter_bridge() { return input_meter_bridge_; }
-    view::AudioBridge& output_meter_bridge() { return output_meter_bridge_; }
+    dataplane::AudioBridge& input_meter_bridge() {
+        return input_meter_bridge_;
+    }
+    dataplane::AudioBridge& output_meter_bridge() {
+        return output_meter_bridge_;
+    }
 
 #if PULP_ENABLE_AUDIO_PROBES
     /// Realtime output-boundary probe. Observes the processor output
@@ -459,8 +463,8 @@ public:
     std::atomic<bool> running_{false};
 
     TestSignalSource test_signal_;
-    view::AudioBridge input_meter_bridge_;
-    view::AudioBridge output_meter_bridge_;
+    dataplane::AudioBridge input_meter_bridge_;
+    dataplane::AudioBridge output_meter_bridge_;
     // View-layer objects, owned through a deleter the view layer supplies, so
     // a StandaloneApp built without a view layer (pulp::standalone-contract)
     // never names their destructors. Null there.
