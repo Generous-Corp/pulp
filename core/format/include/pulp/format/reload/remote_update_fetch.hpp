@@ -30,8 +30,8 @@
 #include <pulp/format/reload/revocation.hpp>
 #include <pulp/format/reload/swap_pack.hpp>
 #include <pulp/runtime/http.hpp>
+#include <pulp/runtime/reload_capabilities.hpp>
 #include <pulp/runtime/safe_relative_path.hpp>
-#include <pulp/view/reload_capabilities.hpp>
 
 #include <cstdint>
 #include <filesystem>
@@ -116,7 +116,7 @@ struct RemoteUpdateConfig {
     std::string channel = "stable";
     std::vector<std::uint8_t> trusted_public_key;  ///< the pinned signer
     std::uint64_t installed_pack_version = 0;
-    view::CapabilitySet host_granted;              ///< the ceiling a pushed UX may not exceed
+    runtime::CapabilitySet host_granted;           ///< the ceiling a pushed UX may not exceed
     std::filesystem::path install_base;            ///< where an accepted pack is installed
     /// Optional developer-provided pack to fall back to when offline, so the plugin
     /// keeps THEIR look with no network. Surfaced as installed_root on Unavailable;

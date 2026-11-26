@@ -29,6 +29,7 @@
    "test/cmake/pulp_state_link_closure.cmake.in",
    "test/cmake/quality_tests.cmake",
    "test/cmake/test_g9_isolated_clap_sdk_consumer.cmake",
+   "test/cmake/test_icu_beside_executable.cmake",
    "test/cmake/x9_hosted_format_receipt.cmake",
    "test/ctest_script_inputs",
    "test/fixtures",
