@@ -1,7 +1,5 @@
 #pragma once
 
-#include <pulp/view/input_events.hpp>
-
 #include <algorithm>
 #include <cstdint>
 #include <string>
@@ -10,10 +8,49 @@
 
 namespace pulp::format::detail {
 
+/// The keys a sequence can name. The values are those of SequenceKey, so a
+/// step means the same key to every consumer: letters and digits are their
+/// ASCII codes, and the rest are numbered as below. Declared here rather than
+/// taken from the view layer so the view-free standalone can parse and drive a
+/// sequence.
+// clang-format off
+enum class SequenceKey : int {
+    unknown = 0,
+
+    a = 'a', b = 'b', c = 'c', d = 'd', e = 'e', f = 'f', g = 'g', h = 'h',
+    i = 'i', j = 'j', k = 'k', l = 'l', m = 'm', n = 'n', o = 'o', p = 'p',
+    q = 'q', r = 'r', s = 's', t = 't', u = 'u', v = 'v', w = 'w', x = 'x',
+    y = 'y', z = 'z',
+
+    num0 = '0', num1 = '1', num2 = '2', num3 = '3', num4 = '4',
+    num5 = '5', num6 = '6', num7 = '7', num8 = '8', num9 = '9',
+
+    semicolon = ';', apostrophe = '\'',
+
+    left = 256, right, up, down,
+    home, end_, page_up, page_down,
+
+    backspace = 270, delete_, tab, enter, escape,
+    space = ' ',
+
+    f1 = 290, f2, f3, f4, f5, f6, f7, f8, f9, f10, f11, f12,
+};
+// clang-format on
+
+/// Modifier bits in KeySequenceStep::modifiers, with view::Modifier's values.
+enum SequenceModifier : uint16_t {
+    kSequenceModNone = 0,
+    kSequenceModShift = 1 << 0,
+    kSequenceModCtrl = 1 << 1,
+    kSequenceModAlt = 1 << 2,
+    kSequenceModMeta = 1 << 3,
+    kSequenceModCmd = 1 << 4,
+};
+
 /// One synthesized key press: the portable key identity plus its modifier mask.
 /// The platform driver owns the translation back to a native virtual keycode.
 struct KeySequenceStep {
-    view::KeyCode key = view::KeyCode::unknown;
+    SequenceKey key = SequenceKey::unknown;
     uint16_t modifiers = 0;
     /// The normalized source token ("down", "cmd+a"). Kept so a run can name
     /// its artifacts and logs after what the operator actually asked for
@@ -25,17 +62,20 @@ struct KeySequenceStep {
 /// Returns 0 for an unrecognized token so the caller can reject the whole spec.
 inline uint16_t key_sequence_modifier_from_name(std::string_view name) {
     if (name == "cmd" || name == "command" || name == "meta" || name == "super")
-        return view::kModCmd;
-    if (name == "shift") return view::kModShift;
-    if (name == "ctrl" || name == "control") return view::kModCtrl;
-    if (name == "alt" || name == "opt" || name == "option") return view::kModAlt;
+        return kSequenceModCmd;
+    if (name == "shift")
+        return kSequenceModShift;
+    if (name == "ctrl" || name == "control")
+        return kSequenceModCtrl;
+    if (name == "alt" || name == "opt" || name == "option")
+        return kSequenceModAlt;
     return 0;
 }
 
 /// Map a key token ("down", "return", "a", "f7") to its portable KeyCode.
 /// Returns KeyCode::unknown for an unrecognized token.
-inline view::KeyCode key_sequence_key_from_name(std::string_view name) {
-    using KC = view::KeyCode;
+inline SequenceKey key_sequence_key_from_name(std::string_view name) {
+    using KC = SequenceKey;
     if (name.empty()) return KC::unknown;
 
     if (name == "down") return KC::down;
@@ -136,7 +176,7 @@ inline bool parse_key_sequence(std::string_view spec,
 
         const auto key_name = lower(trim(rest));
         step.key = key_sequence_key_from_name(key_name);
-        if (step.key == view::KeyCode::unknown) {
+        if (step.key == SequenceKey::unknown) {
             error = "unknown key '" + key_name + "'";
             out.clear();
             return false;

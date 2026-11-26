@@ -26,6 +26,7 @@
 #include <pulp/audio/device.hpp>
 #include <pulp/format/processor.hpp>
 #include <pulp/format/standalone.hpp>
+#include <pulp/format/standalone_panel.hpp>
 #include <pulp/midi/message.hpp>
 #include <pulp/state/preset_library.hpp>
 #include <pulp/state/preset_manager.hpp>
@@ -215,6 +216,15 @@ struct StandaloneRenderTestAccess {
                        audio::BufferView<float>& output,
                        const audio::CallbackContext& ctx) {
         app.render_audio_block(input, output, ctx);
+    }
+    static void create_panels(StandaloneApp& app, const StandaloneConfig& config) {
+        app.create_panels(config);
+    }
+    static std::size_t panel_count(const StandaloneApp& app) {
+        return app.panels_.size();
+    }
+    static void stop(StandaloneApp& app) {
+        app.stop();
     }
 };
 }  // namespace pulp::format
@@ -580,4 +590,176 @@ TEST_CASE("Standalone: a plug-in that does not opt in has no program-change obje
     REQUIRE(StandaloneRenderTestAccess::library(app) == nullptr);
     app.service_program_changes(); // a no-op, not a crash
     ProgramChangeSynth::opt_in = true;
+}
+
+namespace {
+
+// A panel that records what the standalone asks of it and, on the audio
+// thread, appends one note-off the way a panel recovers a release it could
+// not queue.
+struct PanelRecord {
+    int created = 0;
+    int drains = 0;
+    int last_frame_count = 0;
+    int shutdowns = 0;
+    int destroyed = 0;
+    bool sink_accepts = false;
+};
+PanelRecord panel_record;
+
+class RecordingPanel final : public format::StandalonePanel {
+  public:
+    explicit RecordingPanel(const format::StandalonePanelContext& context) {
+        ++panel_record.created;
+        // The sink is the standalone's UI MIDI queue.
+        panel_record.sink_accepts =
+            context.midi_sink && context.midi_sink(midi::MidiEvent::note_on(0, 60, 100));
+    }
+    ~RecordingPanel() override {
+        ++panel_record.destroyed;
+    }
+    std::string menu_title() const override {
+        return "Recording Panel";
+    }
+    char shortcut() const override {
+        return 'k';
+    }
+    bool toggle() override {
+        return true;
+    }
+    bool is_visible() const override {
+        return false;
+    }
+    void set_primary_window(void*) override {}
+    void drain_midi_into(midi::MidiBuffer& midi, int frame_count) noexcept override {
+        ++panel_record.drains;
+        panel_record.last_frame_count = frame_count;
+        auto off = midi::MidiEvent::note_off(0, 60);
+        off.sample_offset = frame_count - 1;
+        (void)midi.add(off);
+    }
+    void shutdown() noexcept override {
+        ++panel_record.shutdowns;
+    }
+};
+
+std::unique_ptr<format::StandalonePanel>
+make_recording_panel(const format::StandalonePanelContext& context) {
+    return std::make_unique<RecordingPanel>(context);
+}
+
+std::unique_ptr<format::StandalonePanel> make_no_panel(const format::StandalonePanelContext&) {
+    return nullptr;
+}
+
+struct PanelFactoryReset {
+    PanelFactoryReset() {
+        format::detail::reset_standalone_panel_factories_for_testing();
+        panel_record = {};
+    }
+    ~PanelFactoryReset() {
+        format::detail::reset_standalone_panel_factories_for_testing();
+    }
+};
+
+// Counts the note-offs the processor receives.
+class MidiCountingProcessor final : public format::Processor {
+  public:
+    static inline int note_offs = 0;
+    format::PluginDescriptor descriptor() const override {
+        format::PluginDescriptor d;
+        d.name = "StandalonePanelMidi";
+        d.bundle_id = "com.pulp.test.standalone-panel-midi";
+        d.accepts_midi = true;
+        d.output_buses = {{"Audio Out", 2}};
+        return d;
+    }
+    void define_parameters(state::StateStore&) override {}
+    void prepare(const format::PrepareContext&) override {}
+    void process(audio::BufferView<float>& output, const audio::BufferView<const float>&,
+                 midi::MidiBuffer& midi_in, midi::MidiBuffer&,
+                 const format::ProcessContext&) override {
+        output.clear();
+        for (const auto& event : midi_in)
+            if (event.is_note_off())
+                ++note_offs;
+    }
+};
+
+std::unique_ptr<format::Processor> create_midi_counting() {
+    return std::make_unique<MidiCountingProcessor>();
+}
+
+} // namespace
+
+TEST_CASE("standalone panel factories install once and build panels in order",
+          "[standalone][format][standalone-panel]") {
+    PanelFactoryReset reset;
+    CHECK_FALSE(format::detail::install_standalone_panel_factory(nullptr));
+    REQUIRE(format::detail::install_standalone_panel_factory(&make_no_panel));
+    REQUIRE(format::detail::install_standalone_panel_factory(&make_recording_panel));
+    // Installing the same factory again adds nothing.
+    REQUIRE(format::detail::install_standalone_panel_factory(&make_recording_panel));
+
+    format::StandaloneConfig config;
+    const format::StandalonePanelContext context{config, {}};
+    const auto panels = format::detail::create_standalone_panels(context);
+    // The factory that declined contributes nothing; the other builds one.
+    REQUIRE(panels.size() == 1);
+    CHECK(panel_record.created == 1);
+    CHECK(panels[0]->menu_title() == "Recording Panel");
+}
+
+TEST_CASE("the standalone drains its panels on the audio thread and shuts them down after audio",
+          "[standalone][format][standalone-panel][rt-safety]") {
+    using pulp::format::StandaloneRenderTestAccess;
+    PanelFactoryReset reset;
+    REQUIRE(format::detail::install_standalone_panel_factory(&make_recording_panel));
+    MidiCountingProcessor::note_offs = 0;
+    constexpr int kFrames = 128;
+
+    format::StandaloneConfig cfg;
+    cfg.sample_rate = 48000.0;
+    cfg.buffer_size = kFrames;
+    cfg.output_channels = 2;
+    cfg.input_channels = 0;
+    cfg.persist_settings = false;
+    cfg.transport_playing = false;
+    cfg.route_test_signal_to_output = false;
+
+    format::StandaloneApp app(create_midi_counting);
+    app.set_config(cfg);
+    StandaloneRenderTestAccess::ensure_processor(app);
+    StandaloneRenderTestAccess::create_panels(app, cfg);
+    REQUIRE(StandaloneRenderTestAccess::panel_count(app) == 1);
+    CHECK(panel_record.sink_accepts);
+    StandaloneRenderTestAccess::prepare(app);
+
+    std::array<float, kFrames> out_l{};
+    std::array<float, kFrames> out_r{};
+    float* out_ptrs[2] = {out_l.data(), out_r.data()};
+    audio::BufferView<const float> input;
+    audio::BufferView<float> output(out_ptrs, 2, kFrames);
+    audio::CallbackContext ctx;
+    ctx.sample_rate = 48000.0;
+    ctx.buffer_size = kFrames;
+
+    StandaloneRenderTestAccess::render(app, input, output, ctx);
+    StandaloneRenderTestAccess::render(app, input, output, ctx);
+    std::size_t allocations = 0;
+    {
+        pulp::test::ScopedRtProcessProbe probe;
+        StandaloneRenderTestAccess::render(app, input, output, ctx);
+        allocations = probe.allocation_count();
+    }
+    CHECK(allocations == 0);
+    CHECK(panel_record.drains == 3);
+    CHECK(panel_record.last_frame_count == kFrames);
+    // Each block's appended note-off reached the processor.
+    CHECK(MidiCountingProcessor::note_offs == 3);
+
+    StandaloneRenderTestAccess::stop(app);
+    CHECK(panel_record.shutdowns == 1);
+    CHECK(panel_record.destroyed == 1);
+    CHECK(StandaloneRenderTestAccess::panel_count(app) == 0);
 }

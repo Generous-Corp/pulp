@@ -591,6 +591,301 @@ def case_an_invalid_check_fails(fx: Fixture) -> None:
     assert "INVALID" in res.stderr, res.stderr
 
 
+def case_the_overall_bound_is_advisory_not_a_pass_or_a_stale_verdict(fx: Fixture) -> None:
+    """A check still running at the bound exits BOUND_EXCEEDED (5), well before
+    its own timeout, never STALE and never 0."""
+    fx.setup()
+    path = "tools/scripts/vellum_inheritance_ledger_check.py"
+    checker = fx.repo / path
+    checker.parent.mkdir(parents=True, exist_ok=True)
+    checker.write_text("import time; time.sleep(60)\n", encoding="utf-8")
+    fx.git("add", path)
+    fx.git("commit", "-qm", "slow checker")
+    started = time.monotonic()
+    res = subprocess.run(
+        [sys.executable, str(MERGE_TREE_STATE), "--repo-root", str(fx.repo),
+         "--base", "origin/main", "--head", "HEAD", "--overall-bound", "5"],
+        cwd=fx.repo, capture_output=True, text=True, encoding="utf-8", timeout=55,
+    )
+    assert res.returncode == merge_tree_state.BOUND_EXCEEDED == 5, (res.returncode, res.stderr)
+    assert time.monotonic() - started < 45
+    assert "NOT CHECKED" in res.stderr and "ADVISORY" in res.stderr, res.stderr
+    assert merge_tree_state.STALE not in res.stderr, res.stderr
+
+
+def case_a_real_failure_still_refuses_under_the_bound(fx: Fixture) -> None:
+    """The bound does not hide a failure that finished inside it."""
+    fx.setup()
+    path = "tools/scripts/vellum_inheritance_ledger_check.py"
+    checker = fx.repo / path
+    checker.parent.mkdir(parents=True, exist_ok=True)
+    checker.write_text("raise SystemExit(1)\n", encoding="utf-8")
+    fx.git("add", path)
+    fx.git("commit", "-qm", "failing checker")
+    res = subprocess.run(
+        [sys.executable, str(MERGE_TREE_STATE), "--repo-root", str(fx.repo),
+         "--base", "origin/main", "--head", "HEAD", "--overall-bound", "120"],
+        cwd=fx.repo, capture_output=True, text=True, encoding="utf-8", timeout=125,
+    )
+    assert res.returncode == 1, (res.returncode, res.stderr)
+    assert merge_tree_state.STALE in res.stderr, res.stderr
+
+
+def _make_checkout_slow(fx: Fixture) -> None:
+    """A smudge filter that sleeps keeps `git worktree add` inside its checkout,
+    where git holds the "initializing" lock."""
+    fx.commit(".gitattributes", "*.slow filter=slow\n", "attrs")
+    fx.commit("a.slow", "x\n", "slow file")
+    fx.git("config", "filter.slow.smudge", "sleep 60; cat")
+
+
+def case_an_interrupted_worktree_add_leaves_no_record_or_directory(fx: Fixture) -> None:
+    """A bound hit while `git worktree add` runs must not leave a locked
+    "initializing" record or its directory in the shared repo."""
+    fx.setup()
+    _make_checkout_slow(fx)
+    target = Path(tempfile.mkdtemp(prefix="pulp-merge-tree-", dir=fx.tmp))
+    started = time.monotonic()
+    res = merge_tree_state.add_worktree(fx.repo, target, "HEAD", 3.0)
+    assert res is None, "the slow add should have hit the timeout"
+    assert time.monotonic() - started < 30
+    assert "locked" in fx.git("worktree", "list", "--porcelain"), "the add should leave a locked record"
+    merge_tree_state.remove_worktree(fx.repo, target)
+    assert str(target) not in fx.git("worktree", "list", "--porcelain")
+    assert not target.exists(), target
+    leftovers = list((fx.repo / ".git" / "worktrees").glob("*")) if (fx.repo / ".git" / "worktrees").exists() else []
+    assert leftovers == [], leftovers
+
+
+def case_the_overall_bound_during_the_add_exits_not_checked_and_cleans_up(fx: Fixture) -> None:
+    fx.setup()
+    _make_checkout_slow(fx)
+    res = subprocess.run(
+        [sys.executable, str(MERGE_TREE_STATE), "--repo-root", str(fx.repo),
+         "--base", "origin/main", "--head", "HEAD", "--overall-bound", "3"],
+        cwd=fx.repo, capture_output=True, text=True, encoding="utf-8", timeout=55)
+    assert res.returncode == 5, (res.returncode, res.stderr)
+    assert fx.git("worktree", "list", "--porcelain").count("worktree ") == 1, fx.git("worktree", "list")
+    assert not list(fx.repo.parent.glob("pulp-merge-tree-*")), list(fx.repo.parent.glob("pulp-merge-tree-*"))
+
+
+
+def case_the_check_bound_holds_when_a_descendant_keeps_the_pipes_open(fx: Fixture) -> None:
+    """A checker's child that inherits stdout/stderr must not outlive the bound."""
+    code = "import subprocess,sys,time; subprocess.Popen([sys.executable,'-c','import time; time.sleep(60)']); time.sleep(60)"
+    start = time.monotonic()
+    try:
+        merge_tree_state._run_grouped([sys.executable, "-c", code], Path.cwd(), dict(os.environ), 1.0)
+    except subprocess.TimeoutExpired:
+        pass
+    else:
+        raise AssertionError("the checker was expected to time out")
+    elapsed = time.monotonic() - start
+    assert elapsed < 15, f"bound not enforced: {elapsed:.1f}s"
+
+
+def case_cancellation_reaps_checkout_before_removing_its_worktree(fx: Fixture) -> None:
+    """Deliver real signals inside add's communicate and observe teardown order."""
+    import signal
+    from unittest import mock
+
+    fx.setup()
+    real_popen = subprocess.Popen
+    real_remove = merge_tree_state.remove_worktree
+    for signum in (signal.SIGINT, signal.SIGTERM):
+        children = []
+        events = []
+
+        def popen(*args, **kwargs):
+            proc = real_popen(*args, **kwargs)
+            if "worktree" in proc.args and "add" in proc.args:
+                children.append(proc)
+                communicate = proc.communicate
+
+                def cancel_once(*a, **kw):
+                    proc.communicate = communicate
+                    os.kill(os.getpid(), signum)
+                    raise AssertionError("signal did not interrupt checkout")
+
+                proc.communicate = cancel_once
+            return proc
+
+        def remove(root, path):
+            events.append("cleanup")
+            assert children and children[-1].returncode is not None, "cleanup preceded checkout reap"
+            real_remove(root, path)
+
+        try:
+            with mock.patch.object(subprocess, "Popen", side_effect=popen), \
+                 mock.patch.object(merge_tree_state, "remove_worktree", side_effect=remove):
+                try:
+                    merge_tree_state.main(["--repo-root", str(fx.repo)])
+                except SystemExit as exc:
+                    assert exc.code == 128 + signum, exc.code
+                else:
+                    raise AssertionError("cancellation was swallowed")
+            assert events == ["cleanup"], events
+            assert fx.git("worktree", "list", "--porcelain").count("worktree ") == 1
+            assert not list(fx.tmp.glob("pulp-merge-tree-*"))
+        finally:
+            # Also reap on the deliberately broken control implementation.
+            for proc in children:
+                try:
+                    os.killpg(proc.pid, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
+                proc.communicate()
+            for path in fx.tmp.glob("pulp-merge-tree-*"):
+                real_remove(fx.repo, path)
+
+
+def case_the_capability_check_runs_only_when_the_range_touches_its_inputs(fx: Fixture) -> None:
+    fx.setup()
+    base = fx.git("rev-parse", "origin/main")
+    head = fx.commit("docs/readme.txt", "x\n", "docs only")
+    assert merge_tree_state._touches_capability_inputs(fx.repo, base, head) is False
+    head2 = fx.commit("core/state/include/pulp/state/x.hpp", "// h\n", "header")
+    assert merge_tree_state._touches_capability_inputs(fx.repo, base, head2) is True
+    assert merge_tree_state._touches_capability_inputs(fx.repo, "nonexistent-ref", head2) is True
+
+
+def case_both_capability_triggers_cover_manifest_data_and_helpers(fx: Fixture) -> None:
+    fx.setup()
+    hook = HOOK.read_text(encoding="utf-8")
+    trigger = next(line for line in hook.splitlines()
+                   if 'elif git diff --name-only "$capability_base"' in line)
+    pattern = trigger.split("grep -qE '", 1)[1].split("'", 1)[0]
+    paths = (
+        "tools/dsp_vocabulary.py",
+        "docs/status/forge-catalog.json",
+        "test/test_agent_capability_compile.cpp",
+        "tools/scripts/json_schema_lite.py",
+        "tools/scripts/gate_common.py",
+        "tools/scripts/agent_capability_manifest.py",
+        "core/signal/include/pulp/signal/test.hpp",
+        "tools/agent-capabilities/history/test.json",
+        "docs/status/agent-capabilities.json",
+        "docs/status/agent-capability-surface/test.json",
+        "docs/readme.txt",
+    )
+    for path in paths:
+        # Compare each change with its own parent: an earlier matching path
+        # must not hide a missing dependency later in the table.
+        base = fx.git("rev-parse", "HEAD")
+        head = fx.commit(path, "fixture\n", "change one capability input")
+        expected = path != "docs/readme.txt"
+        assert merge_tree_state._touches_capability_inputs(fx.repo, base, head) is expected, path
+        result = subprocess.run(["grep", "-qE", pattern], input=path + "\n", text=True, encoding="utf-8")
+        assert result.returncode == (0 if expected else 1), path
+
+
+def case_cheap_unrunnable_checks_come_before_the_slow_ones(fx: Fixture) -> None:
+    src = MERGE_TREE_STATE.read_text(encoding="utf-8")
+    body = src[src.index("checks: list[tuple[str, list[str]]] = []"):src.index("failed: list[str]")]
+    order = [body.index(n) for n in ('"vellum-inheritance-ledger"', '"unregistered-tests"',
+                                     '"changed-surface-script-families-drift"', '"agent-capability-manifest"')]
+    assert order == sorted(order), order
+
+
+def case_a_not_checked_merge_tree_is_recorded_and_named_in_the_verdict(fx: Fixture) -> None:
+    hook = (ROOT / ".githooks/pre-push").read_text(encoding="utf-8")
+    five = hook[hook.index("            5) echo"):hook.index("            3) echo")]
+    assert 'prepush_receipt_note skipped merge-tree-script-state' in five and "_prepush_merge_tree_not_checked=1" in five, five
+    four = hook[hook.index("            4)"):hook.index("            5) echo")]
+    assert 'prepush_receipt_note skipped merge-tree-script-state' in four, four
+    assert "    _prepush_final_verdict_line\n    exit 0" in hook
+    start = hook.index("_prepush_final_verdict_line() {")
+    func = hook[start:hook.index("\n}\n", start) + 3]
+    def line(**env: str) -> str:
+        script = func + "\n_prepush_final_verdict_line\n"
+        res = subprocess.run(["bash", "-c", script], capture_output=True, text=True, encoding="utf-8",
+                             env={"PATH": os.environ["PATH"], **env})
+        return res.stderr.strip()
+    assert line() == "[pre-push] gates clean."
+    both = line(_prepush_merge_tree_not_checked="1", _prepush_fixtures_not_checked="a, b")
+    assert both.startswith("[pre-push] gates passed except ") and "merge-tree script-state NOT CHECKED" in both \
+        and "fixture tests: a, b NOT CHECKED" in both and "clean" not in both, both
+    triple = line(_prepush_merge_tree_not_checked="1", _prepush_fixtures_not_checked="a",
+                  _prepush_diff_cover_refused="1")
+    assert "diff coverage: NOT CHECKED" in triple and "merge-tree script-state NOT CHECKED" in triple \
+        and "fixture tests: a NOT CHECKED" in triple and triple.startswith("[pre-push] gates passed except"), triple
+    only_mt = line(_prepush_merge_tree_not_checked="1")
+    assert "merge-tree script-state NOT CHECKED" in only_mt and "gates clean" not in only_mt, only_mt
+
+
+def case_advisory_merge_tree_outcomes_are_recorded_in_the_verdict(fx: Fixture) -> None:
+    """An advisory error must not be reported as a fully clean push."""
+    hook = (ROOT / ".githooks/pre-push").read_text(encoding="utf-8")
+    c0 = hook.index('case "$_merge_tree_rc" in')
+    case = hook[c0:hook.index("\n        esac", c0) + len("\n        esac")]
+    start = hook.index("_prepush_final_verdict_line() {")
+    func = hook[start:hook.index("\n}\n", start) + 3]
+    for rc in (2, 3, 9):
+        script = f"""
+prepush_receipt_note() {{ :; }}
+MERGE_TREE_BASE=origin/main
+_merge_tree_rc={rc}; _prepush_merge_tree_not_checked=0
+{case}
+{func}
+_prepush_final_verdict_line
+"""
+        res = subprocess.run(["bash", "-c", script], capture_output=True, text=True, encoding="utf-8")
+        assert "merge-tree script-state NOT CHECKED" in res.stderr, (rc, res.stderr)
+        assert "gates clean." not in res.stderr, (rc, res.stderr)
+
+
+def _families_fast_path_run(fx: Fixture, merge_tree_rc: int, families_rc: int = 0, allow: str = "0"):
+    """Run the hook's real merge-tree exit handling and then its real families
+    step, with stubbed gates. Returns (families_ran, prepush_failed, exited_early)."""
+    hook = (ROOT / ".githooks/pre-push").read_text(encoding="utf-8")
+    c0 = hook.index('case "$_merge_tree_rc" in')
+    case = hook[c0:hook.index("\n        esac", c0) + len("\n        esac")]
+    f0 = hook.index('if [ -f "$SURFACE_FAMILIES" ]')
+    f1 = hook.index('gate_could_not_run "changed_surface_script_families_static"', f0)
+    fam = hook[f0:hook.index("\nfi\n", f1) + 4]
+    marker = fx.tmp / "families-ran"
+    marker.unlink(missing_ok=True)
+    script = f"""
+prepush_receipt_note() {{ :; }}
+run_gate_captured() {{ echo ran >> {str(marker)!r}; return {families_rc}; }}
+prepush_fail() {{ echo PREPUSH_FAIL; }}
+gate_could_not_run() {{ echo COULD_NOT_RUN; }}
+SURFACE_FAMILIES={str(marker.parent / "families.py")!r}; : > "$SURFACE_FAMILIES"
+PYTHON=py; ROOT=.; BASE=origin/main; MERGE_TREE_BASE=origin/main; MERGE_TREE_BOUND=30
+PULP_PREPUSH_ALLOW_NOT_CHECKED={allow}
+_merge_tree_clean=0; _prepush_merge_tree_not_checked=0; _merge_tree_rc={merge_tree_rc}
+{case}
+{fam}
+echo DONE
+"""
+    res = subprocess.run(["bash", "-c", script], capture_output=True, text=True, encoding="utf-8")
+    return marker.exists(), "PREPUSH_FAIL" in res.stdout, "DONE" not in res.stdout
+
+
+def case_a_clean_merge_tree_suppresses_the_duplicate_families_check(fx: Fixture) -> None:
+    ran, failed, early = _families_fast_path_run(fx, 0)
+    assert (ran, failed, early) == (False, False, False), (ran, failed, early)
+
+
+def case_every_other_merge_tree_outcome_keeps_the_families_check(fx: Fixture) -> None:
+    # 2 internal error (advisory), 3 conflict (advisory), 4 not checked with the
+    # override, 5 bound ran out (advisory), and an unknown code.
+    for rc, allow in ((2, "0"), (3, "0"), (4, "1"), (5, "0"), (9, "0")):
+        ran, failed, early = _families_fast_path_run(fx, rc, allow=allow)
+        assert ran and not failed and not early, (rc, ran, failed, early)
+
+
+def case_a_failing_families_fallback_refuses_the_push(fx: Fixture) -> None:
+    for rc in (3, 5):
+        ran, failed, early = _families_fast_path_run(fx, rc, families_rc=1)
+        assert ran and failed, (rc, ran, failed)
+    ran, failed, _ = _families_fast_path_run(fx, 5, families_rc=2)
+    assert ran and failed
+    # After a clean merge-tree the duplicate is not run, so it cannot refuse.
+    ran, failed, _ = _families_fast_path_run(fx, 0, families_rc=1)
+    assert not ran and not failed
+
+
 def case_the_check_timeout_scales_with_load(fx: Fixture) -> None:
     """60 s floor, scaled up past one runnable task per core, capped."""
     from unittest import mock
@@ -684,7 +979,7 @@ def main() -> int:
                 failures.append(case.__name__)
                 print(f"FAIL {case.__name__}: {exc}")
     # Control: a suite that collected nothing would pass vacuously.
-    if len(CASES) < 14:
+    if len(CASES) < 24:
         print(f"FAIL collected only {len(CASES)} cases")
         return 1
     print(f"{len(CASES) - len(failures)}/{len(CASES)} passed")
