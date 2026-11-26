@@ -37,6 +37,43 @@ class PickRunTests(unittest.TestCase):
             vsc.pick_run([_run(1, conclusion="failure")])
 
 
+class SelectRunTests(unittest.TestCase):
+    @staticmethod
+    def _fetch(having):
+        def fetch(run):
+            return [{"id": run["id"], "name": vsc.EVIDENCE_ARTIFACT, "expired": False}] if run["id"] in having else []
+        return fetch
+
+    def test_newest_run_without_the_artifact_is_passed_over(self):
+        runs = [_run(1, created="2026-11-11T09:00:00Z"), _run(2, created="2026-11-11T10:00:00Z")]
+        run, artifact = vsc.select_run(runs, self._fetch({1}))
+        self.assertEqual((run["id"], artifact["id"]), (1, 1))
+
+    def test_newest_run_with_the_artifact_wins(self):
+        runs = [_run(1, created="2026-11-11T09:00:00Z"), _run(2, created="2026-11-11T10:00:00Z")]
+        self.assertEqual(vsc.select_run(runs, self._fetch({1, 2}))[0]["id"], 2)
+
+    def test_expired_artifact_does_not_count(self):
+        runs = [_run(1)]
+        with self.assertRaises(vsc.ResolveError):
+            vsc.select_run(runs, lambda r: [{"id": 1, "name": vsc.EVIDENCE_ARTIFACT, "expired": True}])
+
+    def test_none_in_range_fails_clearly(self):
+        runs = [_run(i, created=f"2026-11-11T{i:02d}:00:00Z") for i in range(1, 6)]
+        with self.assertRaisesRegex(vsc.ResolveError, "none of the newest 5"):
+            vsc.select_run(runs, self._fetch(set()))
+
+    def test_search_is_bounded(self):
+        runs = [_run(i, created=f"2026-11-11T{i:02d}:00:00Z") for i in range(1, 6)]
+        with self.assertRaisesRegex(vsc.ResolveError, "none of the newest 2"):
+            vsc.select_run(runs, self._fetch({1}), limit=2)
+
+    def test_artifact_after_first_ten_green_runs_is_selected(self):
+        runs = [_run(i, created=f"2026-11-11T{i:02d}:00:00Z") for i in range(1, 13)]
+        run, artifact = vsc.select_run(runs, self._fetch({1}), limit=vsc.RUN_SEARCH_LIMIT)
+        self.assertEqual((run["id"], artifact["id"]), (1, 1))
+
+
 class MinimumCommitTests(unittest.TestCase):
     """A run older than the required Vellum commit is refused, not downloaded."""
 
@@ -55,6 +92,8 @@ class MinimumCommitTests(unittest.TestCase):
             self.paths.append(path)
             if path.startswith(f"repos/{vsc.VELLUM_REPO}/actions/runs?"):
                 return {"workflow_runs": [_run(1)]}
+            if path == f"repos/{vsc.VELLUM_REPO}/actions/runs/1/artifacts":
+                return {"artifacts": [{"id": 9, "name": vsc.EVIDENCE_ARTIFACT, "expired": False}]}
             if path.startswith(f"repos/{vsc.VELLUM_REPO}/compare/"):
                 return {"status": compare_status}
             raise vsc.ResolveError(f"unexpected {path}")
@@ -67,15 +106,15 @@ class MinimumCommitTests(unittest.TestCase):
 
     def test_run_behind_the_minimum_is_refused_before_any_download(self):
         self.assertEqual(self._resolve("behind"), vsc.INCONCLUSIVE)
-        self.assertFalse(any("artifacts" in p for p in self.paths))
+        self.assertFalse(any(p.endswith("/zip") for p in self.paths))
         self.assertTrue(any(p.endswith("compare/abc...sha1") for p in self.paths))
 
     def test_run_at_or_ahead_of_the_minimum_goes_on_to_download(self):
         for status in ("identical", "ahead"):
             self.paths.clear()
-            # The fake has no artifact listing, so the download step fails loudly.
+            # The fake serves no archive, so the download step fails loudly.
             self.assertEqual(self._resolve(status), vsc.INCONCLUSIVE)
-            self.assertTrue(any("runs/1/artifacts" in p for p in self.paths), status)
+            self.assertTrue(any(p.endswith("artifacts/9/zip") for p in self.paths), status)
 
 
 class PickArtifactTests(unittest.TestCase):
@@ -159,6 +198,8 @@ class SkipIfUnchangedTests(unittest.TestCase):
             return _zip({"receipt.json": '{"vellum_head_sha": "%s"}' % self.recorded})
         if path.startswith(f"repos/{vsc.VELLUM_REPO}/actions/runs?"):
             return {"workflow_runs": [_run(1)]}
+        if path == f"repos/{vsc.VELLUM_REPO}/actions/runs/1/artifacts":
+            return {"artifacts": [{"id": 9, "name": vsc.EVIDENCE_ARTIFACT, "expired": False}]}
         raise vsc.ResolveError(f"unexpected {path}")
 
     def _resolve(self):
@@ -178,7 +219,7 @@ class SkipIfUnchangedTests(unittest.TestCase):
         rc, outputs = self._resolve()
         self.assertEqual(rc, 0)
         self.assertIn("unchanged=true", outputs)
-        self.assertFalse(any("runs/1/artifacts" in c for c in self.calls))
+        self.assertFalse(any(c.endswith("artifacts/9/zip") for c in self.calls))
 
     def test_new_head_goes_on_to_download(self):
         self.recorded = "sha0"
@@ -354,6 +395,99 @@ class BridgeWiringTests(unittest.TestCase):
                 self.assertNotIn("${%s}" % variable, code, f"{path.relative_to(self.ROOT)} uses ${{{variable}}}")
         tests = (self.ROOT / "integrations/pulp-vellum/tests/CMakeLists.txt").read_text(encoding="utf-8")
         self.assertIn("${PULP_ROOT_DIR}/test/test_pulp_vellum_param_bridge.cpp", tests)
+
+
+class LabelledTargetTests(unittest.TestCase):
+    EXECUTABLES = {
+        "pulp-test-pulp-vellum": {"source": "integrations/pulp-vellum/tests", "artifact": "a/pulp-test-pulp-vellum"},
+        "pulp-test-vellum-scripted-wiring": {"source": "integrations/pulp-vellum/tests",
+                                             "artifact": "a/pulp-test-vellum-scripted-wiring"},
+        "pulp-test-elsewhere": {"source": "test", "artifact": "t/pulp-test-elsewhere"},
+        "pulp-test-unrelated": {"source": "test", "artifact": "t/pulp-test-unrelated"},
+    }
+
+    def test_integration_executables_are_selected_without_a_ctest_entry(self):
+        # A Catch2 executable that was never built registers no ctest entry, so
+        # the directory rule alone must select it.
+        self.assertEqual(vsc.vellum_test_targets(self.EXECUTABLES, []),
+                         ["pulp-test-pulp-vellum", "pulp-test-vellum-scripted-wiring"])
+
+    def test_absolute_source_paths_are_matched_against_the_checkout(self):
+        root = "/work/checkout"
+        absolute = {
+            "in-tree": {"source": f"{root}/integrations/pulp-vellum-audio/tests/foo.cpp", "artifact": "a/in-tree",
+                        "source_root": root},
+            "elsewhere": {"source": f"{root}/test", "artifact": "a/elsewhere", "source_root": root},
+            "outside": {"source": "/other/integrations/pulp-vellum/tests", "artifact": "a/outside",
+                        "source_root": root},
+            "relative": {"source": "integrations/pulp-vellum/tests", "artifact": "a/relative", "source_root": root},
+            "windows": {"source": "C:\\work\\checkout\\integrations\\pulp-vellum\\tests", "artifact": "a/win",
+                        "source_root": "C:\\work\\checkout"},
+        }
+        self.assertEqual(vsc.vellum_test_targets(absolute, []), ["in-tree", "relative", "windows"])
+
+    def test_symlinked_checkout_root_is_resolved(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            real = Path(tmp).resolve() / "real"
+            (real / "integrations/pulp-vellum/tests").mkdir(parents=True)
+            link = Path(tmp).resolve() / "link"
+            link.symlink_to(real)
+            self.assertEqual(vsc.checkout_relative(str(real / "integrations/pulp-vellum/tests"), str(link)),
+                             "integrations/pulp-vellum/tests")
+
+    def test_a_labelled_test_program_outside_the_integration_dirs_is_selected(self):
+        programs = [("some-test", Path("/b/t/pulp-test-elsewhere")), ("not-an-exe", Path("/b/t/script.cmake"))]
+        self.assertEqual(vsc.vellum_test_targets(self.EXECUTABLES, programs),
+                         ["pulp-test-elsewhere", "pulp-test-pulp-vellum", "pulp-test-vellum-scripted-wiring"])
+
+    def test_cmake_env_wrapper_is_looked_through(self):
+        self.assertEqual(vsc._test_program(["/usr/bin/cmake", "-E", "env", "CI=0", "DISPLAY=:0", "/b/exe"]), "/b/exe")
+        self.assertEqual(vsc._test_program(["/b/exe", "[tag]"]), "/b/exe")
+        self.assertIsNone(vsc._test_program([]))
+
+    def test_unbuilt_target_and_program_fail_verification(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            build = Path(tmp)
+            (build / "a").mkdir()
+            (build / "a/pulp-test-pulp-vellum").write_text("", encoding="utf-8")
+            targets = ["pulp-test-pulp-vellum", "pulp-test-vellum-scripted-wiring"]
+            programs = [("wiring", build / "a/pulp-test-vellum-scripted-wiring")]
+            problems = vsc.missing_programs(build, targets, self.EXECUTABLES, programs)
+            self.assertEqual(len(problems), 2)
+            self.assertIn("target pulp-test-vellum-scripted-wiring", problems[0])
+            self.assertIn("test wiring", problems[1])
+            # Control: once both exist the same check is clean.
+            (build / "a/pulp-test-vellum-scripted-wiring").write_text("", encoding="utf-8")
+            self.assertEqual(vsc.missing_programs(build, targets, self.EXECUTABLES, programs), [])
+
+    def test_missing_reply_is_an_error_not_an_empty_selection(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            with self.assertRaises(vsc.LabelError):
+                vsc.codemodel_executables(Path(tmp))
+
+    def test_codemodel_reply_is_read_and_non_executables_skipped(self):
+        import json
+        with tempfile.TemporaryDirectory() as tmp:
+            build = Path(tmp)
+            reply = build / ".cmake/api/v1/reply"
+            reply.mkdir(parents=True)
+            (reply / "index-1.json").write_text(json.dumps(
+                {"objects": [{"kind": "codemodel", "jsonFile": "codemodel.json"}]}), encoding="utf-8")
+            (reply / "codemodel.json").write_text(json.dumps({"configurations": [{"targets": [
+                {"name": "exe", "jsonFile": "exe.json"}, {"name": "lib", "jsonFile": "lib.json"}]}]}), encoding="utf-8")
+            (reply / "exe.json").write_text(json.dumps({"name": "exe", "type": "EXECUTABLE",
+                "paths": {"source": "integrations/pulp-vellum/tests"}, "artifacts": [{"path": "x/exe"}]}), encoding="utf-8")
+            (reply / "lib.json").write_text(json.dumps({"name": "lib", "type": "STATIC_LIBRARY",
+                "paths": {"source": "integrations/pulp-vellum"}, "artifacts": [{"path": "x/lib.a"}]}), encoding="utf-8")
+            self.assertEqual(vsc.codemodel_executables(build),
+                             {"exe": {"source": "integrations/pulp-vellum/tests", "artifact": "x/exe", "source_root": ""}})
+
+    def test_workflow_builds_the_selection_and_verifies_it(self):
+        text = (Path(__file__).resolve().parents[2] / ".github/workflows/vellum-sdk-consumer.yml").read_text(
+            encoding="utf-8")
+        for needed in ("labelled-targets", "--prepare", "--verify", "--no-tests=error"):
+            self.assertIn(needed, text)
+        self.assertNotIn("--target pulp-test-pulp-vellum ", text)
 
 
 if __name__ == "__main__":

@@ -70,6 +70,47 @@ class FlaggedTest(unittest.TestCase):
         self.assertEqual(len(scan("t = time.time()  # clock-ok:")), 1)  # clock-ok: fixture text
 
 
+class ChangedFilesOnlyTest(unittest.TestCase):
+    """tracked_lines(only=...) reads just the named files and nothing else."""
+
+    def _repo(self, tmp: Path) -> None:
+        def g(*a):
+            subprocess.run(["git", "-C", str(tmp), "-c", "user.name=t", "-c", "user.email=t@x.invalid", *a],
+                           check=True, capture_output=True)
+        g("init", "-q")
+        (tmp / "tools").mkdir()
+        for name in ("a", "b", "c"):
+            (tmp / "tools" / f"test_{name}.py").write_text(f"x = '{name}'\n", encoding="utf-8")
+        g("add", "."); g("commit", "-qm", "x")
+
+    def test_only_the_named_files_are_read_and_results_match_the_full_scan(self):
+        with tempfile.TemporaryDirectory(prefix="clock-only-") as raw:
+            tmp = Path(raw)
+            self._repo(tmp)
+            old_root = lint.ROOT
+            lint.ROOT = tmp
+            reads: list[str] = []
+            real_show = lint._git
+            def counting(args):
+                if args and args[0] == "show":
+                    reads.append(args[1])
+                return real_show(args)
+            lint._git = counting
+            try:
+                full = lint.tracked_lines("HEAD")
+                full_reads, reads[:] = len(reads), []
+                part = lint.tracked_lines("HEAD", only={"tools/test_b.py", "tools/gone.py"})
+                self.assertEqual(full_reads, 3)
+                self.assertEqual(reads, ["HEAD:tools/test_b.py"])
+                self.assertEqual(part, {"tools/test_b.py": full["tools/test_b.py"]})
+                # A working-tree read honours the same filter.
+                self.assertEqual(set(lint.tracked_lines(None, only={"tools/test_c.py"})),
+                                 {"tools/test_c.py"})
+            finally:
+                lint._git = real_show
+                lint.ROOT = old_root
+
+
 class DiffScopeTest(unittest.TestCase):
     def test_marker_on_unchanged_line_cannot_exempt_added_multiline_call(self):
         lines = [(1, "value = time  # clock-ok: old use"), (2, "    .time()")]
