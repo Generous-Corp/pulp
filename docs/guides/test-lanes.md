@@ -283,6 +283,11 @@ stopped compiling and no Pulp check noticed.
   not contain the given Vellum commit (checked through Vellum's compare endpoint
   before any download). The workflow sets it to the commit that introduced the
   `ParamModel` surface that `integrations/pulp-vellum` builds on.
+- **MCP UI tools.** After the bridge, the lane builds `pulp-test-mcp-server` in
+  the same configure and runs its `[ui]` cases with
+  `PULP_TEST_VELLUM_APP_HOST` set to the SDK's `bin/vellum-app-host`. The live
+  case drives the real host (view tree, a press, a frame), and a skipped live
+  case fails the step so the lane cannot pass without running it.
 - **Parameter bridge.** The same SDK also builds `integrations/pulp-vellum` in a
   separate configure (`PULP_ENABLE_PULP_VELLUM=ON`) and runs its `pulp-vellum`
   ctest label, so a Vellum change that breaks the bridge shows up here. Pull
@@ -312,6 +317,22 @@ stopped compiling and no Pulp check noticed.
   retained Pulp view components against Vellum main's view layer and renders
   them offscreen. PRs touching `integrations/pulp-vellum-components/**` run the
   lane.
+- **Scene3d renderer.** The same configure turns on `PULP_ENABLE_SCENE3D` and
+  `PULP_ENABLE_PULP_VELLUM_RENDERER3D`. `pulp-test-pulp-vellum-renderer3d`
+  (ctest label `pulp-vellum-renderer3d`, also matched by `-L pulp-vellum`)
+  renders through gpu-runtime's device and, while `core/render` still has the
+  legacy renderer, renders each frame with both and requires identical pixels.
+  On Metal it also checks the frame fingerprint that `renderer3d-goldens.json`
+  records. PRs touching
+  `integrations/pulp-vellum-renderer3d/**` run the lane.
+- **Graph editor.** `PULP_ENABLE_PULP_VELLUM_GRAPH` is on in the same
+  configure. `pulp-test-pulp-vellum-graph` (ctest label `pulp-vellum-graph`,
+  also matched by `-L pulp-vellum`) drives the SignalGraph node editor through
+  Vellum's pointer routing and renders it offscreen, and
+  `pulp-vellum-graph-link-edges` checks that the package links `pulp::host` and
+  Vellum's view layer and names no Pulp view target; its negative control runs
+  the same check over a closure with `pulp::view-core` added and must fail.
+  PRs touching `integrations/pulp-vellum-graph/**` run the lane.
 - **Draco and glTF scene loading.** The same configure turns on
   `PULP_ENABLE_SCENE3D` and `PULP_ENABLE_PULP_VELLUM_SCENE`, and
   `pulp-test-pulp-vellum-scene` (ctest label `pulp-vellum-scene`, also matched

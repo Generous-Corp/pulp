@@ -133,3 +133,25 @@ function(_pulp_vellum_scripted_package context out_var)
     endif()
     set(${out_var} pulp-vellum-scripted-package PARENT_SCOPE)
 endfunction()
+
+# Built-in package for UI_ENGINE vellum without UI_SCRIPT: the generated
+# parameter editor (pulp::vellum::AutoUi), which needs no script runtime.
+function(_pulp_vellum_auto_ui_package context out_var)
+    if(TARGET Pulp::vellum)
+        set(_vellum Pulp::vellum)
+    elseif(TARGET pulp::vellum)
+        set(_vellum pulp::vellum)
+    else()
+        message(FATAL_ERROR "${context}: UI_ENGINE vellum requires PULP_ENABLE_PULP_VELLUM=ON")
+    endif()
+    if(NOT TARGET pulp-vellum-auto-ui-package)
+        add_library(pulp-vellum-auto-ui-package INTERFACE)
+        target_link_libraries(pulp-vellum-auto-ui-package INTERFACE "${_vellum}")
+        _pulp_vellum_runtime_libraries(_runtime_libraries Vellum::MirrorView_core)
+        set_target_properties(pulp-vellum-auto-ui-package PROPERTIES
+            PULP_EDITOR_FACTORY_FUNCTION "pulp::vellum::auto_ui_editor_factory"
+            PULP_EDITOR_FACTORY_HEADER "pulp/vellum/auto_ui.hpp"
+            PULP_EDITOR_RUNTIME_LIBRARIES "${_runtime_libraries}")
+    endif()
+    set(${out_var} pulp-vellum-auto-ui-package PARENT_SCOPE)
+endfunction()

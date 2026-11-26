@@ -121,6 +121,15 @@ on a real PR. Do them in order.
    Commit the event(s) before re-running — both checkers read the commit
    range, never the working tree. Run `python3 tools/scripts/vellum_watch_preflight.py --enforce`
    on its own for just the Vellum verdict.
+
+   A new `integrations/pulp-vellum-*` package is built and tested by the
+   `Vellum SDK consumer` lane only: add its directory to that workflow's
+   `paths:` list and its `PULP_ENABLE_*` flag to the bridge configure line, and
+   give its ctest targets a label that starts with `pulp-vellum` so
+   `labelled-targets` selects them. Any new TU that includes a tracked core
+   header (for example `pulp/host/signal_graph.hpp`) trips the header fan-out
+   guard; the package needs a `Fanout-Grow: all reason="..."` trailer naming
+   the legacy TU it replaces.
 2. **Know the required contexts, and only those.** They come from branch
    protection, not from the check list on the PR page:
 
@@ -3368,8 +3377,9 @@ Without the second line a zero is ambiguous between "not wired" and "bad grep".
 
 `.github/workflows/scene3d-advisory.yml` now covers that surface: path-filtered,
 advisory, `macos-15`, SCENE3D ON, not on `merge_group`. The `Vellum SDK
-consumer` lane also turns SCENE3D ON, for `integrations/pulp-vellum-scene`
-(Vellum's Draco decoder behind the glTF loader hook): that package refuses to
+consumer` lane also turns SCENE3D ON, for `integrations/pulp-vellum-renderer3d`
+(the scene3d renderer on gpu-runtime's device) and `integrations/pulp-vellum-scene`
+(Vellum's Draco decoder behind the glTF loader hook): those packages refuse to
 configure without `pulp::scene`. Three things about the scene3d lane
 generalize to any lane you add:
 
@@ -13991,3 +14001,8 @@ main's SDK. A new optional Vellum integration package needs its option, its
 `pulp-test-*` target and a `paths:` entry added there, or no lane compiles it
 against main. The tests' ctest label should start with `pulp-vellum` so the
 lane's `-L pulp-vellum` filter runs them.
+
+The same lane also runs the MCP UI tool cases (`pulp-test-mcp-server "[ui]"`)
+against the SDK's `bin/vellum-app-host` through `PULP_TEST_VELLUM_APP_HOST`. The
+step greps the output for `SKIPPED`, because Catch2 reports a skipped live case
+as a pass: keep that check if the step is edited.
