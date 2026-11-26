@@ -44,9 +44,8 @@ struct RemoteUpdateResult {
 ///        false, which already rejects).
 inline RemoteUpdateResult evaluate_remote_ux_update(
     const std::filesystem::path& pack_root, const SwapPackManifest& m,
-    const std::vector<std::uint8_t>& trusted_public_key,
-    std::uint64_t installed_pack_version, const runtime::CapabilitySet& host_granted,
-    bool srl_fresh, const SignedRevocationList* srl) {
+    const std::vector<std::uint8_t>& trusted_public_key, std::uint64_t installed_pack_version,
+    const runtime::CapabilitySet& host_granted, bool srl_fresh, const SignedRevocationList* srl) {
     // 1. Authenticity first — nothing else means anything without it.
     if (auto v = verify_swap_pack(pack_root, m, trusted_public_key); !v.ok())
         return {RemoteUpdateVerdict::RejectSignature, v.detail};
