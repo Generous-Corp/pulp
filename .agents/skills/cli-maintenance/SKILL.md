@@ -61,6 +61,10 @@ the Rust crate would ship a check nobody reaches. Verify the split rather than
 assuming it: run the built `./build/pulp doctor` and confirm the C++ check names
 appear in its output.
 
+The WidgetBridge doctor row keeps its own list of the generator's input files
+(`input_rels`). When the generator reads a capability table from a new header,
+mirror the path there too, or the row reports a stale surface as current.
+
 ### `--only` must filter BEFORE the work, not after
 
 `run_doctor_checks(root, standalone, only)` is also how `pulp status` gets its
