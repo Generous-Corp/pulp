@@ -1713,7 +1713,7 @@ set_tests_properties(cmake-canvas-fontconfig-link PROPERTIES
 # must not skip; elsewhere they report SKIP.
 foreach(_vellum_ui_compat_scenario
         wiring shape pulp-ui partial-ui view-core missing twice no-bridge
-        no-vellum real wrong-version gpu-guard gpu-owner-real)
+        no-vellum real wrong-version view-native gpu-guard gpu-owner-real)
     set(_vellum_ui_compat_test "cmake-vellum-ui-compat-${_vellum_ui_compat_scenario}")
     set(_vellum_ui_compat_args "")
     set(_vellum_ui_compat_labels "cmake;sdk")
@@ -1749,7 +1749,7 @@ unset(_vellum_ui_compat_labels)
 
 # The consumer modules read PULP_UI_PROVIDER, so a Vellum-backed Pulp::view
 # never has Pulp's view, render or editor-adapter sources compiled against it.
-foreach(_ui_provider_scenario provider editor no-editor bundle reload objc bytecode)
+foreach(_ui_provider_scenario provider editor no-editor bundle reload objc bytecode standalone)
     add_test(NAME cmake-ui-provider-${_ui_provider_scenario}
         COMMAND ${CMAKE_COMMAND}
             -DPULP_SOURCE_DIR=${CMAKE_SOURCE_DIR}

@@ -1385,7 +1385,7 @@
       "vellum_renderer_drift_check": {
         "note": "tools/deps/audit.py --strict reads gpu-runtime's renderer lock at this commit, which must equal vellum-gpu-runtime's upstream.commit, and fails unless its macos-arm64 sha256 equals release_assets.mac-universal.sha256, every other mac-* release asset carries that same digest (an x86_64-only or arm64-only macOS build forwards to gpu-runtime too, and its lock pins one macOS asset), and its milestone equals this entry's version. PULP_VELLUM_CHECKOUT=<vellum checkout> reads the same commit from a local clone instead of raw.githubusercontent.com.",
         "repository": "https://github.com/Generous-Corp/vellum",
-        "commit": "2a01d9d61855c8682db44b96ec27ca3d2566ed81",
+        "commit": "2191e8a3ee823ba1946b83e466c2fd20c3494e4d",
         "path": "gpu-runtime/renderer-lock.json",
         "lock_platform": "macos-arm64",
         "pulp_release_asset": "mac-universal"
@@ -1715,13 +1715,13 @@
       "name": "vellum-gpu-runtime",
       "category": "render",
       "license": "MIT",
-      "version": "0.2.2 (2a01d9d6)",
+      "version": "0.2.3 (2191e8a3)",
       "source_kind": "fetchcontent",
       "repository": "https://github.com/Generous-Corp/vellum.git",
       "upstream": {
         "kind": "git-commit",
-        "ref": "2a01d9d61855c8682db44b96ec27ca3d2566ed81",
-        "commit": "2a01d9d61855c8682db44b96ec27ca3d2566ed81"
+        "ref": "2191e8a3ee823ba1946b83e466c2fd20c3494e4d",
+        "commit": "2191e8a3ee823ba1946b83e466c2fd20c3494e4d"
       },
       "documented_in_dependencies_md": true,
       "documented_in_notice_md": true,
@@ -1756,7 +1756,7 @@
       "name": "vellum-sdk",
       "category": "render",
       "license": "MIT",
-      "version": "0.2.2",
+      "version": "0.2.3",
       "source_kind": "prebuilt-toolchain",
       "repository": "https://github.com/Generous-Corp/vellum.git",
       "upstream": {
