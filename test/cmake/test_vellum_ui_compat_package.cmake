@@ -50,6 +50,7 @@
 #                 Pulp names, defines both (two owners, which nm can see), and
 #                 the same pair through the Pulp names is refused.
 #
+# real also needs CHOC_DIR (the directory holding choc/containers/choc_Value.h).
 # real and wrong-version need VELLUM_DIR (the directory holding
 # VellumConfig.cmake). Without it they print SKIP, unless REQUIRE_VELLUM is on,
 # when they fail: the lane that registers them with a Vellum SDK must run them.
@@ -179,7 +180,7 @@ function(_standins out)
     set(${out} "${_text}" PARENT_SCOPE)
 endfunction()
 set(_vellum_targets Vellum::MirrorCanvas Vellum::MirrorRender_2d Vellum::MirrorView_core
-    Vellum::MirrorDesign_import Vellum::MirrorView_script Pulp::vellum Pulp::vellum-audio)
+    Vellum::MirrorDesign_import Vellum::MirrorView_script Pulp::vellum Pulp::vellum-audio Pulp::editor-bridge)
 _standins(_vellum_standins ${_vellum_targets})
 # Pulp's own UI targets, each linking a marker so the scenario can tell them apart.
 function(_pulp_own out)
@@ -254,7 +255,7 @@ elseif(SCENARIO STREQUAL "shape")
     _expect("${_out}" "T\\[view-native\\]=\\[ABSENT\\]" "no Vellum-backed view-native: it would carry a script engine")
     _expect("${_out}" "T\\[view\\]=\\[Vellum::MirrorView_core;Vellum::MirrorDesign_import;Vellum::MirrorView_script;Pulp::vellum\\] F\\[view\\]=\\[cxx_std_20\\] A\\[view\\]=\\[YES\\]" "view")
     _expect("${_out}" "T\\[view-audio\\]=\\[Pulp::vellum-audio\\] F\\[view-audio\\]=\\[cxx_std_20\\] A\\[view-audio\\]=\\[YES\\]" "view-audio on the audio package")
-    _expect("${_out}" "T\\[view-tooling\\]=\\[Vellum::MirrorView_core;Pulp::vellum;Vellum::MirrorView_script\\] F\\[view-tooling\\]=\\[cxx_std_20\\] A\\[view-tooling\\]=\\[YES\\]" "view-tooling on the editor bridge and the view layer")
+    _expect("${_out}" "T\\[view-tooling\\]=\\[Vellum::MirrorView_core;Pulp::vellum;Pulp::editor-bridge;Vellum::MirrorView_script\\] F\\[view-tooling\\]=\\[cxx_std_20\\] A\\[view-tooling\\]=\\[YES\\]" "view-tooling on the editor bridge and the view layer")
 
 elseif(SCENARIO STREQUAL "pulp-ui")
     # Today's SDK: the flag is off and Pulp exports its own UI.
@@ -299,7 +300,7 @@ elseif(SCENARIO STREQUAL "missing")
     _inspect(missing-audio ON ON "${_no_audio}" 1 _out)
     _expect("${_out}" "COMPAT=\\[render;design-import;view;view-tooling\\]" "view-audio left out")
     _expect("${_out}" "T\\[view-audio\\]=\\[ABSENT\\]" "no empty view-audio target")
-    _expect("${_out}" "T\\[view-tooling\\]=\\[Vellum::MirrorView_core;Pulp::vellum;Vellum::MirrorView_script\\]" "view-tooling unaffected")
+    _expect("${_out}" "T\\[view-tooling\\]=\\[Vellum::MirrorView_core;Pulp::vellum;Pulp::editor-bridge;Vellum::MirrorView_script\\]" "view-tooling unaffected")
 
 elseif(SCENARIO STREQUAL "twice")
     _inspect(twice ON ON "${_vellum_standins}" 2 _out)
@@ -621,6 +622,21 @@ elseif(SCENARIO STREQUAL "no-vellum" OR SCENARIO STREQUAL "real" OR SCENARIO STR
     # prefix has no compiled Pulp archives, so what these prove is the include
     # path and link line each name hands a consumer, not the packages' own code.
     set(_pulp_pkgs "")
+    # Pulp::editor-bridge stands in as the real dispatch core's source, include
+    # path and CHOC, because the fabricated prefix has no compiled archive. The
+    # source is compiled into the consumer, so the include path and sources are
+    # what the name must hand over.
+    if(NOT CHOC_DIR OR NOT EXISTS "${CHOC_DIR}/choc/containers/choc_Value.h")
+        message(FATAL_ERROR "real: CHOC_DIR='${CHOC_DIR}' holds no CHOC headers")
+    endif()
+    string(APPEND _pulp_pkgs
+        "if(NOT TARGET Pulp::editor-bridge)\n"
+        "  add_library(Pulp::editor-bridge INTERFACE IMPORTED)\n"
+        "  set_target_properties(Pulp::editor-bridge PROPERTIES\n"
+        "    INTERFACE_SOURCES \"${PULP_SOURCE_DIR}/core/view/src/editor_bridge.cpp\"\n"
+        "    INTERFACE_INCLUDE_DIRECTORIES \"${PULP_SOURCE_DIR}/core/view/include;${PULP_SOURCE_DIR}/core/runtime/include;${CHOC_DIR}\"\n"
+        "    INTERFACE_COMPILE_FEATURES cxx_std_20)\n"
+        "endif()\n")
     foreach(_pkg IN ITEMS vellum vellum-audio)
         string(REPLACE "-" "_" _dir "${_pkg}")
         string(APPEND _pulp_pkgs
@@ -698,6 +714,7 @@ elseif(SCENARIO STREQUAL "no-vellum" OR SCENARIO STREQUAL "real" OR SCENARIO STR
     _expect("${_out}" "Pulp::view -> vellum::view::parse_designmd_yaml primary=#336699" "the umbrella ran")
     _expect("${_out}" "Pulp::view-audio -> MusicalTypingController 'a' sounds note 60" "the audio widgets probe ran")
     _expect("${_out}" "Pulp::view-tooling -> vellum::view::has_screenshot_backend (yes|no)" "the tooling probe ran")
+    _expect("${_out}" "EditorBridge dispatched" "EditorBridge dispatched through Pulp::view-tooling")
     message(STATUS "real: six Vellum-backed names built and ran against Vellum ${_version}")
 
 else()

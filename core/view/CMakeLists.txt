@@ -33,6 +33,8 @@ add_library(pulp::view-audio ALIAS pulp-view-audio)
 
 # Pulp-kept plugin-host and editor layer (inspector, editor bridge, StateStore
 # host-parameter adapter). Extracted view targets never link it.
+add_library(pulp-editor-bridge)
+add_library(pulp::editor-bridge ALIAS pulp-editor-bridge)
 add_library(pulp-view-tooling)
 add_library(pulp::view-tooling ALIAS pulp-view-tooling)
 
@@ -283,6 +285,14 @@ if(PULP_ENABLE_DESIGN_IMPORT)
     target_compile_definitions(pulp-view-audio PRIVATE PULP_VIEW_AUDIO_HAS_DESIGN_IMPORT=1)
 endif()
 target_link_libraries(pulp-view-tooling PUBLIC pulp::view-core)
+# EditorBridge's dispatch core: CHOC and the runtime only, no view library.
+target_include_directories(pulp-editor-bridge PUBLIC
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+    $<BUILD_INTERFACE:${choc_SOURCE_DIR}>
+    $<INSTALL_INTERFACE:include>)
+target_compile_features(pulp-editor-bridge PUBLIC cxx_std_20)
+target_link_libraries(pulp-editor-bridge PUBLIC pulp::runtime)
+target_link_libraries(pulp-view-tooling PUBLIC pulp::editor-bridge)
 if(PULP_ENABLE_JS)
     # Link-only: the runtime-inspector bridge implementation reaches
     # ScriptedUiSession, but the tooling headers expose no view-script type, so

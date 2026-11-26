@@ -1719,7 +1719,8 @@ foreach(_vellum_ui_compat_scenario
     set(_vellum_ui_compat_labels "cmake;sdk")
     if(_vellum_ui_compat_scenario STREQUAL "real" OR _vellum_ui_compat_scenario STREQUAL "wrong-version")
         if(Vellum_DIR)
-            set(_vellum_ui_compat_args -DVELLUM_DIR=${Vellum_DIR} -DREQUIRE_VELLUM=ON)
+            
+            list(APPEND _vellum_ui_compat_args -DCHOC_DIR=${choc_SOURCE_DIR})
             set(_vellum_ui_compat_labels "cmake;sdk;pulp-vellum")
         endif()
     elseif(_vellum_ui_compat_scenario STREQUAL "gpu-owner-real")
