@@ -16,10 +16,9 @@ namespace pulp::view {
 
 void EditorBridge::attach_native_runtime(JsRuntime& /*runtime*/,
                                          std::string_view /*handler_name*/) {
-    // Stub for pulp #468 (Claude Design import lane). The full wiring
-    // lands when JsRuntime exposes a postMessage-equivalent primitive
-    // that calls back into C++. The interface is defined here so #468
-    // plugs in without designing a parallel dispatch model.
+    // Intentionally empty: the runtime-import lane needs a postMessage-style
+    // primitive on JsRuntime that calls back into C++. The overload exists so
+    // that lane can attach without a parallel dispatch model.
 }
 
 void EditorBridge::attach_native_runtime(ScriptEngine& engine, std::string_view handler_name) {
