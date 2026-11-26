@@ -9,6 +9,46 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
      release's bullet block. See docs/guides/versioning.md § Release pipeline
      for the full end-to-end flow. -->
 
+<a id="v12120"></a>
+## [1.212.0] - 2026-11-26
+
+- feature/reload capabilities runtime ([#12914](https://github.com/Generous-Corp/pulp/pull/12914))
+- release/version bump ([#12921](https://github.com/Generous-Corp/pulp/pull/12921))
+- ci/windows skip chrome label ([#12910](https://github.com/Generous-Corp/pulp/pull/12910))
+- ci/windows lf checkout ([#12860](https://github.com/Generous-Corp/pulp/pull/12860))
+- feature/format changed rename aware ([#12904](https://github.com/Generous-Corp/pulp/pull/12904))
+- test/windows software adapter skips ([#12908](https://github.com/Generous-Corp/pulp/pull/12908))
+- feature/standalone panel seam ([#12899](https://github.com/Generous-Corp/pulp/pull/12899))
+- feature/vellum consumer build all labelled ([#12885](https://github.com/Generous-Corp/pulp/pull/12885))
+- lane/b2 pulp bytecode message ([#12890](https://github.com/Generous-Corp/pulp/pull/12890))
+
+<a id="v12110"></a>
+## [1.211.0] - 2026-11-26
+
+- release/version bump ([#12854](https://github.com/Generous-Corp/pulp/pull/12854))
+- lane/cutover a2a3 verify ([#12897](https://github.com/Generous-Corp/pulp/pull/12897))
+- feature/g5 standalone contract view free ([#12894](https://github.com/Generous-Corp/pulp/pull/12894))
+- feature/vellum ui no view native ([#12880](https://github.com/Generous-Corp/pulp/pull/12880))
+- lane/pin vellum v0.2.3 ([#12883](https://github.com/Generous-Corp/pulp/pull/12883))
+- feature/vellum audio d3 seq ([#12861](https://github.com/Generous-Corp/pulp/pull/12861))
+- ci/windows hosted budget ([#12874](https://github.com/Generous-Corp/pulp/pull/12874))
+- feature/vellum ui gpu runtime owner ([#12870](https://github.com/Generous-Corp/pulp/pull/12870))
+- feature/vellum audio d3 typing ([#12864](https://github.com/Generous-Corp/pulp/pull/12864))
+- feature/g1 vst3 vellum editor keys ([#12863](https://github.com/Generous-Corp/pulp/pull/12863))
+- fix/windows view widgets stack ([#12876](https://github.com/Generous-Corp/pulp/pull/12876))
+- ci/windows skip source selftests ([#12875](https://github.com/Generous-Corp/pulp/pull/12875))
+- feature/vellum components d4 model manager ([#12872](https://github.com/Generous-Corp/pulp/pull/12872))
+- feature/vellum audio d3 eq ([#12869](https://github.com/Generous-Corp/pulp/pull/12869))
+- fix/windows mcp popen quoting ([#12871](https://github.com/Generous-Corp/pulp/pull/12871))
+- feature/ui provider aware consumer modules ([#12867](https://github.com/Generous-Corp/pulp/pull/12867))
+- fix/msvc windows test compile ([#12853](https://github.com/Generous-Corp/pulp/pull/12853))
+- ci/windows hosted budget ([#12859](https://github.com/Generous-Corp/pulp/pull/12859))
+- feature/daw smoke isolated reaper ([#12855](https://github.com/Generous-Corp/pulp/pull/12855))
+- codex/au camera feasibility 20261125 ([#12858](https://github.com/Generous-Corp/pulp/pull/12858))
+- feature/vellum components d4 ([#12848](https://github.com/Generous-Corp/pulp/pull/12848))
+- feature/browser prefer headless shell ([#12856](https://github.com/Generous-Corp/pulp/pull/12856))
+- feature/vellum audio d3 views ([#12852](https://github.com/Generous-Corp/pulp/pull/12852))
+
 <a id="v12100"></a>
 ## [1.210.0] - 2026-11-25
 
@@ -13730,6 +13770,8 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/Generous-Corp/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/Generous-Corp/pulp/pull/2))
 
+[1.212.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.212.0
+[1.211.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.211.0
 [1.210.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.210.0
 [1.209.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.209.0
 [1.208.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.208.0
