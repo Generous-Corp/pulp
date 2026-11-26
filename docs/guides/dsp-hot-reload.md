@@ -195,7 +195,7 @@ A host whose thin logic builds a Pulp view calls `pulp_reload_host_ui()`, which
 also exports the editor surface. In an SDK that serves `Pulp::view` from Vellum
 there is no Pulp editor surface, so `pulp_reload_host_ui()` stops configure:
 keep the logic DSP-only, call `pulp_reload_host()`, and take the editor from a
-UI package over `ReloadableShellCore`.
+UI package, which reloads itself after each DSP swap.
 
 > **Thin reload is validated for *executable* hosts** (standalone apps, tools).
 > A DAW loads a VST3/CLAP *bundle* with `RTLD_LOCAL`, so the bundle's exported

@@ -145,8 +145,7 @@ function(pulp_reload_host_ui target)
             "pulp_reload_host_ui(${target}): this Pulp SDK serves Pulp::view from Vellum, "
             "so it has no Pulp editor surface for a reload logic to resolve. Keep the logic "
             "DSP-only, call pulp_reload_host(${target}), and give the plug-in a Vellum UI "
-            "package (UI <package>) over format::reload::ReloadableShellCore; that editor "
-            "reloads itself after each DSP swap.")
+            "package (UI <package>); that editor reloads itself after each DSP swap.")
     endif()
     pulp_reload_host(${target})
     if(TARGET pulp-view-reload-exports)
