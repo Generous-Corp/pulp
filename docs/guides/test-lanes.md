@@ -274,16 +274,36 @@ stopped compiling and no Pulp check noticed.
   the artifact's `SHA256SUMS`, and records the run id, head sha, artifact id and
   archive sha256 in the step summary and a `vellum-sdk-consumer-receipt`
   artifact. Any lookup or digest failure fails the step; nothing falls back.
+- **Runs without an SDK are passed over.** A green push run whose change the
+  classifier skipped (an observatory-only commit, for example) builds and
+  uploads nothing. `resolve` therefore walks Vellum main's newest successful
+  runs (at most 10) and takes the first with an unexpired evidence artifact;
+  if none of them has one the step fails and says so.
 - **Pinned minimum.** `resolve --min-vellum-sha` refuses a run whose head does
   not contain the given Vellum commit (checked through Vellum's compare endpoint
   before any download). The workflow sets it to the commit that introduced the
   `ParamModel` surface that `integrations/pulp-vellum` builds on.
+- **MCP UI tools.** After the bridge, the lane builds `pulp-test-mcp-server` in
+  the same configure and runs its `[ui]` cases with
+  `PULP_TEST_VELLUM_APP_HOST` set to the SDK's `bin/vellum-app-host`. The live
+  case drives the real host (view tree, a press, a frame), and a skipped live
+  case fails the step so the lane cannot pass without running it.
 - **Parameter bridge.** The same SDK also builds `integrations/pulp-vellum` in a
   separate configure (`PULP_ENABLE_PULP_VELLUM=ON`) and runs its `pulp-vellum`
   ctest label, so a Vellum change that breaks the bridge shows up here. Pull
   requests that touch the package, its test, or the two CMake files that own its
   option and test registration (`integrations/CMakeLists.txt` and the root
   `CMakeLists.txt`) run the lane.
+- **Every labelled test is built.** The bridge configure does not list targets
+  by hand. `tools/ci/vellum_sdk_consumer.py labelled-targets` reads the CMake
+  file API (requested with `--prepare` before the configure) and names every
+  executable defined under `integrations/pulp-vellum*/` plus every program a
+  `pulp-vellum*` ctest entry runs; the lane builds exactly that set. A Catch2
+  executable that is never built registers no ctest entry at all, so the target
+  graph, not `ctest -N`, is the source of truth. After the build, `--verify`
+  fails when a selected target or a labelled test's program is absent, and the
+  `ctest` run uses `--no-tests=error`. A new test under those directories needs
+  no workflow edit.
 - **Editor package and audio display.** The same configure also turns on
   `PULP_ENABLE_PULP_VELLUM_AUDIO` and builds `pulp-test-pulp-vellum-editor` and
   `pulp-test-pulp-vellum-audio`, whose ctest labels (`pulp-vellum-editor`,
@@ -291,12 +311,34 @@ stopped compiling and no Pulp check noticed.
   tests need Vellum's view layer (`Vellum::MirrorView_core`), which is in Vellum
   main's SDK but not in the v0.2.0 release, so this lane, which builds against
   main, is where they run until `pulp.lock` pins a release that ships it.
+- **Reload shell under the Vellum editor.** `pulp-test-vellum-reload-shell`
+  (label `pulp-vellum-editor`) builds the view-free DAW reload shell
+  (`reloadable_shell_core.hpp`) into a target that cannot see Pulp's view
+  headers and hot-swaps real logic libraries under the Vellum scripted editor
+  root, so a view include in the shell or a lost reload edge fails here. PRs
+  touching that header run the lane.
 - **View components.** `PULP_ENABLE_PULP_VELLUM_COMPONENTS` is on in the same
   configure, and `pulp-test-pulp-vellum-components` (ctest label
   `pulp-vellum-components`, also matched by `-L pulp-vellum`) builds the
   retained Pulp view components against Vellum main's view layer and renders
   them offscreen. PRs touching `integrations/pulp-vellum-components/**` run the
   lane.
+- **Scene3d renderer.** The same configure turns on `PULP_ENABLE_SCENE3D` and
+  `PULP_ENABLE_PULP_VELLUM_RENDERER3D`. `pulp-test-pulp-vellum-renderer3d`
+  (ctest label `pulp-vellum-renderer3d`, also matched by `-L pulp-vellum`)
+  renders through gpu-runtime's device and, while `core/render` still has the
+  legacy renderer, renders each frame with both and requires identical pixels.
+  On Metal it also checks the frame fingerprint that `renderer3d-goldens.json`
+  records. PRs touching
+  `integrations/pulp-vellum-renderer3d/**` run the lane.
+- **Graph editor.** `PULP_ENABLE_PULP_VELLUM_GRAPH` is on in the same
+  configure. `pulp-test-pulp-vellum-graph` (ctest label `pulp-vellum-graph`,
+  also matched by `-L pulp-vellum`) drives the SignalGraph node editor through
+  Vellum's pointer routing and renders it offscreen, and
+  `pulp-vellum-graph-link-edges` checks that the package links `pulp::host` and
+  Vellum's view layer and names no Pulp view target; its negative control runs
+  the same check over a closure with `pulp::view-core` added and must fail.
+  PRs touching `integrations/pulp-vellum-graph/**` run the lane.
 - **Vellum-backed UI target names.** The `pulp-vellum` filter also runs
   `cmake-vellum-ui-compat-real` and `cmake-vellum-ui-compat-wrong-version`. In a
   configure that found Vellum they get that label and `REQUIRE_VELLUM`, so they

@@ -41,6 +41,8 @@ if(PULP_BUILD_TESTS AND TARGET Catch2::Catch2WithMain)
             target_link_libraries(pulp-test-pulp-vellum-editor PRIVATE Vellum::MirrorView_script)
             target_compile_definitions(pulp-test-pulp-vellum-editor PRIVATE
                 PULP_TEST_VELLUM_SCRIPTED_UI=1)
+            # The live-swap UI stage over a real Vellum scripted session.
+            target_sources(pulp-test-pulp-vellum-editor PRIVATE test_scripted_ui_swap_unit.cpp)
         endif()
         if(TARGET pulp-vellum-scripted)
             add_executable(pulp-test-vellum-scripted-wiring test_scripted_editor_wiring.cpp)
@@ -54,6 +56,27 @@ if(PULP_BUILD_TESTS AND TARGET Catch2::Catch2WithMain)
                     $<TARGET_FILE:pulp-test-vellum-scripted-wiring>)
             set_tests_properties(pulp-vellum-scripted-wiring PROPERTIES
                 LABELS pulp-vellum-editor TIMEOUT 30)
+            # The view-free reload shell under the Vellum scripted editor. It
+            # links format-core and Vellum only, so a Pulp view include in the
+            # shell fails this build, and it hot-swaps the logic fixtures that
+            # test/cmake/format_reload_tests.cmake builds.
+            if(TARGET pulp-reload-logic-unity AND NOT WIN32)
+                add_executable(pulp-test-vellum-reload-shell test_reloadable_shell_editor.cpp)
+                target_link_libraries(pulp-test-vellum-reload-shell PRIVATE
+                    pulp-vellum-scripted Vellum::MirrorView_script Catch2::Catch2WithMain
+                    Threads::Threads ${CMAKE_DL_LIBS})
+                add_dependencies(pulp-test-vellum-reload-shell
+                    pulp-reload-logic-unity pulp-reload-logic-compat pulp-reload-logic-incompat)
+                target_compile_definitions(pulp-test-vellum-reload-shell PRIVATE
+                    RELOAD_LOGIC_UNITY="$<TARGET_FILE:pulp-reload-logic-unity>"
+                    RELOAD_LOGIC_COMPATIBLE="$<TARGET_FILE:pulp-reload-logic-compat>"
+                    RELOAD_LOGIC_INCOMPATIBLE="$<TARGET_FILE:pulp-reload-logic-incompat>"
+                    # In the build tree: macOS dyld refuses an unsigned image
+                    # from a world-writable temp directory.
+                    RELOAD_WATCH_DIR="${CMAKE_CURRENT_BINARY_DIR}")
+                catch_discover_tests(pulp-test-vellum-reload-shell PROPERTIES
+                    LABELS pulp-vellum-editor TIMEOUT 60)
+            endif()
             target_compile_definitions(pulp-test-pulp-vellum-editor PRIVATE
                 PULP_TEST_VELLUM_SCRIPTED_EDITOR=1)
             if(TARGET pulp-vellum-audio)
@@ -87,6 +110,11 @@ if(PULP_BUILD_TESTS AND TARGET Catch2::Catch2WithMain)
         if(PULP_HAS_VST3)
             target_compile_definitions(pulp-test-pulp-vellum-editor PRIVATE
                 PULP_TEST_VELLUM_VST3=1)
+            # The capture case decodes the host's back buffer with ImageIO.
+            if(APPLE)
+                target_link_libraries(pulp-test-pulp-vellum-editor PRIVATE
+                    "-framework CoreGraphics" "-framework ImageIO")
+            endif()
         endif()
 
         add_executable(pulp-test-pulp-vellum-about-notices
