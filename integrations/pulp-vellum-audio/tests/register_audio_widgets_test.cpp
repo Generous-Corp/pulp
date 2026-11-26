@@ -7,8 +7,8 @@
 
 #include <vellum/state/store.hpp>
 #include <vellum/view/data_display.hpp>
-#include <vellum/view/scripted_ui.hpp>
 #include <vellum/view/screenshot.hpp>
+#include <vellum/view/scripted_ui.hpp>
 
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
@@ -146,9 +146,8 @@ TEST_CASE("Script data reaches the registered widgets and paints",
     CHECK(changed_in_column(before, after, 160, 80) > 100);
 
     if (const char* dir = std::getenv("PULP_VELLUM_AUDIO_PNG_DIR"))
-        CHECK(::vellum::view::render_to_file(ui.root, 240, 120,
-                                             std::string(dir) + "/scripted-audio-displays.png",
-                                             4.0f));
+        CHECK(::vellum::view::render_to_file(
+            ui.root, 240, 120, std::string(dir) + "/scripted-audio-displays.png", 4.0f));
 }
 
 TEST_CASE("Without a registered provider the script cannot create audio displays",
