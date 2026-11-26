@@ -21,10 +21,14 @@
 #              compatibility target has no include directories of its own, and
 #              PulpReload's $<TARGET_PROPERTY:...,INTERFACE_INCLUDE_DIRECTORIES>
 #              reaches the Vellum target it links transitively.
+#              pulp_reload_host_ui() configures in pulp mode and is refused in
+#              vellum mode, which has no Pulp editor surface to export.
 #   objc       the per-binary macOS view ObjC cluster is compiled into a target
 #              in pulp mode and skipped in vellum mode.
 #   bytecode   pulp_add_js_bytecode() builds its generator against Pulp::view in
 #              pulp mode and is refused in vellum mode.
+#   standalone a UI <package> plug-in's Standalone configures as an app on the
+#              view-free Pulp::standalone-contract in both modes.
 if(NOT DEFINED PULP_SOURCE_DIR OR NOT DEFINED FIXTURE_DIR OR NOT DEFINED SCENARIO)
     message(FATAL_ERROR "PULP_SOURCE_DIR, FIXTURE_DIR and SCENARIO are required")
 endif()
@@ -174,6 +178,12 @@ elseif(SCENARIO STREQUAL "reload")
             message(FATAL_ERROR "reload (${_mode}): the thin logic's include directories lack ${_want}: ${_includes}")
         endif()
     endforeach()
+    # A host that exports the Pulp editor surface to a UI-building logic
+    # configures on Pulp's view and is refused, by name, in vellum mode.
+    set(_host "add_executable(Rhost logic.cpp)\npulp_reload_host_ui(Rhost)\n")
+    _expect_pass(pulp reload-host-ui "${_host}")
+    _expect_refused(vellum reload-host-ui "${_host}"
+        "pulp_reload_host_ui(Rhost): this Pulp SDK serves Pulp::view from Vellum")
 
 elseif(SCENARIO STREQUAL "objc")
     if(NOT APPLE)
@@ -201,6 +211,42 @@ elseif(SCENARIO STREQUAL "bytecode")
     _expect_text("generator=[present]" "the generator built against Pulp::view")
     _expect_refused(vellum bytecode "${_call}"
         "pulp_add_js_bytecode(Pscripts): this Pulp SDK serves Pulp::view from Vellum")
+    _expect_refused(vellum bytecode "${_call}"
+        "this Vellum package has no vellum_add_js_bytecode()")
+    # A Vellum package that ships the helper is named as the replacement.
+    set(_stub "function(vellum_add_js_bytecode)\nendfunction()\n")
+    _expect_refused(vellum bytecode "${_stub}${_call}"
+        "Call vellum_add_js_bytecode() from the Vellum package instead")
+
+elseif(SCENARIO STREQUAL "standalone")
+    # A UI <package> plug-in's Standalone is the launch target that remains
+    # once Pulp's view standalone is gone: in both modes it configures as an
+    # app bundle on the view-free Pulp::standalone-contract and links none of
+    # Pulp's view standalones. Without the contract host it is refused by
+    # name, rather than falling back to a view standalone.
+    set(_hosts
+        "foreach(t IN ITEMS standalone standalone-native standalone-contract)\n"
+        "  add_library(Pulp::\${t} INTERFACE IMPORTED)\n"
+        "endforeach()\n"
+        "include(\"${PULP_SOURCE_DIR}/tools/cmake/PulpRuntimeStaging.cmake\")\n")
+    string(JOIN "" _hosts ${_hosts})
+    set(_call
+        "pulp_add_plugin(Papp BUNDLE_ID dev.pulp.app UI ui-pkg FORMATS Standalone)\n"
+        "get_target_property(_bundle Papp_Standalone MACOSX_BUNDLE)\n"
+        "get_target_property(_links Papp_Standalone LINK_LIBRARIES)\n"
+        "message(STATUS \"standalone-bundle=[\${_bundle}] links=[\${_links}]\")\n")
+    string(JOIN "" _call ${_call})
+    foreach(_mode pulp vellum)
+        _expect_pass(${_mode} app "${_hosts}${_call}")
+        _expect_text("links=[Papp_Core;Pulp::standalone-contract;ui-pkg]"
+            "the view-free standalone host in ${_mode} mode")
+        if(APPLE)
+            _expect_text("standalone-bundle=[TRUE]" "an app bundle in ${_mode} mode")
+        endif()
+        _expect_refused(${_mode} nohost
+            "add_library(Pulp::standalone INTERFACE IMPORTED)\ninclude(\"${PULP_SOURCE_DIR}/tools/cmake/PulpRuntimeStaging.cmake\")\n${_call}"
+            "does not export the view-free Pulp::standalone-contract")
+    endforeach()
 
 else()
     message(FATAL_ERROR "unknown SCENARIO '${SCENARIO}'")

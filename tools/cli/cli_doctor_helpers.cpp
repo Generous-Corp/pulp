@@ -471,7 +471,8 @@ std::vector<DoctorCheck> run_doctor_checks(const fs::path& active_root, bool sta
                 fs::path("tools") / "scripts" / "generate_widget_bridge_api.py",
                 fs::path("core") / "view" / "src" / "widget_bridge_api_manifest.tsv",
                 fs::path("core") / "view" / "include" / "pulp" / "view" / "reload_autocaps.hpp",
-                fs::path("core") / "view" / "include" / "pulp" / "view" / "reload_capabilities.hpp",
+                fs::path("core") / "runtime" / "include" / "pulp" / "runtime" /
+                    "reload_capabilities.hpp",
             };
             const std::vector<fs::path> output_rels{
                 fs::path("packages") / "pulp-react" / "src" / "bridge-globals.generated.d.ts",
