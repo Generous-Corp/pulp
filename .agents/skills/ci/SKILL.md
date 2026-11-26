@@ -13889,6 +13889,13 @@ about that path are not obvious:
   forwarded GitHub `Authorization` header with HTTP 401. Python's `urllib`
   forwards it by default; `tools/ci/vellum_sdk_consumer.py` drops it on any
   cross-host redirect. `curl -L` without `--location-trusted` already drops it.
+- **Build the labelled set from the target graph, not a list.** A Catch2
+  executable that was never built registers no ctest entry (discovery runs
+  after the build), so `ctest -N` cannot show what is missing, while a plain
+  `add_test()` whose program was not built fails with "no such file".
+  `vellum_sdk_consumer.py labelled-targets` (`--prepare` before configure,
+  `--verify` after the build) selects executables from the CMake file API, so a
+  new `pulp-vellum*` test target needs no workflow edit.
 - **Skip by head, but only from a green run.** The nightly lane stops early when
   Vellum main's head equals the head recorded in the last *successful* run's
   receipt artifact, and it uploads that receipt only when the whole run is
