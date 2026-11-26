@@ -25,7 +25,7 @@ modules:
 
   - name: pulp_vellum_components
     path: integrations/pulp-vellum-components
-    summary: Retained Pulp view components (panic button, lasso, preferences panel, model manager) as Vellum views with a stable-id catalogue, plus the inspector overlay geometry helpers
+    summary: Retained Pulp view components (panic button, lasso, preferences panel, model manager) as Vellum views with a stable-id catalogue, plus the inspector canvas overlay and its geometry helpers
     status: experimental
     dependencies: [state, format]
     docs: reference/modules.md#pulp_vellum_components
