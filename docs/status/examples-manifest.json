@@ -113,7 +113,8 @@
   "design-panel-plugin": {
    "class": "moves-to-vellum",
    "platform": "cross",
-   "evidence": "links pulp::view; includes pulp/view"
+   "evidence": "links pulp::view; includes pulp/view",
+   "gate": "PULP_HAS_SKIA AND the PULP_DESIGN_PANEL_IR file (panel.design.pulp.json is not in the tree)"
   },
   "design-tool": {
    "class": "moves-to-vellum",
@@ -581,7 +582,8 @@
   "showcase": {
    "class": "moves-to-vellum",
    "platform": "cross",
-   "evidence": "script-only widget board run by ui-preview (--script); no target of its own"
+   "evidence": "script-only widget board run by ui-preview (--script); no target of its own",
+   "gate": "script-only: no target, run through ui-preview --script"
   },
   "spectral-frame-codec-consumer": {
    "class": "audio-only",
@@ -691,7 +693,7 @@
    "class": "moves-to-vellum",
    "platform": "cross",
    "evidence": "links pulp::view; Monaco WebView (PULP_BUILD_WEBVIEW, prebundled assets)",
-   "gate": "PULP_BUILD_WEBVIEW"
+   "gate": "PULP_BUILD_WEBVIEW AND PULP_MONACO_BUNDLE_DIR (prebundled assets)"
   },
   "webview-palette": {
    "class": "moves-to-vellum",
@@ -703,7 +705,7 @@
    "class": "moves-to-vellum",
    "platform": "macos",
    "evidence": "links pulp::view; WebView editor (macOS)",
-   "gate": "APPLE"
+   "gate": "PULP_BUILD_WEBVIEW AND APPLE"
   },
   "widget-gallery": {
    "class": "moves-to-vellum",
