@@ -34,11 +34,12 @@ void place(View& v, float x, float y, float w, float h) {
     v.set_bounds({x, y, w, h});
 }
 
-// Two siblings side by side under a 500x300 root.
+// Three siblings side by side under a 500x300 root.
 struct Pair {
     View root;
     View* a = nullptr;
     View* b = nullptr;
+    View* c = nullptr;
     Pair() {
         root.set_bounds({0, 0, 500, 300});
         auto first = std::make_unique<View>();
@@ -49,6 +50,10 @@ struct Pair {
         second->set_bounds({100, 10, 60, 60});
         b = second.get();
         root.add_child(std::move(second));
+        auto third = std::make_unique<View>();
+        third->set_bounds({200, 10, 60, 60});
+        c = third.get();
+        root.add_child(std::move(third));
     }
 };
 
@@ -56,6 +61,14 @@ std::size_t paint_count(InspectorOverlay& inspector) {
     ::vellum::canvas::RecordingCanvas canvas;
     inspector.paint(canvas);
     return canvas.command_count();
+}
+
+// The overlay draws a line only to measure, so each stroke_line is one
+// measurement (a view's box model and highlight use rectangles).
+std::size_t line_count(InspectorOverlay& inspector) {
+    ::vellum::canvas::RecordingCanvas canvas;
+    inspector.paint(canvas);
+    return canvas.count(::vellum::canvas::DrawCommand::Type::stroke_line);
 }
 
 // A tinted pixel against the empty background: how far red moved.
@@ -75,11 +88,15 @@ TEST_CASE("Alt-hover draws a distance line to the hovered view and releasing Alt
     const auto baseline = paint_count(inspector);
     REQUIRE(baseline > 0);
 
+    REQUIRE(line_count(inspector) == 0);
+
     REQUIRE_FALSE(inspector.handle_mouse_event(at(130, 30, kModAlt)));
     REQUIRE(paint_count(inspector) > baseline);
+    REQUIRE(line_count(inspector) == 1);
 
     REQUIRE_FALSE(inspector.handle_mouse_event(at(130, 30)));
     REQUIRE(paint_count(inspector) == baseline);
+    REQUIRE(line_count(inspector) == 0);
 }
 
 TEST_CASE("Alt-hover without a selection adds nothing to the paint",
@@ -104,19 +121,27 @@ TEST_CASE("the sticky anchor draws a line to the selection and clears with a pla
     inspector.set_active(true);
     REQUIRE(inspector.handle_mouse_event(at(20, 20, kModAlt, true)));
     REQUIRE(inspector.distance_anchor() == t.a);
-    const auto anchored_only = paint_count(inspector);
+    // An anchor with nothing selected has nothing to measure to.
+    REQUIRE(line_count(inspector) == 0);
 
     REQUIRE(inspector.handle_mouse_event(at(130, 20, kModAlt, true)));
     REQUIRE(inspector.selected_view() == t.b);
-    const auto measuring = paint_count(inspector);
-    REQUIRE(measuring > anchored_only);
+    REQUIRE(line_count(inspector) == 1);
 
-    // Anchor plus a live Alt-hover over a third place draws both lines.
+    // The anchor plus a live Alt-hover over the anchored view draws only the
+    // anchor's line, because the hover target is the anchor itself.
     inspector.handle_mouse_event(at(20, 20, kModAlt));
-    REQUIRE(paint_count(inspector) > measuring);
+    REQUIRE(inspector.alt_hover_target() == t.a);
+    REQUIRE(line_count(inspector) == 1);
+
+    // Hovering a third view with Alt adds a second line from the selection.
+    inspector.handle_mouse_event(at(230, 20, kModAlt));
+    REQUIRE(inspector.alt_hover_target() == t.c);
+    REQUIRE(line_count(inspector) == 2);
 
     REQUIRE(inspector.handle_mouse_event(at(20, 20, 0, true)));
     REQUIRE(inspector.distance_anchor() == nullptr);
+    REQUIRE(line_count(inspector) == 0);
 }
 
 TEST_CASE("the distance line and its pixel label render between the view centres",
@@ -151,6 +176,7 @@ TEST_CASE("the distance line and its pixel label render between the view centres
     // The label sits on the midpoint (x = 140), a solid red pill.
     const auto pill = frame.at(140 - 22, 60);
     CHECK(red_lift(pill, bg) > 60);
+    CHECK(pill.g < bg.g + 80); // red, not a saturated white
     // Clear of the line and the boxes, nothing is drawn.
     const auto clear = frame.at(140, 100);
     CHECK(clear.r == bg.r);
@@ -193,6 +219,7 @@ TEST_CASE("the box model tints padding inside the selection and margin outside i
 
     // Padding is green: green gains over the selection's own orange wash.
     CHECK(padding.g > content.g + 8);
+    CHECK(padding.g < 150); // a faint band, not a saturated one
     // Margin is orange and sits outside the selection fill.
     CHECK(red_lift(margin, bg) > 8);
     CHECK(margin.r > margin.b);
