@@ -5,13 +5,14 @@ if(PULP_BUILD_TESTS AND TARGET Catch2::Catch2WithMain)
         ${CMAKE_CURRENT_SOURCE_DIR}/audio_inspector_panel_test.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/eq_curve_view_test.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/multi_meter_test.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/register_audio_widgets_test.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/musical_typing_keyboard_test.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/musical_typing_test.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/spectrogram_view_test.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/waveform_editor_test.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/waveform_view_test.cpp)
     target_link_libraries(pulp-test-pulp-vellum-audio PRIVATE
-        pulp::vellum-audio Catch2::Catch2WithMain Threads::Threads)
+        pulp::vellum-audio Vellum::MirrorView_script Catch2::Catch2WithMain Threads::Threads)
     include(Catch)
     catch_discover_tests(pulp-test-pulp-vellum-audio PROPERTIES LABELS pulp-vellum-audio)
 endif()

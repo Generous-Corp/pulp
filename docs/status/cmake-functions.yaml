@@ -104,6 +104,13 @@ functions:
       - target
     docs: guides/dsp-hot-reload.md
 
+  - name: pulp_reload_host_ui
+    status: usable
+    summary: Like pulp_reload_host, and also force-retains and exports Pulp's editor surface so a thin reload logic can build its own Pulp view. Refuses configure in an SDK that serves Pulp::view from Vellum, where the logic stays DSP-only and the editor comes from a UI package.
+    required:
+      - target
+    docs: guides/dsp-hot-reload.md
+
   - name: pulp_profile_validate
     status: usable
     summary: Final gate of the PULP_PROFILE contract (tools/cmake/PulpProfiles.cmake). Under PULP_PROFILE=release it refuses the configure when any enforced option is ON, or warns per option and publishes PULP_PROFILE_OVERRIDDEN=ON under PULP_PROFILE_ALLOW_OVERRIDE; it records the profile-neutral options in PULP_PROFILE_NEUTRAL_RECORD. Call once, after the last governed option().

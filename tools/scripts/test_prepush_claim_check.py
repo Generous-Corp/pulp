@@ -338,7 +338,7 @@ prepush_claim_check_final
         hook = (ROOT.parent.parent / ".githooks" / "pre-push").read_text(encoding="utf-8")
         skip = hook.index('prepush_receipt_note skipped all-gates "PULP_SKIP_PREPUSH=1"')
         self.assertIn("prepush_claim_check_final", hook[skip:hook.index("exit 0", skip)])
-        clean = hook.index('echo "[pre-push] gates clean." >&2')
+        clean = hook.index("    _prepush_final_verdict_line\n    exit 0")
         self.assertIn("prepush_claim_check_final", hook[hook.rindex("if [ \"$fail\" = \"0\" ]", 0, clean):clean])
         demoted = hook.index("gate failures present but demoted by env override")
         self.assertIn("prepush_claim_check_final", hook[demoted:hook.index("exit 0", demoted)])

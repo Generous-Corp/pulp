@@ -341,6 +341,15 @@ jobs:
     env:
       PULP_BUILD_DIR: build-windows
     steps:
+      # Git for Windows ships core.autocrlf=true, so the checkout rewrites every
+      # LF to CRLF. Tests that compare a committed text file with a regenerated
+      # one, or hash it against a pinned digest, then read bytes no pin
+      # describes. Pin LF before the checkout, as release-cli.yml does.
+      - name: Check out sources with upstream LF bytes
+        shell: bash
+        run: |
+          git config --global core.autocrlf false
+          git config --global core.eol lf
       - uses: actions/checkout@v7.0.1
         with:
           lfs: false
@@ -495,10 +504,14 @@ jobs:
         # only the checkout and already run on ubuntu-latest in the required
         # `Enforce version & skill sync` job (tools/ci/source_selftests.json);
         # many assume POSIX tools. Linux enforces them on every merge group.
+        # `browser-capture` is excluded because those registrations launch a
+        # real Chrome, whose CDP probe times out on a loaded hosted runner;
+        # the macOS gate runs them on every merge group. `windows-pr-quarantine`
+        # is the label build.yml's Windows lane already excludes.
         shell: cmd
         run: |
           chcp 65001
-          ctest --test-dir "%PULP_BUILD_DIR%" --output-on-failure -C Release -LE "validation|slow|source-selftest" -j8 --timeout 120 --exclude-regex "STFT|VisualizationBridge|Clipboard|Toolbar add items" > test-windows.log 2>&1
+          ctest --test-dir "%PULP_BUILD_DIR%" --output-on-failure -C Release -LE "validation|slow|source-selftest|browser-capture|windows-pr-quarantine" -j8 --timeout 120 --exclude-regex "STFT|VisualizationBridge|Clipboard|Toolbar add items" > test-windows.log 2>&1
           set CTEST_RC=%ERRORLEVEL%
           type test-windows.log
           echo ctest exit code: %CTEST_RC%

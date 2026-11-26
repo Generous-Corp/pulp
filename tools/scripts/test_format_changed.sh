@@ -197,6 +197,18 @@ expect_rc "committed-since-base change → still judged" 1
 if grep -q -- '--lines=5:5' "$repo/fake.log"; then ok "committed hunk → --lines=5:5"; else bad "committed hunk → --lines=5:5" "log: $(cat "$repo/fake.log")"; fi
 rm -rf "$repo"
 
+# ── a moved file is judged on its edits, not reformatted whole ──────────────
+repo="$(make_repo)"; fake="$repo/fake"; make_fake "$fake"
+mkdir -p "$repo/core/moved"
+git -C "$repo" mv core/a.cpp core/moved/a.cpp
+printf 'line1\nline2\nline3\nEDITED\nline5\n' > "$repo/core/moved/a.cpp"
+git -C "$repo" commit -qam "move a.cpp and edit line 4"
+run "$repo" "$fake" --check
+expect_rc "moved file with one edited line → exit 1" 1
+if grep -q -- '--lines=4:4' "$repo/fake.log"; then ok "moved file → --lines=4:4"; else bad "moved file → --lines=4:4" "log: $(cat "$repo/fake.log")"; fi
+expect_no_out "moved file leaves untouched lines alone" "+F:line1"
+rm -rf "$repo"
+
 # ── an untracked new file is formatted whole ────────────────────────────────
 repo="$(make_repo)"; fake="$repo/fake"; make_fake "$fake"
 printf 'n1\nn2\n' > "$repo/core/new.cpp"

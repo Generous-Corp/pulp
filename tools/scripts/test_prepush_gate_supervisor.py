@@ -521,6 +521,42 @@ run_gate_captured "$3" -c 'raise SystemExit(0)'
                     supervisor.wait()
                 force_cleanup(gate_pid, descendant_pid)
 
+    def test_a_finished_gate_wakes_the_supervisor_before_the_poll_interval(self) -> None:
+        # With a 60 s poll, a sleep-based loop would hold a 0.3 s gate for 60 s.
+        with tempfile.TemporaryDirectory(prefix="prepush-supervisor-wake-") as raw:
+            module = load_supervisor_module()
+            module.POLL_SECONDS = 60.0
+            started = time.monotonic()
+            result = module.main([
+                str(SUPERVISOR), "--log", str(Path(raw) / "gate.log"), "--",
+                sys.executable, "-c", "import time; time.sleep(0.3); raise SystemExit(5)",
+            ])
+            elapsed = time.monotonic() - started
+            self.assertEqual(result, 5)
+            self.assertLess(elapsed, 20.0)
+
+    def test_a_group_that_refuses_signals_after_the_leader_exits_is_not_a_crash(self) -> None:
+        # Waking the moment the leader exits can find the group holding only
+        # exiting members, which macOS answers with EPERM.
+        module = load_supervisor_module()
+        process = subprocess.Popen([sys.executable, "-c", "pass"], start_new_session=True)
+        process.wait()
+        real_killpg = module.os.killpg
+        calls: list[int] = []
+
+        def refusing_killpg(group: int, sig: int) -> None:
+            calls.append(sig)
+            if sig == 0:
+                raise ProcessLookupError  # the group is gone by the first probe
+            raise PermissionError(1, "Operation not permitted")
+
+        module.os.killpg = refusing_killpg
+        try:
+            module.terminate_group(process)
+        finally:
+            module.os.killpg = real_killpg
+        self.assertEqual(calls[0], signal.SIGTERM)
+
     def test_load_bearing_supervision_primitives_remain_present(self) -> None:
         source = SUPERVISOR.read_text(encoding="utf-8")
         self.assertIn("start_new_session=True", source)

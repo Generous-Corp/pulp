@@ -1,4 +1,5 @@
 #include <pulp/vellum_audio/audio_widgets.hpp>
+#include <pulp/vellum_audio/waveform_view.hpp>
 
 #include <cstddef>
 #include <memory>
@@ -15,21 +16,35 @@ std::unique_ptr<::vellum::view::View> make_scope() {
     return std::make_unique<AnalyzerScope>();
 }
 
+std::unique_ptr<::vellum::view::View> make_series() {
+    return std::make_unique<WaveformView>();
+}
+
 } // namespace
 
 void register_audio_widgets() {
-    static const bool registered = [] {
-        ::vellum::view::register_data_display({"pulp.level",
-                                               &make_level,
-                                               {{"pulp.level", "pulp::vellum_audio::LevelMeter",
-                                                 "pulp/vellum_audio/audio_widgets.hpp"}}});
-        ::vellum::view::register_data_display({"pulp.bins",
-                                               &make_scope,
-                                               {{"pulp.bins", "pulp::vellum_audio::AnalyzerScope",
-                                                 "pulp/vellum_audio/audio_widgets.hpp"}}});
-        return true;
-    }();
-    (void)registered;
+    // Checked per id rather than once per process, so a registry that was
+    // cleared (clear_data_displays) is filled again by the next call.
+    using ::vellum::view::has_data_display;
+    using ::vellum::view::register_data_display;
+    if (!has_data_display("pulp.level")) {
+        register_data_display({"pulp.level",
+                               &make_level,
+                               {{"pulp.level", "pulp::vellum_audio::LevelMeter",
+                                 "pulp/vellum_audio/audio_widgets.hpp"}}});
+    }
+    if (!has_data_display("pulp.series")) {
+        register_data_display({"pulp.series",
+                               &make_series,
+                               {{"pulp.series", "pulp::vellum_audio::WaveformView",
+                                 "pulp/vellum_audio/waveform_view.hpp"}}});
+    }
+    if (!has_data_display("pulp.bins")) {
+        register_data_display({"pulp.bins",
+                               &make_scope,
+                               {{"pulp.bins", "pulp::vellum_audio::AnalyzerScope",
+                                 "pulp/vellum_audio/audio_widgets.hpp"}}});
+    }
 }
 
 void detail::AudioWidgetSampler::mount() {
