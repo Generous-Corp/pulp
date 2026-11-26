@@ -4,7 +4,6 @@ import os
 import tarfile
 import sys
 import tempfile
-import time
 import unittest
 import zipfile
 from pathlib import Path
@@ -14,6 +13,10 @@ sys.path.insert(0, str(Path(__file__).parent))
 from archive_sdk import archive_tree
 from check_archive_mtimes import check_archive
 
+# Fixed instants so the tests do not depend on the wall clock.
+BASE = 1_700_000_000
+FUTURE = BASE + 8 * 3600
+
 
 class ArchiveSdkTest(unittest.TestCase):
     def test_archive_normalizes_all_tar_mtimes(self) -> None:
@@ -22,9 +25,8 @@ class ArchiveSdkTest(unittest.TestCase):
             root.mkdir()
             payload = root / "file.txt"
             payload.write_text("payload", encoding="utf-8")
-            future = time.time() + 8 * 3600
-            os.utime(payload, (future, future))
-            os.utime(root, (future, future))
+            os.utime(payload, (FUTURE, FUTURE))
+            os.utime(root, (FUTURE, FUTURE))
             archive = Path(temporary) / "sdk.tar.gz"
             archive_tree(root, archive, 123456789)
             self.assertEqual(check_archive(archive, 123456789), [])
@@ -40,17 +42,17 @@ class ArchiveSdkTest(unittest.TestCase):
             with tarfile.open(archive, "w:gz") as tar:
                 member = tarfile.TarInfo("future.txt")
                 member.size = 0
-                member.mtime = time.time() + 3600
+                member.mtime = FUTURE
                 tar.addfile(member)
-            self.assertEqual(len(check_archive(archive, time.time())), 1)
+            self.assertEqual(len(check_archive(archive, BASE)), 1)
 
     def test_checker_rejects_future_zip_member(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             archive = Path(temporary) / "future.zip"
             with zipfile.ZipFile(archive, "w") as zipped:
-                info = zipfile.ZipInfo("future.txt", time.localtime(time.time() + 3600)[:6])
+                info = zipfile.ZipInfo("future.txt", (2030, 1, 1, 0, 0, 0))
                 zipped.writestr(info, "")
-            self.assertEqual(len(check_archive(archive, time.time())), 1)
+            self.assertEqual(len(check_archive(archive, BASE)), 1)
 
 
 if __name__ == "__main__":
