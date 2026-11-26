@@ -54,6 +54,8 @@ use without hard-coding macOS, Windows, Linux, iOS, or Web behavior.
 
 `pulp::vellum_components` (`integrations/pulp-vellum-components`, optional, off unless `PULP_ENABLE_PULP_VELLUM_COMPONENTS=ON`) provides the retained Pulp view components as `vellum::view::View` subclasses: `PanicButton` (with `panic_target()` for a `format::Processor`), `LassoComponent`, `PreferencesPanel` and `ModelManagerView` (a block per `runtime::ListedModel` with install, activate and remove actions that carry the model id, and a progress line while a download runs). `make_pulp_view_component(id, context)` builds one by stable id (`pulp.panic_button`, `pulp.lasso`, `pulp.preferences_panel`, `pulp.model_manager`); the `PulpViewComponentContext` carries the Pulp-owned services a component binds to. A preferences panel restores its stored page when the caller binds a `PropertiesFile` after adding its pages.
 
+The component inspector window is here too. `InspectorWindow` is a view (a host places it in a window or panel and calls `refresh()` once per frame) with a tool strip above an Elements tab: the inspected view tree beside collapsable Identity, Layout, Visual, Widget and Theme Colors sections. A tree-row click selects and fires `on_view_selected`; `reflect_selection()` mirrors a canvas selection without firing it; `set_selection_readonly(true)` shows properties without driving the selection; the tool strip reports Select or Text picks through `on_tool_picked`. A widget outside Vellum's view core shows its rows through `vellum::view::InspectorFacts`.
+
 ## simd
 
 Portable block kernels for DSP: elementwise buffer arithmetic (`add`, `sub`,
