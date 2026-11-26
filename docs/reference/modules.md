@@ -54,6 +54,8 @@ use without hard-coding macOS, Windows, Linux, iOS, or Web behavior.
 
 `pulp::vellum_components` (`integrations/pulp-vellum-components`, optional, off unless `PULP_ENABLE_PULP_VELLUM_COMPONENTS=ON`) provides the retained Pulp view components as `vellum::view::View` subclasses: `PanicButton` (with `panic_target()` for a `format::Processor`), `LassoComponent`, `PreferencesPanel` and `ModelManagerView` (a block per `runtime::ListedModel` with install, activate and remove actions that carry the model id, and a progress line while a download runs). `make_pulp_view_component(id, context)` builds one by stable id (`pulp.panic_button`, `pulp.lasso`, `pulp.preferences_panel`, `pulp.model_manager`); the `PulpViewComponentContext` carries the Pulp-owned services a component binds to. A preferences panel restores its stored page when the caller binds a `PropertiesFile` after adding its pages.
 
+`ViewInspector` is the read-only introspection of a Vellum view tree behind the component inspector: `to_json()`, `find_by_id()`, `find_by_anchor()` (an empty anchor never matches), `count_views()`, `populate_tree()`, `view_properties()` and `absolute_bounds()` (which honours a scrolled `ScrollView`'s child offset). A widget outside Vellum's view core describes itself to it through `vellum::view::InspectorFacts`.
+
 ## simd
 
 Portable block kernels for DSP: elementwise buffer arithmetic (`add`, `sub`,
