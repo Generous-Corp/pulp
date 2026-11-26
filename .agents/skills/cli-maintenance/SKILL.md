@@ -4460,3 +4460,12 @@ or a Program Change is latched and never applied.
 before building and refuses the install when the lock is missing or malformed.
 A snapshot without `tools/deps/pulp_lock.py` is treated as a failure, not
 skipped.
+
+## `pulp audio` image PNGs are encoded without the render layer
+
+`tools/cli/audio_png_encoder.cpp` writes the scope, waveform and spectrogram
+PNGs from a raw RGBA buffer over the runtime's `zlib_compress`; `cmd_audio.cpp`
+includes no `pulp/render` header. Keep it that way: a new image verb hands its
+pixels to `encode_png_rgba` and never reaches for a surface. The unit test
+parses the bytes by hand (CRCs, IHDR, inflate, filter bytes), so an encoder
+change that a viewer would forgive still fails there.

@@ -103,10 +103,6 @@ using pulp_mcp::handle_content_validate;
 using pulp_mcp::handle_gpu_doctor;
 using pulp_mcp::handle_gpu_probe;
 using pulp_mcp::handle_gpu_recipes;
-using pulp_mcp::handle_ui_screenshot;
-using pulp_mcp::handle_ui_simulate_click;
-using pulp_mcp::handle_ui_view_tree;
-using pulp_mcp::ui_request_uses_vellum_host;
 using pulp_mcp::handle_inspect_pending_requests;
 using pulp_mcp::handle_kit;
 using pulp_mcp::handle_kit_apply;
@@ -123,6 +119,10 @@ using pulp_mcp::handle_minos;
 using pulp_mcp::handle_status;
 using pulp_mcp::handle_test;
 using pulp_mcp::handle_trace_analyze;
+using pulp_mcp::handle_ui_screenshot;
+using pulp_mcp::handle_ui_simulate_click;
+using pulp_mcp::handle_ui_view_tree;
+using pulp_mcp::ui_request_uses_vellum_host;
 #if PULP_MCP_ENABLE_TIMELINE_TOOLS
 using pulp_mcp::handle_timeline_tool;
 #endif

@@ -43,6 +43,9 @@ on:
       - 'test/cmake/editor_host_slice_tests.cmake'
       - 'tools/scripts/editor_host_acceptance.py'
       - 'tools/ci/vellum_sdk_consumer.py'
+      # The MCP UI tools that run bundles on the SDK's vellum-app-host.
+      - 'tools/mcp/mcp_ui_tools.cpp'
+      - 'test/test_mcp_ui_tools.cpp'
       # The Vellum-backed UI target names: the package config that defines
       # them, their scenario driver and the installed consumer it builds. The
       # `real` and `wrong-version` scenarios carry the pulp-vellum label.
@@ -168,6 +171,23 @@ jobs:
             pulp-test-pulp-vellum-components
           ctest --test-dir build-vellum-bridge -L pulp-vellum --output-on-failure \
             | tee "$RUNNER_TEMP/vellum-sdk/bridge.log"
+
+      # The MCP UI tools resolve vellum-app-host from the SDK this run
+      # resolved. The live case must run, so a skip fails the step.
+      - name: MCP UI tools against the SDK's app host
+        if: steps.sdk.outputs.unchanged != 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          tools/ci/governed-build.sh cmake --build build-vellum-bridge --target pulp-test-mcp-server
+          host="${{ steps.sdk.outputs.prefix }}/bin/vellum-app-host"
+          test -x "$host"
+          PULP_TEST_VELLUM_APP_HOST="$host" MTL_DEBUG_LAYER=0 \
+            build-vellum-bridge/test/pulp-test-mcp-server "[ui]" | tee "$RUNNER_TEMP/vellum-sdk/mcp-ui.log"
+          if grep -q "SKIPPED" "$RUNNER_TEMP/vellum-sdk/mcp-ui.log"; then
+            echo "the live MCP UI case skipped" >&2
+            exit 1
+          fi
 
       - name: Negative control (a renamed SDK header must fail the build)
         if: steps.sdk.outputs.unchanged != 'true'

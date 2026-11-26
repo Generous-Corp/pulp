@@ -217,7 +217,8 @@ TEST_CASE("UI tools report a missing host and a missing bundle", "[mcp][tools][u
     FakeHost host;
     {
         ScopedHostEnv env((host.dir.path / "absent-host").string());
-        const auto response = call("pulp_get_view_tree", "{\"bundle\":" + quoted(host.bundle) + "}");
+        const auto response =
+            call("pulp_get_view_tree", "{\"bundle\":" + quoted(host.bundle) + "}");
         CHECK(is_error(response));
         require_contains(response, "host-unavailable");
     }
@@ -262,8 +263,7 @@ TEST_CASE("pulp_simulate_click presses a node and returns the new tree and frame
     CHECK(choc::json::parse(without_frame)["result"]["content"].size() == 1);
 }
 
-TEST_CASE("pulp_simulate_click at a point presses the deepest pressable node",
-          "[mcp][tools][ui]") {
+TEST_CASE("pulp_simulate_click at a point presses the deepest pressable node", "[mcp][tools][ui]") {
     FakeHost host;
     ScopedHostEnv env(host.script.string());
     const auto bundle = "\"bundle\":" + quoted(host.bundle);
@@ -336,8 +336,7 @@ TEST_CASE("UI tools drive a real Vellum app host when one is named", "[mcp][tool
     // Keep the delivered frame for a human look: the base64 text of the PNG.
     if (const char* keep = std::getenv("PULP_TEST_UI_CAPTURE_DIR")) {
         std::ofstream(fs::path(keep) / "click.png.b64") << png_b64;
-        const auto shot = choc::json::parse(
-            "{\"result\":" + handle_ui_screenshot("{}") + "}");
+        const auto shot = choc::json::parse("{\"result\":" + handle_ui_screenshot("{}") + "}");
         std::ofstream(fs::path(keep) / "screenshot.png.b64")
             << std::string(shot["result"]["content"][0]["data"].getString());
     }

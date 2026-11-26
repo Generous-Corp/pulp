@@ -75,7 +75,8 @@ std::vector<std::uint8_t> encode_png_rgba8(std::uint32_t width, std::uint32_t he
     std::vector<std::uint8_t> header;
     put_u32(header, width);
     put_u32(header, height);
-    header.insert(header.end(), {8, 6, 0, 0, 0}); // 8-bit RGBA, deflate, no filter bank, no interlace
+    header.insert(header.end(),
+                  {8, 6, 0, 0, 0}); // 8-bit RGBA, deflate, no filter bank, no interlace
 
     std::vector<std::uint8_t> png(kSignature.begin(), kSignature.end());
     put_chunk(png, "IHDR", header);

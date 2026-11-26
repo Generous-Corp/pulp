@@ -38,7 +38,7 @@ struct Parsed {
     std::uint32_t width = 0;
     std::uint32_t height = 0;
     std::vector<std::uint8_t> idat;
-    std::string order;  ///< Chunk types in file order, e.g. "IHDR,IDAT,IEND".
+    std::string order; ///< Chunk types in file order, e.g. "IHDR,IDAT,IEND".
 };
 
 Parsed parse(const std::vector<std::uint8_t>& png) {
@@ -59,8 +59,8 @@ Parsed parse(const std::vector<std::uint8_t>& png) {
         if (name == "IHDR" && length == 13) {
             out.width = be32(&png[at + 8]);
             out.height = be32(&png[at + 12]);
-            if (png[at + 16] != 8 || png[at + 17] != 6 || png[at + 18] != 0 ||
-                png[at + 19] != 0 || png[at + 20] != 0)
+            if (png[at + 16] != 8 || png[at + 17] != 6 || png[at + 18] != 0 || png[at + 19] != 0 ||
+                png[at + 20] != 0)
                 return out;
         } else if (name == "IDAT") {
             out.idat.insert(out.idat.end(), &png[at + 8], &png[at + 8 + length]);
@@ -88,7 +88,7 @@ std::vector<std::uint8_t> gradient(std::uint32_t w, std::uint32_t h) {
 
 TEST_CASE("encode_png_rgba8 writes a PNG that parses back to the input pixels",
           "[audio][png][encoder]") {
-    const std::uint32_t w = 37, h = 11;  // odd sizes catch row-stride mistakes
+    const std::uint32_t w = 37, h = 11; // odd sizes catch row-stride mistakes
     const auto rgba = gradient(w, h);
     std::string error;
     const auto png = pulp_cli::encode_png_rgba8(w, h, rgba, &error);
@@ -106,7 +106,7 @@ TEST_CASE("encode_png_rgba8 writes a PNG that parses back to the input pixels",
     REQUIRE(raw->size() == (std::size_t(w) * 4 + 1) * h);
     for (std::uint32_t y = 0; y < h; ++y) {
         const auto* line = raw->data() + y * (std::size_t(w) * 4 + 1);
-        CHECK(line[0] == 0);  // filter type none
+        CHECK(line[0] == 0); // filter type none
         CHECK(std::memcmp(line + 1, rgba.data() + std::size_t(y) * w * 4, std::size_t(w) * 4) == 0);
     }
 }
@@ -114,8 +114,8 @@ TEST_CASE("encode_png_rgba8 writes a PNG that parses back to the input pixels",
 TEST_CASE("encode_png_rgba8 refuses a buffer that does not match its size",
           "[audio][png][encoder]") {
     std::string error;
-    CHECK(pulp_cli::encode_png_rgba8(4, 4, std::vector<std::uint8_t>(4 * 4 * 4 - 1), &error)
-              .empty());
+    CHECK(
+        pulp_cli::encode_png_rgba8(4, 4, std::vector<std::uint8_t>(4 * 4 * 4 - 1), &error).empty());
     CHECK(error.find("does not match") != std::string::npos);
 
     error.clear();
@@ -129,6 +129,6 @@ TEST_CASE("encode_png_rgba8 refuses a buffer that does not match its size",
 TEST_CASE("the test's PNG parser rejects a corrupted chunk", "[audio][png][encoder]") {
     auto png = pulp_cli::encode_png_rgba8(8, 8, gradient(8, 8), nullptr);
     REQUIRE(parse(png).valid);
-    png[png.size() / 2] ^= 0x40;  // a flipped payload bit breaks a chunk CRC
+    png[png.size() / 2] ^= 0x40; // a flipped payload bit breaks a chunk CRC
     CHECK_FALSE(parse(png).valid);
 }

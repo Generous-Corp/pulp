@@ -73,8 +73,7 @@ std::string error_result(const UiError& error) {
 }
 
 std::string base64(const std::vector<std::uint8_t>& bytes) {
-    constexpr char alphabet[] =
-        "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    constexpr char alphabet[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
     std::string out;
     out.reserve((bytes.size() + 2) / 3 * 4);
     for (std::size_t i = 0; i < bytes.size(); i += 3) {
@@ -118,7 +117,9 @@ class Scratch {
     }
     Scratch(const Scratch&) = delete;
     Scratch& operator=(const Scratch&) = delete;
-    const fs::path& path() const { return path_; }
+    const fs::path& path() const {
+        return path_;
+    }
 
   private:
     fs::path path_;
@@ -151,8 +152,8 @@ std::optional<fs::path> resolve_host() {
 }
 
 struct Request {
-    fs::path bundle;          ///< Absolute path to the bundle to run.
-    std::string scale = "1";  ///< Host capture scale: "1" or "2".
+    fs::path bundle;         ///< Absolute path to the bundle to run.
+    std::string scale = "1"; ///< Host capture scale: "1" or "2".
 };
 
 struct HostRun {
@@ -286,8 +287,8 @@ std::optional<UiError> parse_request(const std::string& params_json,
             unknown = std::string(name);
     });
     if (!unknown.empty())
-        return UiError{"invalid-arguments", "unsupported argument for the Vellum host: " + unknown,
-                       {}};
+        return UiError{
+            "invalid-arguments", "unsupported argument for the Vellum host: " + unknown, {}};
 
     if (params.hasObjectMember("scale")) {
         const auto scale = number_member(params.getView(), "scale");
@@ -365,16 +366,16 @@ std::string handle_ui_view_tree(const std::string& params_json) {
     HostRun run;
     if (auto error = run_host(host, request, {}, false, run))
         return error_result(*error);
-    return "{\"content\":[" + text_block(run.tree_json) + "],\"structuredContent\":" +
-           run.tree_json + "}";
+    return "{\"content\":[" + text_block(run.tree_json) +
+           "],\"structuredContent\":" + run.tree_json + "}";
 }
 
 std::string handle_ui_simulate_click(const std::string& params_json) {
     choc::value::Value params;
     Request request;
     Scratch demo;
-    if (auto error = parse_request(params_json, {"node_id", "x", "y", "capture"}, params, request,
-                                   demo))
+    if (auto error =
+            parse_request(params_json, {"node_id", "x", "y", "capture"}, params, request, demo))
         return error_result(*error);
     fs::path host;
     if (auto error = require_host(host))
@@ -406,8 +407,8 @@ std::string handle_ui_simulate_click(const std::string& params_json) {
             return error_result(*error);
         const auto nodes = parse_nodes(before.tree_json);
         if (!nodes)
-            return error_result({"malformed-host-output", "the tree dump was not understood",
-                                 before.tree_json});
+            return error_result(
+                {"malformed-host-output", "the tree dump was not understood", before.tree_json});
         // Later nodes paint on top of earlier ones, so try the deepest hit
         // first and fall back to the boxes beneath it.
         for (auto it = nodes->rbegin(); it != nodes->rend(); ++it) {
@@ -424,8 +425,8 @@ std::string handle_ui_simulate_click(const std::string& params_json) {
         HostRun run;
         auto error = run_host(host, request, candidate, want_png, run);
         if (!error) {
-            const auto structured = "{\"clicked\":" + json_string(candidate) +
-                                    ",\"tree\":" + run.tree_json + "}";
+            const auto structured =
+                "{\"clicked\":" + json_string(candidate) + ",\"tree\":" + run.tree_json + "}";
             std::string content = text_block(structured);
             if (want_png)
                 content += "," + image_block(run.png);

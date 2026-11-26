@@ -138,7 +138,8 @@ std::vector<std::uint8_t> render_scope_png(const pulp::audio::AudioScopeAcquisit
         std::uint32_t width;
         std::uint32_t height;
         std::vector<std::uint8_t> pixels;
-    } rgba{width, height, std::vector<std::uint8_t>(static_cast<std::size_t>(width) * height * 4, 0)};
+    } rgba{width, height,
+           std::vector<std::uint8_t>(static_cast<std::size_t>(width) * height * 4, 0)};
 
     auto put = [&](int x, int y, std::uint8_t r, std::uint8_t g, std::uint8_t b,
                    std::uint8_t a = 255) {
