@@ -1471,7 +1471,13 @@ TEST_CASE("A Vellum root that does not opt in keeps immediate presentation",
 
 #include <vellum/view/text_editor.hpp>
 
+#if defined(__APPLE__)
+#include <CoreGraphics/CoreGraphics.h>
+#include <ImageIO/ImageIO.h>
+#endif
+
 #include <cstdlib>
+#include <fstream>
 #include <string>
 
 using pulp::format::vst3::ContractPlugView;
@@ -1698,6 +1704,42 @@ Steinberg::tresult press(ContractPlugView& view, Steinberg::char16 key, Steinber
     return view.onKeyDown(key, code, modifiers);
 }
 
+/// A PNG decoded to 8-bit sRGB RGBA, rows top to bottom.
+struct DecodedPng {
+    std::size_t width = 0;
+    std::size_t height = 0;
+    std::vector<std::uint8_t> rgba;
+};
+
+DecodedPng decode_png_rgba(const std::vector<std::uint8_t>& png) {
+    DecodedPng out;
+#if defined(__APPLE__)
+    CFDataRef data = CFDataCreate(nullptr, png.data(), static_cast<CFIndex>(png.size()));
+    CGImageSourceRef source = CGImageSourceCreateWithData(data, nullptr);
+    CFRelease(data);
+    if (!source)
+        return out;
+    CGImageRef image = CGImageSourceCreateImageAtIndex(source, 0, nullptr);
+    CFRelease(source);
+    if (!image)
+        return out;
+    out.width = CGImageGetWidth(image);
+    out.height = CGImageGetHeight(image);
+    out.rgba.resize(out.width * out.height * 4);
+    CGColorSpaceRef space = CGColorSpaceCreateWithName(kCGColorSpaceSRGB);
+    CGContextRef context =
+        CGBitmapContextCreate(out.rgba.data(), out.width, out.height, 8, out.width * 4, space,
+                              kCGImageAlphaPremultipliedLast);
+    CGColorSpaceRelease(space);
+    CGContextDrawImage(context, CGRectMake(0, 0, out.width, out.height), image);
+    CGContextRelease(context);
+    CGImageRelease(image);
+#else
+    (void)png;
+#endif
+    return out;
+}
+
 } // namespace vst3_cases
 
 using namespace vst3_cases;
@@ -1752,6 +1794,49 @@ TEST_CASE("A VST3 host opens, sizes and closes a Vellum editor",
     REQUIRE(view->removed() == Steinberg::kResultTrue);
     CHECK(g_vst3_root.closes == 1);
     CHECK_FALSE(host->is_attached());
+    view->release();
+}
+
+TEST_CASE("A VST3 host's Vellum editor paints its root through the macOS view host",
+          "[pulp-vellum][vst3][editor-host][capture]") {
+#if !defined(__APPLE__)
+    SKIP("Vellum's SDK ships its GPU plug-in view host on macOS only");
+#endif
+    Vst3Fixture fx;
+    auto* view = fx.create_view();
+    REQUIRE(g_vst3_root.root != nullptr);
+    // A colour no default theme paints, so a match proves the root's own paint.
+    g_vst3_root.root->set_background_color(::vellum::canvas::Color::rgba8(0x1e, 0x90, 0xff));
+    REQUIRE(view->attached(fx.native_parent(), Steinberg::kPlatformTypeNSView) ==
+            Steinberg::kResultTrue);
+    auto* host = g_vst3_root.root->plugin_view_host();
+    REQUIRE(host != nullptr);
+    CHECK(host->is_gpu_backed());
+    host->present_first_frame();
+
+    const auto png = host->capture_back_buffer_png();
+    REQUIRE_FALSE(png.empty());
+    if (const char* out = std::getenv("PULP_VELLUM_HOST_CAPTURE_PNG"))
+        std::ofstream(out, std::ios::binary)
+            .write(reinterpret_cast<const char*>(png.data()),
+                   static_cast<std::streamsize>(png.size()));
+    const auto image = vst3_cases::decode_png_rgba(png);
+    REQUIRE(image.width > 0);
+    // The back buffer is in device pixels: at least the editor's 400x300.
+    CHECK(image.width >= 400);
+    CHECK(image.height >= 300);
+    // Sample the lower right quarter, away from the text field the root lays
+    // out along its top edge.
+    const std::size_t at = ((image.height * 3 / 4) * image.width + image.width * 3 / 4) * 4;
+    REQUIRE(at + 3 < image.rgba.size());
+    INFO("rgba " << int(image.rgba[at]) << "," << int(image.rgba[at + 1]) << ","
+                 << int(image.rgba[at + 2]) << "," << int(image.rgba[at + 3]));
+    CHECK(image.rgba[at] == 0x1e);
+    CHECK(image.rgba[at + 1] == 0x90);
+    CHECK(image.rgba[at + 2] == 0xff);
+    CHECK(image.rgba[at + 3] == 0xff);
+
+    REQUIRE(view->removed() == Steinberg::kResultTrue);
     view->release();
 }
 
