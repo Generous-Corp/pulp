@@ -1286,7 +1286,7 @@ class PrRouteTest(unittest.TestCase):
         self.assertEqual(number, "2")
         self.assertIn("--head", calls[0])
         self.assertEqual(calls[0][calls[0].index("--head") + 1],
-                         "Generous-Corp:" + val.BUMP_BRANCH)
+                         val.BUMP_BRANCH)
         self.assertIn("number,headRepositoryOwner", calls[0])
 
     def test_pr_route_preserves_draft_hold_and_fails_closed(self) -> None:
@@ -1298,12 +1298,16 @@ class PrRouteTest(unittest.TestCase):
         held_sha = _git(self.clone, "rev-parse", "HEAD").strip()
         _git(self.clone, "switch", "-q", "main")
 
-        fake = _FakeGh(open_prs=1, draft_pr=True)
+        held_body = "owner hold notes\n"
+        fake = _FakeGh(open_prs=1, draft_pr=True, body=held_body)
         val._gh = fake
         status, _ = val.apply_via_pr(self.clone, self._cfg())
         self.assertEqual(status, "arm-failed")
         self.assertFalse(fake.did("pr", "merge"))
         self.assertFalse(fake.did("pr", "create"))
+        self.assertEqual(fake.body, held_body)
+        self.assertFalse(any(c[:1] == ("api",) and ".body" in c
+                             for c in fake.calls))
         self.assertEqual(_git(self.clone, "ls-remote", "origin",
                               val.BUMP_BRANCH).split()[0], held_sha)
 
@@ -1319,6 +1323,25 @@ class PrRouteTest(unittest.TestCase):
         replacement_sha = _git(self.clone, "ls-remote", "origin",
                                val.BUMP_BRANCH).split()[0]
         self.assertNotEqual(replacement_sha, held_sha)
+
+    def test_pr_route_draft_stale_defer_does_not_reconcile_description(self) -> None:
+        """A draft is an owner's hold, so its hand-written body is preserved."""
+        _git(self.clone, "checkout", "-q", "-b", val.BUMP_BRANCH)
+        (self.clone / "STALE_BUMP.txt").write_text(
+            "held draft head\n", encoding="utf-8")
+        _git(self.clone, "add", "--", "STALE_BUMP.txt")
+        _git(self.clone, "commit", "--no-verify", "-q", "-m", "held draft")
+        _git(self.clone, "push", "-q", "origin", f"HEAD:{val.BUMP_BRANCH}")
+        _git(self.clone, "switch", "-q", "main")
+
+        held_body = "owner hold notes\n"
+        fake = _FakeGh(open_prs=1, draft_pr=True, covers=False, body=held_body)
+        val._gh = fake
+        status, _ = val.apply_via_pr(self.clone, self._cfg())
+        self.assertEqual(status, "stale-defer")
+        self.assertEqual(fake.body, held_body)
+        self.assertFalse(any(c[:1] == ("api",) and ".body" in c
+                             for c in fake.calls))
 
     def test_pr_route_noop_without_intent(self) -> None:
         # Drain an origin that already carries the marker → nothing to bump.

@@ -1258,8 +1258,11 @@ def _list_open_bump_pr(repo: Path) -> tuple[bool, str | None]:
                       check=False).stdout.strip()
     match = re.search(r"github\.com[:/]([^/]+)/", remote_url)
     owner = match.group(1) if match else None
-    head_filter = f"{owner}:{BUMP_BRANCH}" if owner else BUMP_BRANCH
-    res = _gh(repo, "pr", "list", "--head", head_filter, "--state", "open",
+    # `gh pr list --head` accepts a branch name, not the REST-style
+    # `<owner>:<branch>` spelling. Query the branch and enforce ownership from
+    # the returned headRepositoryOwner field so a fork cannot become the
+    # standing PR.
+    res = _gh(repo, "pr", "list", "--head", BUMP_BRANCH, "--state", "open",
               "--json", "number,headRepositoryOwner", check=False)
     if res.returncode != 0:
         return False, None
@@ -1299,7 +1302,8 @@ def _is_non_ff_rejection(detail: str) -> bool:
     return "non-fast-forward" in d or "fetch first" in d
 
 
-def _arm_auto_merge(repo: Path, ref: str) -> bool:
+def _arm_auto_merge(repo: Path, ref: str,
+                    report: dict[str, str] | None = None) -> bool:
     """Confirm the bump PR is ready for the merge steward to admit. Despite the
     name it no longer arms auto-merge (see the comment at the end). A confirmed
     non-draft PR returns True. Drafts fail closed:
@@ -1312,6 +1316,8 @@ def _arm_auto_merge(repo: Path, ref: str) -> bool:
                          "refusing to arm auto-merge.\n")
         return False
     if draft.stdout.strip() == "true":
+        if report is not None:
+            report["reason"] = "the bump PR is a draft"
         sys.stderr.write(f"version-at-land: bump PR {ref} is draft; preserving "
                          "the explicit hold and refusing to arm it.\n")
         return False
@@ -1408,13 +1414,13 @@ def _drive_standing_pr(
     `apply_via_pr` for the statuses."""
     covers = _bump_pr_covers(repo, number, head)
     if covers is True and not heal_stale:
-        return ("pending" if _arm_auto_merge(repo, number)
+        return ("pending" if _arm_auto_merge(repo, number, report)
                 else "arm-failed")
     state, reason = _bump_pr_liveness(repo, number)
     if report is not None:
         report.update(pr=number, reason=reason)
     if covers is True and state != "red":
-        return ("pending" if _arm_auto_merge(repo, number)
+        return ("pending" if _arm_auto_merge(repo, number, report)
                 else "arm-failed")
     if covers is None or state not in ("progressing", "red", "dead",
                                        "queued"):
@@ -1554,13 +1560,16 @@ def apply_via_pr(
         # needs a higher version. Unknown coverage is treated as NOT covering.
         stamp = now if now is not None else int(time.time())
         tip = _fetch_bump_tip(repo, remote)
+        status_report = report if report is not None else {}
         status = _drive_standing_pr(
             repo, config, remote=remote, number=existing, tip=tip, plan=plan,
             base=base, head=head, heal_stale=heal_stale,
             window=coalesce_window, release_now=release_now, now=stamp,
-            report=report)
+            report=status_report)
+        draft_hold = (status in ("stale-defer", "arm-failed")
+                      and status_report.get("reason") == "the bump PR is a draft")
         if (status not in ("pr-updated", "exhausted", "body-reconcile-failed")
-                and tip is not None):
+                and tip is not None and not draft_hold):
             # An update writes its own description, and a lost push means the
             # head is no longer `tip`. Every other outcome keeps the head, so
             # a description an earlier drain failed to refresh is repaired
@@ -1827,8 +1836,8 @@ def main(argv: list[str]) -> int:
             return 1
         elif status == "body-reconcile-failed":
             sys.stderr.write(
-                "version-at-land: bump PR branch changed but its description "
-                "was not reconciled; the next drain will retry.\n")
+                "version-at-land: bump PR description could not be read or "
+                "refreshed; the next drain will retry.\n")
             _write_assignment_summary(status, plan)
             return 1
         else:  # "exhausted"
