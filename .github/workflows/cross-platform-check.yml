@@ -341,6 +341,15 @@ jobs:
     env:
       PULP_BUILD_DIR: build-windows
     steps:
+      # Git for Windows ships core.autocrlf=true, so the checkout rewrites every
+      # LF to CRLF. Tests that compare a committed text file with a regenerated
+      # one, or hash it against a pinned digest, then read bytes no pin
+      # describes. Pin LF before the checkout, as release-cli.yml does.
+      - name: Check out sources with upstream LF bytes
+        shell: bash
+        run: |
+          git config --global core.autocrlf false
+          git config --global core.eol lf
       - uses: actions/checkout@v7.0.1
         with:
           lfs: false
