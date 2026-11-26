@@ -75,6 +75,13 @@ namespace detail {
 /// factory is null or the fixed table is full.
 bool install_standalone_panel_factory(StandalonePanelFactory factory) noexcept;
 
+/// Called by the standalone before it builds its panels. The definition in
+/// format-core does nothing; an executable that offers UI-integration panels
+/// supplies its own definition (the generated registrar of a UI package
+/// plug-in's Standalone) that installs their factories. An explicit call from
+/// the standalone, so no static-init object has to survive the linker.
+void install_standalone_panels();
+
 /// One panel per installed factory that returned one, in install order.
 std::vector<std::unique_ptr<StandalonePanel>>
 create_standalone_panels(const StandalonePanelContext& context);

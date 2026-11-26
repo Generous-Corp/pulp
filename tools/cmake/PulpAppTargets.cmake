@@ -66,6 +66,23 @@ function(_pulp_check_standalone_hosts target)
     endif()
 endfunction()
 
+# The generated registrar of a view-free standalone: a definition of
+# pulp::format::detail::install_standalone_panels() that installs the Vellum
+# musical typing panel's factory. The standalone calls it before it builds its
+# panels, so the factory is installed by an explicit call and not by a
+# static-init object an archive could drop. Adds nothing when the Vellum audio
+# package is not part of this build.
+function(_pulp_add_standalone_panel_registrar exe)
+    if(NOT TARGET pulp::vellum-audio)
+        return()
+    endif()
+    set(_registrar "${CMAKE_CURRENT_BINARY_DIR}/${exe}_standalone_panel_registrar.cpp")
+    file(GENERATE OUTPUT "${_registrar}" CONTENT
+        "#include <pulp/format/standalone_panel.hpp>\n#include <pulp/vellum_audio/standalone_typing_panel.hpp>\nnamespace pulp::format::detail { void install_standalone_panels() { pulp::vellum_audio::install_standalone_typing_panel(); } }\n")
+    target_sources(${exe} PRIVATE "${_registrar}")
+    target_link_libraries(${exe} PRIVATE pulp::vellum-audio)
+endfunction()
+
 function(_pulp_add_standalone target name bundle_id version processor_factory)
     if(NOT PULP_${target}_STANDALONE_TARGET)
         if(PULP_${target}_VIEW_FREE_STANDALONE)
@@ -99,6 +116,9 @@ function(_pulp_add_standalone target name bundle_id version processor_factory)
             "pulp_add_plugin(${target}): declared inspector shipping component is unavailable; configure/install Pulp with Inspector support")
     endif()
     target_link_libraries(${target}_Standalone PRIVATE ${target}_Core ${_standalone_target})
+    if(PULP_${target}_VIEW_FREE_STANDALONE)
+        _pulp_add_standalone_panel_registrar(${target}_Standalone)
+    endif()
     # Checked once the directory is done, when every link has been added.
     cmake_language(DEFER DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
         CALL _pulp_check_standalone_hosts "${target}_Standalone")
