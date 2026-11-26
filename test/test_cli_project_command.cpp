@@ -1474,7 +1474,7 @@ TEST_CASE("doctor WidgetBridge generated API reports stale generated files",
     write_file(repo / "core" / "view" / "include" / "pulp" / "view"
                    / "reload_autocaps.hpp",
                "#pragma once\rclass ReloadAutocaps {};\r");
-    write_file(repo / "core" / "view" / "include" / "pulp" / "view"
+    write_file(repo / "core" / "runtime" / "include" / "pulp" / "runtime"
                    / "reload_capabilities.hpp",
                "#pragma once\nclass ReloadCapability {};\n");
 
@@ -1519,7 +1519,7 @@ TEST_CASE("doctor WidgetBridge generated API reports missing inputs and outputs"
     write_file(repo / "core" / "view" / "include" / "pulp" / "view"
                    / "reload_autocaps.hpp",
                "#pragma once\n");
-    write_file(repo / "core" / "view" / "include" / "pulp" / "view"
+    write_file(repo / "core" / "runtime" / "include" / "pulp" / "runtime"
                    / "reload_capabilities.hpp",
                "#pragma once\n");
 
