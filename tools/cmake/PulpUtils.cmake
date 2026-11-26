@@ -51,8 +51,9 @@ function(_pulp_refuse_view_editor_from_vellum context)
         message(FATAL_ERROR
             "${context}: this Pulp SDK serves Pulp::view from Vellum, so Pulp's own "
             "view editor (the default editor, NATIVE_UI, GPU_UI, FULL_EDITOR or a "
-            "Pulp UI_SCRIPT) cannot be built with it. Use UI_ENGINE vellum with "
-            "UI_SCRIPT, UI <package> with a Vellum editor package, or NO_EDITOR.")
+            "Pulp UI_SCRIPT) cannot be built with it. Use UI_ENGINE vellum (with "
+            "UI_SCRIPT for a scripted editor, or alone for the generated parameter "
+            "editor), UI <package> with a Vellum editor package, or NO_EDITOR.")
     endif()
 endfunction()
 
