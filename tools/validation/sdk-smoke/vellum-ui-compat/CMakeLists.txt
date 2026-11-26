@@ -15,7 +15,7 @@ if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
 endif()
 
 set(PULP_VELLUM_UI_COMPAT_PROBE_NAMES
-    "view;canvas;render;view-native;design-import"
+    "view;canvas;render;design-import"
     CACHE STRING "Pulp UI names this consumer must link")
 
 foreach(_name IN LISTS PULP_VELLUM_UI_COMPAT_PROBE_NAMES)
