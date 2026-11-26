@@ -36,6 +36,7 @@
    "test/gpu_health_scene3d_acceptance.cpp",
    "test/mac_objc_coload_probe.cpp",
    "test/support",
+   "test/test_aax_editor.cpp",
    "test/test_agent_capability_compile.cpp",
    "test/test_control_phase15_aggregate_e2e.cpp",
    "test/test_coremidi_shared_client.cpp",
