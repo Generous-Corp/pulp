@@ -128,7 +128,10 @@ def pick_run(runs: list[dict]) -> dict:
     return max(candidates, key=lambda run: (run.get("created_at") or "", run.get("id") or 0))
 
 
-RUN_SEARCH_LIMIT = 10
+# The workflow requests one full API page. Green Vellum pushes may reuse an
+# earlier proof and therefore have no evidence artifact, so inspect the whole
+# page before declaring that no usable SDK exists.
+RUN_SEARCH_LIMIT = 50
 
 
 def select_run(runs: list[dict], fetch_artifacts, limit: int = RUN_SEARCH_LIMIT) -> tuple[dict, dict]:
