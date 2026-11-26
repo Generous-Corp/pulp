@@ -147,7 +147,7 @@ modules:
     docs: reference/modules.md#simd
 
   - name: runtime
-    summary: Core utilities — SIMD compatibility wrappers over simd, XML/JSON, ZIP, HTTP client, sockets, IPC pipes, crypto (SHA-256/AES/RSA via mbedTLS), i18n, analytics, licensing
+    summary: Core utilities — SIMD compatibility wrappers over simd, XML/JSON, ZIP, HTTP client, sockets, IPC pipes, crypto (SHA-256/AES/RSA via mbedTLS), i18n, analytics, licensing, reload capability vocabulary
     status: stable
     dependencies: [platform, simd]
     docs: reference/modules.md#runtime

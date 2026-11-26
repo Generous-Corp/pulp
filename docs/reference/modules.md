@@ -208,6 +208,18 @@ Core utilities — the foundation everything else builds on.
 `<pulp/runtime/simd.hpp>` keeps the `simd_*` names working as inline wrappers
 over the [`simd`](#simd) module. New code should include `<pulp/simd/simd.hpp>`.
 
+### Reload capabilities
+
+`<pulp/runtime/reload_capabilities.hpp>` defines the capability vocabulary a
+reloadable or remotely pushed scripted UI declares in its signed pack:
+`ReloadCapability`, its stable wire names (`exec`, `clipboard`, `filesystem`,
+`storage`, `ai`, `runtime_import`, `network`) and `CapabilitySet`, which fails
+closed on an unknown name. The format layer validates a pack's declared names
+with it (`format::reload::evaluate_remote_ux_update`) without any UI layer, and
+the scripted-UI bridge enforces the grant (`<pulp/view/reload_capabilities.hpp>`
+keeps the `pulp::view` names as aliases). Vellum's scripted UI reads the same
+wire names; `integrations/pulp-vellum` tests the two lists against each other.
+
 ### XML — Parse and generate XML
 
 Wraps pugixml (MIT). Parse from string or file, query with XPath, generate documents.
