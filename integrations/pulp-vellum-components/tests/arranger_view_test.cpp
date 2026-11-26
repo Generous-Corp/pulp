@@ -362,6 +362,59 @@ TEST_CASE("Arranger empty-header release must match the press without drag callb
     CHECK(arrangement_host.intents().empty());
 }
 
+TEST_CASE("Arranger empty-header click creates a track that persists and undoes",
+          "[timeline][arranger][pointer]") {
+    auto owned = DocumentSession::create(make_authored_track_project());
+    REQUIRE(owned);
+    auto session = std::move(owned).value();
+    auto registered = session->register_writer();
+    REQUIRE(registered);
+    auto writer = std::move(registered).value();
+    const auto baseline = canonical_project(*session->snapshot());
+
+    ScriptedUiHost<EditIntent> clip_host;
+    ScriptedUiHost<TrackArrangementIntent> arrangement_host;
+    ArrangerView view;
+    configure(view, *session->snapshot(), clip_host);
+    auto layout = unit_layout();
+    layout.ruler_height_px = 24.0f;
+    view.set_layout(layout);
+    view.set_track_arrangement_host(&arrangement_host);
+    view.set_track_factory([]() { return Track::create({9}, "created", {}).value(); });
+
+    // The first row past the last authored track, in the header column.
+    const float empty_header_y = layout.ruler_height_px + 3.0f * layout.track_height_px + 20.0f;
+    view.simulate_click({60.0f, empty_header_y});
+    REQUIRE(arrangement_host.intents().size() == 1);
+    const auto* create = std::get_if<TrackCreateIntent>(&arrangement_host.intents().front());
+    REQUIRE(create != nullptr);
+    CHECK(create->sequence_id == ItemId{3});
+    CHECK(create->track.id() == ItemId{9});
+    CHECK_FALSE(create->before_track_id.has_value());
+
+    EditIntentIdentity identity;
+    identity.transaction_id = writer.allocate_transaction_id();
+    identity.command_id = writer.allocate_command_id();
+    identity.expected_revision = session->revision();
+    identity.undo_group = writer.allocate_undo_group_id();
+    auto lowered = lower_track_arrangement_intent(arrangement_host.intents().front(), identity);
+    REQUIRE(lowered);
+    REQUIRE(session->submit(writer, std::move(lowered).value()));
+
+    const auto edited = canonical_project(*session->snapshot());
+    CHECK(edited != baseline);
+    CHECK(track_order_after_round_trip(*session->snapshot()) ==
+          std::vector<ItemId>{{8}, {4}, {7}, {9}});
+
+    // Undo removes the track. The document's id allocator does not step back,
+    // so the whole-document comparison is not the check here.
+    REQUIRE(session->undo(writer));
+    CHECK(session->snapshot()->find_sequence({3})->find_track({9}) == nullptr);
+    CHECK(track_order_after_round_trip(*session->snapshot()) == std::vector<ItemId>{{8}, {4}, {7}});
+    REQUIRE(session->redo(writer));
+    CHECK(canonical_project(*session->snapshot()) == edited);
+}
+
 TEST_CASE("Arranger clip drag survives a serialize round trip with its authored start",
           "[timeline][arranger]") {
     const auto project = make_project();
