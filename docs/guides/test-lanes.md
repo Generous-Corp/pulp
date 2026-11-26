@@ -341,6 +341,15 @@ stopped compiling and no Pulp check noticed.
   fabricated Pulp prefix that stages this run's Vellum SDK. Pull requests that
   touch `tools/cmake/PulpConfig.cmake.in`, the scenario driver
   `test/cmake/test_vellum_ui_compat_package.cmake` or that consumer run the lane.
+- **Installed SDK smoke.** One step configures a release-profile SDK with the
+  Vellum bridge and audio package, builds every target (`cmake --install`
+  refuses an unbuilt one), installs to an empty prefix and runs
+  `test/cmake/test_vellum_installed_sdk_smoke.cmake`. That driver configures
+  `tools/validation/sdk-smoke/vellum-installed/` from scratch against the
+  prefix, links `Pulp::vellum` and `Pulp::vellum-audio`, builds and runs it.
+  The same consumer refused with Vellum unfindable is the control. The
+  installed SDK still exports Pulp's own view targets, so this does not cover
+  the Vellum-backed UI names; the scenario driver above does.
 - **Negative control.** Every full run recompiles one Vellum-side translation
   unit (`knob_panel.cpp`) with `-fsyntax-only`, once against the SDK as
   published, which must succeed, and once against a copy of its mirror headers
