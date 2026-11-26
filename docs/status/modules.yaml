@@ -23,6 +23,13 @@ modules:
     dependencies: [runtime, audio, signal, pulp_vellum]
     docs: reference/modules.md#pulp_vellum_audio
 
+  - name: pulp_vellum_scene
+    path: integrations/pulp-vellum-scene
+    summary: Binds Vellum's installed Draco decoder to the glTF scene loader's decode hook so a KHR_draco_mesh_compression scene loads without pulp::render, with the glTF and Draco fixture consumers over pulp::scene
+    status: experimental
+    dependencies: [scene]
+    docs: reference/modules.md#pulp_vellum_scene
+
   - name: pulp_vellum_components
     path: integrations/pulp-vellum-components
     summary: Retained Pulp view components (panic button, lasso, preferences panel, model manager) as Vellum views with a stable-id catalogue

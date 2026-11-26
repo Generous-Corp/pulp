@@ -3367,7 +3367,10 @@ grep -rc "PULP_ENABLE_GPU" .github/workflows/build.yml                    # 2
 Without the second line a zero is ambiguous between "not wired" and "bad grep".
 
 `.github/workflows/scene3d-advisory.yml` now covers that surface: path-filtered,
-advisory, `macos-15`, SCENE3D ON, not on `merge_group`. Three things about it
+advisory, `macos-15`, SCENE3D ON, not on `merge_group`. The `Vellum SDK
+consumer` lane also turns SCENE3D ON, for `integrations/pulp-vellum-scene`
+(Vellum's Draco decoder behind the glTF loader hook): that package refuses to
+configure without `pulp::scene`. Three things about the scene3d lane
 generalize to any lane you add:
 
 - **`ctest -R` is case-sensitive** and `grep -i` is not, so a regex checked with

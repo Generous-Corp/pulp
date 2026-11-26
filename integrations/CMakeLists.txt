@@ -66,3 +66,11 @@ if(PULP_ENABLE_PULP_VELLUM_COMPONENTS)
     set_property(GLOBAL APPEND PROPERTY PULP_INTEGRATION_TEST_DIRS
         "${CMAKE_CURRENT_SOURCE_DIR}/pulp-vellum-components/tests")
 endif()
+
+option(PULP_ENABLE_PULP_VELLUM_SCENE
+    "Build integrations/pulp-vellum-scene (Vellum's Draco decoder behind the glTF loader hook; needs PULP_ENABLE_SCENE3D)" OFF)
+if(PULP_ENABLE_PULP_VELLUM_SCENE)
+    add_subdirectory(pulp-vellum-scene)
+    set_property(GLOBAL APPEND PROPERTY PULP_INTEGRATION_TEST_DIRS
+        "${CMAKE_CURRENT_SOURCE_DIR}/pulp-vellum-scene/tests")
+endif()

@@ -47,6 +47,10 @@ def main() -> int:
         "components target": ("core/format/CMakeLists.txt", "target_link_libraries(x PUBLIC pulp::vellum-components)\n"),
         "components raw target": ("core/format/CMakeLists.txt", "target_link_libraries(x PRIVATE pulp-vellum-components)\n"),
         "components header": ("core/view/src/a.cpp", '#include <pulp/vellum_components/catalogue.hpp>\n'),
+        "scene option": ("core/format/CMakeLists.txt", "if(PULP_ENABLE_PULP_VELLUM_SCENE)\n"),
+        "scene target": ("core/format/CMakeLists.txt", "target_link_libraries(x PUBLIC pulp::vellum-scene)\n"),
+        "scene raw target": ("core/format/CMakeLists.txt", "target_link_libraries(x PRIVATE pulp-vellum-scene)\n"),
+        "scene header": ("core/view/src/a.cpp", '#include <pulp/vellum_scene/draco_scene_adapter.hpp>\n'),
     }
     for name, (rel, text) in planted.items():
         with tempfile.TemporaryDirectory(prefix="pulp-integrations-boundary-") as raw:
