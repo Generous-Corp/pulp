@@ -45,7 +45,7 @@ modules:
     docs: reference/modules.md#pulp_vellum_renderer3d
   - name: pulp_vellum_graph
     path: integrations/pulp-vellum-graph
-    summary: The SignalGraph node editor as a Vellum view with draggable nodes port-to-port connection drags that choose audio feedback or MIDI edges by modifier and a double-click activation hook and the hosted plug-in editor attachment to a Vellum window host over pulp::host
+    summary: The SignalGraph node editor as a Vellum view with draggable nodes port-to-port connection drags that choose audio feedback or MIDI edges by modifier and a double-click activation hook and the hosted plug-in editor attachment to a Vellum window host and the plug-in manager panel over pulp::host
     status: experimental
     dependencies: [host]
     docs: reference/modules.md#pulp_vellum_graph
