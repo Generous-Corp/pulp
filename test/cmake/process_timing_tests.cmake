@@ -1,8 +1,10 @@
 # Neutral adapter timing facts (format::ProcessTiming) and their projection onto
 # the host event timeline. The CLAP traces drive the real adapter, so the target
-# matches pulp-format's PULP_CLAP_GUI layout of PulpClapPlugin.
+# matches pulp-format's PULP_CLAP_GUI layout of PulpClapPlugin. The adapter
+# header pulls the view bridge, so the suite links the format umbrella itself
+# rather than taking it from pulp::host.
 if(TARGET pulp-host AND TARGET clap)
-    set(_process_timing_libs pulp::host clap)
+    set(_process_timing_libs pulp::host pulp::format clap)
     if(TARGET vst3-sdk)
         list(APPEND _process_timing_libs vst3-sdk)
     endif()
@@ -20,7 +22,7 @@ if(PULP_HAS_VST3 AND TARGET pulp-host)
         test_vst3_process_timing.cpp
         ${CMAKE_SOURCE_DIR}/core/format/src/vst3_plug_view.cpp)
     target_link_libraries(pulp-test-vst3-process-timing
-        PRIVATE pulp::host Catch2::Catch2WithMain)
+        PRIVATE pulp::host pulp::format Catch2::Catch2WithMain)
     target_compile_definitions(pulp-test-vst3-process-timing PRIVATE
         PULP_VST3=1
         PULP_VST3_GUI=1)

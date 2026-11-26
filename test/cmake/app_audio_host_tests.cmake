@@ -1403,3 +1403,6 @@ pulp_test_spawns(pulp-test-host-signal-graph NONE REASON "adds in-memory PluginS
 
 # Spectral asset save/replay persistence and its installed-SDK consumer.
 include("${CMAKE_CURRENT_LIST_DIR}/a3_spectral_replay_tests.cmake")
+
+# The host's link closure must stay free of Pulp's view stack.
+include("${CMAKE_CURRENT_LIST_DIR}/host_link_edge_tests.cmake")
