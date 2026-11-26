@@ -345,6 +345,8 @@ set(PULP_RUNTIME_UNIT_HEADERS
     include/pulp/runtime/node_abi.hpp
     include/pulp/runtime/primes.hpp
     include/pulp/runtime/range.hpp
+    include/pulp/runtime/reload_autocaps.hpp
+    include/pulp/runtime/reload_capabilities.hpp
     include/pulp/runtime/result.hpp
     include/pulp/runtime/runtime.hpp
     include/pulp/runtime/safe_relative_path.hpp

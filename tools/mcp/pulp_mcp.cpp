@@ -119,6 +119,10 @@ using pulp_mcp::handle_minos;
 using pulp_mcp::handle_status;
 using pulp_mcp::handle_test;
 using pulp_mcp::handle_trace_analyze;
+using pulp_mcp::handle_ui_screenshot;
+using pulp_mcp::handle_ui_simulate_click;
+using pulp_mcp::handle_ui_view_tree;
+using pulp_mcp::ui_request_uses_vellum_host;
 #if PULP_MCP_ENABLE_TIMELINE_TOOLS
 using pulp_mcp::handle_timeline_tool;
 #endif
@@ -568,11 +572,11 @@ std::string pulp_mcp::server::tools_list_json() {
     out +=
         R"JSON({"name":"pulp_audio_compare","description":"Advisory, agent-facing before/after judgment between two WAVs (measure -> compare -> judge) via `pulp audio compare`. Delegates to the opt-in Audio Quality Lab tool (no DSP in the CLI); level-matches, runs one measurement axis, and returns the typed quality_lab.compare.v1 report JSON (evidence envelope + verdict: regression_suspected | material_change_detected | no_material_change_detected | inconclusive | invalid). Advisory, never a gate. Requires the tool: `pulp tool install audio-quality-lab`.","inputSchema":{"type":"object","required":["reference","candidate"],"properties":{"reference":{"type":"string","description":"Path to the reference (before) WAV"},"candidate":{"type":"string","description":"Path to the candidate (after) WAV"},"profile":{"type":"string","description":"Measurement axis: tonal-balance (LTAS centroid), added-hf (band-relative >=8kHz dB), noise-roughness (HNR drop), graininess (spectral-flux rise), stereo-width (side/mid + phase; needs 2-channel input), or transient-integrity (per-onset attack smear; needs percussive material). Default tonal-balance"},"reference_role":{"type":"string","description":"peer (neutral A/B, default) or golden (reference is known-good; enables regression_suspected)"},"align":{"type":"string","description":"Time-align before measuring: none (default), latency (trim a constant delay/offset so a pure shift is not read as a material change), varispeed:R (undo a declared tape-style speed change by resampling to the reference time base), stretch:R (a declared pitch-preserving time-stretch — measure warp-invariant axes directly, warp-normalize graininess + corroboration), pitch:S (a declared duration-preserving pitch shift in semitones — compensate tonal-balance for the expected centroid move), or ratio:auto (ESTIMATE a uniform stretch ratio, double-gated). Refuses if the audio does not support the request"},"threshold":{"type":"number","description":"Materiality override (finite positive; the per-axis valid range is enforced by the tool); defaults to the axis's own default"}}}},)JSON";
     out +=
-        R"JSON({"name":"pulp_screenshot","description":"Render a built-in demo or JavaScript UI fixture to PNG (base64). For project plugin screenshots, use pulp_validate with screenshot=true or the CLI's pulp run --headless --screenshot path.","inputSchema":{"type":"object","properties":{"script":{"type":"string","description":"Path to JS UI script"},"width":{"type":"integer","description":"Width in points (default 400)"},"height":{"type":"integer","description":"Height in points (default 300)"},"theme":{"type":"string","description":"Theme: dark, light, pro_audio"},"demo":{"type":"boolean","description":"Render built-in demo UI"}}}},)JSON";
+        R"JSON({"name":"pulp_screenshot","description":"Render a built-in demo or JavaScript UI fixture to PNG (base64). Pass bundle to render a Vellum authoring bundle through the Vellum app host instead (scale 1 or 2; the host takes no theme, width or height). For project plugin screenshots, use pulp_validate with screenshot=true or the CLI's pulp run --headless --screenshot path.","inputSchema":{"type":"object","properties":{"bundle":{"type":"string","description":"Vellum authoring bundle to render through the Vellum app host"},"scale":{"type":"integer","description":"Vellum host capture scale, 1 or 2 (default 1)"},"script":{"type":"string","description":"Path to JS UI script"},"width":{"type":"integer","description":"Width in points (default 400)"},"height":{"type":"integer","description":"Height in points (default 300)"},"theme":{"type":"string","description":"Theme: dark, light, pro_audio"},"demo":{"type":"boolean","description":"Render built-in demo UI"}}}},)JSON";
     out +=
-        R"JSON({"name":"pulp_simulate_click","description":"Simulate a mouse click at coordinates on a demo UI and return the view tree JSON","inputSchema":{"type":"object","properties":{"x":{"type":"number","description":"X coordinate"},"y":{"type":"number","description":"Y coordinate"}}}},)JSON";
+        R"JSON({"name":"pulp_simulate_click","description":"Press a node of a Vellum authoring bundle (the built-in demo panel when no bundle is given) through the Vellum app host, by node_id or by x,y (the deepest pressable node under the point), and return the resulting view tree and a PNG of the frame.","inputSchema":{"type":"object","properties":{"bundle":{"type":"string","description":"Vellum authoring bundle path (default: built-in demo panel)"},"node_id":{"type":"string","description":"Node to press"},"x":{"type":"number","description":"X coordinate in design units"},"y":{"type":"number","description":"Y coordinate in design units"},"scale":{"type":"integer","description":"Capture scale, 1 or 2 (default 1)"},"capture":{"type":"boolean","description":"Include a PNG of the frame after the press (default true)"}}}},)JSON";
     out +=
-        R"JSON({"name":"pulp_get_view_tree","description":"Get the view tree as JSON for a demo UI","inputSchema":{"type":"object","properties":{}}},)JSON";
+        R"JSON({"name":"pulp_get_view_tree","description":"Get the node ids, types and boxes of a Vellum authoring bundle (the built-in demo panel when no bundle is given) through the Vellum app host.","inputSchema":{"type":"object","properties":{"bundle":{"type":"string","description":"Vellum authoring bundle path (default: built-in demo panel)"}}}},)JSON";
     out +=
         R"JSON({"name":"pulp_create","description":"Scaffold a new plugin project from templates","inputSchema":{"type":"object","properties":{"name":{"type":"string","description":"Plugin name"},"type":{"type":"string","enum":["effect","instrument"],"description":"Plugin type"},"manufacturer":{"type":"string","description":"Manufacturer name"}}}},)JSON";
     out +=
@@ -839,37 +843,33 @@ static std::string handle_request_raw(const std::string& json) {
         else if (auto timeline = handle_timeline_tool(name, args_json))
             result = std::move(*timeline);
 #endif
-        else if (name == "pulp_screenshot" || name == "pulp_simulate_click" ||
-                 name == "pulp_get_view_tree") {
-            // These tools delegate to pulp-screenshot binary
+        else if (name == "pulp_simulate_click") {
+            result = handle_ui_simulate_click(args_json);
+        } else if (name == "pulp_get_view_tree") {
+            result = handle_ui_view_tree(args_json);
+        } else if (name == "pulp_screenshot" && ui_request_uses_vellum_host(args_json)) {
+            result = handle_ui_screenshot(args_json);
+        } else if (name == "pulp_screenshot") {
+            // Demo and script fixtures delegate to the pulp-screenshot binary.
             auto root = find_project_root();
             if (root.empty()) {
                 result =
                     "{\"content\":[{\"type\":\"text\",\"text\":\"Error: not in a Pulp project\"}]}";
             } else {
                 auto screenshot_bin = root / "build" / "tools" / "screenshot" / "pulp-screenshot";
-                if (name == "pulp_screenshot") {
-                    auto demo = extract_string(args_json, "demo");
-                    auto script = extract_string(args_json, "script");
-                    std::string cmd = shell_quote(screenshot_bin.string()) + " --base64";
-                    if (!script.empty())
-                        cmd += " --script " + shell_quote(script);
-                    else
-                        cmd += " --demo";
-                    auto theme = extract_string(args_json, "theme");
-                    if (!theme.empty())
-                        cmd += " --theme " + shell_quote(theme);
-                    auto output = exec(cmd + " 2>/dev/null");
-                    result = "{\"content\":[{\"type\":\"image\",\"data\":\"" + output +
-                             "\",\"mimeType\":\"image/png\"}]}";
-                } else {
-                    // simulate_click and get_view_tree: run screenshot in demo mode, capture view tree
-                    std::string cmd = shell_quote(screenshot_bin.string()) +
-                                      " --demo --output /dev/null 2>/dev/null";
-                    exec(cmd);
-                    result = "{\"content\":[{\"type\":\"text\",\"text\":\"View tree and event "
-                             "simulation available via pulp-screenshot --demo\"}]}";
-                }
+                auto demo = extract_string(args_json, "demo");
+                auto script = extract_string(args_json, "script");
+                std::string cmd = shell_quote(screenshot_bin.string()) + " --base64";
+                if (!script.empty())
+                    cmd += " --script " + shell_quote(script);
+                else
+                    cmd += " --demo";
+                auto theme = extract_string(args_json, "theme");
+                if (!theme.empty())
+                    cmd += " --theme " + shell_quote(theme);
+                auto output = exec(cmd + " 2>/dev/null");
+                result = "{\"content\":[{\"type\":\"image\",\"data\":\"" + output +
+                         "\",\"mimeType\":\"image/png\"}]}";
             }
         } else if (name == "pulp_create") {
             auto root = find_project_root();

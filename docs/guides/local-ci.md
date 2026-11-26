@@ -1185,6 +1185,15 @@ This is a deliberate trade: up to ~24 h of latency on a Windows regression, in
 exchange for merge-queue capacity and spend. Revisit if Windows parity becomes an
 active workstream rather than a background one.
 
+### Hosted Windows checkout keeps LF bytes
+
+Git for Windows defaults to `core.autocrlf=true`. The Windows job in
+`cross-platform-check.yml` therefore sets `core.autocrlf=false` and
+`core.eol=lf` before `actions/checkout`, the same pin `release-cli.yml` uses.
+Without it every text file arrives with CRLF line endings, and tests that diff a
+committed artifact against a regenerated one (the timeline schema drift checks)
+or compare a pinned digest fail on bytes nobody committed.
+
 ### Hosted Windows budget and compiler cache
 
 On a GitHub-hosted `windows-latest` runner (4 vCPUs, no remote ccache storage) a
@@ -1205,6 +1214,15 @@ label. Those registrations (`tools/ci/source_selftests.json`) only read the
 checkout, run on ubuntu-latest in the required `Enforce version & skill sync`
 job on every merge group, and many use POSIX-only fixtures. See
 `docs/guides/test-lanes.md`, "The source-selftest lane".
+
+### Windows skips the browser-capture and quarantined labels
+
+The same ctest also excludes `browser-capture` and `windows-pr-quarantine`.
+The `browser-capture` registrations launch a real Chrome, and on a loaded
+hosted runner its CDP capability probe times out; the macOS gate runs them on
+every merge group, so coverage is not lost. `windows-pr-quarantine` is the
+label `build.yml`'s Windows lane already excludes on pull requests, so the two
+Windows lanes now agree on which tests are known not to pass there.
 
 ## The FetchContent cache had to point at a real path
 
@@ -9131,3 +9149,14 @@ workflows (`web-plugins.yml`, `wclap-cloudflare.yml`, `format-baseline-diff.yml`
 call it as `python3 tools/scripts/download_retry.py URL DEST`. The macOS
 `brew install ccache` step in `build.yml` uses the same schedule inline. A new
 workflow download should use the helper rather than a bare `curl -fsSL`.
+
+### Pre-push merge-tree time budget
+
+`PULP_PREPUSH_MERGE_TREE_BOUND` (default 30 seconds, 0 to disable) supplies the
+merge-tree helper's `--overall-bound`. This shared elapsed budget limits worktree
+checkout and checker execution. It does **not** enforce a whole-command deadline:
+Git metadata operations, including `merge-tree`, `commit-tree`, and pruning, and
+worktree cleanup can extend the elapsed time beyond it. Exhaustion reports
+NOT CHECKED, advisory, rather than a pass. A completed failing check still blocks
+the push; when merge-tree does not pass cleanly, the hook retains its static
+changed-surface families check.

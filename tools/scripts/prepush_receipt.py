@@ -42,6 +42,7 @@ VALUE_KNOBS = (
     "PULP_PREPUSH_ALLOW_NOT_CHECKED",
     "PULP_SKIP_PR_BATCH_ADVICE",
     "PULP_PREPUSH_BASE",
+    "PULP_PREPUSH_MERGE_TREE_BOUND",
     "PULP_REFRESH_PUSH_POLICY",
 )
 # Only whether these are set is recorded.
