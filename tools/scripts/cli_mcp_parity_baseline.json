@@ -96,7 +96,7 @@
     "pulp_kit_validate": "Sub-tool of `pulp kit` — metadata validation RPC, no top-level CLI peer",
     "pulp_kit_verify": "Sub-tool of `pulp kit` — post-plan validation-profile RPC, no top-level CLI peer",
     "pulp_screenshot": "Headless render via pulp-screenshot binary; not a top-level CLI command",
-    "pulp_simulate_click": "Headless screenshot harness; wraps pulp-screenshot binary",
+    "pulp_simulate_click": "Headless press and capture through the Vellum app host; not a top-level CLI command",
     "pulp_timeline_command_apply": "Sub-tool of `pulp seq` — applies the generated typed command vocabulary, no top-level CLI peer",
     "pulp_timeline_diff": "MCP-local DocumentSession operation reporting the latest exact dirty set; no `pulp seq` session peer",
     "pulp_timeline_explain": "Sub-tool of `pulp seq` — structured playback-program explanation, no top-level CLI peer",

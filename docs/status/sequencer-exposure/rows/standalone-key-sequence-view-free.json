@@ -1,0 +1,45 @@
+{
+  "id": "standalone-key-sequence-view-free",
+  "title": "The standalone key-sequence harness names its keys without the view layer",
+  "classification": "engine_internal",
+  "delivery_state": "pending",
+  "claim_id": "standalone-key-sequence-view-free-20261125",
+  "owned_paths": [
+    "core/format/include/pulp/format/detail/standalone_key_sequence.hpp",
+    "core/format/src/standalone_key_driver_mac.mm",
+    "test/test_standalone_key_sequence.cpp",
+    "docs/status/sequencer-exposure/rows/standalone-key-sequence-view-free.json"
+  ],
+  "evidence": [
+    {
+      "path": "core/format/include/pulp/format/detail/standalone_key_sequence.hpp",
+      "needles": ["enum class SequenceKey : int", "bool parse_key_sequence"]
+    },
+    {
+      "path": "core/format/src/standalone_key_driver_mac.mm",
+      "needles": ["unsigned short vk_from_key_code(SequenceKey key)"]
+    }
+  ],
+  "surfaces": {
+    "installed_sdk": {
+      "disposition": "not_applicable",
+      "rationale": "The key identities move from view::KeyCode to a format-local enum with the same values in a detail header; the parser, the --key-sequence spelling and the delivered native events are unchanged."
+    },
+    "offline_timeline_cli": {
+      "disposition": "not_applicable",
+      "rationale": "No timeline CLI command, flag, or output contract changes."
+    },
+    "offline_timeline_mcp": {
+      "disposition": "not_applicable",
+      "rationale": "No MCP operation, schema, or handler changes."
+    },
+    "live_product_control": {
+      "disposition": "not_applicable",
+      "rationale": "No runtime operation, executor binding, grant, or profile policy changes."
+    },
+    "design_time_agent_manifest": {
+      "disposition": "not_applicable",
+      "rationale": "No design-time capability or authoring contract changes."
+    }
+  }
+}
