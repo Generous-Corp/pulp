@@ -39,7 +39,7 @@ use without hard-coding macOS, Windows, Linux, iOS, or Web behavior.
 
 ## pulp_vellum
 
-`pulp::vellum` (`integrations/pulp-vellum`, optional, off unless `PULP_ENABLE_PULP_VELLUM=ON`) presents Pulp's editor-host ports in Vellum's value interfaces, so a Vellum widget binds to a processor's parameters without either side naming the other's types. `ParamPortModel` is a `vellum::value::ParamModel` over a `format::ParamPort`: parameters resolve by name or decimal id (or a plug-in's own resolver), gestures nest and reach the port once, a host change a subscriber echoes back is not written as an edit, and restored state replays through the port's listener. `mapping.hpp` holds the pure value mapping (`to_normalized`, `to_plain`, text parse and format) over Pulp's own `ParamRange`, callable without a model. `VisualPortFeed` presents a `format::VisualPort` as a `vellum::value::ValueFeed`. `editor_factory<T>()` wraps a `vellum::view::View` tree in the editor-host contract and gives each editor its own parameter model and visual feed. Vellum's `Vellum::MirrorView_core` defines `PluginViewHost::create()` and its factory registry with the GPU-backed host; Pulp registers Dawn once per plug-in bundle before creating an editor and does not provide a competing raster host. Modulation readout takes a reader the caller supplies over `StateStore::displayed_modulation`. It needs an installed Vellum SDK on `CMAKE_PREFIX_PATH`, nothing in `core/` links it (`integrations_boundary_check.py`), and its tests run in the Vellum SDK consumer workflow against the newest green Vellum main SDK.
+`pulp::vellum` (`integrations/pulp-vellum`, optional, off unless `PULP_ENABLE_PULP_VELLUM=ON`) presents Pulp's editor-host ports in Vellum's value interfaces, so a Vellum widget binds to a processor's parameters without either side naming the other's types. `ParamPortModel` is a `vellum::value::ParamModel` over a `format::ParamPort`: parameters resolve by name or decimal id (or a plug-in's own resolver), gestures nest and reach the port once, a host change a subscriber echoes back is not written as an edit, and restored state replays through the port's listener. `mapping.hpp` holds the pure value mapping (`to_normalized`, `to_plain`, text parse and format) over Pulp's own `ParamRange`, callable without a model. `VisualPortFeed` presents a `format::VisualPort` as a `vellum::value::ValueFeed`. `editor_factory<T>()` wraps a `vellum::view::View` tree in the editor-host contract and gives each editor its own parameter model and visual feed. `AutoUi` builds the generated parameter editor on Vellum views from a `format::ParamPort` (one knob or toggle tile per parameter, a section per registered group, a scroll once it overflows), with every control bound through the editor's `ParamModel`; `auto_ui_editor_factory()` serves it, opening at its fitting size unless the processor declares one, and `pulp_add_plugin(... UI_ENGINE vellum)` without `UI_SCRIPT` selects it. Vellum's `Vellum::MirrorView_core` defines `PluginViewHost::create()` and its factory registry with the GPU-backed host; Pulp registers Dawn once per plug-in bundle before creating an editor and does not provide a competing raster host. `ScriptedUiSwapUnit` (`scripted_ui_swap_unit.hpp`) is the live-swap UI stage for a Vellum scripted session: it moves the session to another script through `reload_from()` under `format::reload::apply_live_swap()` and rolls it back when a later stage, such as the DSP swap, fails. Modulation readout takes a reader the caller supplies over `StateStore::displayed_modulation`. It needs an installed Vellum SDK on `CMAKE_PREFIX_PATH`, nothing in `core/` links it (`integrations_boundary_check.py`), and its tests run in the Vellum SDK consumer workflow against the newest green Vellum main SDK.
 
 `pulp::vellum::AboutNotices` (`about_notices.hpp`) is a ready-made About view for a Vellum editor. It lists a plug-in's third-party notices (name, version, license per row) in a scrolling list, and a click expands one row to show its license text. `AboutNotices()` reads the running module's own `format::third_party_notices()`; `AboutNotices(notices)` takes a `format::ThirdPartyNotices` directly. When there are no notices it shows the document's `reason`. What it displays is the pure `make_about_model(notices, expanded)`, so a test or another surface can read the rows without painting. Add it as a child of an editor's root view (a panel, a tab, or a modal) and size it with ordinary flex layout. It is built only when the Vellum SDK ships its view layer.
 
@@ -55,6 +55,14 @@ use without hard-coding macOS, Windows, Linux, iOS, or Web behavior.
 `pulp::vellum_components` (`integrations/pulp-vellum-components`, optional, off unless `PULP_ENABLE_PULP_VELLUM_COMPONENTS=ON`) provides the retained Pulp view components as `vellum::view::View` subclasses: `PanicButton` (with `panic_target()` for a `format::Processor`), `LassoComponent`, `PreferencesPanel` and `ModelManagerView` (a block per `runtime::ListedModel` with install, activate and remove actions that carry the model id, and a progress line while a download runs). `make_pulp_view_component(id, context)` builds one by stable id (`pulp.panic_button`, `pulp.lasso`, `pulp.preferences_panel`, `pulp.model_manager`); the `PulpViewComponentContext` carries the Pulp-owned services a component binds to. A preferences panel restores its stored page when the caller binds a `PropertiesFile` after adding its pages.
 
 `ViewInspector` is the read-only introspection of a Vellum view tree behind the component inspector: `to_json()`, `find_by_id()`, `find_by_anchor()` (an empty anchor never matches), `count_views()`, `populate_tree()`, `view_properties()` and `absolute_bounds()` (which honours a scrolled `ScrollView`'s child offset). A widget outside Vellum's view core describes itself to it through `vellum::view::InspectorFacts`.
+
+## pulp_vellum_renderer3d
+
+`pulp::vellum_renderer3d` (`integrations/pulp-vellum-renderer3d`, optional, off unless `PULP_ENABLE_PULP_VELLUM_RENDERER3D=ON`, and it needs `PULP_ENABLE_SCENE3D=ON` and a macOS build with gpu-runtime) is the native scene3d renderer on Vellum's GPU device layer. `Renderer3D::render_hardcoded_textured_cube()` draws offscreen and returns the same `Scene3DRenderResult` as the legacy `pulp::render::Renderer3D`: the stage flags, the adapter, the frame census, RGBA and a PNG. `rgba_fingerprint()` is the FNV-1a frame fingerprint the renderer goldens record. The Dawn device is gpu-runtime's (`VellumGpuRuntime::Device`): the renderer creates an offscreen `gpu_runtime::GpuSurface` and only borrows its device, queue and instance. It links `pulp::scene`, gpu-runtime and the Skia/Dawn archive gpu-runtime's Dawn comes from, and not `pulp::render`. It lives in Pulp rather than in Vellum because it renders `pulp::scene` data.
+
+## pulp_vellum_graph
+
+`pulp::vellum_graph` (`integrations/pulp-vellum-graph`, optional, off unless `PULP_ENABLE_PULP_VELLUM_GRAPH=ON`) is the node editor for `host::SignalGraph` as a `vellum::view::View`. The graph model stays in `pulp::host`; this package is where the plug-in host and Vellum's view layer meet, so an ordinary Vellum editor never links the host. `GraphEditorView` draws each node as a titled box with input ports on the left and output ports on the right, strokes each connection as a cubic curve in a colour per edge kind (audio, MIDI, automation, feedback) and draws a ghost curve while a connection is dragged. Dragging from a port to a port on the other side connects them through the graph; Shift makes the edge a feedback edge and Alt makes it a MIDI edge. `set_node_position()` places a node, `auto_layout()` gives every unplaced node a grid slot, and `selected_node()` reports the last clicked node. A double click on a node calls the handler set with `set_node_activated_handler()`; opening a hosted plug-in window from it is the application's choice. The package links `pulp::host` and `Vellum::MirrorView_core` and none of Pulp's own view targets. It is not built on iOS, where `pulp::host` does not exist.
 
 ## simd
 
@@ -209,6 +217,18 @@ Core utilities — the foundation everything else builds on.
 
 `<pulp/runtime/simd.hpp>` keeps the `simd_*` names working as inline wrappers
 over the [`simd`](#simd) module. New code should include `<pulp/simd/simd.hpp>`.
+
+### Reload capabilities
+
+`<pulp/runtime/reload_capabilities.hpp>` defines the capability vocabulary a
+reloadable or remotely pushed scripted UI declares in its signed pack:
+`ReloadCapability`, its stable wire names (`exec`, `clipboard`, `filesystem`,
+`storage`, `ai`, `runtime_import`, `network`) and `CapabilitySet`, which fails
+closed on an unknown name. The format layer validates a pack's declared names
+with it (`format::reload::evaluate_remote_ux_update`) without any UI layer, and
+the scripted-UI bridge enforces the grant (`<pulp/view/reload_capabilities.hpp>`
+keeps the `pulp::view` names as aliases). Vellum's scripted UI reads the same
+wire names; `integrations/pulp-vellum` tests the two lists against each other.
 
 ### XML — Parse and generate XML
 
@@ -2725,7 +2745,7 @@ capabilities over new virtual methods.
 
 ## host
 
-The host module owns plugin hosting and the `SignalGraph` binding. Its bounded
+The host module owns plugin hosting and the `SignalGraph` binding. `pulp::host` links `pulp::format-core`, not the `pulp::format` umbrella, so a host consumer does not inherit Pulp's view stack; link `pulp::format` for the format adapters and the editor bridge. Its bounded
 sample-region surface declares scalar kernels, explicit `UnitDelay` causal
 boundaries, promoted parameter contracts, and immutable prepared snapshots.
 `SampleRegionExecutionDomain` prevents an old binding and a newly adopted

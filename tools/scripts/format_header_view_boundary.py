@@ -68,8 +68,6 @@ VIEW_HEADERS = {
     "pulp/format/panic_target.hpp",
     "pulp/format/reload/pack_build.hpp",
     "pulp/format/reload/reloadable_shell.hpp",
-    "pulp/format/reload/remote_update.hpp",
-    "pulp/format/reload/remote_update_fetch.hpp",
     "pulp/format/reload/scripted_ui_swap_unit.hpp",
     "pulp/format/settings_panel.hpp",
     "pulp/format/standalone_settings.hpp",

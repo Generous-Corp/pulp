@@ -5,11 +5,16 @@ The author refreshes a branch with ``git merge origin/main``.  This helper lets
 the local gates inspect that same hypothetical tree before the merge exists,
 so generated script manifests cannot silently validate only the old branch.
 Compiled/build checks intentionally do not run here.
+
+``--overall-bound`` caps checkout and checker execution against a shared elapsed
+budget. Git metadata operations (including merge-tree/commit-tree and pruning)
+and cleanup are outside that enforcement; this is not a whole-command deadline.
 """
 from __future__ import annotations
 
 import argparse
 import os
+import re
 import shutil
 import signal
 import subprocess
@@ -37,6 +42,11 @@ UNAVAILABLE = None
 # (stale) and from 3 (the merge conflicts), so a caller can never read "did
 # not run" as "passed".
 NOT_CHECKED = 4
+# The overall time bound (--overall-bound) ran out before every check finished.
+# Distinct from NOT_CHECKED: the hook treats it as advisory, never a pass and
+# never a refusal. A check that finished with a failure still outranks it.
+BOUND_EXCEEDED = 5
+BOUND = "bound"
 BASE_CHECK_TIMEOUT = 60.0
 LOAD_SCALE_SECONDS = 20.0
 MAX_CHECK_TIMEOUT = 240.0
@@ -69,22 +79,59 @@ def _check_timeout() -> float:
     return min(MAX_CHECK_TIMEOUT, max(BASE_CHECK_TIMEOUT, scaled))
 
 
-def _run(cmd: list[str], cwd: Path, env: dict[str, str], timeout: float | None = None) -> int | None:
+def _run_grouped(cmd: list[str], cwd: Path, env: dict[str, str],
+                 limit: float) -> subprocess.CompletedProcess[str]:
+    """subprocess.run with a process-group kill on timeout: a descendant that
+    inherited the captured pipes cannot keep communicate() waiting past the
+    bound. Raises TimeoutExpired / OSError like subprocess.run."""
+    proc = subprocess.Popen(cmd, cwd=cwd, env=env, text=True, encoding="utf-8",
+                            stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+                            stderr=subprocess.PIPE, start_new_session=True)
+    try:
+        out, err = proc.communicate(timeout=limit)
+    except BaseException as exc:
+        try:
+            os.killpg(proc.pid, signal.SIGKILL)
+        except (ProcessLookupError, PermissionError):
+            pass
+        try:
+            proc.communicate(timeout=5)
+        except subprocess.TimeoutExpired:
+            pass
+        if isinstance(exc, subprocess.TimeoutExpired):
+            raise subprocess.TimeoutExpired(cmd, limit) from None
+        raise
+    return subprocess.CompletedProcess(proc.args, proc.returncode, out, err)
+
+
+def _run(cmd: list[str], cwd: Path, env: dict[str, str], timeout: float | None = None,
+         deadline: float | None = None) -> int | str | None:
     """Run one check. A timeout is retried once with double the limit; a second
     timeout (or a start failure) is UNAVAILABLE, which callers treat as not
-    checked, never as a pass."""
+    checked, never as a pass. `deadline` (a time.monotonic() value) caps every
+    attempt at the time left; running out of it returns BOUND, with no retry."""
     if timeout is None:
         timeout = _check_timeout()
     proc = None
     for limit in (timeout, timeout * 2):
         start = time.monotonic()
+        bounded = False
+        if deadline is not None:
+            remaining = deadline - start
+            if remaining <= 0:
+                return BOUND
+            if limit >= remaining:
+                limit, bounded = remaining, True
         try:
-            proc = subprocess.run(cmd, cwd=cwd, env=env, text=True, encoding="utf-8",
-                                  timeout=limit, capture_output=True)
+            proc = _run_grouped(cmd, cwd, env, limit)
             break
         except (OSError, subprocess.TimeoutExpired) as exc:
             elapsed = time.monotonic() - start
             load, _ = _load_per_core()
+            if bounded and isinstance(exc, subprocess.TimeoutExpired):
+                print(f"merge-tree script-state: {cmd[0]} stopped at the overall bound "
+                      f"(elapsed {elapsed:.1f}s, 1-min load {load:.1f})", file=sys.stderr)
+                return BOUND
             retrying = isinstance(exc, subprocess.TimeoutExpired) and limit == timeout
             print(f"merge-tree script-state: {cmd[0]} unavailable or timed out: {exc} "
                   f"(elapsed {elapsed:.1f}s, limit {limit:.0f}s, 1-min load {load:.1f}); "
@@ -104,12 +151,93 @@ def _run(cmd: list[str], cwd: Path, env: dict[str, str], timeout: float | None =
     return proc.returncode
 
 
+def add_worktree(root: Path, path: Path, commit: str,
+                 timeout: float | None) -> subprocess.CompletedProcess[str] | None:
+    """`git worktree add --detach`, with group teardown on timeout/cancellation.
+    Reap before the caller removes the worktree. None on timeout."""
+    proc = subprocess.Popen(
+        ["git", "-C", str(root), "worktree", "add", "--detach", str(path), commit],
+        text=True, encoding="utf-8", stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE, start_new_session=True)
+    try:
+        out, err = proc.communicate(timeout=timeout)
+    except BaseException as exc:
+        # Cancellation must unwind through here before outer worktree cleanup.
+        try:
+            os.killpg(proc.pid, signal.SIGKILL)
+        except (ProcessLookupError, PermissionError):
+            pass
+        proc.communicate()
+        if isinstance(exc, subprocess.TimeoutExpired):
+            return None
+        raise
+    return subprocess.CompletedProcess(proc.args, proc.returncode, out, err)
+
+
+REMOVE_TRIES = 5
+REMOVE_PAUSE = 0.4
+
+
+def remove_worktree(root: Path, path: Path) -> None:
+    """Remove our own worktree at `path`, including one whose add was killed.
+
+    Git leaves an interrupted add locked ("initializing"); `prune` skips it and
+    a single --force will not remove it. Unlock, remove with --force twice,
+    retry the directory removal (a file written as it starts makes it fail
+    once), then prune. Only `path`, our own mkdtemp directory, is touched."""
+    def git_quiet(*a: str) -> None:
+        subprocess.run(["git", "-C", str(root), *a], stdout=subprocess.DEVNULL,
+                       stderr=subprocess.DEVNULL)
+    git_quiet("worktree", "unlock", str(path))
+    git_quiet("worktree", "remove", "--force", "--force", str(path))
+    for _ in range(REMOVE_TRIES):
+        shutil.rmtree(path, ignore_errors=True)
+        if not path.exists():
+            break
+        time.sleep(REMOVE_PAUSE)
+    git_quiet("worktree", "prune", "--expire", "now")
+
+
+# Include the manifest's shared helper imports as well as its
+# agent_capability_* modules. Keep this selector in sync with the hook and
+# gates.sh so all push surfaces make the same relevance decision.
+# The hook's equivalent selector is covered by the same fixture matrix.
+CAPABILITY_INPUTS = re.compile(
+    r"^(core/[^/]+/include/|tools/scripts/agent_capability_|tools/scripts/(json_schema_lite|gate_common)\.py$|tools/agent-capabilities/|docs/status/agent-capabilit"
+    r"|tools/dsp_vocabulary\.py$|docs/status/forge-catalog\.json$|test/test_agent_capability_compile\.cpp$)")
+
+
+def _touches_capability_inputs(root: Path, base: str, head: str) -> bool:
+    """Same paths as the hook's own capability gate. Unreadable means yes."""
+    res = git(root, "diff", "--name-only", f"{base}...{head}")
+    if res.returncode:
+        return True
+    return any(CAPABILITY_INPUTS.match(line) for line in res.stdout.splitlines())
+
+
+def _bound_exceeded(bound: float, unrun: list[str]) -> int:
+    names = f" (not finished: {', '.join(unrun)})" if unrun else ""
+    print(f"merge-tree script-state: NOT CHECKED: the {bound:.0f}s overall bound ran out{names}. "
+          "ADVISORY, NOT A PASS: CI builds the same merged tree on pull_request. Run "
+          "`python3 tools/scripts/merge_tree_script_state.py` on a quieter host to check it now.",
+          file=sys.stderr)
+    return BOUND_EXCEEDED
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--repo-root", type=Path, default=Path.cwd())
     ap.add_argument("--base", default="origin/main")
     ap.add_argument("--head", default="HEAD")
+    ap.add_argument("--only-if-capability-inputs", action="store_true",
+                    help="run the agent-capability manifest check only when base...head touches "
+                         "its inputs (the pre-push hook passes this; gates.sh always runs it)")
+    ap.add_argument("--overall-bound", type=float, default=0.0, metavar="SECONDS",
+                    help="cap checkout and checker execution with this shared elapsed budget "
+                         f"and exit {BOUND_EXCEEDED} (not checked, advisory); "
+                         "metadata operations and cleanup are not bounded; 0 means no bound")
     args = ap.parse_args(argv)
+    deadline = time.monotonic() + args.overall_bound if args.overall_bound > 0 else None
     root = args.repo_root.resolve()
     base = git(root, "rev-parse", "--verify", args.base)
     head = git(root, "rev-parse", "--verify", args.head)
@@ -143,51 +271,58 @@ def main(argv: list[str] | None = None) -> int:
     def cleanup() -> None:
         nonlocal added_worktree
         if added_worktree:
-            subprocess.run(["git", "-C", str(root), "worktree", "remove", "--force", str(tmp)],
-                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            remove_worktree(root, tmp)
             added_worktree = False
-        shutil.rmtree(tmp, ignore_errors=True)
-        subprocess.run(["git", "-C", str(root), "worktree", "prune", "--expire", "now"],
-                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        else:
+            shutil.rmtree(tmp, ignore_errors=True)
 
     def on_signal(signum: int, _frame: object) -> None:
-        cleanup()
+        # add_worktree tears down its child before the finally block cleans up.
         raise SystemExit(128 + signum)
 
     old_handlers = {s: signal.signal(s, on_signal) for s in (signal.SIGINT, signal.SIGTERM, signal.SIGHUP)}
     try:
-        added = subprocess.run(["git", "-C", str(root), "worktree", "add", "--detach", str(tmp), synthetic],
-                               text=True, encoding="utf-8", capture_output=True)
+        # Set before the add: an interrupted add leaves a locked record that
+        # cleanup() must still remove.
+        added_worktree = True
+        added = add_worktree(root, tmp, synthetic,
+                             None if deadline is None else max(0.1, deadline - time.monotonic()))
+        if added is None:
+            return _bound_exceeded(args.overall_bound, [])
         if added.returncode:
             print(added.stderr, file=sys.stderr)
             return 2
-        added_worktree = True
         env = os.environ.copy()
         env["PULP_GATES_NO_CONFIGURE"] = "1"
-        checks: list[tuple[str, list[str]]] = [
-            ("changed-surface-script-families-drift", [sys.executable, str(tmp / "tools/scripts/changed_surface_script_families.py"),
-                                                        "--repo-root", str(tmp), "--static", "--base", base_sha,
-                                                        "--head", synthetic]),
-            ("agent-capability-manifest", [sys.executable, str(tmp / "tools/scripts/agent_capability_manifest.py"), "--check"]),
-            ("unregistered-tests", [sys.executable, str(tmp / "tools/scripts/unregistered_tests_check.py"),
-                                    "--repo-root", str(tmp)]),
-        ]
+        # Cheapest first. A bound hit drops only what is last in line, so the
+        # checks the hook cannot re-run itself (ledger, unregistered tests) go
+        # first; families --static and the capability check are re-run by the
+        # hook when this one does not finish.
+        checks: list[tuple[str, list[str]]] = []
+        ledger = tmp / "tools/scripts/vellum_inheritance_ledger_check.py"
+        if ledger.exists():
+            checks.append(("vellum-inheritance-ledger", [sys.executable, str(ledger),
+                            "--root", str(tmp), "--base", base_sha]))
+        checks.append(("unregistered-tests", [sys.executable, str(tmp / "tools/scripts/unregistered_tests_check.py"),
+                                              "--repo-root", str(tmp)]))
+        checks.append(("changed-surface-script-families-drift",
+                       [sys.executable, str(tmp / "tools/scripts/changed_surface_script_families.py"),
+                        "--repo-root", str(tmp), "--static", "--base", base_sha, "--head", synthetic]))
         # The ctest script-input inventory is compiled/build-owned and has no
         # build-free equivalent. Run it only when a configured build is
         # explicitly supplied; never substitute its schema-only validator.
-        # The lane runs with the temporary merge-tree worktree as its root,
-        # and a configured build belongs to the checkout it was configured
-        # in: its registered commands carry that checkout's absolute paths,
-        # which the lane reads as paths outside the (temporary) checkout and
-        # reports as manifest drift. So the check runs here only for a build
-        # configured under this root -- which the caller's PULP_GATES_BUILD_DIR
-        # never is -- and is otherwise skipped, named. gates.sh runs the same
-        # lane against the caller's build in its own pass.
+        # A configured build belongs to the checkout it was configured in: its
+        # registered commands carry that checkout's absolute paths, which the
+        # lane reads as paths outside the (temporary) checkout and reports as
+        # manifest drift. So the check runs here only for a build configured
+        # under this root -- which the caller's PULP_GATES_BUILD_DIR never is --
+        # and is otherwise skipped, named. gates.sh runs the same lane against
+        # the caller's build in its own pass.
         configured = os.environ.get("PULP_GATES_BUILD_DIR", "")
         configured_path = Path(configured).expanduser().resolve() if configured else None
         if (configured_path is not None and (configured_path / "CMakeCache.txt").exists()
                 and configured_path.is_relative_to(tmp.resolve())):
-            checks.insert(0, ("script-test-inputs-drift", [sys.executable,
+            checks.append(("script-test-inputs-drift", [sys.executable,
                             str(tmp / "tools/scripts/gates_script_inputs.py"),
                             "--base", base_sha, "--repo-root", str(tmp),
                             "--build-dir", str(configured_path)]))
@@ -195,19 +330,28 @@ def main(argv: list[str] | None = None) -> int:
             print("merge-tree script-state: script-test-inputs-drift (no build-free variant; "
                   "a build configured outside the merge-tree root cannot be checked here; skipped)",
                   file=sys.stderr)
-
-        ledger = tmp / "tools/scripts/vellum_inheritance_ledger_check.py"
-        if ledger.exists():
-            checks.append(("vellum-inheritance-ledger", [sys.executable, str(ledger),
-                            "--root", str(tmp), "--base", base_sha]))
+        # The capability check is ~10 s and can only change when the range
+        # touches its inputs: the same trigger the hook uses for its own run.
+        if args.only_if_capability_inputs and not _touches_capability_inputs(root, base_sha, head_sha):
+            print("merge-tree script-state: agent-capability-manifest (the range touches none of its "
+                  "inputs; skipped)", file=sys.stderr)
+        else:
+            checks.append(("agent-capability-manifest",
+                           [sys.executable, str(tmp / "tools/scripts/agent_capability_manifest.py"), "--check"]))
         failed: list[str] = []
         unavailable: list[str] = []
+        unrun: list[str] = []
         for name, cmd in checks:
             if not Path(cmd[1]).exists():
                 continue
             print(f"merge-tree script-state: {name}", file=sys.stderr)
-            rc = _run(cmd, tmp, env)
-            if rc is UNAVAILABLE:
+            if unrun:  # the bound already ran out; do not start another check
+                unrun.append(name)
+                continue
+            rc = _run(cmd, tmp, env, deadline=deadline)
+            if rc == BOUND:
+                unrun.append(name)
+            elif rc is UNAVAILABLE:
                 unavailable.append(name)
             elif rc:
                 failed.append(name)
@@ -221,6 +365,8 @@ def main(argv: list[str] | None = None) -> int:
                   "not a pass. Re-run on a less loaded host or raise "
                   "PULP_MERGE_TREE_CHECK_TIMEOUT.", file=sys.stderr)
             return NOT_CHECKED
+        if unrun:
+            return _bound_exceeded(args.overall_bound, unrun)
         return 0
     finally:
         cleanup()

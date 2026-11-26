@@ -257,6 +257,37 @@ function(pulp_expected_runtime_dependencies out_var)
     set(${out_var} "${_expected}" PARENT_SCOPE)
 endfunction()
 
+# Stage Skia's ICU data file beside `target` on Windows.
+#
+# Not optional packaging metadata. SkParagraph's ICU-backed SkUnicode returns
+# null without this file and deliberately traps on its `fUnicode` check during
+# the first label render, so any executable that shapes text needs it. Plug-ins
+# and apps get it through pulp_stage_runtime_dependencies(); a command-line
+# tool or test executable that renders text calls this directly. A no-op off
+# Windows and without Skia.
+function(pulp_stage_skia_icu_data target)
+    if(NOT TARGET ${target})
+        message(FATAL_ERROR "pulp_stage_skia_icu_data(${target}): not a target")
+    endif()
+    if(NOT (WIN32 AND SKIA_FOUND))
+        return()
+    endif()
+    pulp_resolve_icudtl(_icudtl)
+    if(NOT _icudtl)
+        message(FATAL_ERROR
+            "Pulp's Windows Skia runtime requires icudtl.dat beside each "
+            "plug-in/app module, but neither PULP_SKIA_ICUDTL_FILE nor "
+            "SKIA_ICUDTL_FILE resolved to an existing file. Reinstall the "
+            "matching Pulp/Skia SDK.")
+    endif()
+    add_custom_command(
+        TARGET ${target} POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "${_icudtl}" $<TARGET_FILE_DIR:${target}>
+        COMMENT "Staging Skia ICU runtime data next to ${target}"
+        VERBATIM)
+endfunction()
+
 # Stage every runtime file `target` needs beside its binary.
 #
 # Pulp's format helpers call this for every plug-in/app target they create, so
@@ -360,26 +391,7 @@ function(pulp_stage_runtime_dependencies target)
         _pulp_runtime_staging_append_unique(${target} INSTALL_RPATH "@loader_path")
     endif()
 
-    if(WIN32 AND SKIA_FOUND)
-        # Not optional packaging metadata. SkParagraph's ICU-backed SkUnicode
-        # returns null without this file and deliberately traps on its
-        # `fUnicode` check during the first label render — the host process
-        # dies on first paint rather than degrading to simpler text.
-        pulp_resolve_icudtl(_icudtl)
-        if(NOT _icudtl)
-            message(FATAL_ERROR
-                "Pulp's Windows Skia runtime requires icudtl.dat beside each "
-                "plug-in/app module, but neither PULP_SKIA_ICUDTL_FILE nor "
-                "SKIA_ICUDTL_FILE resolved to an existing file. Reinstall the "
-                "matching Pulp/Skia SDK.")
-        endif()
-        add_custom_command(
-            TARGET ${target} POST_BUILD
-            COMMAND ${CMAKE_COMMAND} -E copy_if_different
-                "${_icudtl}" $<TARGET_FILE_DIR:${target}>
-            COMMENT "Staging Skia ICU runtime data next to ${target}"
-            VERBATIM)
-    endif()
+    pulp_stage_skia_icu_data(${target})
 
     set_property(TARGET ${target} PROPERTY PULP_RUNTIME_DEPENDENCIES_STAGED TRUE)
 endfunction()

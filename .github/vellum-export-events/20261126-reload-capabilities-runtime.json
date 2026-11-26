@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "event_id": "20261126-reload-capabilities-runtime",
+  "kind": "exported-path-change",
+  "created_at": "2026-11-26T00:20:00Z",
+  "receipt_export_id": "20261107-f0ac0a4ff392",
+  "paths": [
+    "core/runtime/CMakeLists.txt",
+    "core/runtime/include/pulp/runtime/reload_capabilities.hpp",
+    "core/view/include/pulp/view/reload_capabilities.hpp"
+  ],
+  "vellum_inherits": false,
+  "rationale": "Pulp-only move of the reload capability vocabulary into runtime, plus its runtime unit header list entry, so the format layer validates remote UX packs without its view layer. Vellum keeps its own vocabulary in vellum/view/reload_capabilities.hpp, and integrations/pulp-vellum tests that both lists carry the same wire names."
+}
