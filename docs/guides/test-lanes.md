@@ -278,6 +278,11 @@ stopped compiling and no Pulp check noticed.
   not contain the given Vellum commit (checked through Vellum's compare endpoint
   before any download). The workflow sets it to the commit that introduced the
   `ParamModel` surface that `integrations/pulp-vellum` builds on.
+- **MCP UI tools.** After the bridge, the lane builds `pulp-test-mcp-server` in
+  the same configure and runs its `[ui]` cases with
+  `PULP_TEST_VELLUM_APP_HOST` set to the SDK's `bin/vellum-app-host`. The live
+  case drives the real host (view tree, a press, a frame), and a skipped live
+  case fails the step so the lane cannot pass without running it.
 - **Parameter bridge.** The same SDK also builds `integrations/pulp-vellum` in a
   separate configure (`PULP_ENABLE_PULP_VELLUM=ON`) and runs its `pulp-vellum`
   ctest label, so a Vellum change that breaks the bridge shows up here. Pull
