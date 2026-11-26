@@ -1,0 +1,20 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20261125-w-b7-reconcile-watch",
+  "created_at": "2026-11-25T11:42:40Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "render-assets-and-backends",
+    "visual-proof-harness"
+  ],
+  "rationale": "PULP_VIEW_JS_DIR lets a build read the embedded web-compat preludes from another copy of the same prelude set; the default is unchanged (core/view/js), so default builds embed byte-identical preludes. pulp-test-js-preludes now compares each embedded prelude with the configured directory. No design-import, Chromium, rendering or packaging authority moves; the change is test-harness plumbing for comparing Pulp's suites against Vellum's published preludes.",
+  "tests": [
+    "ctest --test-dir build -R pulp-test-js-preludes",
+    "python3 tools/scripts/vellum_expansion_watch_check.py --base <merge-base origin/main HEAD> --head <HEAD>",
+    "vellum-expansion-watch"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}
