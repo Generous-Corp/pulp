@@ -9,6 +9,19 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
      release's bullet block. See docs/guides/versioning.md § Release pipeline
      for the full end-to-end flow. -->
 
+<a id="v12120"></a>
+## [1.212.0] - 2026-11-26
+
+- feature/reload capabilities runtime ([#12914](https://github.com/Generous-Corp/pulp/pull/12914))
+- release/version bump ([#12921](https://github.com/Generous-Corp/pulp/pull/12921))
+- ci/windows skip chrome label ([#12910](https://github.com/Generous-Corp/pulp/pull/12910))
+- ci/windows lf checkout ([#12860](https://github.com/Generous-Corp/pulp/pull/12860))
+- feature/format changed rename aware ([#12904](https://github.com/Generous-Corp/pulp/pull/12904))
+- test/windows software adapter skips ([#12908](https://github.com/Generous-Corp/pulp/pull/12908))
+- feature/standalone panel seam ([#12899](https://github.com/Generous-Corp/pulp/pull/12899))
+- feature/vellum consumer build all labelled ([#12885](https://github.com/Generous-Corp/pulp/pull/12885))
+- lane/b2 pulp bytecode message ([#12890](https://github.com/Generous-Corp/pulp/pull/12890))
+
 <a id="v12110"></a>
 ## [1.211.0] - 2026-11-26
 
@@ -13757,6 +13770,7 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/Generous-Corp/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/Generous-Corp/pulp/pull/2))
 
+[1.212.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.212.0
 [1.211.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.211.0
 [1.210.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.210.0
 [1.209.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.209.0
