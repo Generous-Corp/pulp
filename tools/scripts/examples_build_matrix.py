@@ -36,8 +36,6 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 MANIFEST = Path("docs/status/examples-manifest.json")
 RETAINED = ("audio-only", "moves-to-vellum")
 BUILT_TYPES = ("EXECUTABLE", "MODULE_LIBRARY", "SHARED_LIBRARY", "STATIC_LIBRARY")
-SKIP_SUFFIXES = ("_BuildInfo",)
-SKIP_MARKERS = ("_ControlShippingScan_",)
 FORMAT_PREFERENCE = ("_CLAP", "_Standalone", "_VST3", "_AU")
 
 
@@ -66,13 +64,10 @@ def primary_targets(targets: list[dict]) -> list[str]:
 
     A plug-in builds one target per format; the first format in FORMAT_PREFERENCE
     that exists stands for it. Executables and libraries that are not part of a
-    plug-in format are built as they are. Per-format bookkeeping targets and
-    test executables are left out.
+    plug-in format are built as they are. Utility targets (build info, shipping
+    scans, installs) are left out.
     """
-    real = [t for t in targets
-            if t["type"] in BUILT_TYPES
-            and not t["name"].endswith(SKIP_SUFFIXES)
-            and not any(m in t["name"] for m in SKIP_MARKERS)]
+    real = [t for t in targets if t["type"] in BUILT_TYPES]
     names = [t["name"] for t in real]
     chosen: list[str] = []
     for suffix in FORMAT_PREFERENCE:
