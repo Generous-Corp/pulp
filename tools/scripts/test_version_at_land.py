@@ -1679,7 +1679,7 @@ class StandingBumpPrTest(unittest.TestCase):
                 os.environ["GITHUB_STEP_SUMMARY"] = previous
         self.assertEqual(status, "body-reconcile-failed")
         self.assertIn("::error title=version-at-land::", out.getvalue())
-        self.assertIn("PATCH refused", summary.read_text())
+        self.assertIn("PATCH refused", summary.read_text(encoding="utf-8"))
         patch = next(c for c in fake.calls
                      if c[:3] == ("api", "--method", "PATCH"))
         self.assertTrue(patch[3].endswith("/pulls/1"), patch)
@@ -1702,7 +1702,7 @@ class StandingBumpPrTest(unittest.TestCase):
                 os.environ["GITHUB_STEP_SUMMARY"] = previous
         self.assertEqual(status, "body-reconcile-failed")
         self.assertIn("::error title=version-at-land::", out.getvalue())
-        self.assertIn("GET refused", summary.read_text())
+        self.assertIn("GET refused", summary.read_text(encoding="utf-8"))
         get = next(c for c in fake.calls
                    if c[:1] == ("api",) and ".body" in c)
         self.assertTrue(get[1].endswith("/pulls/1"), get)
