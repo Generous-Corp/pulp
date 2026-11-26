@@ -523,9 +523,58 @@ std::size_t InspectorWindow::compute_tree_signature(const View* view) const {
     return h;
 }
 
+void InspectorWindow::clear_elements() {
+    if (tree_view_) {
+        tree_view_->set_selected_node(nullptr);
+        tree_view_->root().children.clear();
+        float h = tree_view_->content_height();
+        tree_view_->flex().preferred_height = h;
+        if (tree_scroll_)
+            tree_scroll_->set_content_size({300, h});
+    }
+    if (theme_section_) {
+        auto* content = theme_section_->content();
+        while (content->child_count() > 0)
+            content->remove_child(content->child_at(0));
+    }
+    selected_view_ = nullptr;
+    tree_signature_ = 0;
+
+    struct Placeholder {
+        Label* label;
+        const char* text;
+    };
+    const Placeholder placeholders[] = {
+        {prop_type_label_, "Type: \xE2\x80\x94"},
+        {prop_id_label_, "ID: \xE2\x80\x94"},
+        {prop_bounds_label_, "Bounds: \xE2\x80\x94"},
+        {prop_direction_label_, "Direction: \xE2\x80\x94"},
+        {prop_gap_label_, "Gap: \xE2\x80\x94"},
+        {prop_padding_label_, "Padding: \xE2\x80\x94"},
+        {prop_margin_label_, "Margin: \xE2\x80\x94"},
+        {prop_grow_shrink_label_, "Grow/Shrink: \xE2\x80\x94"},
+        {prop_opacity_label_, "Opacity: \xE2\x80\x94"},
+        {prop_bgcolor_label_, "Background: \xE2\x80\x94"},
+        {prop_border_label_, "Border: \xE2\x80\x94"},
+        {prop_corner_label_, "Corner radius: \xE2\x80\x94"},
+        {prop_visible_label_, "Visible: \xE2\x80\x94"},
+        {prop_enabled_label_, "Enabled: \xE2\x80\x94"},
+        {prop_widget_value_label_, "Value: \xE2\x80\x94"},
+    };
+    for (const auto& p : placeholders)
+        if (p.label)
+            p.label->set_text(p.text);
+}
+
 void InspectorWindow::refresh_elements() {
-    if (!tree_view_ || !inspected_root_)
+    if (!tree_view_)
         return;
+    if (!inspected_root_) {
+        // Nothing to inspect: show the empty inspector rather than the last tree.
+        if (tree_signature_ != 0 || selected_view_)
+            clear_elements();
+        return;
+    }
 
     // Anti-flicker. refresh_elements() runs on every idle tick (~30 Hz).
     // Rebuilding the whole TreeView each tick clears then repopulates it,

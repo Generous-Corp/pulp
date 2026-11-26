@@ -103,6 +103,7 @@ class InspectorWindow : public View {
   private:
     std::unique_ptr<View> build_elements_tab();
     void refresh_elements();
+    void clear_elements();
     void populate_tree_from_view(::vellum::view::TreeNode& parent, View* view);
     void show_properties_for(View* view);
     std::size_t compute_tree_signature(const View* view) const;
