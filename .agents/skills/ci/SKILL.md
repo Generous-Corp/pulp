@@ -197,6 +197,12 @@ on a real PR. Do them in order.
    `git fetch origin main -q && git merge-base --is-ancestor <merge-sha> origin/main`.
    A `wait` exit code is not merge proof.
 
+The PR route of `version-at-land` keeps the standing bump description aligned
+with its commit. It compares the complete normalized body, filters the bump
+branch to this repository's head owner, and emits an Actions error plus a
+failing status when the description GET or PATCH fails; the next drain retries
+the reconciliation.
+
 ## A `run:` step stops at the first failing command
 
 GitHub's default shell for `run:` is `bash -e {0}` (no pipefail), so a step
@@ -3378,7 +3384,8 @@ Without the second line a zero is ambiguous between "not wired" and "bad grep".
 `.github/workflows/scene3d-advisory.yml` now covers that surface: path-filtered,
 advisory, `macos-15`, SCENE3D ON, not on `merge_group`. The `Vellum SDK
 consumer` lane also turns SCENE3D ON, for `integrations/pulp-vellum-renderer3d`
-(the scene3d renderer on gpu-runtime's device): that package refuses to
+(the scene3d renderer on gpu-runtime's device) and `integrations/pulp-vellum-scene`
+(Vellum's Draco decoder behind the glTF loader hook): those packages refuse to
 configure without `pulp::scene`. Three things about the scene3d lane
 generalize to any lane you add:
 

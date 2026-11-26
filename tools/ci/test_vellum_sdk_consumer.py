@@ -68,6 +68,11 @@ class SelectRunTests(unittest.TestCase):
         with self.assertRaisesRegex(vsc.ResolveError, "none of the newest 2"):
             vsc.select_run(runs, self._fetch({1}), limit=2)
 
+    def test_artifact_after_first_ten_green_runs_is_selected(self):
+        runs = [_run(i, created=f"2026-11-11T{i:02d}:00:00Z") for i in range(1, 13)]
+        run, artifact = vsc.select_run(runs, self._fetch({1}), limit=vsc.RUN_SEARCH_LIMIT)
+        self.assertEqual((run["id"], artifact["id"]), (1, 1))
+
 
 class MinimumCommitTests(unittest.TestCase):
     """A run older than the required Vellum commit is refused, not downloaded."""

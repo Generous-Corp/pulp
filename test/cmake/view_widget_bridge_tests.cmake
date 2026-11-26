@@ -867,6 +867,8 @@ if(PULP_ENABLE_JS)
         LIBRARIES pulp::view-script pulp::runtime
         INCLUDE_DIRS $<TARGET_PROPERTY:pulp-view-script,BINARY_DIR>)
     pulp_test_data(pulp-test-js-preludes PATHS core/view/js/*.js)
+    target_compile_definitions(pulp-test-js-preludes PRIVATE
+        "PULP_VIEW_JS_DIR=\"${PULP_VIEW_JS_DIR}\"")
 endif()
 # The late GPU/lifetime and stderr-diagnostic cases use the same private support
 # but compile as a second translation unit, keeping the original bridge suite
