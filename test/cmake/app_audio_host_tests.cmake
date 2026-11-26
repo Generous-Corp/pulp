@@ -733,6 +733,15 @@ endif()
 pulp_test_data(pulp-test-audio-image-raster PATHS test/fixtures/audio/images)
 catch_discover_tests(pulp-test-audio-image-raster)
 
+# The PNG writer behind the `pulp audio` image verbs: dependency-free, so the
+# test compiles it directly and links only the runtime for zlib.
+add_executable(pulp-test-audio-png-encoder
+    test_audio_png_encoder.cpp
+    ${CMAKE_SOURCE_DIR}/tools/cli/audio_png_encoder.cpp)
+target_include_directories(pulp-test-audio-png-encoder PRIVATE ${CMAKE_SOURCE_DIR}/tools/cli)
+target_link_libraries(pulp-test-audio-png-encoder PRIVATE pulp::runtime Catch2::Catch2WithMain)
+catch_discover_tests(pulp-test-audio-png-encoder)
+
 # Shell-out coverage for `pulp audio spectrogram` and `pulp audio waveform`.
 add_executable(pulp-test-cli-audio-image test_cli_audio_image.cpp)
 target_link_libraries(pulp-test-cli-audio-image PRIVATE pulp::audio pulp::runtime pulp::platform Catch2::Catch2WithMain)

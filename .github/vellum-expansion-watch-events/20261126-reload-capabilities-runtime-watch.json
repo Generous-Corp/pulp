@@ -1,0 +1,20 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20261126-reload-capabilities-runtime-watch",
+  "created_at": "2026-11-26T00:09:04Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "render-assets-and-backends"
+  ],
+  "rationale": "Moves the scripted-UI capability vocabulary (ReloadCapability, wire names, CapabilitySet) from the view layer into runtime so the format layer validates remote UX packs without a UI layer; the view header keeps the old names as aliases and every wire name is unchanged. No design-import, Chromium, rendering or packaging authority moves.",
+  "tests": [
+    "ctest --test-dir build -R pulp-test-reload-remote-fetch",
+    "ctest --test-dir build -R pulp-test-reload-remote-update",
+    "python3 tools/scripts/vellum_expansion_watch_check.py --base <merge-base origin/main HEAD> --head <HEAD>",
+    "vellum-expansion-watch"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}

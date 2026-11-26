@@ -43,6 +43,9 @@ on:
       - 'test/cmake/editor_host_slice_tests.cmake'
       - 'tools/scripts/editor_host_acceptance.py'
       - 'tools/ci/vellum_sdk_consumer.py'
+      # The MCP UI tools that run bundles on the SDK's vellum-app-host.
+      - 'tools/mcp/mcp_ui_tools.cpp'
+      - 'test/test_mcp_ui_tools.cpp'
       # The Vellum-backed UI target names: the package config that defines
       # them, their scenario driver and the installed consumer it builds. The
       # `real` and `wrong-version` scenarios carry the pulp-vellum label.
@@ -157,17 +160,44 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          python3 -I tools/ci/vellum_sdk_consumer.py labelled-targets \
+            --build-dir build-vellum-bridge --prepare
           cmake -S . -B build-vellum-bridge -G Ninja -DCMAKE_BUILD_TYPE=Release \
             -DPULP_BUILD_EXAMPLES=OFF -DPULP_BUILD_TESTS=ON \
             -DPULP_ENABLE_PULP_VELLUM=ON \
             -DPULP_ENABLE_PULP_VELLUM_AUDIO=ON \
             -DPULP_ENABLE_PULP_VELLUM_COMPONENTS=ON \
             -DCMAKE_PREFIX_PATH="${{ steps.sdk.outputs.prefix }}"
-          tools/ci/governed-build.sh cmake --build build-vellum-bridge \
-            --target pulp-test-pulp-vellum pulp-test-pulp-vellum-editor pulp-test-pulp-vellum-audio \
-            pulp-test-pulp-vellum-components
-          ctest --test-dir build-vellum-bridge -L pulp-vellum --output-on-failure \
+          # Every executable under integrations/pulp-vellum*/ and every program
+          # a pulp-vellum* ctest entry runs, from the CMake target graph, so a
+          # new test target needs no edit here.
+          target_list=$(python3 -I tools/ci/vellum_sdk_consumer.py labelled-targets \
+            --build-dir build-vellum-bridge | tr '\n' ' ')
+          read -r -a targets <<< "$target_list"
+          echo "Building ${#targets[@]} Vellum test targets: ${targets[*]}"
+          tools/ci/governed-build.sh cmake --build build-vellum-bridge --target "${targets[@]}"
+          # Fails when a selected target or a labelled test's program is absent.
+          python3 -I tools/ci/vellum_sdk_consumer.py labelled-targets \
+            --build-dir build-vellum-bridge --verify
+          ctest --test-dir build-vellum-bridge -L pulp-vellum --no-tests=error --output-on-failure \
             | tee "$RUNNER_TEMP/vellum-sdk/bridge.log"
+
+      # The MCP UI tools resolve vellum-app-host from the SDK this run
+      # resolved. The live case must run, so a skip fails the step.
+      - name: MCP UI tools against the SDK's app host
+        if: steps.sdk.outputs.unchanged != 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          tools/ci/governed-build.sh cmake --build build-vellum-bridge --target pulp-test-mcp-server
+          host="${{ steps.sdk.outputs.prefix }}/bin/vellum-app-host"
+          test -x "$host"
+          PULP_TEST_VELLUM_APP_HOST="$host" MTL_DEBUG_LAYER=0 \
+            build-vellum-bridge/test/pulp-test-mcp-server "[ui]" | tee "$RUNNER_TEMP/vellum-sdk/mcp-ui.log"
+          if grep -q "SKIPPED" "$RUNNER_TEMP/vellum-sdk/mcp-ui.log"; then
+            echo "the live MCP UI case skipped" >&2
+            exit 1
+          fi
 
       - name: Negative control (a renamed SDK header must fail the build)
         if: steps.sdk.outputs.unchanged != 'true'

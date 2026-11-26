@@ -1509,6 +1509,11 @@ build is about 2.5 hours and the suite 30 minutes, so its `timeout-minutes` is
 300; when a hosted Windows run is cancelled at the limit, read the step timings
 before blaming the test step.
 
+A hosted Windows checkout must keep LF bytes: Git for Windows defaults to
+`core.autocrlf=true`, so `cross-platform-check.yml` sets `core.autocrlf=false`
+and `core.eol=lf` before `actions/checkout`. Without it, tests that diff a
+committed artifact against a regenerated one fail on CRLF nobody committed.
+
 ## The Windows nightly skips the source-selftest lane
 
 `cross-platform-check.yml`'s Windows ctest excludes the `source-selftest` label.
@@ -1516,6 +1521,14 @@ Those Python registrations read only the checkout and run on ubuntu-latest in
 the required `Enforce version & skill sync` job, so the Windows copy added
 failures from POSIX-only fixtures and about 48 minutes of serial time, not
 coverage. A Windows-specific script belongs outside that manifest.
+
+The same ctest also excludes `browser-capture` and `windows-pr-quarantine`.
+Hosted Windows images do carry Chrome, but its CDP capability probe times out
+under the `-j8` load, so those tests report a missing browser that is really a
+slow one; the macOS gate runs them on every merge group. `windows-pr-quarantine`
+is the label `build.yml`'s Windows PR lane already excludes. When a Windows
+failure group looks like "no browser", read the probe's timeout line before
+concluding the runner lacks Chrome.
 
 ## Android minimum-API allocation check
 
@@ -13889,6 +13902,13 @@ about that path are not obvious:
   forwarded GitHub `Authorization` header with HTTP 401. Python's `urllib`
   forwards it by default; `tools/ci/vellum_sdk_consumer.py` drops it on any
   cross-host redirect. `curl -L` without `--location-trusted` already drops it.
+- **Build the labelled set from the target graph, not a list.** A Catch2
+  executable that was never built registers no ctest entry (discovery runs
+  after the build), so `ctest -N` cannot show what is missing, while a plain
+  `add_test()` whose program was not built fails with "no such file".
+  `vellum_sdk_consumer.py labelled-targets` (`--prepare` before configure,
+  `--verify` after the build) selects executables from the CMake file API, so a
+  new `pulp-vellum*` test target needs no workflow edit.
 - **Skip by head, but only from a green run.** The nightly lane stops early when
   Vellum main's head equals the head recorded in the last *successful* run's
   receipt artifact, and it uploads that receipt only when the whole run is
@@ -13968,3 +13988,8 @@ main's SDK. A new optional Vellum integration package needs its option, its
 `pulp-test-*` target and a `paths:` entry added there, or no lane compiles it
 against main. The tests' ctest label should start with `pulp-vellum` so the
 lane's `-L pulp-vellum` filter runs them.
+
+The same lane also runs the MCP UI tool cases (`pulp-test-mcp-server "[ui]"`)
+against the SDK's `bin/vellum-app-host` through `PULP_TEST_VELLUM_APP_HOST`. The
+step greps the output for `SKIPPED`, because Catch2 reports a skipped live case
+as a pass: keep that check if the step is edited.
