@@ -12,6 +12,7 @@
 /// `set_selected_view`.
 
 #include <pulp/vellum_components/aliases.hpp>
+#include <pulp/vellum_components/atlas_inventory.hpp>
 #include <pulp/vellum_components/field_edit.hpp>
 #include <pulp/vellum_components/overlay_geometry.hpp>
 #include <pulp/vellum_components/render_pass_stats.hpp>
@@ -305,6 +306,33 @@ class InspectorOverlay {
         pass_viewer_enabled_ = !pass_viewer_enabled_;
     }
 
+    /// The texture atlas viewer: the same docked panel as the pass viewer,
+    /// listing each atlas of an inventory the host supplies and borrows with
+    /// its size, page and entry counts and an occupancy bar that turns amber at
+    /// 60 percent and red at 85. `A` toggles it. The pass viewer wins the panel
+    /// when both are on. With no inventory it says none is attached; with an
+    /// empty one, that no atlas is available.
+    void set_atlas_inventory(const overlay::AtlasInventory* inventory) {
+        atlas_inventory_ = inventory;
+    }
+    const overlay::AtlasInventory* atlas_inventory() const {
+        return atlas_inventory_;
+    }
+    bool atlas_viewer_visible() const {
+        return atlas_viewer_visible_;
+    }
+    void set_atlas_viewer_visible(bool visible) {
+        atlas_viewer_visible_ = visible;
+    }
+    void toggle_atlas_viewer() {
+        atlas_viewer_visible_ = !atlas_viewer_visible_;
+    }
+    /// The atlas rows the last paint laid out; zero while the viewer is
+    /// hidden, empty or the overlay is off.
+    std::size_t atlas_row_count() const {
+        return atlas_row_count_;
+    }
+
     /// Offer a key to the overlay. Cmd+I (Ctrl+I elsewhere) toggles it. While
     /// a text edit is open it owns the keyboard: Enter commits, Esc cancels
     /// and returns to the Select tool, Backspace and Delete remove, the
@@ -318,7 +346,7 @@ class InspectorOverlay {
     /// cancels and Tab commits and moves to the next field (Shift+Tab to the
     /// previous); every other key falls through to the view tree untouched.
     /// Otherwise, while active, V and T pick the tool, P toggles the render
-    /// pass viewer, Escape deselects and keeps the overlay on, M
+    /// pass viewer, A the atlas viewer, Escape deselects and keeps the overlay on, M
     /// flips the selection mode and Z toggles the loupe. Returns true when the
     /// key was consumed.
     bool handle_key_event(const ::vellum::view::KeyEvent& event);
@@ -384,6 +412,7 @@ class InspectorOverlay {
     bool mouse_text_tool(const ::vellum::view::MouseEvent& event, bool is_press);
     void paint_text_edit(canvas::Canvas& canvas);
     void paint_pass_panel(canvas::Canvas& canvas);
+    void paint_atlas_panel(canvas::Canvas& canvas);
     bool text_target_reachable() const;
     void push_text_to_target();
     void clear_text_edit();
@@ -422,6 +451,9 @@ class InspectorOverlay {
     const overlay::RenderPassSource* pass_source_ = nullptr;
     overlay::PassHistory pass_history_;
     bool pass_viewer_enabled_ = false;
+    const overlay::AtlasInventory* atlas_inventory_ = nullptr;
+    bool atlas_viewer_visible_ = false;
+    std::size_t atlas_row_count_ = 0;
 
     static constexpr float kFontSize = 11.0f;
     bool zoom_active_ = false;

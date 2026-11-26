@@ -6,9 +6,11 @@
 find_package(Vellum CONFIG REQUIRED)
 
 add_library(pulp-vellum-components STATIC
+    src/atlas_inventory.cpp
     src/catalogue.cpp
     src/field_edit.cpp
     src/inspector_overlay.cpp
+    src/inspector_overlay_atlas_panel.cpp
     src/inspector_overlay_field_edit.cpp
     src/inspector_overlay_pass_panel.cpp
     src/inspector_overlay_text_edit.cpp

@@ -57,6 +57,8 @@ void InspectorOverlay::set_active(bool active) {
         alt_hover_target_ = nullptr;
         distance_anchor_ = nullptr;
         zoom_active_ = false;
+        // The toggle stays, so reopening restores the same viewer.
+        atlas_row_count_ = 0;
     }
 }
 
@@ -115,6 +117,10 @@ bool InspectorOverlay::handle_key_event(const ::vellum::view::KeyEvent& event) {
     }
     if (event.key == KeyCode::p && event.modifiers == 0) {
         toggle_pass_viewer();
+        return true;
+    }
+    if (event.key == KeyCode::a && event.modifiers == 0) {
+        toggle_atlas_viewer();
         return true;
     }
     if (event.key == KeyCode::m && event.modifiers == 0) {
@@ -232,8 +238,15 @@ void InspectorOverlay::paint(canvas::Canvas& canvas) {
     if (selected_)
         paint_box_model(canvas, *selected_);
     paint_text_edit(canvas);
-    if (pass_viewer_enabled_)
+    // The pass viewer wins the docked panel when both viewers are on.
+    if (pass_viewer_enabled_) {
+        atlas_row_count_ = 0;
         paint_pass_panel(canvas);
+    } else if (atlas_viewer_visible_) {
+        paint_atlas_panel(canvas);
+    } else {
+        atlas_row_count_ = 0;
+    }
     // Last, so the magnified grid sits on top of the highlights.
     if (zoom_active_)
         paint_zoom_panel(canvas);
