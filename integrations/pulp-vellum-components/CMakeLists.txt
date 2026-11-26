@@ -10,6 +10,7 @@ add_library(pulp-vellum-components STATIC
     src/field_edit.cpp
     src/inspector_overlay.cpp
     src/inspector_overlay_field_edit.cpp
+    src/inspector_overlay_text_edit.cpp
     src/inspector_overlay_zoom.cpp
     src/inspector_window.cpp
     src/overlay_geometry.cpp

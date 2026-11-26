@@ -34,7 +34,8 @@ void InspectorOverlay::clear_field_edit() {
 }
 
 bool InspectorOverlay::begin_field_edit(std::string field_path, float initial_value) {
-    if (!selected_ || field_path.empty())
+    // A text edit owns the keyboard, so a field edit cannot also be open.
+    if (!selected_ || field_path.empty() || text_editing())
         return false;
     start_field_edit(*selected_, std::move(field_path), initial_value);
     return true;

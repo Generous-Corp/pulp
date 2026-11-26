@@ -46,8 +46,10 @@ InspectorOverlay::~InspectorOverlay() {
 }
 
 void InspectorOverlay::set_active(bool active) {
-    if (!active)
+    if (!active) {
         cancel_field_edit();
+        cancel_text_edit();
+    }
     active_ = active;
     if (!active) {
         selected_ = nullptr;
@@ -89,6 +91,8 @@ bool InspectorOverlay::handle_key_event(const ::vellum::view::KeyEvent& event) {
     // An open edit owns the keyboard, so a letter typed into it can never
     // flip a mode: whatever the edit does not take falls through to the view
     // tree.
+    if (text_editing())
+        return handle_text_key(event);
     if (field_edit_.active())
         return handle_edit_key(event);
     if (event.key == KeyCode::escape) {
@@ -99,6 +103,14 @@ bool InspectorOverlay::handle_key_event(const ::vellum::view::KeyEvent& event) {
         hovered_ = nullptr;
         alt_hover_target_ = nullptr;
         distance_anchor_ = nullptr;
+        return true;
+    }
+    if (event.key == KeyCode::v && event.modifiers == 0) {
+        set_tool(Tool::select);
+        return true;
+    }
+    if (event.key == KeyCode::t && event.modifiers == 0) {
+        set_tool(Tool::text);
         return true;
     }
     if (event.key == KeyCode::m && event.modifiers == 0) {
@@ -120,6 +132,10 @@ bool InspectorOverlay::handle_mouse_event(const ::vellum::view::MouseEvent& even
     // the pointer through a press and a drag. It never consumes one.
     if (zoom_active_)
         zoom_sample_center_ = event.position;
+
+    // The Text tool decides first, so a press never starts a selection.
+    if (mouse_text_tool(event, event.hasExplicitPhase() ? event.isPress() : event.is_down))
+        return true;
 
     // A host that sets an explicit phase says what the event is. Otherwise
     // the button-down flag marks a press, and nothing here is mid-gesture.
@@ -196,6 +212,8 @@ void InspectorOverlay::drop_stale_views() {
     // to restore.
     if (field_target_ && !overlay::tree_contains(root_, field_target_))
         clear_field_edit();
+    if (text_target_ && !overlay::tree_contains(root_, text_target_))
+        clear_text_edit();
 }
 
 void InspectorOverlay::paint(canvas::Canvas& canvas) {
@@ -206,6 +224,7 @@ void InspectorOverlay::paint(canvas::Canvas& canvas) {
     paint_distance_lines(canvas);
     if (selected_)
         paint_box_model(canvas, *selected_);
+    paint_text_edit(canvas);
     // Last, so the magnified grid sits on top of the highlights.
     if (zoom_active_)
         paint_zoom_panel(canvas);
@@ -246,6 +265,14 @@ void InspectorOverlay::paint_highlight(canvas::Canvas& canvas) {
     if (!selected_)
         return;
     const auto r = overlay::bounds_in_root(selected_, root_);
+    // While the selection's copy is being edited, the resize box and handles
+    // would hide the text, so a thin outline stands in for them.
+    if (selection_uses_subtle_edit_outline()) {
+        canvas.set_stroke_color(overlay::kHighlightStroke);
+        canvas.set_line_width(1.0f);
+        canvas.stroke_rect(r.x, r.y, r.width, r.height);
+        return;
+    }
     canvas.set_fill_color(overlay::kSelectedFill);
     canvas.fill_rect(r.x, r.y, r.width, r.height);
     canvas.set_stroke_color(overlay::kSelectedStroke);
@@ -391,6 +418,12 @@ void install_inspector_hooks(InspectorOverlay& inspector) {
             return false;
         return owner->handle_mouse_event(e);
     });
+    View::set_inspector_text_hook([](const ::vellum::view::TextInputEvent& e, View* event_root) {
+        InspectorOverlay* owner = g_owner;
+        if (!owner || (event_root && event_root != &owner->inspected_root()))
+            return false;
+        return owner->handle_text_input(e);
+    });
     View::set_inspector_cursor_hook([](const ::vellum::view::MouseEvent& e, View* event_root) {
         InspectorOverlay* owner = g_owner;
         if (!owner || (event_root && event_root != &owner->inspected_root()))
@@ -405,6 +438,7 @@ void uninstall_inspector_hooks() {
     View::set_inspector_paint_hook({});
     View::set_inspector_key_hook({});
     View::set_inspector_mouse_hook({});
+    View::set_inspector_text_hook({});
     View::set_inspector_cursor_hook({});
 }
 

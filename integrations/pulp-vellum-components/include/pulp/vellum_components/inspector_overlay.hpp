@@ -14,6 +14,7 @@
 #include <pulp/vellum_components/aliases.hpp>
 #include <pulp/vellum_components/field_edit.hpp>
 #include <pulp/vellum_components/overlay_geometry.hpp>
+#include <pulp/vellum_components/text_edit.hpp>
 
 #include <vellum/view/input_events.hpp>
 
@@ -21,6 +22,7 @@
 #include <functional>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <variant>
 
 namespace pulp::vellum_components {
@@ -129,6 +131,19 @@ class InspectorOverlay {
     /// or -1 to keep the cursor of the view under the pointer.
     int cursor_style_for(Point pos) const;
 
+    /// The canvas tool: what a press on the canvas does. Select (`V`) is the
+    /// default and selects. Text (`T`) edits the copy of the Label or
+    /// TextEditor under the press in place, and never selects or drags.
+    enum class Tool : std::uint8_t { select, text };
+    Tool tool() const {
+        return tool_;
+    }
+    /// Leaving the Text tool with an edit open commits it.
+    void set_tool(Tool tool);
+    void toggle_tool() {
+        set_tool(tool_ == Tool::select ? Tool::text : Tool::select);
+    }
+
     /// Where committed edits go. The overlay edits the live view itself and
     /// reports the change here for whatever persists it; with no sink the live
     /// edit still happens and nothing is reported. Only views with an anchor
@@ -172,13 +187,95 @@ class InspectorOverlay {
     /// Stop editing and restore the value the field had when the edit began.
     void cancel_field_edit();
 
+    /// True while a view's copy is being edited in place.
+    bool text_editing() const {
+        return text_target_ != nullptr;
+    }
+    /// The live edited copy; empty when not editing.
+    const std::string& text_edit_buffer() const {
+        return text_edit_.text();
+    }
+    View* text_edit_target() const {
+        return text_target_;
+    }
+
+    /// Start editing `view`'s copy, caret at the end, and select it. False,
+    /// and no edit, for a null view or one without editable text (see
+    /// `overlay::view_has_editable_text`). Typing previews on the view live.
+    /// A numeric field edit that was open is committed first.
+    bool begin_text_edit(View* view);
+    /// Keep the live copy and report it to the edit sink under
+    /// `text_tweak_path()`. True when a changed copy was reported; false for
+    /// unchanged text, a view with no anchor id, no sink or a view that left
+    /// the tree. The edit ends either way.
+    bool commit_text_edit();
+    /// End the edit and restore the copy it began with.
+    void cancel_text_edit();
+
+    /// UTF-8 character input for the open text edit. The host routes it here
+    /// before the view tree (`install_inspector_hooks` does). True when an
+    /// edit is open and took the text; false otherwise, so the text reaches
+    /// the focused widget.
+    bool handle_text_input(const ::vellum::view::TextInputEvent& event);
+
+    /// The caret's byte offset, and the selected byte range (low, high).
+    std::size_t text_caret() const {
+        return text_edit_.caret();
+    }
+    std::pair<std::size_t, std::size_t> text_selection() const {
+        return text_edit_.selection();
+    }
+    bool text_has_selection() const {
+        return text_edit_.has_selection();
+    }
+    void text_move_caret(int delta, bool extend);
+    void text_move_word(int direction, bool extend);
+    void text_move_home(bool extend);
+    void text_move_end(bool extend);
+    void text_select_all();
+    /// Insert at the caret, replacing any selection.
+    void text_insert(const std::string& utf8);
+    void text_delete_backward();
+    void text_delete_forward();
+    /// Copy, cut and paste through the clipboard, which defaults to the
+    /// platform's. Cut removes the selection even if the clipboard write
+    /// failed. Each returns whether the clipboard was read or written.
+    bool text_copy();
+    bool text_cut();
+    bool text_paste();
+    void set_text_clipboard(overlay::TextClipboard clipboard);
+
+    /// The property path a committed copy is reported under. "text" by
+    /// default; an empty path is ignored.
+    const std::string& text_tweak_path() const {
+        return text_tweak_path_;
+    }
+    void set_text_tweak_path(std::string path) {
+        if (!path.empty())
+            text_tweak_path_ = std::move(path);
+    }
+
+    /// True while a text edit is open on the selected view: the selection
+    /// paints a thin outline and a caret instead of the resize box and
+    /// handles.
+    bool selection_uses_subtle_edit_outline() const {
+        return text_editing() && selected_ != nullptr && selected_ == text_target_;
+    }
+
     /// Offer a key to the overlay. Cmd+I (Ctrl+I elsewhere) toggles it. While
-    /// a field is being edited the edit owns the keyboard: digits extend the
+    /// a text edit is open it owns the keyboard: Enter commits, Esc cancels
+    /// and returns to the Select tool, Backspace and Delete remove, the
+    /// arrows, Home, End and Alt-arrows move (Shift extends), and the main
+    /// modifier with A, C, X and V selects, copies, cuts and pastes; every
+    /// other key, being character input, is declined so it arrives through
+    /// `handle_text_input`. While a field is being edited the edit owns the
+    /// keyboard: digits extend the
     /// buffer, Up and Down nudge by 1 (10 with Shift, 100 with Cmd), Left,
     /// Right, Home and End move the caret, Backspace trims, Enter commits, Esc
     /// cancels and Tab commits and moves to the next field (Shift+Tab to the
     /// previous); every other key falls through to the view tree untouched.
-    /// Otherwise, while active, Escape deselects and keeps the overlay on, M
+    /// Otherwise, while active, V and T pick the tool, Escape deselects and
+    /// keeps the overlay on, M
     /// flips the selection mode and Z toggles the loupe. Returns true when the
     /// key was consumed.
     bool handle_key_event(const ::vellum::view::KeyEvent& event);
@@ -240,6 +337,12 @@ class InspectorOverlay {
 
   private:
     void drop_stale_views();
+    bool handle_text_key(const ::vellum::view::KeyEvent& event);
+    bool mouse_text_tool(const ::vellum::view::MouseEvent& event, bool is_press);
+    void paint_text_edit(canvas::Canvas& canvas);
+    bool text_target_reachable() const;
+    void push_text_to_target();
+    void clear_text_edit();
     bool handle_edit_key(const ::vellum::view::KeyEvent& event);
     void apply_edit_buffer_to_view();
     void start_field_edit(View& target, std::string field_path, float initial_value);
@@ -266,6 +369,12 @@ class InspectorOverlay {
     EditSink edit_sink_;
     overlay::FieldEditBuffer field_edit_;
     View* field_target_ = nullptr; ///< the view the open field edit writes to
+    Tool tool_ = Tool::select;
+    View* text_target_ = nullptr; ///< the view whose copy is being edited
+    std::string text_original_;   ///< the copy when the edit began
+    overlay::TextEditBuffer text_edit_;
+    overlay::TextClipboard clipboard_ = overlay::TextClipboard::system();
+    std::string text_tweak_path_ = "text";
 
     static constexpr float kFontSize = 11.0f;
     bool zoom_active_ = false;
@@ -281,9 +390,11 @@ class InspectorOverlay {
     static constexpr float kEdgeFontSize = 9.0f;
     static constexpr float kBadgeHeight = 16.0f;
     static constexpr float kHandleHalfSide = 4.0f;
+    static constexpr float kCaretWidth = 1.5f;
+    static constexpr float kFallbackFontSize = 13.0f;
 };
 
-/// Route the View layer's inspector hooks (paint, key, mouse, cursor) to
+/// Route the View layer's inspector hooks (paint, key, mouse, text, cursor) to
 /// `inspector`. The hooks are process-wide, so one overlay owns them at a
 /// time; a later call replaces the earlier owner. Every hook reads the owner
 /// when it fires, so `uninstall_inspector_hooks`, or the owner's destructor,
