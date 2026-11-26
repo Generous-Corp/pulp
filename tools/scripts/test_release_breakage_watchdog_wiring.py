@@ -41,7 +41,7 @@ class ReleaseContentWiring(unittest.TestCase):
     def test_installed_macho_is_resigned_before_handoff_hash_and_sdk_archive(self) -> None:
         resign = RELEASE.index("python3 tools/scripts/resign_macos_release_tree.py sdk-staging")
         stamp = RELEASE.index('python3 "$PULP_SDK_PROVENANCE_HELPER" stamp')
-        archive = RELEASE.index("tar czf pulp-sdk-${{ matrix.platform }}.tar.gz")
+        archive = RELEASE.index("tools/scripts/archive_sdk.py")
         self.assertLess(resign, stamp)
         self.assertLess(stamp, archive)
 

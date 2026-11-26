@@ -1417,7 +1417,14 @@ jobs:
               print("OK: MacGpuWindowHost symbol present in libpulp-view-core.a")
           PY
           mv sdk-staging pulp-sdk
-          tar czf pulp-sdk-${{ matrix.platform }}.tar.gz pulp-sdk
+          SOURCE_DATE_EPOCH="$(git show -s --format=%ct HEAD)"
+          python3 tools/scripts/archive_sdk.py \
+            --source pulp-sdk \
+            --output "pulp-sdk-${{ matrix.platform }}.tar.gz" \
+            --epoch "$SOURCE_DATE_EPOCH"
+          python3 tools/scripts/check_archive_mtimes.py \
+            "pulp-sdk-${{ matrix.platform }}.tar.gz" \
+            --max-mtime "$SOURCE_DATE_EPOCH"
           rm -rf pulp-sdk
         shell: bash
 
@@ -1457,7 +1464,20 @@ jobs:
           # somewhere, not that they are in the correct archive.
           python -c "from pathlib import Path; core = Path(r'sdk-staging/lib/pulp-view-core.lib').read_bytes(); wv = Path(r'sdk-staging/lib/pulp-view-webview.lib'); data = core + (wv.read_bytes() if wv.exists() else b''); assert b'WebViewPanel' in data, 'WebViewPanel symbol missing'; assert b'make_webview_embedded_resource_fetcher' in data, 'make_webview_embedded_resource_fetcher symbol missing'"
           Rename-Item sdk-staging pulp-sdk
-          Compress-Archive -Path pulp-sdk -DestinationPath pulp-sdk-${{ matrix.platform }}.tar.gz
+          $sourceEpoch = [int64](git show -s --format=%ct HEAD).Trim()
+          python tools/scripts/archive_sdk.py `
+            --source pulp-sdk `
+            --output pulp-sdk-${{ matrix.platform }}.tar.gz `
+            --epoch $sourceEpoch
+          if ($LASTEXITCODE -ne 0) {
+            throw 'Failed to create deterministic SDK archive'
+          }
+          python tools/scripts/check_archive_mtimes.py `
+            pulp-sdk-${{ matrix.platform }}.tar.gz `
+            --max-mtime $sourceEpoch
+          if ($LASTEXITCODE -ne 0) {
+            throw 'SDK archive contains a future-dated entry'
+          }
           Remove-Item -Recurse pulp-sdk
         shell: pwsh
 
