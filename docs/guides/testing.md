@@ -168,7 +168,11 @@ through the GPU backend, and rejects clear-only frames. Use the lower-level
 about a backend's raw raster behavior. `WindowHost::capture_back_buffer_png()`
 remains the live-host back-buffer path for host integration checks.
 
-The MCP `pulp_screenshot` tool is for demo/script fixtures. For project
+The MCP `pulp_screenshot` tool is for demo/script fixtures, and renders a Vellum
+authoring bundle through the Vellum app host when called with `bundle`; the host
+is found through `PULP_VELLUM_APP_HOST` or the Vellum SDK staged beside the
+installed Pulp SDK. `pulp_get_view_tree` and `pulp_simulate_click` (a press by
+node id or point) use the same host. For project
 captures through MCP, call `pulp_validate` with `screenshot=true`, or run the
 CLI screenshot command through the normal shell surface. Live inspector
 screenshots stay unavailable until host capture wiring lands.

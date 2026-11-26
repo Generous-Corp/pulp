@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20261125-windows-stage-icu-for-tools-watch",
+  "created_at": "2026-11-25T11:49:24Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "design-output-and-packaging",
+    "design-source-ingest"
+  ],
+  "rationale": "Adds pulp_stage_skia_icu_data and stages Skia's ICU data file beside the pulp-import-design executable on Windows, so the CLI no longer aborts in SkParagraph on its first text shaping. The change is a post-build file copy in the build graph. No design-import lowering, Chromium capture, rendering, or packaging authority moves, and no import output changes.",
+  "tests": [
+    "python3 tools/scripts/vellum_expansion_watch_check.py --base <merge-base origin/main HEAD> --head <HEAD>",
+    "vellum-expansion-watch"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}

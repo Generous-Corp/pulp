@@ -68,6 +68,13 @@ def case_a_skipped_push_is_recorded_with_its_knobs(fx: Receipt) -> None:
     assert r["hooks_path"] == "" and r["hooks_path_is_githooks"] is False, r
 
 
+def case_the_merge_tree_bound_override_is_recorded(fx: Receipt) -> None:
+    feat = fx.setup()
+    fx.hook(feat, PULP_SKIP_PREPUSH="1", PULP_PREPUSH_MERGE_TREE_BOUND="0")
+    (r,) = fx.lines()
+    assert r["env"]["PULP_PREPUSH_MERGE_TREE_BOUND"] == "0", r
+
+
 def case_hooks_path_is_reported(fx: Receipt) -> None:
     feat = fx.setup()
     fx.git("config", "core.hooksPath", ".githooks")
@@ -180,6 +187,49 @@ prepush_receipt_finish 1
     assert r["gates"] == [{"gate": "gate_a.py", "status": "ran", "exit": 0},
                           {"gate": "gate_b.py", "status": "ran", "exit": 3}], r
     assert r["gate_host"] is True and r["exit_code"] == 1 and r["outcome"] == "blocked", r
+
+
+def case_a_bound_hit_merge_tree_is_recorded_as_skipped(fx: Receipt) -> None:
+    feat = fx.setup()
+    stub = fx.repo / "tools/scripts/merge_tree_script_state.py"
+    stub.parent.mkdir(parents=True, exist_ok=True)
+    stub.write_text("import sys\nsys.exit(5)\n", encoding="utf-8")
+    res = fx.hook(feat)
+    assert res.returncode == 0, res.stderr
+    assert "merge-tree script-state NOT CHECKED" in res.stderr, res.stderr
+    (r,) = fx.lines()
+    assert any(g.get("gate") == "merge-tree-script-state" and g.get("status") == "skipped"
+               for g in r["gates"]), r["gates"]
+
+
+def case_families_fast_path_and_fallback_refusal(fx: Receipt) -> None:
+    """Run the complete hook beyond the legacy-checkout early exit."""
+    feat = fx.setup()
+    for name in ("version_bump_check.py", "skill_sync_check.py"):
+        fx.write("tools/scripts/" + name, "raise SystemExit(0)\n")
+    fx.write("tools/scripts/versioning.json", "{}\n")
+    checker = "changed_surface_script_families.py"
+    # Exit 4 is advisory only with its explicit override; a missing helper
+    # exercises the skipped path. Every fallback must both allow and refuse.
+    for merge_rc in (0, 2, 3, 4, 5, None):
+        stub = fx.repo / "tools/scripts/merge_tree_script_state.py"
+        if merge_rc is None:
+            stub.unlink()
+        else:
+            stub.write_text(f"raise SystemExit({merge_rc})\n", encoding="utf-8")
+        for families_rc in (0, 1):
+            fx.write("tools/scripts/" + checker,
+                     f"raise SystemExit({families_rc})\n")
+            res = fx.hook(feat, PULP_PREPUSH_ALLOW_NOT_CHECKED="1")
+            receipt = fx.lines()[-1]
+            ran = [g for g in receipt["gates"] if g["gate"] == checker]
+            context = (merge_rc, families_rc, res.stderr, receipt)
+            assert res.returncode == (families_rc if merge_rc != 0 else 0), context
+            if merge_rc == 0:
+                assert ran == [], context
+            else:
+                assert ran == [{"gate": checker, "status": "ran", "exit": families_rc}], context
+            assert "gates clean" in res.stderr or "gates passed except" in res.stderr or "blocking push" in res.stderr, context
 
 
 CASES = [v for k, v in sorted(globals().items()) if k.startswith("case_")]

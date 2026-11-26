@@ -1,0 +1,45 @@
+{
+  "id": "vellum-audio-step-grid-port",
+  "title": "Port StepGridView onto Vellum views in the Vellum audio package",
+  "classification": "public_sdk",
+  "delivery_state": "pending",
+  "claim_id": "vellum-audio-d3-step-grid-20261125",
+  "owned_paths": [
+    "integrations/pulp-vellum-audio/include/pulp/vellum_audio/step_grid_view.hpp",
+    "integrations/pulp-vellum-audio/src/step_grid_view.cpp",
+    "integrations/pulp-vellum-audio/tests/step_grid_view_test.cpp",
+    "docs/status/sequencer-exposure/rows/vellum-audio-step-grid-port.json"
+  ],
+  "evidence": [
+    {
+      "path": "integrations/pulp-vellum-audio/include/pulp/vellum_audio/step_grid_view.hpp",
+      "needles": ["class StepGridViewBase", "using StepGridView"]
+    },
+    {
+      "path": "integrations/pulp-vellum-audio/tests/step_grid_view_test.cpp",
+      "needles": ["StepGridView renders velocity-scaled accent pixels"]
+    }
+  ],
+  "surfaces": {
+    "installed_sdk": {
+      "disposition": "not_applicable",
+      "rationale": "The Vellum audio package is an optional integration that is not part of the installed SDK; the installed pulp/view/step_grid_view.hpp is unchanged and stays until the legacy view layer is removed."
+    },
+    "offline_timeline_cli": {
+      "disposition": "not_applicable",
+      "rationale": "This port adds a Vellum view over the existing sequencer state channel and no offline Timeline CLI surface."
+    },
+    "offline_timeline_mcp": {
+      "disposition": "not_applicable",
+      "rationale": "This port adds a Vellum view over the existing sequencer state channel and no offline Timeline MCP surface."
+    },
+    "live_product_control": {
+      "disposition": "not_applicable",
+      "rationale": "The view submits the same channel commands the legacy view does and adds no new live Product control operation."
+    },
+    "design_time_agent_manifest": {
+      "disposition": "not_applicable",
+      "rationale": "No design-time agent capability is added; the view is not registered in the capability manifest."
+    }
+  }
+}
