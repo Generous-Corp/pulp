@@ -16,6 +16,8 @@
 #include <pulp/vellum_components/aliases.hpp>
 #include <pulp/vellum_components/panic_button.hpp>
 
+#include <pulp/state/preset_library.hpp>
+
 #include <memory>
 #include <string_view>
 #include <vector>
@@ -27,6 +29,10 @@ namespace pulp::vellum_components {
 struct PulpViewComponentContext {
     /// Where the panic button raises its request. Empty means unavailable.
     PanicTarget panic;
+    /// The library whose MIDI program map the program editor edits. The editor
+    /// holds a reference to it, so the catalogue returns no
+    /// `pulp.preset_program_editor` while it is null.
+    state::PresetLibrary* preset_library = nullptr;
 };
 
 /// Ids accepted by `make_pulp_view_component`, in catalogue order.
