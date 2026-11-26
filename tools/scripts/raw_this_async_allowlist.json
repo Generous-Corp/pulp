@@ -77,9 +77,9 @@
       "reason": "BackgroundTaskLane destructor stops and joins its single worker"
     },
     {
-      "path": "core/format/include/pulp/format/reload/reloadable_shell.hpp",
+      "path": "core/format/include/pulp/format/reload/reloadable_shell_core.hpp",
       "needle": "std::thread([this]",
-      "reason": "ReloadableShell destructor stops and joins its watcher before Processor teardown"
+      "reason": "ReloadableShellCore destructor stops and joins its watcher before Processor teardown"
     },
     {
       "path": "core/gpu_audio/src/gpu_audio_transport.cpp",
