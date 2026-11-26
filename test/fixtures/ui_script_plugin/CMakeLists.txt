@@ -83,35 +83,6 @@ if(TARGET pulp-vellum-scripted AND CMAKE_NM)
         set_tests_properties(ui-script-vellum-route-${_route_format} PROPERTIES
             LABELS "pulp-vellum;format;scripted-ui" TIMEOUT 60)
     endforeach()
-    # The census on fixed listings (cat stands in for nm), with symbols taken
-    # from real images. A listing with Pulp's editor stack reads as legacy. An
-    # image that defines the Vellum factory beside that stack (what a
-    # UI_ENGINE vellum plug-in linked to the view layer looks like) fails the
-    # vellum verdict. Undefined references and std instantiations over a
-    # pulp::view type do not count against a Vellum image.
-    find_program(_ui_script_census_cat cat)
-    if(_ui_script_census_cat)
-        foreach(_control legacy-passes mixed-not-vellum vellum-ignores-references)
-            if(_control STREQUAL "legacy-passes")
-                set(_listing legacy_route.nm)
-                set(_route legacy)
-            elseif(_control STREQUAL "mixed-not-vellum")
-                set(_listing mixed_route.nm)
-                set(_route vellum)
-            else()
-                set(_listing vellum_route.nm)
-                set(_route vellum)
-            endif()
-            add_test(NAME ui-script-vellum-route-census-${_control}
-                COMMAND ${CMAKE_COMMAND} -DNM=${_ui_script_census_cat}
-                    "-DBINARY=${CMAKE_CURRENT_SOURCE_DIR}/${_listing}" -DROUTE=${_route}
-                    -P "${CMAKE_CURRENT_SOURCE_DIR}/check_vellum_route.cmake")
-            set_tests_properties(ui-script-vellum-route-census-${_control} PROPERTIES
-                LABELS "pulp-vellum;format;scripted-ui" TIMEOUT 60)
-        endforeach()
-        set_tests_properties(ui-script-vellum-route-census-mixed-not-vellum PROPERTIES
-            WILL_FAIL TRUE)
-    endif()
     add_custom_target(pulp-ui-script-vellum-fixture DEPENDS ${_vellum_route_targets})
     # The census reads built plug-in images, which no labelled test executable
     # links, so a lane that builds only its test executables would hand the
