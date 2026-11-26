@@ -13,6 +13,7 @@ import tempfile
 from pathlib import Path
 from argparse import Namespace
 from vellum_closure import (
+    is_host_absolute,
     ExternalResolver,
     cmd_gate,
     collect_headers,
@@ -2720,6 +2721,20 @@ class EmsdkIdentityTests(unittest.TestCase):
 
 
 
+class HostAbsolutePathTests(unittest.TestCase):
+    """A path outside the checkout is an external input on every host."""
+
+    def test_posix_and_windows_absolute_paths_are_external(self):
+        self.assertTrue(is_host_absolute("/home/runner/.cache/pulp/fetchcontent-src/brotli/c/common/constants.c"))
+        self.assertTrue(is_host_absolute("C:/Users/runneradmin/AppData/Local/Pulp/fetchcontent-src/brotli-v1.2.1/c/common/constants.c"))
+        self.assertTrue(is_host_absolute("d:/a/pulp/pulp/build/x.h"))
+
+    def test_checkout_and_build_relative_paths_are_not(self):
+        for path in ("core/canvas/src/canvas.cpp", "@build/core/view/gen.hpp", "@external/brotli/abc/c/x.c", "C/relative.c", "C:relative.c"):
+            with self.subTest(path=path):
+                self.assertFalse(is_host_absolute(path))
+
+
 class ExportMetadataTests(unittest.TestCase):
     SHA = "a" * 40
     ENV = {"GITHUB_SHA": SHA, "ImageVersion": "20261111.196.1", "ImageOS": "ubuntu26"}
@@ -2754,6 +2769,14 @@ class ExportMetadataTests(unittest.TestCase):
             self.meta(os_release=self.OS_RELEASE, image_name_input="unknown")
         # Control: an explicit name stands in for an os-release that gives none.
         self.assertEqual(self.meta(os_release="", image_name_input="macos-15")["runner_image"]["name"], "macos-15")
+
+    def test_a_windows_environment_with_upper_cased_names_is_read(self):
+        # Python on Windows upper-cases os.environ keys, so a hosted Windows
+        # runner's ImageVersion arrives as IMAGEVERSION.
+        env = {"GITHUB_SHA": self.SHA, "IMAGEVERSION": "20261116.1.0", "IMAGEOS": "win22"}
+        document = self.meta(env, os_release="", image_name_input="windows-2022")
+        self.assertEqual(document["runner_image"], {"name": "windows-2022", "version": "20261116.1.0"})
+        self.assertEqual(document["image_os"], "win22")
 
     def test_a_missing_os_is_not_required_but_is_not_invented(self):
         env = {k: v for k, v in self.ENV.items() if k != "ImageOS"}

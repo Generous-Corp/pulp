@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20261121-clap-conformance-checker-watch",
+  "created_at": "2026-11-21T09:33:58Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "design-output-and-packaging"
+  ],
+  "rationale": "Adds a headless CLAP host-conformance checker, its fixtures and a selftest under tools/audio and test registrations; no design-import, Chromium, rendering or packaging authority moves.",
+  "tests": [
+    "python3 tools/audio/clap-conformance/test_clap_conformance.py",
+    "python3 tools/scripts/vellum_expansion_watch_check.py --base <merge-base origin/main HEAD> --head <HEAD>",
+    "vellum-expansion-watch"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}

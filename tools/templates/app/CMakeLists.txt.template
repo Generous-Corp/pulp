@@ -5,14 +5,14 @@ pulp_add_app({{TARGET_NAME}}
     BUNDLE_ID "{{BUNDLE_ID}}"
     VERSION "{{VERSION}}"
 )
-target_sources({{TARGET_NAME}} PRIVATE main.cpp)
+target_sources({{TARGET_NAME}} PRIVATE src/main.cpp)
 target_link_libraries({{TARGET_NAME}} PRIVATE pulp::format)
-target_include_directories({{TARGET_NAME}} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_include_directories({{TARGET_NAME}} PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src")
 
 # Optional:
 # pulp_app_icon({{TARGET_NAME}} SOURCE assets/app-icon.png) # 1024x1024 PNG
 
-add_executable({{TARGET_NAME}}-test test_{{LOWER_NAME}}.cpp)
+add_executable({{TARGET_NAME}}-test tests/test_{{LOWER_NAME}}.cpp)
 target_link_libraries({{TARGET_NAME}}-test PRIVATE pulp::format Catch2::Catch2WithMain)
-target_include_directories({{TARGET_NAME}}-test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_include_directories({{TARGET_NAME}}-test PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src")
 catch_discover_tests({{TARGET_NAME}}-test)

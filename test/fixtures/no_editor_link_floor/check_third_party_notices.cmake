@@ -8,6 +8,13 @@
 #   -DCONTROL_FORBIDS=<name>|...    notices the control must not name
 #   -DCONTROL_MISSING_SDKS=<ns>|... namespaces the control must report under
 #                                   sdks_without_manifest
+#   -DCONTROL_REPORT=<json>         the control's build-directory report
+#   -DCONTROL_UNATTRIBUTED=<t>|...  targets the report must list
+#   -DNO_EDITOR_REPORT_DIR=<dir>    pulp-notices dir; every report under it
+#                                   must be valid
+#
+# No bundle file carries `unattributed_targets` (internal target names are a
+# build diagnostic); the report beside the generated notices does.
 #
 # A no-editor bundle names no UI-stack dependency, and still names the audio
 # path it does carry, so an empty or unreadable file cannot pass. The control
@@ -41,6 +48,10 @@ function(_notice_names out_var path)
             endif()
             list(APPEND _names "${_name}")
         endforeach()
+    endif()
+    string(JSON _unattr_type ERROR_VARIABLE _unattr_err TYPE "${_doc}" unattributed_targets)
+    if(NOT _unattr_err)
+        set(_failures "${_failures}\n  ${path}: carries unattributed_targets, a build diagnostic that must stay out of the bundle" PARENT_SCOPE)
     endif()
     set(${out_var} "${_names}" PARENT_SCOPE)
 endfunction()
@@ -136,6 +147,44 @@ if(EXISTS "${_control_txt}")
 else()
     string(APPEND _failures "\n  ${_control_txt}: missing")
 endif()
+
+# The build-directory report lists what the bundle no longer carries.
+if(NOT EXISTS "${CONTROL_REPORT}")
+    string(APPEND _failures "\n  ${CONTROL_REPORT}: missing")
+else()
+    file(READ "${CONTROL_REPORT}" _report)
+    set(_reported "")
+    string(JSON _count LENGTH "${_report}" unattributed_targets)
+    if(_count GREATER 0)
+        math(EXPR _last "${_count} - 1")
+        foreach(_i RANGE ${_last})
+            string(JSON _t GET "${_report}" unattributed_targets ${_i})
+            list(APPEND _reported "${_t}")
+        endforeach()
+    endif()
+    string(REPLACE "|" ";" _expected_unattributed "${CONTROL_UNATTRIBUTED}")
+    if(NOT _expected_unattributed)
+        string(APPEND _failures "\n  no CONTROL_UNATTRIBUTED targets were passed")
+    endif()
+    foreach(_t IN LISTS _expected_unattributed)
+        if(NOT _t IN_LIST _reported)
+            string(APPEND _failures "\n  ${CONTROL_REPORT}: unattributed_targets lacks ${_t}: ${_reported}")
+        endif()
+    endforeach()
+endif()
+# A plug-in with nothing unattributed still gets a valid report.
+file(GLOB _reports "${NO_EDITOR_REPORT_DIR}/*/ThirdPartyNotices.report.json")
+if(NOT _reports)
+    string(APPEND _failures "\n  ${NO_EDITOR_REPORT_DIR}: no reports found")
+endif()
+foreach(_r IN LISTS _reports)
+    file(READ "${_r}" _rdoc)
+    string(JSON _rs ERROR_VARIABLE _rerr GET "${_rdoc}" schema)
+    string(JSON _rn ERROR_VARIABLE _rerr2 LENGTH "${_rdoc}" unattributed_targets)
+    if(_rerr OR _rerr2 OR NOT _rs STREQUAL "pulp.third-party-notices-report.v1")
+        string(APPEND _failures "\n  ${_r}: not a valid report")
+    endif()
+endforeach()
 
 if(_failures)
     message(FATAL_ERROR "third-party notices check failed:${_failures}")

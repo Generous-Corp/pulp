@@ -27,6 +27,16 @@ and WebCLAP steps run from nested working directories, so those two calls must
 use `bash "$GITHUB_WORKSPACE/tools/ci/governed-build.sh"`; a relative
 `tools/ci/` path resolves inside the demo tree and fails before compilation.
 
+## WebCLAP adapter dependencies are separate from native linking
+
+`PulpWclap.cmake` compiles a curated DSP subset without linking `pulp::format`.
+When the CLAP adapter gains an out-of-line dependency, add its implementation
+there too: `HostWriteEchoGuard` needs `core/format/src/host_parameter_edit.cpp`.
+Native adapter tests can pass while every WebCLAP plugin fails at wasm-ld.
+`web-timeline-source-closure` checks this adapter dependency as well as the
+shared timeline/playback closure; its selftest rejects comment-only entries
+and entries placed in an unrelated source list.
+
 ## Web lanes fetch their inputs fresh, never from `$HOME`
 
 The WebCLAP deploy (`wclap-cloudflare.yml`) publishes a site, and the GPU-audio

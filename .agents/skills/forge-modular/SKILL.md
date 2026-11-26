@@ -27,6 +27,15 @@ the toolchain tree list in `tools/rack/install_toolchain.sh`, and the generator'
 `INCLUDES` in `tools/rack/generate.py` (preflight and syntax compilation). A pack that
 misses it fails at the compiler after the model has already been called.
 
+## Test seams go through PULP_TEST_ENV
+
+Read a test-only environment variable with `PULP_TEST_ENV("NAME")`
+(`pulp/format/test_env.hpp`), not `std::getenv`. It reads the environment only
+when `PULP_ENABLE_TEST_SEAMS` is on, which is off for Release, so a shipped
+Modular never obeys `FORGE_MODULAR_TEST_PROMPT`. Register each new seam name in
+`tools/cmake/release_artifact_forbidden.json`, so a release that still carries
+it fails the artifact scan.
+
 ## The prompt reaches the generator by file, never as an argument
 
 Linux refuses any single argument over 128 KiB and macOS refuses argv plus the

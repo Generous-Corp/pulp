@@ -21,6 +21,8 @@ def lane_text(prefix: str, target: str) -> str:
     root = f"_PULP_{prefix}_ROOT"
     sources = f"_PULP_{prefix}_CORE_SOURCES"
     timeline = f"_PULP_{prefix}_TIMELINE_SOURCES"
+    adapter = (f"    ${{{root}}}/core/format/src/host_parameter_edit.cpp\n"
+               if prefix == "WCLAP" else "")
     return f"""\
 pulp_resolve_timeline_sources("${{{root}}}" {timeline})
 set({sources}
@@ -31,7 +33,7 @@ set({sources}
     ${{{root}}}/core/audio/src/realtime_time_stretch.cpp
     ${{{root}}}/core/audio/src/rolling_audio_capture_buffer.cpp
     ${{{root}}}/core/runtime/src/sha256.cpp
-)
+{adapter})
 add_library({target} OBJECT ${{{sources}}})
 target_compile_features({target} PUBLIC cxx_std_20)
 target_compile_definitions({target} PUBLIC
@@ -77,6 +79,20 @@ class SourceClosureTests(unittest.TestCase):
 
     def test_valid_fixture_passes(self) -> None:
         self.assertEqual(self.check(), [])
+
+    def test_webclap_host_echo_dependency_must_be_in_the_dsp_source_set(self) -> None:
+        source = "${_PULP_WCLAP_ROOT}/core/format/src/host_parameter_edit.cpp"
+        for decoy in (f"# {source}\n", f"set(other_sources {source})\n"):
+            with self.subTest(decoy=decoy):
+                path = self.root / "tools/cmake/PulpWclap.cmake"
+                original = path.read_text(encoding="utf-8")
+                path.write_text(original.replace(f"    {source}\n", "") + decoy,
+                                encoding="utf-8")
+                self.assertEqual(self.check(), [
+                    "WebCLAP: missing portable dependency "
+                    "core/format/src/host_parameter_edit.cpp"])
+                path.write_text(original, encoding="utf-8")
+                self.assertEqual(self.check(), [])
 
     def test_shared_playback_manifest_passes_and_remains_complete(self) -> None:
         manifest = self.root / "core" / "playback" / "PulpPlaybackSources.cmake"

@@ -609,6 +609,8 @@ if(Python3_Interpreter_FOUND)
     # the motion shims live in the pulp-vellum integration.
     add_test(NAME swift-bridge-split-guard COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/scripts/swift_bridge_split_guard.py")
+    add_test(NAME swift-bridge-split-guard-selftest COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/scripts/test_swift_bridge_split_guard.py")
 
     # Temp-leak guard: wraps a test command in a private temp directory and
     # fails when the command leaves anything there (see its use on the Node

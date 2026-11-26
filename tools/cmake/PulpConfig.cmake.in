@@ -108,7 +108,25 @@ find_dependency(Threads)
 # first. Consumers of an SDK without the bridge never look for Vellum.
 set(PULP_SDK_HAS_VELLUM_BRIDGE "@PULP_SDK_HAS_VELLUM_BRIDGE@")
 if(PULP_SDK_HAS_VELLUM_BRIDGE)
-    find_dependency(Vellum CONFIG)
+    # The release stages the lock-pinned Vellum SDK inside this prefix at
+    # share/pulp/vellum-sdk/<version>/sdk. Hint it so a consumer that passes
+    # only the Pulp prefix still resolves Vellum, and keep the find QUIET and
+    # optional: the exported targets only name Vellum::* from pulp-vellum, so a
+    # consumer that never links the bridge must not fail to configure.
+    file(GLOB _pulp_vellum_sdk_hints LIST_DIRECTORIES true
+        "${PACKAGE_PREFIX_DIR}/share/pulp/vellum-sdk/*/sdk")
+    list(SORT _pulp_vellum_sdk_hints COMPARE NATURAL ORDER DESCENDING)
+    # HINTS, not PATHS: the staged copy wins over a Vellum elsewhere on the
+    # system. The exact version this SDK's bridge was built against is
+    # required when it is known, so a different Vellum is not found at all
+    # rather than linked against archives compiled for another ABI.
+    set(_pulp_vellum_version "@PULP_SDK_VELLUM_VERSION@")
+    if(_pulp_vellum_version)
+        set(_pulp_vellum_version ${_pulp_vellum_version} EXACT)
+    endif()
+    find_package(Vellum ${_pulp_vellum_version} CONFIG QUIET HINTS ${_pulp_vellum_sdk_hints})
+    unset(_pulp_vellum_version)
+    unset(_pulp_vellum_sdk_hints)
 endif()
 
 # The Pulp SDK is built and installed in the Release configuration only.
@@ -221,6 +239,10 @@ if(TARGET Pulp::canvas AND TARGET skia::skia)
         set_property(TARGET Pulp::canvas APPEND PROPERTY
             INTERFACE_LINK_LIBRARIES skia::dawn)
     endif()
+    # After the Skia archive, so a consumer that links the static view or canvas
+    # libraries into a plug-in module gets libfontconfig as a needed library
+    # (Linux; PulpLinkFontconfig.cmake explains why).
+    pulp_attach_fontconfig_to_canvas(Pulp::canvas)
 endif()
 
 function(_pulp_add_lowercase_alias imported_target alias_target)
@@ -249,6 +271,42 @@ endforeach()
 unset(_pulp_export_name)
 unset(_pulp_sdk_target)
 unset(_pulp_sdk_export_targets)
+
+# Vellum-backed Pulp::view, Pulp::canvas, Pulp::render and Pulp::design-import
+# for any of those names this SDK does not export itself. Pulp::view-native
+# stays undefined there: it promises no JavaScript engine, which no Vellum view
+# target can keep.
+# This runs after the Skia attach above, so a Vellum-backed Pulp::canvas never
+# gains a second Skia beside the one in Vellum's provider, and before the
+# PULP_HAS_* / PULP_ENABLE_GPU facts below, which read the final target set.
+# One SDK-wide fact decides it: PULP_SDK_UI_FROM_VELLUM is on only in an SDK
+# whose UI libraries were removed in favour of Vellum's. An SDK that builds
+# Pulp's own UI, or a partial one (GPU or design import off), defines nothing,
+# so a missing Pulp::render never turns into a Vellum renderer.
+set(PULP_SDK_UI_FROM_VELLUM "@PULP_SDK_UI_FROM_VELLUM@")
+set(PULP_SDK_VELLUM_UI_COMPAT_TARGETS "")
+if(PULP_SDK_UI_FROM_VELLUM AND PULP_SDK_HAS_VELLUM_BRIDGE)
+    if(Vellum_FOUND)
+        include("${CMAKE_CURRENT_LIST_DIR}/PulpVellumUiCompat.cmake")
+        pulp_define_vellum_ui_compat_targets()
+    else()
+        set(_pulp_ui_unexported "")
+        foreach(_pulp_ui_name IN ITEMS view canvas render design-import)
+            if(NOT TARGET "Pulp::${_pulp_ui_name}")
+                list(APPEND _pulp_ui_unexported "Pulp::${_pulp_ui_name}")
+            endif()
+        endforeach()
+        if(_pulp_ui_unexported)
+            message(WARNING
+                "Pulp: this SDK serves ${_pulp_ui_unexported} from Vellum, but the "
+                "Vellum package was not found (looked for version "
+                "'@PULP_SDK_VELLUM_VERSION@' under ${PACKAGE_PREFIX_DIR}/share/pulp/vellum-sdk "
+                "and the usual search paths), so those targets are not defined.")
+        endif()
+        unset(_pulp_ui_name)
+        unset(_pulp_ui_unexported)
+    endif()
+endif()
 
 if(TARGET Pulp::yogacore)
     set_target_properties(Pulp::yogacore PROPERTIES

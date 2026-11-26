@@ -50,12 +50,25 @@ EDGE_ROW = 210
 EDGE_COLUMNS = range(208, 232, 2)
 
 
+def refuse_installed_app_in_sandbox():
+    # Check the resolved path too: a symlink can point into an .app bundle.
+    paths = (CHROME, os.path.realpath(CHROME))
+    if (os.environ.get("CODEX_SANDBOX") and
+            any(part.endswith(".app") for path in paths for part in path.split(os.sep))):
+        # Exit 77 is the skip status; sys.exit(<str>) would exit 1 (a failure).
+        print("SKIP: installed browser apps cannot start in a sandbox; "
+              "install a managed browser or set PULP_CHROME explicitly",
+              file=sys.stderr)
+        sys.exit(77)
+
+
 def sample_columns(left):
     line = next(x for x in range(left + 35, left + 80) if x % 10 == 5)
     return line, line - 5
 
 
 def render():
+    refuse_installed_app_in_sandbox()
     if not os.path.exists(CHROME):
         sys.exit(f"Chrome not found at {CHROME}; set PULP_CHROME")
     shot = os.path.join(tempfile.mkdtemp(prefix="pulp-backdrop-oracle-"), "case.png")

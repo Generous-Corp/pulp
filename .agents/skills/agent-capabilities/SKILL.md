@@ -456,6 +456,12 @@ default-constructs it and invokes a const query, and add the new key to the
 `capability_keys` list of each support header the kernel actually includes
 (e.g. `utility_contract.hpp`), not to every MIDI support header.
 
+`pulp_add_plugin(UI_SCRIPT ... UI_ENGINE vellum)` selects the Vellum editor
+package for a script-only plug-in. Plain `UI_SCRIPT` uses the legacy builder
+and AutoUi stays on the legacy view path. The shared `editor_ui_source.hpp`
+belongs in the consumption census. Vellum audio widgets still need script
+factory registration and a data-channel adapter.
+
 For an existing capability change:
 
 - Update the reviewed header fingerprint for every public-header byte change,
@@ -1677,6 +1683,34 @@ the bypass trailer by reflex:
   `OPTIONAL`, and `PulpConfig.cmake` only registers it when the file exists, so
   an SDK built without Python 3 still configures consumers.
 
+- **The source-install provenance stamp**: `PulpStampSourceInstall.cmake.in`
+  resolves the source commit and dirty state when the SDK is installed, not when
+  it was configured, so an incremental build and install after new commits
+  names the commit its binaries came from. It writes provenance JSON only; no
+  header or covered root changes.
+
+- **The Vellum-backed UI target names**: `PulpVellumUiCompat.cmake` (installed
+  from `integrations/pulp-vellum/cmake/`, because `core_vellum_direction.py`
+  rejects `Vellum::` target names under `tools/cmake`) defines
+  `Pulp::view|canvas|render|design-import` as INTERFACE IMPORTED
+  targets over Vellum's mirror targets, only in an SDK configured with
+  `PULP_SDK_UI_FROM_VELLUM` (off until Pulp's UI libraries are removed). Never
+  key that off one name's absence: a GPU-off or design-import-off bridge SDK
+  lacks `Pulp::render` or `Pulp::design-import` while still shipping Pulp's own
+  view. It installs no header and adds no archive, so no covered root
+  or release-matrix stem moves. The headers consumers reach through those names
+  are Vellum's (`vellum/...`), whose surface Vellum owns; note that the installed
+  mirror refuses `vellum/render/gpu_surface.hpp` and `skia_surface.hpp` with an
+  `#error`, so a probe or test reaching `Pulp::render` must use a supported
+  render header such as `render/texture_atlas.hpp`. Before the flag turns on:
+  a Vellum `Pulp::view` beside `Pulp::gpu-*` loads two GPU stacks,
+  `view-audio`/`view-tooling` have no mirror target, and PulpUtils/PulpReload/PulpJsBytecode/PulpPluginFormats branch on
+  `TARGET Pulp::view` and must read `PULP_UI_PROVIDER` instead.
+  `Pulp::view-native` is deliberately left undefined there: it promises no
+  JavaScript engine, and every Vellum view target carries the provider's. A
+  consumer naming it is refused at configure with that reason, so never map it
+  to a Vellum target until Vellum exports a JS-free view.
+
 ## A platform header installed for per-binary recompilation is not capability surface
 
 `PulpInstallRules.cmake` installs more than public API. The macOS ObjC cluster
@@ -2194,3 +2228,11 @@ belongs in the existing reviewed header it extends, not in a new public header:
 a new `core/midi/include/pulp/midi/*.hpp` fails `--check` as an unclassified
 public header until it is registered. Keep test-only seams in a `core/*/src/`
 header that the test includes by relative path.
+
+## An optional integration package's headers install through PulpInstallRules
+
+Headers under an optional `integrations/<package>/include/pulp/` root are
+installed by a conditional block in `tools/cmake/PulpInstallRules.cmake` and
+listed in the Doxyfile INPUT roots plus `doxygen_installed_header_check.py`.
+Adding a package means adding all three, or the installed-header parity check
+fails.

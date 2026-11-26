@@ -314,6 +314,15 @@ error. Things that are easy to get wrong:
   bootstrap once per plug-in image, keyed by the bundle id, before the first
   `create()`. Without it the host comes back null ("Dawn proc table
   unavailable"), which reads like a GPU failure but is a missing bootstrap.
+- Content-first presentation is opt-in per root view. A root that returns
+  true from `editor_defers_presentation()` makes `pulp::vellum::Editor` pass
+  `PluginViewHost::Options::defer_presentation`, so the host keeps the native
+  layer at the editor colour and presents nothing. The editor calls
+  `resume_presentation()` at attach when the root has no
+  `editor_content_ready()`, otherwise on the first idle where it is true, and
+  after `editor_presentation_timeout()` (500 ms default, checked from idle,
+  never at attach) at the latest. It resumes once per editor: Vellum's host
+  cannot defer again, so a re-attach presents at once.
 
 ### The editor-host acceptance test is one command
 
@@ -2488,8 +2497,9 @@ Per-format wiring:
   `host->set_design_viewport(...)`.
 - **macOS AUv3** — no CLAP/VST3-style drag constraint callback.
   `PulpAUMacViewController` must create its initial root view at the
-  compile-time design size when `PULP_PLUGIN_DESIGN_W/H` are available,
-  then call `host->set_design_viewport(...)` after `ViewBridge` opens.
+  bound processor's `editor_size()` when the unit is bound before the view
+  loads, else at the compile-time design size when `PULP_PLUGIN_DESIGN_W/H`
+  are available, then call `host->set_design_viewport(...)` after `ViewBridge` opens.
   `supportedViewConfigurations:` should return aspect-correct host
   configs first, but only if they are large enough for the design;
   wrong-aspect "large enough" configs are fallbacks. Undersized fixed-
@@ -2912,6 +2922,20 @@ case so the degradation is visible rather than mysterious.
 
 ## The UI_SCRIPT editor is embedded; the on-disk path is a dev-build override
 
+With the Vellum bridge enabled, `pulp_add_plugin(UI_SCRIPT ... UI_ENGINE vellum)`
+routes a script-only plug-in to the Vellum editor package using the same asset
+registration. Plain `UI_SCRIPT` still installs the legacy scripted builder,
+and AutoUi stays on the legacy view path. Vellum audio widgets still need
+script factory registration and a `VisualPortFeed` data-channel adapter.
+
+Test this route through the public CMake selector: setting the final target's
+`PULP_VELLUM_SCRIPTED_EDITOR` property by hand cannot detect a missing package
+hookup. For lifecycle forwarding, use the private scripted root with a recording
+session and a real host observer registry; publish a new surface after close to
+prove the subscription was removed, then reopen to prove it is re-established.
+Keep the prewarm recorder in its own executable so it can replace Vellum's
+external scheduler without changing the ordinary scripted editor tests.
+
 `pulp_add_plugin(UI_SCRIPT)` no longer ships a plug-in that reads `ui.js` from
 the developer's absolute source path at every editor open. The script's bytes,
 the `theme.json` beside it, and the asset files beside it (images, fonts,
@@ -2926,7 +2950,8 @@ and a generated header returns them as the embedded half of a
 later `pulp_use_kit_ui` selection still lands) includes that header, so one static
 initializer registers the embedded editor and the on-disk paths together, and
 the data archive's members are referenced from a direct source and survive
-the link. `select_editor_ui_source()` in `editor_ui.hpp` is the pure decision;
+the link. `select_editor_ui_source_as()` in `editor_ui_source.hpp` makes the
+shared source decision, with a legacy wrapper in `editor_ui.hpp`;
 `test_headless.cpp` tests its matrix and `test_view_bridge.cpp` opens an
 embedded registration through a real ViewBridge.
 
@@ -3998,6 +4023,24 @@ for exactly that, and a linker applies no predicate.
 definition in that file: it is compiled per-plugin, so the symbol resolves the
 same way `PulpPlugView`'s constructor always did.
 
+## Tool windows in the view-free standalone are panels
+
+`pulp::standalone-contract` (a UI package plug-in's Standalone) cannot own a
+Pulp view, so tool windows such as the musical typing keyboard reach it as
+`StandalonePanel`s (`pulp/format/standalone_panel.hpp`) that a UI integration
+installs at static init. Things that are easy to get wrong:
+
+- The registrar must be linked into the Standalone. A static-init object in an
+  archive member that nothing references is dropped, so an integration needs a
+  generated per-target source that calls its install function.
+- The shortcut toggle runs from the editor content view's
+  `performKeyEquivalent:`, not only from the menu. A headless run has no menu,
+  and the key driver offers `performKeyEquivalent:` first, so
+  `PULP_TEST_KEY_SEQUENCE=cmd+k` reaches it.
+- `drain_midi_into` runs on the audio thread until the standalone destroys the
+  panel, which happens after audio stops. A panel must not free what drain reads
+  in `shutdown()`.
+
 ## The standalone harness can press keys, not just move a pointer
 
 `core/format/src/standalone.cpp` arms three harness hooks off `StandaloneConfig`
@@ -4014,6 +4057,13 @@ Shape, if you are extending it:
   no window and no AppKit, so both are unit-tested directly
   (`test/test_standalone_key_sequence.cpp`). Only the delivery is
   platform-specific (`standalone_key_driver_mac.mm`, stub elsewhere).
+- Those headers are view-free on purpose: the contract standalone
+  (`pulp::standalone-contract`, the app a `UI <package>` plug-in ships) links
+  them and compiles with no view include root. A step names its key with
+  `detail::SequenceKey` and `kSequenceMod*`, which carry `view::KeyCode` and
+  `view::Modifier`'s values; do not reach for `pulp/view/input_events.hpp`
+  there again, because that build fails on it and
+  `format_header_view_boundary.py` flags it.
 - Delivery goes through `WindowHost::native_content_view_handle()` — the public
   `void*` NSView seam — so the driver lives entirely in `core/format` and needs
   no edit to `core/view/platform/mac/window_host_mac.mm`. It also needs no
@@ -4137,3 +4187,11 @@ an editor-bearing plug-in with a heavy constructor pays that on every host scan.
 `PULP_CLAP_PLUGIN_WITH_DESCRIPTOR` / `PULP_CLAP_BUNDLE_PLUGIN_WITH_DESCRIPTOR`
 answer descriptor queries from a function, so the Processor (and its editor
 state) is built only at `create_plugin`/`init`. See the `clap` skill.
+
+## Capturing a shipped editor from outside the bundle
+
+A built plug-in exports only `clap_entry`, so `clap_adapter::contract_gui_session()`
+is not reachable from a host that dlopens it. The opt-in CLAP extension
+`pulp.editor-automation/1` (`PULP_EDITOR_AUTOMATION_EXTENSION`, default OFF)
+forwards `capture_png` to the open session's `EditorAutomation`; it is a test
+seam and absent from release plug-ins. See the `clap` skill.

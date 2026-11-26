@@ -22,6 +22,7 @@
 #include <cstdint>
 #include <limits>
 #include <memory>
+#include <stdexcept>
 #include <thread>
 #include <string>
 #include <string_view>
@@ -739,7 +740,28 @@ class TickingFactory final : public EditorFactory {
     int& idles_;
 };
 
+class ThrowingFactory final : public EditorFactory {
+  public:
+    bool supports(EditorRole role) const override {
+        return role == EditorRole::editor;
+    }
+    std::unique_ptr<Editor> create(Processor&, EditorContext&, EditorRole) override {
+        throw std::runtime_error("test editor factory failure");
+    }
+};
+
 } // namespace
+
+TEST_CASE("a throwing editor factory fails session creation without escaping", "[editor-host]") {
+    Fixture f;
+    GainProcessor processor;
+    ThrowingFactory factory;
+    REQUIRE_NOTHROW([&] {
+        const auto session = ContractEditorSession::create(
+            processor, f.store, factory, {}, ContractEditorSession::IdleSource::host_driven);
+        REQUIRE_FALSE(session);
+    }());
+}
 
 TEST_CASE("a contract session whose owner is gone draws no more frames", "[editor-host]") {
     Fixture f;

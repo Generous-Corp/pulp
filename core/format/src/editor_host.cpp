@@ -19,6 +19,11 @@
 #include <unordered_map>
 namespace pulp::format {
 
+std::string_view Editor::attach_error() const noexcept {
+    const auto* diagnostics = dynamic_cast<const EditorAttachDiagnostics*>(this);
+    return diagnostics ? diagnostics->attach_failure_reason() : std::string_view{};
+}
+
 namespace detail {
 
 namespace {
@@ -80,6 +85,7 @@ struct StateStoreParamPort::Link {
     // params() and info() hand out stay valid for the port's lifetime, store
     // or no store.
     std::vector<state::ParamInfo> infos;
+    std::vector<state::ParamGroup> groups;
 
     // Run `use` on the store, outside the lock. False when disconnected.
     template <typename Use> bool with_store(Use&& use) const {
@@ -111,6 +117,8 @@ StateStoreParamPort::StateStoreParamPort(state::StateStore& store)
     link_->store = &store;
     const auto all = store.all_params();
     link_->infos.assign(all.begin(), all.end());
+    const auto groups = store.all_groups();
+    link_->groups.assign(groups.begin(), groups.end());
 }
 
 StateStoreParamPort::~StateStoreParamPort() {
@@ -119,6 +127,14 @@ StateStoreParamPort::~StateStoreParamPort() {
 
 std::span<const state::ParamInfo> StateStoreParamPort::params() const {
     return link_->infos;
+}
+
+std::span<const state::ParamGroup> ParamPort::groups() const {
+    return {};
+}
+
+std::span<const state::ParamGroup> StateStoreParamPort::groups() const {
+    return link_->groups;
 }
 
 const state::ParamInfo* StateStoreParamPort::info(state::ParamID id) const {

@@ -5,7 +5,7 @@
 # frameworks only: no view, canvas, render or GPU-runtime target, and no Skia,
 # Dawn, Vellum or RmlUi.
 
-add_library(pulp-native STATIC src/gl_surface.cpp src/input.cpp src/x11_translate.cpp)
+add_library(pulp-native STATIC src/gl_surface.cpp src/input.cpp src/x11_translate.cpp src/win32_translate.cpp)
 if(APPLE)
     target_sources(pulp-native PRIVATE
         src/frame_pump_mac.cpp

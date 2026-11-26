@@ -210,8 +210,8 @@ if(PULP_BUILD_WEBVIEW)
     elseif(UNIX AND NOT APPLE AND NOT ANDROID)
         target_sources(pulp-view-webview-backend PRIVATE platform/linux/webkitgtk_backend.cpp)
     endif()
-    target_link_libraries(pulp-view-webview PUBLIC
-        "$<LINK_LIBRARY:WHOLE_ARCHIVE,pulp::view-webview-backend>")
+    # In-tree builds link the lower-case alias; the installed export only defines `Pulp::`.
+    target_link_libraries(pulp-view-webview PUBLIC "$<BUILD_INTERFACE:$<LINK_LIBRARY:WHOLE_ARCHIVE,pulp::view-webview-backend>>" "$<INSTALL_INTERFACE:$<LINK_LIBRARY:WHOLE_ARCHIVE,Pulp::view-webview-backend>>")
     target_include_directories(pulp-view-webview
         PUBLIC
             $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>

@@ -578,7 +578,10 @@ straight:
   host's scale; the contract GUI forwards it to the editor
   (`ContractEditorSession::set_scale`).
 - WebCLAP (`PULP_WCLAP`) leaves the contract GUI out; `PulpWclap.cmake`'s source
-  list carries no contract code.
+  list carries no contract code. It must still compile `host_parameter_edit.cpp`:
+  the adapter uses its `HostWriteEchoGuard` implementation, and the WebCLAP
+  subset does not link native `pulp::format`. The source-closure gate checks
+  this dependency; native adapter tests alone cannot detect its omission.
 
 ### Proportional resize with aspect lock
 
@@ -1325,6 +1328,25 @@ skip the open notification and first-frame preparation on refusal. Keep the
 created GUI available for a later `set_parent()` retry or `gui_destroy()`; a
 refused attempt must not publish an editor-open lifecycle event.
 
+## `pulp.editor-automation/1` (opt-in test seam)
+
+A built plug-in exports only `clap_entry`, so a host that dlopens the bundle
+cannot call `clap_adapter::contract_gui_session()`; the editor's
+`EditorAutomation::capture_png()` was reachable only by tests that link the
+plug-in's code in. `pulp/format/clap_editor_automation.hpp` adds a CLAP
+extension for that case: `capture_png(plugin, &data, &size)` returns the open
+editor's current frame as PNG (false when no editor is open or it cannot
+capture; outputs untouched), and `free_png(plugin, data)` releases the buffer.
+Both are main-thread, like every `clap_plugin_gui` call.
+
+It is a **test-automation seam, off by default**. `get_extension` returns it only
+when the CLAP target is compiled with `PULP_EDITOR_AUTOMATION_EXTENSION`, which
+`_pulp_add_clap` sets from the CMake variable of the same name (default OFF);
+otherwise the header's code is not compiled in and the id returns null. Never
+ship a plug-in with it ON. Tests: `[editor-automation]` in
+`test/test_clap_contract_editor.cpp`, built twice (`pulp-test-clap-contract-editor`
+proves it absent, `pulp-test-clap-contract-editor-automation` exercises it).
+
 ## Editor resize contract (aspect-lock vs free reflow)
 
 `gui_can_resize` returns resizable **iff `view_size().min_width>0 && min_height>0`** —
@@ -1502,3 +1524,49 @@ at init, so a harness that sets `set_factory_presets_dir` afterwards must call
 `CLAP_PRESET_DISCOVERY_LOCATION_PLUGIN` loads a library key. The test harness
 `Harness` does not set `plugin.get_extension`; call
 `clap_adapter::clap_get_extension` instead of the vtable slot.
+
+## Host automation mirrored back by the plug-in is not an edit
+
+A plug-in that writes a host-automated value back into the store on the main
+thread (e.g. after quantising it) must not reach the host as an edit: hosts
+treat the parameter as touched and stop applying its envelope. `PulpClapPlugin::host_write_echo_guard`, fed by the outbound param listener, shares
+`HostWriteEchoGuard` with the VST3 bridge: off-main-thread host writes are
+remembered per parameter and a non-host write inside `kWindowNs` is not
+reported unless a gesture is open on it. Do not report from a new listener
+without consulting the guard.
+
+The snapshot-output fallback uses audio-thread captured processor values, not a
+live store read: a concurrent suppressed main-thread mirror must not become an
+output event. Host decode is explicitly scoped separately from processor writes.
+`[echo-concurrent]` interleaves both writers and preserves processor output.
+
+Register processor-output capture before exposing the store to the plug-in.
+Otherwise a reentrant normalizing listener can deliver the nested value first
+and let the outer notification overwrite it with an older value.
+
+## Host-conformance checker
+
+`pulp-clap-conformance <plugin.clap>` (`tools/audio/clap-conformance/`, registered
+in `docs/status/tools.yaml`) runs four host-visible checks with numbers: scan cost
+(dlopen + init + descriptor reads, no plug-in created), automation echo (host
+param events must not come back as out-events or gestures), missing input ports,
+and a save/load/save state round trip. Each check has a fixture that breaks it
+(`conformance_fixture_clap.cpp`, `BREAK_*`). Every check runs in a forked child with a deadline (a crash or hang fails that check by name). Plug-in stdout is moved to stderr so `--json` stays parseable. A macOS `.clap` bundle path is resolved to `Contents/MacOS/<exe>`. The scan-cost instruction budget is measured on macOS only; elsewhere the check reports "instructions n/a". Echo turns the main run loop between blocks after a 2 s warm-up, because main-thread publishes are invisible otherwise (`BREAK_ECHO_MAIN` fixture). `--expect-fail CHECK` turns the run
+into a negative control; `test_clap_conformance.py` is the ctest.
+
+## State: a processor that carries its own parameters can skip the store
+
+`Processor::plugin_state_carries_parameters()` (default false) tells the CLAP and
+VST3 adapters that `serialize_plugin_state()` / `deserialize_plugin_state()`
+restore every parameter. With it set and a non-empty payload, `state.save` /
+`getState` write the PLST envelope with a parameter-free store blob (16 bytes,
+same `state_version`) instead of 8 bytes per parameter. Load is unchanged: the
+store is applied first, then the processor's restore runs and wins, so states
+saved with the full store still load. An empty payload keeps the full store.
+
+* A state saved with the opt-in and loaded by a release that predates it
+  restores the processor's bytes and leaves parameters those bytes do not carry
+  at their current value. This downgrade loss is accepted and tested.
+* AUv3, headless, standalone, LV2 and WAM keep the full store; only
+  `plugin_state_io::serialize(..., StoreLayout::processor_owned_when_declared)`
+  callers opt in.

@@ -6,6 +6,7 @@
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 #include <limits>
 #include <pulp/runtime/external_input.hpp>
+#include <pulp/runtime/interaction_event.hpp>
 #include <pulp/runtime/triple_buffer.hpp>
 #include <thread>
 #include <vector>

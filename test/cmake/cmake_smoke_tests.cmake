@@ -279,6 +279,15 @@ add_test(NAME cmake-ios-auv3-control-shipping
         -DPULP_SOURCE_DIR=${CMAKE_SOURCE_DIR}
         -DFIXTURE_DIR=${CMAKE_CURRENT_BINARY_DIR}/ios-auv3-control-shipping
         -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/test_ios_auv3_control_shipping.cmake)
+
+# pulp_add_ios_auv3(... UI <package>): attaches the package, refuses a missing
+# package, shared runtime libraries and a Vellum SDK without an iOS slice, and
+# leaves the extension unchanged when UI is absent.
+add_test(NAME cmake-ios-auv3-ui-package
+    COMMAND ${CMAKE_COMMAND}
+        -DPULP_SOURCE_DIR=${CMAKE_SOURCE_DIR}
+        -DFIXTURE_DIR=${CMAKE_CURRENT_BINARY_DIR}/ios-auv3-ui-package
+        -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/test_ios_auv3_ui_package.cmake)
 set_tests_properties(cmake-ios-auv3-control-shipping PROPERTIES
     LABELS "cmake;ios;auv3;control"
     TIMEOUT 30)
@@ -465,6 +474,7 @@ add_test(NAME cmake-installed-sdk-runtime-staging
         -DPULP_SOURCE_DIR=${CMAKE_SOURCE_DIR}
         -DPULP_PARENT_BUILD_TYPE=$<CONFIG>
         "-DPULP_PARENT_SANITIZER=${PULP_SANITIZER}"
+        "-DPULP_PARENT_BUILD_WEBVIEW=${PULP_BUILD_WEBVIEW}"
         "-DPULP_PARENT_CXX_FLAGS=${CMAKE_CXX_FLAGS}"
         "-DPULP_PARENT_C_FLAGS=${CMAKE_C_FLAGS}"
         "-DPULP_PARENT_OBJCXX_FLAGS=${CMAKE_OBJCXX_FLAGS}"
@@ -481,6 +491,18 @@ add_test(NAME cmake-installed-sdk-runtime-staging
 set_tests_properties(cmake-installed-sdk-runtime-staging PROPERTIES
     LABELS "cmake;sdk;skia;windows;runtime;slow"
     TIMEOUT 1800)
+
+# The WebView backend edge in the installed export must use the `Pulp::`
+# namespace. The export file is generated at configure time, so this check
+# needs no build and runs whenever the composition has WebView enabled.
+if(PULP_BUILD_WEBVIEW)
+    add_test(NAME cmake-view-webview-backend-export-namespace
+        COMMAND ${CMAKE_COMMAND}
+            -DPULP_BUILD_DIR=${CMAKE_BINARY_DIR}
+            -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/test_view_webview_backend_export_namespace.cmake)
+    set_tests_properties(cmake-view-webview-backend-export-namespace PROPERTIES
+        LABELS "cmake;sdk;install")
+endif()
 
 # Installed GPU-audio SDK consumer: compile a minimal CLAP plugin against the
 # exported transport and custom GpuAudioNode contract.
@@ -949,6 +971,14 @@ add_test(NAME cmake-sdk-provenance-contract
 set_tests_properties(cmake-sdk-provenance-contract PROPERTIES
     LABELS "cmake;sdk;provenance"
     TIMEOUT 30)
+add_test(NAME cmake-source-install-sha-at-install
+    COMMAND ${CMAKE_COMMAND}
+        -DPULP_SOURCE_DIR=${CMAKE_SOURCE_DIR}
+        -DFIXTURE_DIR=${CMAKE_BINARY_DIR}/test-source-install-sha-at-install
+        -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/test_pulp_source_install_sha.cmake)
+set_tests_properties(cmake-source-install-sha-at-install PROPERTIES
+    LABELS "cmake;sdk;provenance"
+    TIMEOUT 60)
 # PULP_PROFILE contract: release seeds the enforced options OFF, refuses a
 # contradicting -D, stale cache or cached PULP_DEV_BUILD=ON, and only
 # PULP_PROFILE_ALLOW_OVERRIDE (with a warning) lets one through. Eight fixture
@@ -1665,3 +1695,95 @@ endif()
 # scanner tests above because it is the same family of `cmake -P` artifact
 # scans and the control scanner reads the same list.
 include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/release_artifact_tests.cmake")
+
+# The installed package config puts libfontconfig after Skia on Pulp::canvas.
+add_test(NAME cmake-canvas-fontconfig-link
+    COMMAND ${CMAKE_COMMAND}
+        -DPULP_SOURCE_DIR=${CMAKE_SOURCE_DIR}
+        -DFIXTURE_DIR=${CMAKE_CURRENT_BINARY_DIR}/canvas-fontconfig-link
+        -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/test_canvas_fontconfig_link.cmake)
+set_tests_properties(cmake-canvas-fontconfig-link PROPERTIES
+    LABELS "cmake;format" TIMEOUT 60)
+
+# The installed package config serves Pulp's UI target names from Vellum in an
+# SDK built without Pulp's own UI libraries, and defines nothing otherwise. The
+# stand-in scenarios run everywhere. `real` and `wrong-version` need a Vellum
+# SDK: in a build that found one (PULP_ENABLE_PULP_VELLUM=ON, as the Vellum SDK
+# consumer lane configures) they carry the pulp-vellum label that lane runs and
+# must not skip; elsewhere they report SKIP.
+foreach(_vellum_ui_compat_scenario
+        wiring shape pulp-ui partial-ui view-core missing twice no-bridge
+        no-vellum real wrong-version view-native gpu-guard gpu-owner-real)
+    set(_vellum_ui_compat_test "cmake-vellum-ui-compat-${_vellum_ui_compat_scenario}")
+    set(_vellum_ui_compat_args "")
+    set(_vellum_ui_compat_labels "cmake;sdk")
+    if(_vellum_ui_compat_scenario STREQUAL "real" OR _vellum_ui_compat_scenario STREQUAL "wrong-version")
+        if(Vellum_DIR)
+            set(_vellum_ui_compat_args -DVELLUM_DIR=${Vellum_DIR} -DREQUIRE_VELLUM=ON)
+            set(_vellum_ui_compat_labels "cmake;sdk;pulp-vellum")
+        endif()
+    elseif(_vellum_ui_compat_scenario STREQUAL "gpu-owner-real")
+        # Needs an installed gpu-runtime package beside the Vellum SDK; a build
+        # that fetches gpu-runtime from source has none and reports SKIP.
+        if(Vellum_DIR AND PULP_GPU_RUNTIME_PREFIX)
+            set(_vellum_ui_compat_args -DVELLUM_DIR=${Vellum_DIR}
+                -DGPU_RUNTIME_DIR=${PULP_GPU_RUNTIME_PREFIX}
+                -DGPU_RUNTIME_SKIA_DIR=${SKIA_DIR})
+        endif()
+    endif()
+    add_test(NAME ${_vellum_ui_compat_test}
+        COMMAND ${CMAKE_COMMAND}
+            -DPULP_SOURCE_DIR=${CMAKE_SOURCE_DIR}
+            -DFIXTURE_DIR=${CMAKE_CURRENT_BINARY_DIR}/vellum-ui-compat
+            -DSCENARIO=${_vellum_ui_compat_scenario}
+            ${_vellum_ui_compat_args}
+            -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/test_vellum_ui_compat_package.cmake)
+    set_tests_properties(${_vellum_ui_compat_test} PROPERTIES
+        LABELS "${_vellum_ui_compat_labels}"
+        SKIP_REGULAR_EXPRESSION "SKIP: (no installed Vellum SDK|gpu-owner-real needs)")
+endforeach()
+unset(_vellum_ui_compat_scenario)
+unset(_vellum_ui_compat_test)
+unset(_vellum_ui_compat_args)
+unset(_vellum_ui_compat_labels)
+
+# The consumer modules read PULP_UI_PROVIDER, so a Vellum-backed Pulp::view
+# never has Pulp's view, render or editor-adapter sources compiled against it.
+foreach(_ui_provider_scenario provider editor no-editor bundle reload objc bytecode standalone)
+    add_test(NAME cmake-ui-provider-${_ui_provider_scenario}
+        COMMAND ${CMAKE_COMMAND}
+            -DPULP_SOURCE_DIR=${CMAKE_SOURCE_DIR}
+            -DFIXTURE_DIR=${CMAKE_CURRENT_BINARY_DIR}/ui-provider-consumer
+            -DSCENARIO=${_ui_provider_scenario}
+            -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/test_ui_provider_consumer_modules.cmake)
+    set_tests_properties(cmake-ui-provider-${_ui_provider_scenario} PROPERTIES
+        LABELS "cmake;sdk"
+        SKIP_REGULAR_EXPRESSION "SKIP: (thin reload logic is not supported on Windows|the view ObjC cluster is macOS-only)")
+endforeach()
+unset(_ui_provider_scenario)
+
+if(UNIX)
+    if(Python3_Interpreter_FOUND)
+        add_test(NAME pulp.plugin-identity-contract
+            COMMAND "${Python3_EXECUTABLE}"
+                "${CMAKE_SOURCE_DIR}/tools/cmake/test_pulp_plugin_identity.py")
+        set_tests_properties(pulp.plugin-identity-contract PROPERTIES LABELS "pr")
+    endif()
+    add_test(NAME cmake-plugin-module-fontconfig
+        COMMAND ${CMAKE_COMMAND}
+            -DPULP_SOURCE_DIR=${CMAKE_SOURCE_DIR}
+            -DWORK_DIR=${CMAKE_CURRENT_BINARY_DIR}/plugin-module-fontconfig
+            -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/test_plugin_module_fontconfig.cmake)
+    set_tests_properties(cmake-plugin-module-fontconfig PROPERTIES
+        LABELS "cmake;format"
+        TIMEOUT 120
+        SKIP_REGULAR_EXPRESSION "SKIP: configure-and-build probe is Linux-only")
+
+    add_test(NAME cmake-plugin-module-probe-exit-status
+        COMMAND ${CMAKE_COMMAND}
+            -DPULP_SOURCE_DIR=${CMAKE_SOURCE_DIR}
+            -DWORK_DIR=${CMAKE_CURRENT_BINARY_DIR}/plugin-module-probe-exit-status
+            -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/test_plugin_module_probe.cmake)
+    set_tests_properties(cmake-plugin-module-probe-exit-status PROPERTIES
+        LABELS "cmake;format" TIMEOUT 60)
+endif()

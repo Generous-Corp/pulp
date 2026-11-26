@@ -1,0 +1,54 @@
+if(NOT PULP_SOURCE_DIR)
+    message(FATAL_ERROR "PULP_SOURCE_DIR is required")
+endif()
+
+string(TIMESTAMP _stamp "%Y%m%d%H%M%S")
+set(_root "${CMAKE_CURRENT_BINARY_DIR}/pulp-executable-export-hygiene-${_stamp}-${RANDOM_SEED}")
+file(MAKE_DIRECTORY "${_root}")
+file(WRITE "${_root}/CMakeLists.txt" [=[
+cmake_minimum_required(VERSION 3.24)
+project(pulp_executable_export_hygiene LANGUAGES CXX)
+set(APPLE TRUE)
+include("@PULP_SOURCE_DIR@/tools/cmake/PulpInstall.cmake")
+include("@PULP_SOURCE_DIR@/tools/cmake/PulpReload.cmake")
+add_executable(tiny_standalone main.cpp)
+_pulp_apply_macho_executable_exports(tiny_standalone tiny_standalone)
+get_target_property(_tiny_options tiny_standalone LINK_OPTIONS)
+if(NOT "${_tiny_options}" MATCHES "exported_symbols_list")
+    message(FATAL_ERROR "standalone target has no Mach-O export allowlist: ${_tiny_options}")
+endif()
+if("${_tiny_options}" MATCHES "export_dynamic")
+    message(FATAL_ERROR "standalone target broad export flag leaked: ${_tiny_options}")
+endif()
+add_executable(reload_host main.cpp)
+_pulp_apply_macho_executable_exports(reload_host reload_host)
+pulp_reload_host(reload_host)
+get_target_property(_reload_options reload_host LINK_OPTIONS)
+if("${_reload_options}" MATCHES "export_dynamic")
+    message(FATAL_ERROR "reload host still uses broad export flag: ${_reload_options}")
+endif()
+if(NOT "${_reload_options}" MATCHES "exported_symbol,__ZN4pulp")
+    message(FATAL_ERROR "reload host lost the curated Pulp export pattern: ${_reload_options}")
+endif()
+]=])
+file(WRITE "${_root}/main.cpp" "int main() { return 0; }\n")
+file(READ "${_root}/CMakeLists.txt" _project)
+string(REPLACE "@PULP_SOURCE_DIR@" "${PULP_SOURCE_DIR}" _project "${_project}")
+file(WRITE "${_root}/CMakeLists.txt" "${_project}")
+execute_process(
+    COMMAND "${CMAKE_COMMAND}" -S "${_root}" -B "${_root}/build"
+    RESULT_VARIABLE _result
+    OUTPUT_VARIABLE _stdout
+    ERROR_VARIABLE _stderr)
+if(NOT _result EQUAL 0)
+    message(FATAL_ERROR "executable export hygiene configure failed\n${_stdout}\n${_stderr}")
+endif()
+execute_process(
+    COMMAND "${CMAKE_COMMAND}" --build "${_root}/build" --target tiny_standalone
+    RESULT_VARIABLE _build_result
+    OUTPUT_VARIABLE _build_stdout
+    ERROR_VARIABLE _build_stderr)
+if(NOT _build_result EQUAL 0)
+    message(FATAL_ERROR "tiny standalone fixture build failed\n${_build_stdout}\n${_build_stderr}")
+endif()
+message(STATUS "Executable export hygiene: OK")

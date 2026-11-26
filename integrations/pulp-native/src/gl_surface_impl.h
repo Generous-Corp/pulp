@@ -26,6 +26,7 @@ struct GlSurface::Impl {
     std::function<void(const SurfaceEvent&)> listener;
     InputHandler input;
     KeyboardFocus keyboard_focus = KeyboardFocus::none;
+    Cursor cursor = Cursor::arrow;
     double scale_override = 0.0;
     mutable std::mutex geometry_mutex;
     SurfaceGeometry geometry;
@@ -62,6 +63,7 @@ struct GlSurface::Impl {
     // UI thread. Backends with input apply the focus and scale here.
     virtual void apply_keyboard_focus() {}
     virtual void apply_scale() {}
+    virtual void apply_cursor() {}
     virtual int event_fd() const {
         return -1;
     }

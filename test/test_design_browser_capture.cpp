@@ -1,4 +1,92 @@
+#include "../core/view/src/design_ir_helpers.hpp"
 #include "test_design_import_shared.hpp"
+#include <pulp/view/widgets.hpp>
+#include <tuple>
+
+TEST_CASE("captured fader thumb travel stays inside the content box",
+          "[view][widgets][fader][geometry]") {
+    CHECK(Fader::thumb_axis_position(100.0f, 1.0f, 1.0f, 10.0f, 0.0f) == Catch::Approx(6.0f));
+    CHECK(Fader::thumb_axis_position(100.0f, 1.0f, 1.0f, 10.0f, 1.0f) == Catch::Approx(94.0f));
+    CHECK(Fader::thumb_axis_position(100.0f, 1.0f, 1.0f, 10.0f, 0.5f) == Catch::Approx(50.0f));
+}
+
+TEST_CASE("fader content box insets by border plus padding", "[view][widgets][fader][geometry]") {
+    Fader fader;
+    fader.set_border_width(3.0f);
+    fader.flex().padding = 2.0f;
+    fader.flex().padding_left = 5.0f;
+    CHECK(fader.effective_axis_border(false, true) == Catch::Approx(8.0f));
+    CHECK(fader.effective_axis_border(false, false) == Catch::Approx(5.0f));
+    CHECK(fader.effective_axis_border(true, true) == Catch::Approx(5.0f));
+}
+
+TEST_CASE("persisted browser faders retain split indicator asset metadata",
+          "[view][import][ir-v1][fader][assets]") {
+    const auto temp = pulp::test::make_unique_temp_dir("fader-persist");
+    const auto indicator = temp / "fader-indicator.png";
+    {
+        std::ofstream out(indicator, std::ios::binary);
+        REQUIRE(out.good());
+        out << "captured-indicator";
+    }
+    DesignIR ir;
+    ir.root.type = "frame";
+    IRNode fader;
+    fader.type = "frame";
+    fader.audio_widget = AudioWidgetType::fader;
+    fader.attributes["fader_indicator_asset_path"] = indicator.string();
+    fader.attributes["fader_indicator_natural_w"] = "18";
+    fader.attributes["fader_indicator_natural_h"] = "10";
+    ir.root.children.push_back(std::move(fader));
+    refresh_design_ir_asset_manifest(ir, {.base_directory = temp});
+    REQUIRE(ir.asset_manifest.assets.size() == 1);
+    REQUIRE(ir.root.children.front().attributes.count("fader_indicator_asset_pathAssetId") == 1);
+    const auto reparsed = parse_design_ir_json(serialize_design_ir(ir));
+    const auto& attrs = reparsed.root.children.front().attributes;
+    CHECK(attrs.at("fader_indicator_asset_path") == indicator.string());
+    CHECK(attrs.at("fader_indicator_natural_w") == "18");
+    CHECK(attrs.at("fader_indicator_natural_h") == "10");
+}
+
+TEST_CASE("manifest AssetIds materialize split fader art paths and natural sizes",
+          "[view][import][ir-v1][fader][assets]") {
+    IRAssetManifest manifest;
+    const std::vector<std::tuple<const char*, const char*, int, int>> specs = {
+        {"body-1", "/art/body.png", 40, 120}, {"ind-1", "/art/ind.png", 18, 10}};
+    for (const auto& [id, path, w, h] : specs) {
+        IRAssetRef asset;
+        asset.asset_id = id;
+        asset.local_path = path;
+        asset.width = w;
+        asset.height = h;
+        manifest.assets.push_back(std::move(asset));
+    }
+
+    IRNode fader;
+    fader.type = "frame";
+    fader.audio_widget = AudioWidgetType::fader;
+    // Only the persisted identities: no path or natural-size attributes.
+    fader.attributes["fader_body_asset_pathAssetId"] = "body-1";
+    fader.attributes["fader_indicator_asset_pathAssetId"] = "ind-1";
+    materialize_manifest_image_uris(fader, manifest);
+
+    CHECK(fader.attributes.at("fader_body_asset_path") == "file:///art/body.png");
+    CHECK(fader.attributes.at("fader_indicator_asset_path") == "file:///art/ind.png");
+    CHECK(fader.attributes.at("fader_body_natural_w") == "40");
+    CHECK(fader.attributes.at("fader_body_natural_h") == "120");
+    CHECK(fader.attributes.at("fader_indicator_natural_w") == "18");
+    CHECK(fader.attributes.at("fader_indicator_natural_h") == "10");
+
+    // An authored natural size is never overwritten by the manifest's.
+    IRNode authored;
+    authored.type = "frame";
+    authored.audio_widget = AudioWidgetType::fader;
+    authored.attributes["fader_indicator_asset_pathAssetId"] = "ind-1";
+    authored.attributes["fader_indicator_natural_w"] = "99";
+    materialize_manifest_image_uris(authored, manifest);
+    CHECK(authored.attributes.at("fader_indicator_natural_w") == "99");
+    CHECK(authored.attributes.at("fader_indicator_natural_h") == "10");
+}
 
 TEST_CASE("DesignIR round-trips faithful browser capture backing distinctly from SVG",
           "[view][import][ir-v1][faithful-capture]") {
@@ -164,4 +252,11 @@ TEST_CASE("DesignIR JSON keeps Chromium's sub-pixel layout on large boxes",
     const auto parsed = parse_design_ir_json(json);
     REQUIRE(parsed.root.style.width == ir.root.style.width);
     REQUIRE(parsed.root.style.height == ir.root.style.height);
+}
+
+TEST_CASE("modulation marker base follows border-inset thumb travel",
+          "[view][widgets][fader][geometry]") {
+    // Zero-extent travel (the marker) uses the same border-inset axis as the thumb.
+    CHECK(Fader::thumb_axis_position(100.0f, 4.0f, 6.0f, 0.0f, 0.0f) == Catch::Approx(4.0f));
+    CHECK(Fader::thumb_axis_position(100.0f, 4.0f, 6.0f, 0.0f, 1.0f) == Catch::Approx(94.0f));
 }

@@ -19,8 +19,8 @@ function Get-PeMachine([string]$Path) {
 }
 function Get-ReaperScanKeys([string]$Machine) {
   switch ($Machine) {
-    'x64' { return @('vstpath64', 'clap_path') }
-    { $_ -in @('arm64','arm64ec','arm64x') } { return @('vstpath_winarm64', 'clap_path') }
+    'x64' { return @('vstpath64', 'clap_path_win64') }
+    { $_ -in @('arm64','arm64ec','arm64x') } { return @('vstpath_winarm64', 'clap_path_winarm64') }
     default { throw 'Unsupported REAPER architecture' }
   }
 }
@@ -361,6 +361,14 @@ function Stage-Vst3Plugin([string]$ScanRoot,[string]$PluginPath) {
     $cursor = $cursor.Parent
   }
   if ($bundleRoot) {
+    if ($pluginItem.PSIsContainer) {
+      # The wrapper passes its ABI-selected payload. Direct directory callers
+      # are safe only when the bundle has a single unambiguous named payload.
+      $payloads = @(Get-ChildItem -LiteralPath $bundleRoot -File -Recurse |
+        Where-Object { $_.Name -ieq $pluginItem.Name })
+      if ($payloads.Count -ne 1) { throw 'VST3 directory requires an unambiguous payload' }
+      $plugin = $payloads[0].FullName
+    }
     Copy-Item -LiteralPath $bundleRoot -Destination $ScanRoot -Recurse
     $staged = Get-Vst3StagedPluginPath $ScanRoot $bundleRoot $plugin
     if (-not (Test-Path -LiteralPath $staged -PathType Leaf)) { throw "Staged VST3 payload missing: $staged" }

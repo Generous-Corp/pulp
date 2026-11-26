@@ -47,3 +47,45 @@ function(pulp_link_fontconfig_after_skia target)
         target_link_libraries(${target} PRIVATE PkgConfig::${_var})
     endif()
 endfunction()
+
+# pulp_fontconfig_needed_on_target(<target> <fontconfig-library>)
+#
+# Appends libfontconfig, as a needed library, to <target>'s INTERFACE link
+# line. The installed package config applies it to Pulp::canvas AFTER the
+# Skia archive is attached, for a consumer that links Pulp's static view or
+# canvas libraries directly (not through pulp_add_plugin) into a plug-in module.
+#
+# `libskia.a` references the `Fc*` functions, and a MODULE library may leave
+# symbols undefined, so such a link succeeds without naming libfontconfig. The
+# module then loads only in a host that already has fontconfig in its process
+# (REAPER and every GTK host do); any other host fails at dlopen under
+# RTLD_NOW, or at the first font lookup. `--no-as-needed` keeps Ubuntu's
+# default `--as-needed` from discarding the library, which at that point has
+# no reference to satisfy. FreeType needs no entry of its own because
+# libfontconfig depends on it.
+function(pulp_fontconfig_needed_on_target target fontconfig_library)
+    set_property(TARGET ${target} APPEND PROPERTY INTERFACE_LINK_LIBRARIES
+        "-Wl,--push-state,--no-as-needed"
+        "${fontconfig_library}"
+        "-Wl,--pop-state")
+endfunction()
+
+# pulp_attach_fontconfig_to_canvas(<canvas-target>)
+#
+# Linux only (no-op elsewhere): finds libfontconfig and applies
+# pulp_fontconfig_needed_on_target. Without the library it warns and leaves the
+# target as it was.
+function(pulp_attach_fontconfig_to_canvas target)
+    if(NOT (UNIX AND NOT APPLE AND NOT ANDROID))
+        return()
+    endif()
+    find_library(PULP_FONTCONFIG_LIBRARY NAMES fontconfig)
+    if(NOT PULP_FONTCONFIG_LIBRARY)
+        message(WARNING
+            "libfontconfig was not found, so ${target} will not name it as a "
+            "needed library and a plug-in linking it loads only in hosts that "
+            "already have fontconfig (install libfontconfig-dev).")
+        return()
+    endif()
+    pulp_fontconfig_needed_on_target(${target} "${PULP_FONTCONFIG_LIBRARY}")
+endfunction()

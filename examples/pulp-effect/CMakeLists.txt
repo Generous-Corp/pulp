@@ -24,6 +24,29 @@ pulp_add_plugin(PulpEffect
     MANUFACTURER_CODE "Pulp"
 )
 
+# Linux: a plug-in with the full editor stack must resolve every symbol through
+# its own dependencies. Skia's fontconfig calls stay unresolved unless the
+# module names libfontconfig, and a host without fontconfig then fails at load.
+# The core test tree runs the same probe on a fixture plug-in and on a control
+# (test/fixtures/linux_reload_host), because examples are off on the required lane.
+if(PULP_BUILD_TESTS AND UNIX AND NOT APPLE AND NOT ANDROID)
+    find_program(PULP_LDD ldd)
+    find_program(PULP_READELF readelf)
+    if(PULP_LDD AND PULP_READELF)
+        set(_pulp_unresolved_check ${CMAKE_SOURCE_DIR}/test/cmake/check_plugin_module_no_unresolved.cmake)
+        foreach(_pulp_fmt VST3 CLAP)
+            if(TARGET PulpEffect_${_pulp_fmt})
+                add_test(NAME no-unresolved-symbols-PulpEffect_${_pulp_fmt}
+                    COMMAND ${CMAKE_COMMAND} -DLDD=${PULP_LDD} -DREADELF=${PULP_READELF}
+                        -DMODULE=$<TARGET_FILE:PulpEffect_${_pulp_fmt}>
+                        -P ${_pulp_unresolved_check})
+                set_tests_properties(no-unresolved-symbols-PulpEffect_${_pulp_fmt}
+                    PROPERTIES LABELS "plugin-footprint" TIMEOUT 60)
+            endif()
+        endforeach()
+    endif()
+endif()
+
 # Validation
 if(PULP_HAS_CLAP AND APPLE)
     add_executable(pulp-clap-bundle-lifecycle-test

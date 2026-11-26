@@ -54,7 +54,8 @@
 
 namespace pulp::state {
 class StateStore;
-}
+struct ParamGroup;
+} // namespace pulp::state
 
 namespace pulp::format {
 
@@ -126,6 +127,11 @@ class ParamPort {
     virtual std::span<const state::ParamInfo> params() const = 0;
     /// One parameter's description, or null for an unknown id. Any thread.
     virtual const state::ParamInfo* info(state::ParamID id) const = 0;
+    /// The named parameter groups `ParamInfo::group_id` refers to, in
+    /// registration order. Empty by default, which a generated editor reads
+    /// as one ungrouped grid. `state::ParamGroup` is declared in
+    /// pulp/state/store.hpp, which a caller reading the groups includes.
+    virtual std::span<const state::ParamGroup> groups() const;
     /// The current plain value (the host's automation included). Any thread.
     virtual float get(state::ParamID id) const = 0;
 
@@ -180,8 +186,8 @@ class ParamPort {
 /// `add_listener()` are then refused, and the port's subscriptions are
 /// already removed.
 ///
-/// `params()` and `info()` describe the parameters as they were when the port
-/// was made. The span and pointers they return stay valid for the port's
+/// `params()`, `info()` and `groups()` describe the parameters as they were
+/// when the port was made. The span and pointers they return stay valid for the port's
 /// lifetime, connected or not, so an editor may keep them.
 class StateStoreParamPort final : public ParamPort {
   public:
@@ -193,6 +199,7 @@ class StateStoreParamPort final : public ParamPort {
 
     std::span<const state::ParamInfo> params() const override;
     const state::ParamInfo* info(state::ParamID id) const override;
+    std::span<const state::ParamGroup> groups() const override;
     float get(state::ParamID id) const override;
     void begin(state::ParamID id) override;
     void set(state::ParamID id, float plain_value) override;
@@ -410,6 +417,15 @@ class EditorAutomation {
     }
 };
 
+/// Optional attach diagnostics for an editor implementation.
+class EditorAttachDiagnostics {
+  public:
+    virtual std::string_view attach_failure_reason() const noexcept = 0;
+
+  protected:
+    ~EditorAttachDiagnostics() = default;
+};
+
 /// One editor instance in one native window.
 ///
 /// Lifecycle: the factory creates it unattached. The size members may be
@@ -441,6 +457,9 @@ class Editor {
     /// Attach to and start drawing into `parent`. False if the editor cannot
     /// attach to it, in which case it stays unattached.
     virtual bool attach(const NativeParent& parent) = 0;
+
+    /// After a failed attach, an editor-owned reason or an empty view.
+    std::string_view attach_error() const noexcept;
 
     /// Stop drawing and remove everything the editor added to its parent. The
     /// parent is still valid during the call. A no-op when not attached.

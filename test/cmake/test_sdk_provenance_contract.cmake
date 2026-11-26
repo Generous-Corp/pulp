@@ -270,7 +270,7 @@ execute_process(
 if(_unsafe_result EQUAL 0)
     message(FATAL_ERROR "unsafe development provenance did not fail closed")
 endif()
-if(NOT "${_unsafe_stdout}\n${_unsafe_stderr}" MATCHES "unknown or unsafe contract")
+if(NOT "${_unsafe_stdout}\n${_unsafe_stderr}" MATCHES "unknown[ \t\r\n]+or[ \t\r\n]+unsafe[ \t\r\n]+contract")
     message(FATAL_ERROR
         "unsafe provenance failed without the expected diagnostic:\n"
         "${_unsafe_stdout}\n${_unsafe_stderr}")
@@ -294,7 +294,7 @@ if(_unsafe_release_result EQUAL 0)
     message(FATAL_ERROR "unsafe release provenance did not fail closed")
 endif()
 if(NOT "${_unsafe_release_stdout}\n${_unsafe_release_stderr}"
-       MATCHES "unknown or unsafe release contract")
+       MATCHES "unknown[ \t\r\n]+or[ \t\r\n]+unsafe[ \t\r\n]+release[ \t\r\n]+contract")
     message(FATAL_ERROR
         "unsafe release failed without the expected diagnostic:\n"
         "${_unsafe_release_stdout}\n${_unsafe_release_stderr}")
@@ -350,3 +350,9 @@ _check_windows_sdk_target("windows-arm64" "ARM64EC" "fail")
 _check_windows_sdk_target("windows-arm64" "ARM64X" "fail")
 _check_windows_sdk_target("windows-x64" "x64" "pass")
 _check_windows_sdk_target("windows-x64" "ARM64" "fail")
+
+# ARM64EC is a distinct release SDK target, never an alias for native ARM64 or x64.
+_check_windows_sdk_target("windows-arm64ec" "ARM64EC" "pass")
+_check_windows_sdk_target("windows-arm64ec" "ARM64" "fail")
+_check_windows_sdk_target("windows-arm64ec" "x64" "fail")
+_check_windows_sdk_target("windows-arm64ec" "ARM64X" "fail")

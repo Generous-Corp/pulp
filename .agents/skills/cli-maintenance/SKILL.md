@@ -102,6 +102,19 @@ Two consequences worth keeping:
   be reported, exercised against the real `lsof` probe — without it, a probe
   that always answered "nobody holds this" would pass every other assertion.
 
+### The WidgetBridge freshness row hashes the generator's own input list
+
+The `WidgetBridge generated API` row in `tools/cli/cli_doctor_helpers.cpp`
+recomputes the generator's input fingerprint without running Python, so its
+`input_rels` list must match `FINGERPRINT_INPUTS` in
+`tools/scripts/generate_widget_bridge_api.py` exactly, in order and by path:
+each relative path is hashed along with the file's bytes. Moving one of those
+inputs (the capability vocabulary moved to `pulp/runtime/reload_capabilities.hpp`)
+means changing the generator, the doctor list and the paths the doctor tests in
+`test/test_cli_project_command.cpp` write, then regenerating the outputs. A
+forwarding header left at the old path still exists, so a missed doctor path
+reports the checked-in outputs as stale rather than missing.
+
 ### `pulp doctor gpu` is a typed diagnostic subcommand
 
 `pulp doctor gpu [--no-render] [--json]` performs bounded render/readback and
@@ -2360,7 +2373,7 @@ recompiles one object and relinks each format; when the body lived in the
 header, every format's entry TU and the test recompiled it.
 
 A `--ui vellum` view source belongs to the editor package, not the plug-in:
-the CLIs emit it as `pulp_add_vellum_editor_package(... SOURCES "<name>_view.cpp")`,
+the CLIs emit it as `pulp_add_vellum_editor_package(... SOURCES "src/<name>_view.cpp")`,
 which compiles it in each format target that links the package. Listed under
 the plug-in's `SOURCES` it compiles in `<target>_Core`, which has no Vellum
 include paths, and a real installed SDK fails on `vellum/value/param_model.hpp`.
@@ -2697,7 +2710,7 @@ Gotchas:
 `pulp_add_plugin` writes into each bundle, through the same parser the
 runtime `pulp::format::third_party_notices()` uses, so the CLI and an About
 view can never disagree. `--check` exits non-zero when
-`sdks_without_manifest` or `unattributed_targets` is non-empty: a notice list
+`sdks_without_manifest` is non-empty (older bundles that still carry `unattributed_targets` also fail): a notice list
 with a gap must fail loudly, never print as complete. It takes a file path,
 so it is CLI-only in the MCP parity baseline.
 
@@ -3804,6 +3817,15 @@ new transport field, new persisted key), update **both**:
 Test coverage lives in `test/test_standalone_transport_midi.cpp` —
 add a case there when you extend either surface.
 
+## Gotcha: `pulp create --ui vellum` must refuse an SDK without the bridge
+
+A generated `--ui vellum` project calls `pulp_add_vellum_editor_package`, which
+needs `Pulp::vellum` in the installed package. When the installed SDK (the SDK `pulp create`
+resolves, or `CMAKE_PREFIX_PATH`) has a Pulp CMake package without that
+target, `cmd_create` refuses before writing anything, so nobody is left with a
+project that only fails later at configure. The shell-out test
+`rejects an installed SDK without Pulp::vellum` covers it.
+
 ## Gotcha: MSVC caps a string literal at 16 KB (C2026) — split big embedded blobs
 
 `tools/mcp/pulp_mcp.cpp` `tools_list_json()` embeds the whole MCP tools-list JSON
@@ -4451,3 +4473,12 @@ or a Program Change is latched and never applied.
 before building and refuses the install when the lock is missing or malformed.
 A snapshot without `tools/deps/pulp_lock.py` is treated as a failure, not
 skipped.
+
+## `pulp audio` image PNGs are encoded without the render layer
+
+`tools/cli/audio_png_encoder.cpp` writes the scope, waveform and spectrogram
+PNGs from a raw RGBA buffer over the runtime's `zlib_compress`; `cmd_audio.cpp`
+includes no `pulp/render` header. Keep it that way: a new image verb hands its
+pixels to `encode_png_rgba` and never reaches for a surface. The unit test
+parses the bytes by hand (CRCs, IHDR, inflate, filter bytes), so an encoder
+change that a viewer would forgive still fails there.

@@ -22,6 +22,9 @@
 #if !(defined(PULP_WCLAP) && PULP_WCLAP)
 #define PULP_CLAP_CONTRACT_GUI 1
 #include <pulp/format/clap_contract_gui.hpp>
+#if defined(PULP_EDITOR_AUTOMATION_EXTENSION)
+#include <pulp/format/clap_editor_automation.hpp>
+#endif
 #endif
 #if defined(PULP_CLAP_GUI) && PULP_CLAP_GUI
 #include <pulp/format/editor_ui.hpp>
@@ -313,7 +316,8 @@ inline const clap_plugin_audio_ports_config_t audio_ports_config_ext = {
 inline bool state_save(const clap_plugin_t* plugin, const clap_ostream_t* stream) {
     auto* self = static_cast<clap_adapter::PulpClapPlugin*>(plugin->plugin_data);
     if (!self || !self->processor) return false;
-    const auto data = plugin_state_io::serialize(self->store, *self->processor);
+    const auto data = plugin_state_io::serialize(
+        self->store, *self->processor, plugin_state_io::StoreLayout::processor_owned_when_declared);
     // CLAP's stream->write() is spec'd to return a short-write count on
     // success — callers MUST loop. Hosts (and clap-validator's
     // `state-reproducibility-flush` with a 23-byte write cap) exercise
@@ -1011,6 +1015,11 @@ inline const void* get_static_extension(const clap_plugin_t* plugin, const char*
         return nullptr;
 #endif
     }
+#if defined(PULP_CLAP_CONTRACT_GUI) && defined(PULP_EDITOR_AUTOMATION_EXTENSION)
+    // Test-automation seam, compiled in only when the plug-in opts in.
+    if (strcmp(id, PULP_CLAP_EXT_EDITOR_AUTOMATION) == 0)
+        return clap_adapter::editor_automation_extension();
+#endif
 #if defined(PULP_CLAP_CONTRACT_GUI)
     if (strcmp(id, CLAP_EXT_TIMER_SUPPORT) == 0)
         if (const auto* contract = clap_adapter::contract_timer_extension(plugin))

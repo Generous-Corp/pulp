@@ -567,3 +567,17 @@ The `sign-and-release.yml` workflow runs on version tags (`v*`):
 | AU | — | `~/Library/Audio/Plug-Ins/Components/` |
 | CLAP | `/Library/Audio/Plug-Ins/CLAP/` | `~/Library/Audio/Plug-Ins/CLAP/` |
 | Standalone | `/Applications/` | `~/Applications/` |
+
+### ARM64EC SDK provenance
+
+An official-release SDK marker can identify `windows-arm64ec` separately from
+`windows-arm64` and `windows-x64`. Consumers reject an SDK whose recorded ABI
+differs from the selected compiler target. The producer and consumer retain the
+same clean tagged-source, Release profile, integrity and capability-handoff
+requirements as the other release SDKs. Source installs remain ineligible for
+distribution.
+
+Recognizing this identity does not add an ARM64EC leg to the automated Pulp
+release matrix or establish runtime support. An ARM64EC package still needs a
+matching validated Skia/Dawn provider, the toolchain's static-runtime STL closure,
+and acceptance in an ARM64EC-capable host.

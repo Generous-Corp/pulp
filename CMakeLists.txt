@@ -8,7 +8,7 @@ include(${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpMacOsArch.cmake)  # macOS ar
 include(${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpMinOs.cmake)
 
 project(Pulp
-    VERSION 1.184.0
+    VERSION 1.213.1
     DESCRIPTION "Cross-platform audio plugin and application framework"
     HOMEPAGE_URL "https://github.com/Generous-Corp/pulp"
     LANGUAGES CXX C
@@ -109,6 +109,29 @@ if(CMAKE_SYSTEM_NAME STREQUAL "iOS" OR ANDROID)
 else()
     option(PULP_BUILD_TESTS "Build unit tests" ON)
 endif()
+# Environment-backed test seams are opt-in and disabled for Release builds.
+# Product code should use PULP_TEST_ENV() so a shipping binary cannot be
+# influenced by an inherited test environment.
+if(CMAKE_BUILD_TYPE MATCHES "^[Rr]elease$")
+    set(_pulp_test_seams_default OFF)
+else()
+    set(_pulp_test_seams_default ${PULP_BUILD_TESTS})
+endif()
+option(PULP_ENABLE_TEST_SEAMS
+       "Compile product test-environment seams (disabled by default for Release)"
+       ${_pulp_test_seams_default})
+if(PULP_ENABLE_TEST_SEAMS)
+    add_compile_definitions(PULP_ENABLE_TEST_SEAMS=1)
+else()
+    add_compile_definitions(PULP_ENABLE_TEST_SEAMS=0)
+endif()
+# Opt-in CLAP extension "pulp.editor-automation/1": lets a test host capture a
+# shipped plug-in's open editor as PNG. Off by default; with it off the code is
+# not compiled into the plug-in. A consumer of an installed SDK sets the same
+# variable in its own configure.
+option(PULP_EDITOR_AUTOMATION_EXTENSION
+       "Expose the test-automation CLAP extension pulp.editor-automation/1 from CLAP plug-ins"
+       OFF)
 # Deterministic RT operation counters (pulp/signal/rt_work_counter.hpp) back
 # the per-callback transition-cost gate. The definition is directory-wide so
 # every translation unit of one build agrees on the inline counter hooks; it
@@ -582,13 +605,15 @@ if(APPLE)
     list(APPEND _pulp_standalone_core_sources
         core/format/src/standalone_key_driver_mac.mm
         core/format/src/standalone_settings_window_mac.mm
-        core/format/src/standalone_contract_editor_mac.mm)
+        core/format/src/standalone_contract_editor_mac.mm
+        core/format/src/standalone_persistence_mac.mm)
     list(APPEND _pulp_standalone_view_sources core/format/src/standalone_updater_mac.mm)
 else()
     list(APPEND _pulp_standalone_core_sources
         core/format/src/standalone_key_driver_stub.cpp
         core/format/src/standalone_settings_window_stub.cpp
-        core/format/src/standalone_contract_editor_stub.cpp)
+        core/format/src/standalone_contract_editor_stub.cpp
+        core/format/src/standalone_persistence_stub.cpp)
     list(APPEND _pulp_standalone_view_sources core/format/src/standalone_updater_stub.cpp)
 endif()
 set(_pulp_standalone_sources ${_pulp_standalone_core_sources} ${_pulp_standalone_view_sources})
@@ -598,16 +623,13 @@ add_library(pulp-standalone-native STATIC ${_pulp_standalone_sources})
 add_library(pulp::standalone-native ALIAS pulp-standalone-native)
 # The standalone of a UI package plug-in (pulp_add_plugin(... UI <package>)):
 # the core alone, with no Pulp view, canvas or render code, so Dawn reaches the
-# app only through its UI package. It still reads a few header-only view types
-# (the meter AudioBridge, key codes), hence the include paths without a link.
+# app only through its UI package. Its sources read no view, canvas or render
+# header either, so it compiles with none of their include roots.
 add_library(pulp-standalone-contract STATIC
     ${_pulp_standalone_core_sources} core/format/src/standalone_view_layer_none.cpp)
 add_library(pulp::standalone-contract ALIAS pulp-standalone-contract)
 target_include_directories(pulp-standalone-contract PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/core/format/include>
-    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/core/view/include>
-    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/core/view/audio/include>
-    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/core/canvas/include>
     $<INSTALL_INTERFACE:include>)
 target_link_libraries(pulp-standalone-contract PUBLIC pulp::format-core)
 target_compile_definitions(pulp-standalone-contract PRIVATE PULP_ENABLE_INSPECTOR=0)

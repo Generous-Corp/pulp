@@ -790,10 +790,9 @@
   },
   {
    "id": "C7",
-   "capability": "Emitter conformance gate (one IR, four lowerings)",
+   "capability": "Emitter conformance gate (one IR, four lowerings); now owned by Vellum as vellum.design-emitter-conformance",
    "paths": [
-    "test/fixtures/emitter-conformance/",
-    "test/test_design_emitter_conformance.cpp"
+    "authoring/design_pipeline/tests/design_emitter_conformance_test.cpp"
    ]
   },
   {
@@ -965,7 +964,19 @@
    "id": "G5",
    "capability": "Standalone application chrome: window factory, settings panels, updater view, musical typing",
    "paths": [
-    "core/format/include/pulp/format/detail/standalone_*.hpp"
+    "core/format/include/pulp/format/detail/standalone_editor_chrome.hpp",
+    "core/format/include/pulp/format/detail/standalone_musical_typing.hpp",
+    "core/format/include/pulp/format/detail/standalone_updater.hpp",
+    "core/format/include/pulp/format/detail/standalone_window_factory.hpp",
+    "core/format/include/pulp/format/settings_panel.hpp",
+    "core/format/include/pulp/format/app_updates_settings_view.hpp",
+    "core/format/src/standalone_view_layer.cpp",
+    "core/format/src/standalone_musical_typing.cpp",
+    "core/format/src/standalone_updater.cpp",
+    "core/format/src/standalone_updater_mac.mm",
+    "core/format/src/standalone_updater_stub.cpp",
+    "core/format/src/settings_panel.cpp",
+    "core/format/src/app_updates_settings_view.cpp"
    ]
   },
   {

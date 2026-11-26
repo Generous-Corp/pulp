@@ -145,6 +145,12 @@
             "pulp-bundled-fonts",
             "pulp-native"
         ],
+        "darwin-arm64": [
+            "pulp-vellum",
+            "pulp-vellum-audio",
+            "pulp-vellum-components",
+            "pulp-vellum-scripted"
+        ],
         "linux": [
             "pulp-bundled-fonts",
             "pulp-bundled-noto-color-emoji",

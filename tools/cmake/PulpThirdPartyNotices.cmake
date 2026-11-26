@@ -27,8 +27,11 @@
 #     from it is compiled in.
 #   - Duplicates across manifests are merged on (name, version), first wins.
 #   - A namespaced target (`Vellum::x`) that no manifest claims is reported under
-#     `sdks_without_manifest`; any other unclaimed non-Pulp target under
-#     `unattributed_targets`. Neither fails the build.
+#     `sdks_without_manifest` (kept in the bundle: it names SDKs, and the text
+#     header says no manifest was available for them); any other unclaimed
+#     non-Pulp target under `unattributed_targets`, which is written only to
+#     <build>/pulp-notices/<format target>/ThirdPartyNotices.report.json and
+#     never into the bundle. Neither fails the build.
 
 include_guard(GLOBAL)
 
@@ -425,7 +428,6 @@ function(_pulp_write_third_party_notices format_target)
     string(APPEND _json "  \"format\": ${_j_format},\n")
     string(APPEND _json "  \"sdks\": [${_sdks_json}],\n")
     string(APPEND _json "  \"sdks_without_manifest\": ${_j_missing},\n")
-    string(APPEND _json "  \"unattributed_targets\": ${_j_unattributed},\n")
     string(APPEND _json "  \"notices\": [${_entries_json}]\n")
     string(APPEND _json "}\n")
 
@@ -437,6 +439,18 @@ function(_pulp_write_third_party_notices format_target)
     endif()
     string(APPEND _header "\n")
 
+    # Unattributed targets are the plug-in author's build diagnostic (internal
+    # target names), not content for the people who receive the bundle, so they
+    # go to a report beside the generated notices and never into the bundle.
+    set(_report "{\n")
+    string(APPEND _report "  \"schema\": \"pulp.third-party-notices-report.v1\",\n")
+    string(APPEND _report "  \"product\": ${_j_product},\n")
+    string(APPEND _report "  \"target\": ${_j_target},\n")
+    string(APPEND _report "  \"format\": ${_j_format},\n")
+    string(APPEND _report "  \"sdks_without_manifest\": ${_j_missing},\n")
+    string(APPEND _report "  \"unattributed_targets\": ${_j_unattributed}\n")
+    string(APPEND _report "}\n")
+    _pulp_notices_write_if_changed("${_dir}/ThirdPartyNotices.report.json" "${_report}")
     _pulp_notices_write_if_changed("${_dir}/ThirdPartyNotices.json" "${_json}")
     _pulp_notices_write_if_changed("${_dir}/ThirdPartyNotices.txt" "${_header}${_text}")
 endfunction()

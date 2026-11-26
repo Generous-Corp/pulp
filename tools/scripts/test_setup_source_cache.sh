@@ -813,6 +813,75 @@ EOF
     exit $((FAIL > 0))
 ) || FAIL=$((FAIL + 1))
 
+echo "== a patched shared source updates FetchContent's cache path"
+(
+    tmp="$(mktemp -d)"; trap 'rm -rf "$tmp"' EXIT
+    mkdir -p "$tmp/cache/choc-v1" "$tmp/src"
+    cat > "$tmp/src/CMakeLists.txt" <<EOF
+cmake_minimum_required(VERSION 3.24)
+project(mutable_cache_path NONE)
+set(PULP_SHARED_FETCHCONTENT_SOURCE_DIR "$tmp/cache")
+set(PULP_USE_SHARED_FETCHCONTENT_SOURCES ON)
+include("$REPO_ROOT/tools/cmake/PulpFetchContent.cmake")
+pulp_register_fetchcontent_source(choc REF v1)
+pulp_materialize_mutable_fetchcontent_source(choc PATCH_KEY fixture)
+get_property(cache_source CACHE FETCHCONTENT_SOURCE_DIR_CHOC PROPERTY VALUE)
+file(WRITE "\${CMAKE_BINARY_DIR}/cache-source.txt" "\${cache_source}")
+EOF
+    cmake -S "$tmp/src" -B "$tmp/build" >/dev/null 2>&1
+    check "$(cat "$tmp/build/cache-source.txt" 2>/dev/null)" "$tmp/build/_deps/pulp-mutable-choc-src" \
+        "FetchContent cache consumers use the patched build-local source"
+
+    exit $((FAIL > 0))
+) || FAIL=$((FAIL + 1))
+
+echo "== a warm configure keeps shared CHOC origin and honors a hand-written override"
+(
+    tmp="$(mktemp -d)"; trap 'rm -rf "$tmp"' EXIT
+    mkdir -p "$tmp/cache/choc-v1" "$tmp/src" "$tmp/operator"
+    printf 'v1\n' > "$tmp/cache/choc-v1/value.txt"
+    printf 'operator\n' > "$tmp/operator/value.txt"
+    cat > "$tmp/src/CMakeLists.txt" <<EOF
+cmake_minimum_required(VERSION 3.24)
+project(shared_reconfigure NONE)
+set(PULP_SHARED_FETCHCONTENT_SOURCE_DIR "$tmp/cache")
+set(PULP_USE_SHARED_FETCHCONTENT_SOURCES ON)
+include("$REPO_ROOT/tools/cmake/PulpFetchContent.cmake")
+pulp_register_fetchcontent_source(choc REF v1)
+file(WRITE "\${CMAKE_BINARY_DIR}/registered.txt" "\${FETCHCONTENT_SOURCE_DIR_CHOC}")
+pulp_materialize_mutable_fetchcontent_source(choc PATCH_KEY "\${TEST_KEY}")
+file(WRITE "\${CMAKE_BINARY_DIR}/selected.txt" "\${FETCHCONTENT_SOURCE_DIR_CHOC}")
+EOF
+
+    cmake -S "$tmp/src" -B "$tmp/build" -DTEST_KEY=one >/dev/null 2>&1
+    check "$(cat "$tmp/build/registered.txt")" "$tmp/cache/choc-v1" \
+        "the first configure registers the shared checkout"
+    check "$(cat "$tmp/build/selected.txt")" "$tmp/build/_deps/pulp-mutable-choc-src" \
+        "the first configure exposes the mutable consumer copy"
+    check "$(cat "$tmp/build/_deps/pulp-mutable-choc-src/value.txt")" "v1" \
+        "the first mutable copy is stamped from the shared checkout"
+
+    printf 'v2\n' > "$tmp/cache/choc-v1/value.txt"
+    cmake -S "$tmp/src" -B "$tmp/build" -DTEST_KEY=two >/dev/null 2>&1
+    check "$(cat "$tmp/build/registered.txt")" "$tmp/cache/choc-v1" \
+        "the second configure still registers the shared checkout"
+    check "$(cat "$tmp/build/selected.txt")" "$tmp/build/_deps/pulp-mutable-choc-src" \
+        "the second configure keeps the mutable consumer copy"
+    check "$(cat "$tmp/build/_deps/pulp-mutable-choc-src/value.txt")" "v2" \
+        "the second configure re-stamps the intact mutable copy"
+
+    cmake -S "$tmp/src" -B "$tmp/build" -DTEST_KEY=three \
+        -DFETCHCONTENT_SOURCE_DIR_CHOC="$tmp/operator" >/dev/null 2>&1
+    check "$(cat "$tmp/build/registered.txt")" "$tmp/operator" \
+        "a hand-written source path remains an operator override"
+    check "$(cat "$tmp/build/selected.txt")" "$tmp/operator" \
+        "the operator override is the consumer path"
+    check "$(cat "$tmp/operator/value.txt")" "operator" \
+        "the operator override is not replaced or patched"
+
+    exit $((FAIL > 0))
+) || FAIL=$((FAIL + 1))
+
 echo "== a warm build follows shared cache pin changes without exposing the cache"
 (
     tmp="$(mktemp -d)"; trap 'rm -rf "$tmp"' EXIT
@@ -826,6 +895,7 @@ set(PULP_SHARED_FETCHCONTENT_SOURCE_DIR "$tmp/cache")
 set(PULP_USE_SHARED_FETCHCONTENT_SOURCES ON)
 include("$REPO_ROOT/tools/cmake/PulpFetchContent.cmake")
 pulp_register_fetchcontent_source(choc REF "\${TEST_REF}")
+file(WRITE "\${CMAKE_BINARY_DIR}/registered.txt" "\${FETCHCONTENT_SOURCE_DIR_CHOC}")
 pulp_materialize_mutable_fetchcontent_source(choc PATCH_KEY "\${TEST_REF}")
 file(WRITE "\${CMAKE_BINARY_DIR}/selected.txt" "\${FETCHCONTENT_SOURCE_DIR_CHOC}")
 EOF
@@ -836,8 +906,8 @@ EOF
         "a pin bump keeps the patched dependency build-local"
     check "$(cat "$selected/value.txt")" "v2" \
         "the build-local copy refreshes from the newly pinned cache"
-    check "$(grep '^FETCHCONTENT_SOURCE_DIR_CHOC:PATH=' "$tmp/build/CMakeCache.txt" | cut -d= -f2-)" \
-        "$tmp/cache/choc-v2" "the automatic cache selection advances to the new pin"
+    check "$(cat "$tmp/build/registered.txt")" "$tmp/cache/choc-v2" \
+        "the automatic shared selection advances to the new pin"
 
     exit $((FAIL > 0))
 ) || FAIL=$((FAIL + 1))

@@ -54,6 +54,26 @@ endfunction()
 
 function(pulp_add_js_bytecode target)
     cmake_parse_arguments(JSBC "WIDGET_BRIDGE_SCRIPT" "NAMESPACE" "SOURCES" ${ARGN})
+    # The generator and register_embedded_script_bytecode() are Pulp's own view.
+    # An SDK that serves Pulp::view from Vellum (PULP_UI_PROVIDER "vellum") has
+    # neither, so a placeholder blob would have nothing to register with.
+    if(TARGET Pulp::view)
+        get_target_property(_pulp_js_bytecode_provider Pulp::view PULP_UI_PROVIDER)
+        if(_pulp_js_bytecode_provider STREQUAL "vellum")
+            if(COMMAND vellum_add_js_bytecode)
+                message(FATAL_ERROR
+                    "pulp_add_js_bytecode(${target}): this Pulp SDK serves Pulp::view "
+                    "from Vellum. Call vellum_add_js_bytecode() from the Vellum "
+                    "package instead and hand its blobs to "
+                    "register_embedded_script_bytecode().")
+            endif()
+            message(FATAL_ERROR
+                "pulp_add_js_bytecode(${target}): this Pulp SDK serves Pulp::view "
+                "from Vellum, and this Vellum package has no vellum_add_js_bytecode(). "
+                "Remove the call; a Vellum editor (UI_ENGINE vellum) compiles its "
+                "scripts from source at run time.")
+        endif()
+    endif()
     if(NOT JSBC_SOURCES)
         message(FATAL_ERROR "pulp_add_js_bytecode(${target}): SOURCES is required.")
     endif()

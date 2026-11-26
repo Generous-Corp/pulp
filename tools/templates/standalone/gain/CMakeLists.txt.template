@@ -1,0 +1,32 @@
+cmake_minimum_required(VERSION 3.24)
+project({{TARGET_NAME}} VERSION {{VERSION}} LANGUAGES CXX)
+
+set(CMAKE_CXX_STANDARD 20)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+find_package(Pulp {{SDK_VERSION}} REQUIRED)
+include(cmake/Testing.cmake)
+
+set(PULP_PLUGIN_ENTRY_DIR "${CMAKE_CURRENT_SOURCE_DIR}/src/entry")
+
+# {{PLUGIN_NAME}} — Gain Plugin
+
+add_executable({{TARGET_NAME}}-test tests/test_{{LOWER_NAME}}.cpp)
+target_link_libraries({{TARGET_NAME}}-test PRIVATE Pulp::format Catch2::Catch2WithMain)
+target_include_directories({{TARGET_NAME}}-test PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src")
+catch_discover_tests({{TARGET_NAME}}-test)
+
+pulp_add_plugin({{TARGET_NAME}}
+    FORMATS         {{FORMATS}}
+    PLUGIN_NAME     "{{PLUGIN_NAME}}"
+    BUNDLE_ID       "{{BUNDLE_ID}}"
+    MANUFACTURER    "{{MANUFACTURER}}"
+    VERSION         "{{VERSION}}"
+    CATEGORY        Effect
+    PLUGIN_CODE     "{{PLUGIN_CODE}}"
+    MANUFACTURER_CODE "{{MANUFACTURER_CODE}}"
+    AAX_PRODUCT_CODE "{{AAX_PRODUCT_CODE}}"
+    AAX_NATIVE_CODE "{{AAX_NATIVE_CODE}}"
+    UI_SCRIPT       "ui/main.js"
+)
+
+target_include_directories({{TARGET_NAME}}_Core INTERFACE "${CMAKE_CURRENT_SOURCE_DIR}/src")

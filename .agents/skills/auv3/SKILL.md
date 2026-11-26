@@ -409,6 +409,14 @@ the extension's loaded `AUAudioUnit` once KVO fires on `self.audioUnit`. Extensi
 `NSExtensionMain`-style Info.plist — see `docs/guides/ios-auv3-guidance.md`
 and the `ios` skill for the extension target wiring.
 
+`pulp_add_ios_auv3(... UI <package>)` attaches a UI package to the extension
+(`_pulp_attach_ui_package`, as `pulp_add_plugin` does), so `editor_factory()` is
+set and `PulpAUViewController` opens the contract view. It refuses at configure
+when the package is not a target, when it needs shared runtime libraries, or
+(for Vellum) when the Vellum SDK has no iOS slice; it never builds an editorless
+extension for a UI that was asked for. `test/cmake/test_ios_auv3_ui_package.cmake`
+covers each case and that omitting `UI` changes nothing.
+
 ### iOS AUv3 spawn-chain gotchas
 
 iOS AUv3 was historically "scaffolded but never actually loaded" — the
@@ -892,6 +900,15 @@ REAPER can choose the initial AUv3 container from `loadView` /
 back to `400x300` there opens imported/scripted UIs in a small padded
 window even though the later `ViewBridge` reports the correct design
 size.
+
+Most hosts bind the audio unit first and load the view after. Then
+`loadView` and `viewDidLoad` size the root and the first
+`preferredContentSize` from the bound processor's `editor_size()`, never the
+placeholder: a host that observes `preferredContentSize` opens its window
+at the first value it reads, so a 400x300 placeholder followed by the
+editor's real size shows a small empty window that then grows. A
+processor whose editor is a UI package should therefore declare the same
+size from `editor_size()` that its editor reports.
 
 REAPER can also shrink the controller view after the first editor build
 on its in-process AUv3 path. The macOS controller has a one-shot initial
@@ -1819,6 +1836,19 @@ Both view controllers consult `Processor::editor_factory()` in
 an AUv3 built with `pulp_add_plugin(... UI <package>)` has its package's editor
 (an RmlUi or native-surface editor included). The module still links the view
 stack for the ViewBridge path, and the iOS path is compile-checked only.
+On macOS, `PULP_EDITOR_RUNTIME_LIBRARIES` from the UI package are copied beside
+`${target}_AUv3Framework` and given an `@loader_path` rpath. The nested dylibs
+are ad-hoc signed before the containing framework is signed. iOS AUv3 keeps its
+flat-extension layout and rejects a UI package that declares runtime libraries
+until a dedicated iOS staging path exists. A package with no runtime libraries
+uses the ordinary AUv3 path unchanged.
+CMake also adds those shared libraries to the `.appex` stub's link line, so the
+stub gets an extra rpath into `<fw>.framework/Versions/A`; without it dyld cannot
+resolve the stub's own `@rpath/libvellum-*.dylib` references. The build leaves
+the dylibs ad-hoc signed, and `pulp ship sign` does not re-sign them with a real
+identity (it runs a single `codesign --force` on the path it is given, with no
+inner-out walk), so a distribution build must sign the nested dylibs, the
+framework, the `.appex` and the host `.app` in that order before notarizing.
 `_pulp_warn_ui_package_formats` (`tools/cmake/PulpEditorPackage.cmake`) does not
 name AUv3, because `AUv3` is in `_PULP_CONTRACT_EDITOR_FORMATS`; it still names
 the formats whose adapters serve no contract editor (LV2, AAX).

@@ -8,13 +8,16 @@ size, never Chrome's exit status.
 
 from __future__ import annotations
 
+import contextlib
 import importlib.util
+import io
 import os
 import stat
 import sys
 import tempfile
 import textwrap
 import unittest
+from unittest import mock
 from pathlib import Path
 
 try:
@@ -28,6 +31,13 @@ SPEC = importlib.util.spec_from_file_location("chrome_gradient_oracle", SCRIPT)
 assert SPEC is not None and SPEC.loader is not None
 oracle = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(oracle)
+
+BACKDROP_SCRIPT = SCRIPT.with_name("chrome_backdrop_opacity_oracle.py")
+BACKDROP_SPEC = importlib.util.spec_from_file_location(
+    "chrome_backdrop_opacity_oracle", BACKDROP_SCRIPT)
+assert BACKDROP_SPEC is not None and BACKDROP_SPEC.loader is not None
+backdrop_oracle = importlib.util.module_from_spec(BACKDROP_SPEC)
+BACKDROP_SPEC.loader.exec_module(backdrop_oracle)
 
 # Each fake reads the same --screenshot / --window-size flags Chrome does.
 # `mode` selects what it leaves behind and how it exits.
@@ -92,6 +102,48 @@ class ScreenshotVerdictTest(unittest.TestCase):
         with self.assertRaises(SystemExit) as ctx:
             oracle.render("linear-gradient(#ff0000, #0000ff)", w=40, h=30)
         self.assertIn("unreadable screenshot", str(ctx.exception.code))
+
+    def test_installed_app_is_skipped_in_sandbox(self):
+        oracle.CHROME = str(Path(self._tmp.name) / "Google Chrome.app" /
+                            "Contents" / "MacOS" / "Google Chrome")
+        stderr = io.StringIO()
+        with mock.patch.dict(os.environ, {"CODEX_SANDBOX": "seatbelt"}), \
+                contextlib.redirect_stderr(stderr):
+            with self.assertRaises(SystemExit) as ctx:
+                oracle.render("linear-gradient(#ff0000, #0000ff)")
+        # 77 is the skip status; a string message would exit 1 (a failure).
+        self.assertEqual(ctx.exception.code, 77)
+        self.assertIn("cannot start in a sandbox", stderr.getvalue())
+
+    def test_symlink_into_installed_app_is_skipped_in_sandbox(self):
+        bundled = Path(self._tmp.name) / "Google Chrome.app" / "Contents" / "MacOS"
+        bundled.mkdir(parents=True)
+        (bundled / "Google Chrome").write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+        link = Path(self._tmp.name) / "google-chrome"
+        link.symlink_to(bundled / "Google Chrome")
+        stderr = io.StringIO()
+        for module in (oracle, backdrop_oracle):
+            old_chrome = module.CHROME
+            self.addCleanup(setattr, module, "CHROME", old_chrome)
+            module.CHROME = str(link)
+            with mock.patch.dict(os.environ, {"CODEX_SANDBOX": "seatbelt"}), \
+                    contextlib.redirect_stderr(stderr):
+                with self.assertRaises(SystemExit) as ctx:
+                    module.refuse_installed_app_in_sandbox()
+            self.assertEqual(ctx.exception.code, 77)
+
+    def test_backdrop_oracle_skips_installed_app_in_sandbox(self):
+        old_chrome = backdrop_oracle.CHROME
+        self.addCleanup(setattr, backdrop_oracle, "CHROME", old_chrome)
+        backdrop_oracle.CHROME = str(Path(self._tmp.name) / "Chromium.app" /
+                                    "Contents" / "MacOS" / "Chromium")
+        stderr = io.StringIO()
+        with mock.patch.dict(os.environ, {"CODEX_SANDBOX": "seatbelt"}), \
+                contextlib.redirect_stderr(stderr):
+            with self.assertRaises(SystemExit) as ctx:
+                backdrop_oracle.render()
+        self.assertEqual(ctx.exception.code, 77)
+        self.assertIn("cannot start in a sandbox", stderr.getvalue())
 
 
 class ColumnMeanTest(unittest.TestCase):

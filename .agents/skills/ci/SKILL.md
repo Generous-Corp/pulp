@@ -49,6 +49,8 @@ on a real PR. Do them in order.
    it build-free; its families prediction can still fail.
    The skipped lanes are listed as NOT CHECKED, so the verdict reads "not a full
    pass" rather than "safe to push". The cheap gates still run.
+   When a gate fails, the final summary names every failed gate in a comma-separated
+   `gates: failed:` line before the remediation advice.
    Two lanes read their commands from the CI jobs themselves, so a step added
    there reaches `gates.sh` with no edit: the required `Enforce version & skill
    sync` job's `python3 <script>` commands that `gates.sh` has no block for
@@ -119,6 +121,15 @@ on a real PR. Do them in order.
    Commit the event(s) before re-running — both checkers read the commit
    range, never the working tree. Run `python3 tools/scripts/vellum_watch_preflight.py --enforce`
    on its own for just the Vellum verdict.
+
+   A new `integrations/pulp-vellum-*` package is built and tested by the
+   `Vellum SDK consumer` lane only: add its directory to that workflow's
+   `paths:` list and its `PULP_ENABLE_*` flag to the bridge configure line, and
+   give its ctest targets a label that starts with `pulp-vellum` so
+   `labelled-targets` selects them. Any new TU that includes a tracked core
+   header (for example `pulp/host/signal_graph.hpp`) trips the header fan-out
+   guard; the package needs a `Fanout-Grow: all reason="..."` trailer naming
+   the legacy TU it replaces.
 2. **Know the required contexts, and only those.** They come from branch
    protection, not from the check list on the PR page:
 
@@ -1500,6 +1511,34 @@ line reads `cacheable 0`, check for `-- Building for: Visual Studio` in its
 configure log before checking the cache. The bake and server steps are in
 `docs/guides/local-ci.md`, "Windows build caches".
 
+A GitHub-hosted Windows leg is the opposite case: it starts empty with no remote
+ccache, so `cross-platform-check.yml` restores and saves a `.ccache` directory
+with `actions/cache` there (skipped on a self-hosted runner). It is capped at 1 GB, keyed on toolchain plus dependency pins, and saved only by the nightly on main, because the repository's 10 GB Actions cache is already full. A cold hosted
+build is about 2.5 hours and the suite 30 minutes, so its `timeout-minutes` is
+300; when a hosted Windows run is cancelled at the limit, read the step timings
+before blaming the test step.
+
+A hosted Windows checkout must keep LF bytes: Git for Windows defaults to
+`core.autocrlf=true`, so `cross-platform-check.yml` sets `core.autocrlf=false`
+and `core.eol=lf` before `actions/checkout`. Without it, tests that diff a
+committed artifact against a regenerated one fail on CRLF nobody committed.
+
+## The Windows nightly skips the source-selftest lane
+
+`cross-platform-check.yml`'s Windows ctest excludes the `source-selftest` label.
+Those Python registrations read only the checkout and run on ubuntu-latest in
+the required `Enforce version & skill sync` job, so the Windows copy added
+failures from POSIX-only fixtures and about 48 minutes of serial time, not
+coverage. A Windows-specific script belongs outside that manifest.
+
+The same ctest also excludes `browser-capture` and `windows-pr-quarantine`.
+Hosted Windows images do carry Chrome, but its CDP capability probe times out
+under the `-j8` load, so those tests report a missing browser that is really a
+slow one; the macOS gate runs them on every merge group. `windows-pr-quarantine`
+is the label `build.yml`'s Windows PR lane already excludes. When a Windows
+failure group looks like "no browser", read the probe's timeout line before
+concluding the runner lacks Chrome.
+
 ## Android minimum-API allocation check
 
 The Android workflow compiles and links the public aligned DSP buffer for both
@@ -2485,6 +2524,50 @@ failure is the last tool line before `Process completed with exit code 1`.
 Exit codes: 0 nothing owed · 10 event owed · 11 inventory stale · 20 no
 verdict · 2 `--write-event` refused. Both callers block on 10 and 11 only.
 
+### Fixture tests the pre-push hook runs: the ones the range reaches, capped at 60 s
+
+The hook runs `tools/ci/prepush_fixtures.py --base <base>`. The candidates are
+the commands of the workflow's "Gate-script fixture tests" step and the
+source-only selftests in `tools/ci/source_selftests.json`. An aggregate suite
+such as `test_gates.py` (about two minutes) is split into the classes it
+imports, one candidate per module, so a CMake module change runs
+`test_version_bump_surfaces.py` (about 2 s) instead of the whole aggregate.
+
+The step runs a candidate only when the range changes one of these:
+
+- its own script;
+- a module it imports, directly or through repo helpers;
+- a declared read in `tools/ci/prepush_triggers.json`;
+- the lane itself, in which case it runs everything.
+
+A test that `select_for_changes` reaches only because its source names a
+changed file is left to CI. Add a declared read only from what the test's
+code scans, globs or loads. `select_for_changes` (the selector
+`gates.sh --changed-from` uses) also selects a test whose source writes a glob
+the change matches (`"tools/cmake/Pulp*.cmake"`).
+
+The cap is a hard 60 s wall clock, selection included, on at most 4 workers.
+`PULP_PREPUSH_FIXTURE_BUDGET` can lower it, never raise it. A test the cap
+stops is killed with its whole process group. Its output pipe is abandoned
+after a second, so a child that left the group cannot hold the step.
+
+A failure prints one line: `✗ fixture test <name>: <first failing item> |
+repro: <command> (base: <verdict>)`. Before refusing, the step re-runs the
+failing test on the merge base within what is left of the cap. A failure the
+base shares is printed as PRE-EXISTING ON BASE and does not block, as in
+`gates.sh`.
+
+A test the cap stops or never starts makes the step exit 3, NOT CHECKED, and
+prints each such test's own command. That command is the remedy, because
+`gates.sh` does not run these suites on a gate host. The hook writes a
+`skipped fixture-tests` receipt event and ends with `gates passed except
+fixture tests: N NOT CHECKED`, never `gates clean`. The step is plain Python,
+with no configure, compile or receipt of its own, so gate hosts run it too.
+A tag-only or delete-only push skips it.
+
+Exit codes: 0 every selected test ran and nothing new failed, 1 a test failed,
+2 could not run, 3 NOT CHECKED.
+
 ### `gates.sh` and the pre-push hook are two lists, not one
 
 `gates.sh` describes itself as running the gates `.githooks/pre-push` runs, and
@@ -3293,7 +3376,10 @@ grep -rc "PULP_ENABLE_GPU" .github/workflows/build.yml                    # 2
 Without the second line a zero is ambiguous between "not wired" and "bad grep".
 
 `.github/workflows/scene3d-advisory.yml` now covers that surface: path-filtered,
-advisory, `macos-15`, SCENE3D ON, not on `merge_group`. Three things about it
+advisory, `macos-15`, SCENE3D ON, not on `merge_group`. The `Vellum SDK
+consumer` lane also turns SCENE3D ON, for `integrations/pulp-vellum-renderer3d`
+(the scene3d renderer on gpu-runtime's device): that package refuses to
+configure without `pulp::scene`. Three things about the scene3d lane
 generalize to any lane you add:
 
 - **`ctest -R` is case-sensitive** and `grep -i` is not, so a regex checked with
@@ -5567,6 +5653,15 @@ Same idea applies to the self-hosted golden images: bake with the flags CI actua
 uses, or the golden warms a cache the real jobs never touch.
 
 ## GitHub workflow gotchas
+
+- **An integration that is off by default is absent from the release SDK
+  unless the release leg turns it on.** `PULP_ENABLE_PULP_VELLUM` defaults
+  OFF, and only `vellum-sdk-consumer.yml` set it, so released SDKs carried no
+  `Pulp::vellum` and every `--ui vellum` project failed at configure. The
+  darwin-arm64 leg of `release-cli.yml` now fetches the `pulp.lock` Vellum SDK,
+  verifies its digest, builds the bridge, and fails the release through
+  `tools/scripts/check_vellum_sdk_staging.py` if the staged SDK lacks it. A
+  consumer-lane green says nothing about what the release ships.
 
 - **A pre-push gate that reads the working tree can pass a commit it never
   saw.** The push sends HEAD's commit; a file fixed on disk but not committed
@@ -13819,6 +13914,13 @@ about that path are not obvious:
   forwarded GitHub `Authorization` header with HTTP 401. Python's `urllib`
   forwards it by default; `tools/ci/vellum_sdk_consumer.py` drops it on any
   cross-host redirect. `curl -L` without `--location-trusted` already drops it.
+- **Build the labelled set from the target graph, not a list.** A Catch2
+  executable that was never built registers no ctest entry (discovery runs
+  after the build), so `ctest -N` cannot show what is missing, while a plain
+  `add_test()` whose program was not built fails with "no such file".
+  `vellum_sdk_consumer.py labelled-targets` (`--prepare` before configure,
+  `--verify` after the build) selects executables from the CMake file API, so a
+  new `pulp-vellum*` test target needs no workflow edit.
 - **Skip by head, but only from a green run.** The nightly lane stops early when
   Vellum main's head equals the head recorded in the last *successful* run's
   receipt artifact, and it uploads that receipt only when the whole run is
@@ -13842,6 +13944,12 @@ with `-k 0`, and uploads a JSON report grouped by capability-ledger row. Notes:
   whose head does not contain that commit (checked with Vellum's compare
   endpoint before anything is downloaded); the workflow sets it to the commit
   that introduced the `ParamModel` surface `integrations/pulp-vellum` builds on.
+- **A `cmake -P` scenario needs no build target to join the lane.** The bridge
+  step builds three targets and then runs `ctest -L pulp-vellum`, so any test
+  carrying that label runs there, built or not. The Vellum-backed UI scenarios
+  (`cmake-vellum-ui-compat-real`, `-wrong-version`) take the label only when the
+  configure found Vellum, and with `REQUIRE_VELLUM` they fail instead of
+  printing SKIP, which ctest reports as skipped and leaves the lane green.
 
 ## Exporting a platform's Vellum closure
 
@@ -13883,3 +13991,17 @@ merge: that once emptied a PR's diff. Use the helper instead:
 
 Review the printed stat before pushing; push once. Tests:
 `tools/scripts/test_regen_agent_capability_after_merge.py`.
+
+## The Vellum SDK consumer lane builds every optional Vellum package
+
+`vellum-sdk-consumer.yml` configures `PULP_ENABLE_PULP_VELLUM`, `_AUDIO` and
+`_COMPONENTS` together and builds each package's test target against Vellum
+main's SDK. A new optional Vellum integration package needs its option, its
+`pulp-test-*` target and a `paths:` entry added there, or no lane compiles it
+against main. The tests' ctest label should start with `pulp-vellum` so the
+lane's `-L pulp-vellum` filter runs them.
+
+The same lane also runs the MCP UI tool cases (`pulp-test-mcp-server "[ui]"`)
+against the SDK's `bin/vellum-app-host` through `PULP_TEST_VELLUM_APP_HOST`. The
+step greps the output for `SKIPPED`, because Catch2 reports a skipped live case
+as a pass: keep that check if the step is edited.

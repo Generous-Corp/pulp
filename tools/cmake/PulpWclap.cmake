@@ -119,6 +119,8 @@ set(_PULP_WCLAP_CORE_SOURCES
     ${_PULP_WCLAP_PLAYBACK_SOURCES}
     ${_PULP_WCLAP_WAV_SOURCES}
     ${_PULP_WCLAP_ROOT}/core/format/src/clap_adapter.cpp
+    # The adapter uses HostWriteEchoGuard without linking native pulp::format.
+    ${_PULP_WCLAP_ROOT}/core/format/src/host_parameter_edit.cpp
     # clap_init() requests the editor prewarm; with no view layer here no
     # scheduler is ever installed, so the request is a no-op, but it must link.
     ${_PULP_WCLAP_ROOT}/core/format/src/editor_prewarm.cpp

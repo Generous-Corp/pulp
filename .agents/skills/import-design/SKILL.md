@@ -46,6 +46,21 @@ holds one subtree past the fixture's destruction to prove the readback fails.
 counters (`paint_calls`, `paint_commands_total`, `layout_passes`, bridge and
 invalidation counts) included: they start at the first sampled frame.
 
+### Web-compat ui.js is flex-only: a DesignIR grid becomes wrapped rows
+
+`CodeGenMode::web_compat` emits `document.createElement` + `el.style`, and the
+web-compat runtime treats `display:grid` as a no-op (`setGrid` stores tracks but
+never switches a view to `LayoutMode::grid`; only the bridge lane's `createGrid`
+does). So `generate_node` lowers a row-flow grid with more than one column
+track to `flexDirection:'row'` + `flexWrap:'wrap'`, which reproduces the rows
+for fixed-width cells. Single-column and column-flow grids keep the stacked
+column. Every node with an authored height also gets `flexShrink:'0'`, which in
+a row parent pins its width too: a grid lowered as an unwrapped row overflows
+rather than shrinking. Assert grid fixes on live bounds after
+`WidgetBridge::load_script`, not on emitted text, and note that
+`emit_js_container` (bridge lane) is a different emitter from the web-compat
+`generate_node`. Forge's Designer link uses web_compat.
+
 ### A DOM node's own layout row: one rule per language
 
 Chromium's DOMSnapshot emits several layout rows for one DOM node: a
@@ -90,6 +105,17 @@ matches in `ids.map.json` are rejected. Verify deterministic output with
 `node --test tools/import-design/jsx-runtime/materialized_source_emitter.test.mjs`
 and keep the browser capture's Chromium validation receipt alongside the
 emitted source tree.
+
+### No installed browser inside an agent sandbox
+
+An installed macOS browser app (`/Applications/Google Chrome.app` and the
+other `.app` candidates) registers with the window server even with
+`--headless=new`. An agent sandbox (`CODEX_SANDBOX` set) denies that, so the
+browser aborts at launch and macOS files a crash report for the user's own
+Chrome. Browser discovery therefore drops `.app` candidates when
+`CODEX_SANDBOX` is set, and the Chrome oracles skip (exit 77) rather than
+launch one. In a sandbox, install a Pulp-managed browser or pass a headless
+shell explicitly; never point `PULP_CHROME` at the installed app.
 
 ### The capture browser runs at the capture's device scale
 
@@ -235,6 +261,29 @@ the CSS family. A face that can't be read or fails its manifest hash is
 skipped with `font-asset-unavailable`, and that family keeps resolving to host
 faces.
 
+Generated JS registers a face that the export pass localized beside the script
+(`assets/<sha256>.ttf`) with `registerEmbeddedFont(family, 'assets/<sha256>.ttf', ...)`.
+That is the name a UI_SCRIPT build embeds the file under. The call needs no
+capability, so a shipped panel registers its fonts under an empty grant. It
+never takes the manifest `asset_id`: no embedded file is named `pulp-page-font-...`.
+Only a face reachable solely by an absolute path still emits the
+Filesystem-gated `registerFont`, and any `registerFont` in the script makes
+`infer_capabilities_from_js` request Filesystem. So a headless tool that runs
+generated JS (`--validate`'s render, `pulp-design-ir-observe`,
+`pulp-design-import-bench`) must seal the files beside the script into its
+bridge with `read_sealed_font_files` (`tools/import-design/sealed_font_files.hpp`).
+Putting `registerFont` back into the script instead would make the panel ask
+for Filesystem. `sealed_font_asset_name()` is the single rule for that name.
+A path-backed or hot-reloading `ScriptedUiSession` does the same host-side: it
+seals the font files beside its script (symlinks that leave the directory are
+skipped). Both bridge font calls check the sealed bytes' size and signature
+(`view::register_font_container`) and never fall back to a path. A WOFF2 the
+decoder rejects is refused, never handed to the platform font manager. A panel
+may not rebind a family that host code or another panel's storage identity
+registered first; `registerEmbeddedFont` returns false and logs why. Font
+registration is process-global, so a test that probes it must use a family
+name no other case registers.
+
 ### Imported text looks heavier than Chromium: check font smoothing first
 
 Pulp's default glyph raster on macOS is Chromium's `-webkit-font-smoothing:
@@ -300,7 +349,7 @@ alike (`ua_form_control_state()` is the shared parse). The ui.js lane emits the
 same widget and state from that parse (`design_js_capture_lowering.cpp`:
 `createRangeSlider`/`createCheckbox`, `createButtonSurface` with its label as
 children, `setUaSkin`, `setCheckboxKind`, the range, value and checked state), and every lane records the snapped paint rect
-(`setCapturedPaintRect` in ui.js); the emitter conformance gate checks all of it. Only those controls get
+(`setCapturedPaintRect` in ui.js); Vellum's emitter conformance gate checks all of it. Only those controls get
 the skin: an `author` or `unresolved` verdict, another import lane's checkbox,
 AutoUi and every hand-built widget keep `UaSkin::platform`. Chromium paints a
 theme part in its CSS-px-snapped box, so the skins paint in
@@ -331,12 +380,12 @@ both when you give it a native skin.
 
 The native materializer, the ui.js emitter (`design_codegen.cpp`), the baked C++
 exporter and the SwiftUI exporter each walk the IR on their own, so a lowering
-added to one does not reach the others. `pulp-test-design-emitter-conformance`
-builds the fixtures in `test/fixtures/emitter-conformance/` (plus the
-figma-plugin fidelity scene) through all four and compares, per anchor, the
+added to one does not reach the others. Vellum owns this gate as the
+`vellum.design-emitter-conformance` ctest (`authoring/design_pipeline`). It
+builds its spectr, kelvin, form-controls, keyed-list and fidelity-scene fixtures through all four and compares, per anchor, the
 anchored-view tree, widget kind, theme-control state, captured paint rect and
 snapped `self_paint_bounds()`, and bindings, against the native lane. The baked
-C++ is generated at build time by `pulp-emitter-conformance-gen`, never
+C++ is generated at build time by the Vellum gate, never
 committed. A divergence must match an entry in `allowlist.json`, each linked to
 an issue; an entry that matches nothing fails the gate, so delete it with the
 fix. `PULP_CONFORMANCE_REPORT=<path>` writes every divergence as JSON. When you
@@ -4935,8 +4984,22 @@ Gotchas baked into the tool: (1) the render and the captured asset PNGs are at *
   version comparison in the probe — nothing rejects a browser for being too
   new, so a discovery failure on a current Chrome is never a version-range
   problem. Selection order is `--browser` → `PULP_DESIGN_BROWSER` → managed
-  (`~/.pulp/tools/chrome-for-testing`, via its `current.json`) → system paths,
-  and the default `auto` mode prefers the pinned browser over a system one.
+  (`~/.pulp/tools/chrome-for-testing`: the release's `chrome-headless-shell`
+  via `headless-shell.json`, then the browser via `current.json`) → system
+  paths, and the default `auto` mode prefers the pinned browser over a system
+  one. The shell is accepted only when its record names the release and
+  platform `current.json` names, and only from `<platform>-headless-shell/`.
+- **Prefer the headless shell on a shared desktop.** The full Chrome for
+  Testing binary connects to the window server even with `--headless=new`;
+  on m5s it intermittently hung (`--dump-dom` of a 127.0.0.1 page never
+  returned) while `chrome-headless-shell` of the same release answered in a
+  second, sandboxed or not. The `bootstrap_look_up
+  ...MachPortRendezvousServer.1: Permission denied (1100)` line it prints is a
+  helper outliving its parent at teardown; it appears in passing runs too and
+  is not the cause. The CDP product of the shell is `HeadlessChrome`, which the
+  probe and the capture both report, so the identity check stays consistent.
+  `launchBrowser()` passes `--headless=new` only to the full browser
+  (`headlessModeArguments()`).
   `pulp config set import_design.browser {auto,managed,system}` picks the mode;
   `managed-browser-unavailable` fires only when `managed` is selected
   explicitly and nothing is installed.
@@ -4955,8 +5018,9 @@ Gotchas baked into the tool: (1) the render and the captured asset PNGs are at *
   written in JavaScript. Its order is `PULP_DESIGN_BROWSER`, then (under GitHub
   Actions) nothing, so a lane that did not provision the pinned build skips the
   real-browser cases instead of launching the runner image's Chrome; then the
-  legacy `PULP_BROWSER`, then the managed install (`managedBrowser()`, the same
-  `current.json` containment rules as `managed_current_browser`), then
+  legacy `PULP_BROWSER`, then the managed install (`managedHeadlessShell()`
+  then `managedBrowser()`, the same record containment rules as
+  `managed_headless_shell` and `managed_current_browser`), then
   hardcoded system paths. It does not read `import_design.browser` modes. On a
   developer host, run `pulp tool install chrome-for-testing` once: until then
   every local run of these suites, and every host-side `pulp import-design`,
@@ -8580,3 +8644,13 @@ generated-JS emitter in `design_codegen.cpp` and the native lowering in
 `apply_layout` (`design_import_native_common.cpp`). Change them together;
 `design import screenshot parity compares live and baked native fixtures`
 (the `clipped-stack` fixture) fails when only one lane keeps the height.
+
+## The import CLI needs Skia's ICU data beside it on Windows
+
+`pulp-import-design` shapes text through SkParagraph, whose ICU-backed
+`SkUnicode` is null without `icudtl.dat` and traps on its `fUnicode` check
+(`SkIcuLoader: datafile missing: <dir>\icudtl.dat`). Plug-ins and apps get the
+file from `pulp_stage_runtime_dependencies()`; a command-line tool or test
+executable that renders text calls `pulp_stage_skia_icu_data(<target>)` itself.
+A hosted Windows run that aborts every import test with that message is this,
+not an importer regression.

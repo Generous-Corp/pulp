@@ -1,25 +1,51 @@
 #include <pulp/vellum_audio/audio_widgets.hpp>
+#include <pulp/dataplane/audio_bridge.hpp>
+#include <pulp/vellum_audio/audio_display_provider.hpp>
 
 #include <algorithm>
 #include <cmath>
+#include <memory>
 #include <string>
 
 namespace pulp::vellum_audio {
 
-void LevelMeter::set_feed(AudioDisplayProvider* feed, std::size_t channel) noexcept {
+LevelMeter::LevelMeter(::vellum::value::ValueFeed* feed)
+    : feed_(feed), ballistics_(std::make_unique<pulp::dataplane::MeterBallistics>()) {
+    set_access_role(::vellum::view::View::AccessRole::meter);
+}
+
+LevelMeter::~LevelMeter() = default;
+
+double LevelMeter::get_current_value() const {
+    return ballistics_->display_peak;
+}
+
+float LevelMeter::displayed_peak() const noexcept {
+    return ballistics_->display_peak;
+}
+
+float LevelMeter::displayed_rms() const noexcept {
+    return ballistics_->display_rms;
+}
+
+float LevelMeter::held_peak() const noexcept {
+    return ballistics_->held_peak;
+}
+
+void LevelMeter::set_feed(::vellum::value::ValueFeed* feed, std::size_t channel) noexcept {
     feed_ = feed;
     channel_ = channel;
     last_publish_ = 0;
     quiet_ticks_ = 0;
     stale_ = true;
     rms_ = peak_ = 0.0f;
-    ballistics_ = {};
+    *ballistics_ = {};
 }
 
 void LevelMeter::set_levels(float primary, float secondary) {
     rms_ = std::clamp(primary, 0.0f, 1.0f);
     peak_ = std::clamp(secondary, 0.0f, 1.0f);
-    (void)ballistics_.update(peak_, rms_, 1.0f / 60.0f);
+    (void)ballistics_->update(peak_, rms_, 1.0f / 60.0f);
     stale_ = false;
     request_repaint();
 }
@@ -30,6 +56,10 @@ void LevelMeter::set_levels(float primary, float secondary) {
     if (level > 0.7f)
         return resolve_color("meter.yellow", ::vellum::canvas::Color::rgba8(240, 180, 60));
     return resolve_color("meter.green", ::vellum::canvas::Color::rgba8(80, 200, 80));
+}
+
+::vellum::canvas::Color LevelMeter::bar_color(float level) const {
+    return fill_override_ ? *fill_override_ : level_color(level);
 }
 
 MidiKeyboard::MidiKeyboard() {
@@ -96,6 +126,8 @@ float MidiKeyboard::white_key_width() const {
         const float top = bounds.height * row / rows;
         return {0, top, bounds.width, bounds.height / rows};
     }
+    if (white_key_count() == 0) // the range is one accidental: it owns the whole keyboard
+        return {0, 0, bounds.width, bounds.height};
     const float white_width = white_key_width();
     int white_index = 0;
     for (int n = first_note_; n < note; ++n)
@@ -109,10 +141,13 @@ float MidiKeyboard::white_key_width() const {
     const float black_width = white_width * 0.6f;
     const float black_height = (horizontal ? bounds.height : bounds.width) * 0.6f;
     const float offset = white_width - black_width * 0.5f;
-    return horizontal ? ::vellum::view::Rect{white_index * white_width + offset - white_width, 0,
-                                             black_width, black_height}
-                      : ::vellum::view::Rect{0, white_index * white_width + offset - white_width,
-                                             black_height, black_width};
+    // A range that starts or ends on an accidental has no natural on that side,
+    // so the centred key would hang off the keyboard; shift it fully inside.
+    const float extent = horizontal ? bounds.width : bounds.height;
+    const float start = std::clamp(white_index * white_width + offset - white_width, 0.0f,
+                                   std::max(0.0f, extent - black_width));
+    return horizontal ? ::vellum::view::Rect{start, 0, black_width, black_height}
+                      : ::vellum::view::Rect{0, start, black_height, black_width};
 }
 
 int MidiKeyboard::note_at_position(::vellum::view::Point pos) const {
@@ -214,13 +249,13 @@ void LevelMeter::set_level_fill(std::optional<::vellum::canvas::Color> backgroun
     if (background)
         background_ = *background;
     if (!gradient.empty())
-        fill_ = gradient.back();
+        fill_override_ = gradient.back();
     request_repaint();
 }
 
 void LevelMeter::clear_level_fill() {
     background_ = {0.08f, 0.08f, 0.1f, 1.0f};
-    fill_ = {0.25f, 0.85f, 0.35f, 1.0f};
+    fill_override_.reset();
     request_repaint();
 }
 
@@ -239,16 +274,24 @@ void LevelMeter::sample() noexcept {
             stale_ = true;
             rms_ = peak_ = 0.0f;
         }
-        (void)ballistics_.update(0.0f, 0.0f, 1.0f / 60.0f);
+        // Decay and peak-hold release must stay visible, but a settled meter
+        // must not repaint every tick: update() reports real movement only.
+        if (ballistics_->update(0.0f, 0.0f, 1.0f / 60.0f))
+            request_repaint();
         return;
     }
     std::array<float, AudioDisplayProvider::kMaxMeterChannels> rms{};
     std::array<float, AudioDisplayProvider::kMaxMeterChannels> peak{};
     AudioFrameInfo next_info;
-    if (feed_->read_meter(channel_, rms, peak, next_info) != 0) {
+    const auto count = [&] {
+        if (auto* audio = dynamic_cast<AudioDisplayProvider*>(feed_))
+            return audio->read_meter(channel_, rms, peak, next_info);
+        return feed_->read_meter(channel_, rms, peak);
+    }();
+    if (count != 0) {
         rms_ = std::clamp(rms[0], 0.0f, 1.0f);
         peak_ = std::clamp(peak[0], 0.0f, 1.0f);
-        (void)ballistics_.update(peak_, rms_, 1.0f / 60.0f);
+        (void)ballistics_->update(peak_, rms_, 1.0f / 60.0f);
         stale_ = false;
         info_ = next_info;
         last_publish_ = published;
@@ -259,7 +302,8 @@ void LevelMeter::sample() noexcept {
     // A frame with zero channels is not consumed: stay stale and retry next tick.
     stale_ = true;
     rms_ = peak_ = 0.0f;
-    (void)ballistics_.update(0.0f, 0.0f, 1.0f / 60.0f);
+    if (ballistics_->update(0.0f, 0.0f, 1.0f / 60.0f))
+        request_repaint();
 }
 
 void LevelMeter::paint(::vellum::canvas::Canvas& canvas) {
@@ -268,9 +312,9 @@ void LevelMeter::paint(::vellum::canvas::Canvas& canvas) {
     canvas.fill_rect(0, 0, b.width, b.height);
     const bool vertical = orientation_ == Orientation::vertical;
     const float length = vertical ? b.height : b.width;
-    const float level = std::clamp(ballistics_.display_rms, 0.0f, 1.0f);
+    const float level = std::clamp(ballistics_->display_rms, 0.0f, 1.0f);
     const float fill = std::round(level * length);
-    canvas.set_fill_color(level_color(level));
+    canvas.set_fill_color(bar_color(level));
     const float cross = vertical ? b.width * std::clamp(bar_ratio_, 0.05f, 1.0f) : b.height;
     if (vertical)
         canvas.fill_rect((b.width - cross) * 0.5f, b.height - fill, cross, fill);
@@ -278,14 +322,14 @@ void LevelMeter::paint(::vellum::canvas::Canvas& canvas) {
         canvas.fill_rect(0, (b.height - cross) * 0.5f, fill, cross);
     canvas.set_stroke_color({1.0f, 1.0f, 1.0f, 1.0f});
     canvas.set_line_width(1.0f);
-    const float peak_pos = std::round(std::clamp(ballistics_.display_peak, 0.0f, 1.0f) * length);
+    const float peak_pos = std::round(std::clamp(ballistics_->display_peak, 0.0f, 1.0f) * length);
     if (vertical)
         canvas.stroke_line(0, b.height - peak_pos, b.width, b.height - peak_pos);
     else
         canvas.stroke_line(peak_pos, 0, peak_pos, b.height);
-    const float held_pos = std::round(std::clamp(ballistics_.held_peak, 0.0f, 1.0f) * length);
+    const float held_pos = std::round(std::clamp(ballistics_->held_peak, 0.0f, 1.0f) * length);
     canvas.set_stroke_color(
-        ballistics_.held_peak > 0.9f
+        ballistics_->held_peak > 0.9f
             ? resolve_color("accent.error", ::vellum::canvas::Color::rgba8(255, 50, 50))
             : ::vellum::canvas::Color::rgba8(255, 100, 100));
     canvas.set_line_width(2.0f);
@@ -295,7 +339,7 @@ void LevelMeter::paint(::vellum::canvas::Canvas& canvas) {
         canvas.stroke_line(held_pos, 0, held_pos, b.height);
 }
 
-void AnalyzerScope::set_feed(AudioDisplayProvider* feed, std::size_t channel) noexcept {
+void AnalyzerScope::set_feed(::vellum::value::ValueFeed* feed, std::size_t channel) noexcept {
     feed_ = feed;
     channel_ = channel;
     last_publish_ = 0;
@@ -348,7 +392,11 @@ void AnalyzerScope::sample() noexcept {
         return;
     }
     AudioFrameInfo next_info;
-    const auto count = feed_->read_vector(channel_, bins_, next_info);
+    const auto count = [&] {
+        if (auto* audio = dynamic_cast<AudioDisplayProvider*>(feed_))
+            return audio->read_vector(channel_, bins_, next_info);
+        return feed_->read_vector(channel_, bins_);
+    }();
     if (!map_bins_(bins_.data(), count)) {
         stale_ = true;
         return;

@@ -48,6 +48,12 @@ function(pulp_add_vellum_editor_package package)
     if(NOT _vellum_pkg_VIEW_HEADER OR NOT _vellum_pkg_VIEW_TYPE)
         message(FATAL_ERROR "${package}: VIEW_HEADER and VIEW_TYPE are required")
     endif()
+    if(NOT TARGET Vellum::MirrorView_core AND (PULP_IOS OR CMAKE_SYSTEM_NAME STREQUAL "iOS"))
+        message(FATAL_ERROR "${package}: this configure targets iOS, and the Vellum SDK "
+            "on the prefix path has no iOS slice (Vellum::MirrorView_core is absent). "
+            "An iOS AUv3 with a Vellum editor needs a Vellum SDK built for iOS; it will "
+            "not be built without an editor.")
+    endif()
     if(NOT TARGET Vellum::MirrorView_core)
         message(FATAL_ERROR "${package}: pulp_add_vellum_editor_package needs "
             "Vellum::MirrorView_core, which this Vellum SDK does not provide "
@@ -102,4 +108,50 @@ function(pulp_add_vellum_editor_package package)
         PULP_EDITOR_FACTORY_HEADER "pulp-vellum/editor-packages/${_package_id}.hpp"
         PULP_EDITOR_RUNTIME_LIBRARIES "${_runtime_libraries}")
     unset(_pulp_vellum_target)
+endfunction()
+
+# Built-in package for UI_SCRIPT. Keep its script library out of other Vellum editors.
+function(_pulp_vellum_scripted_package context out_var)
+    if(TARGET Pulp::vellum-scripted)
+        set(_scripted Pulp::vellum-scripted)
+    elseif(TARGET pulp::vellum-scripted)
+        set(_scripted pulp::vellum-scripted)
+    else()
+        message(FATAL_ERROR
+            "${context}: UI_ENGINE vellum requires PULP_ENABLE_PULP_VELLUM=ON "
+            "and a Vellum SDK with Vellum::MirrorView_script")
+    endif()
+    if(NOT TARGET pulp-vellum-scripted-package)
+        add_library(pulp-vellum-scripted-package INTERFACE)
+        target_link_libraries(pulp-vellum-scripted-package INTERFACE "${_scripted}")
+        _pulp_vellum_runtime_libraries(_runtime_libraries Vellum::MirrorView_script)
+        set_target_properties(pulp-vellum-scripted-package PROPERTIES
+            PULP_EDITOR_FACTORY_FUNCTION "pulp::vellum::scripted_editor_factory"
+            PULP_EDITOR_FACTORY_HEADER "pulp/vellum/scripted_editor.hpp"
+            PULP_EDITOR_RUNTIME_LIBRARIES "${_runtime_libraries}"
+            PULP_VELLUM_SCRIPTED_EDITOR TRUE)
+    endif()
+    set(${out_var} pulp-vellum-scripted-package PARENT_SCOPE)
+endfunction()
+
+# Built-in package for UI_ENGINE vellum without UI_SCRIPT: the generated
+# parameter editor (pulp::vellum::AutoUi), which needs no script runtime.
+function(_pulp_vellum_auto_ui_package context out_var)
+    if(TARGET Pulp::vellum)
+        set(_vellum Pulp::vellum)
+    elseif(TARGET pulp::vellum)
+        set(_vellum pulp::vellum)
+    else()
+        message(FATAL_ERROR "${context}: UI_ENGINE vellum requires PULP_ENABLE_PULP_VELLUM=ON")
+    endif()
+    if(NOT TARGET pulp-vellum-auto-ui-package)
+        add_library(pulp-vellum-auto-ui-package INTERFACE)
+        target_link_libraries(pulp-vellum-auto-ui-package INTERFACE "${_vellum}")
+        _pulp_vellum_runtime_libraries(_runtime_libraries Vellum::MirrorView_core)
+        set_target_properties(pulp-vellum-auto-ui-package PROPERTIES
+            PULP_EDITOR_FACTORY_FUNCTION "pulp::vellum::auto_ui_editor_factory"
+            PULP_EDITOR_FACTORY_HEADER "pulp/vellum/auto_ui.hpp"
+            PULP_EDITOR_RUNTIME_LIBRARIES "${_runtime_libraries}")
+    endif()
+    set(${out_var} pulp-vellum-auto-ui-package PARENT_SCOPE)
 endfunction()

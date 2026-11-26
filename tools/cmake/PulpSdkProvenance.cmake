@@ -180,7 +180,7 @@ if(EXISTS "${_pulp_sdk_provenance}")
            (NOT _pulp_sdk_expected_inspector AND _pulp_sdk_inspector) OR
            NOT _pulp_sdk_version MATCHES "^[0-9]+\\.[0-9]+\\.[0-9]+$" OR
            NOT _pulp_sdk_source_ref STREQUAL "v${_pulp_sdk_version}" OR
-           NOT _pulp_sdk_platform MATCHES "^(darwin|linux|windows)-(arm64|x64)$" OR
+           NOT _pulp_sdk_platform MATCHES "^((darwin|linux|windows)-(arm64|x64)|windows-arm64ec)$" OR
            (DEFINED PULP_VERSION AND NOT _pulp_sdk_version STREQUAL PULP_VERSION))
             message(FATAL_ERROR
                 "Pulp SDK provenance at ${_pulp_sdk_provenance} has an unknown "

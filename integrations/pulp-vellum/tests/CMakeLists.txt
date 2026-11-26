@@ -5,8 +5,11 @@
 find_package(Threads REQUIRED)
 
 if(PULP_BUILD_TESTS AND TARGET Catch2::Catch2WithMain)
+    # test_reload_capabilities_vellum.cpp checks Pulp's reload capability names
+    # against Vellum's and runs the remote UX update gate with no Pulp view.
     add_executable(pulp-test-pulp-vellum
-        ${PULP_ROOT_DIR}/test/test_pulp_vellum_param_bridge.cpp)
+        ${PULP_ROOT_DIR}/test/test_pulp_vellum_param_bridge.cpp
+        test_reload_capabilities_vellum.cpp)
     target_link_libraries(pulp-test-pulp-vellum PRIVATE
         pulp::vellum Catch2::Catch2WithMain Threads::Threads)
     include(Catch)
@@ -38,8 +41,60 @@ if(PULP_BUILD_TESTS AND TARGET Catch2::Catch2WithMain)
             target_link_libraries(pulp-test-pulp-vellum-editor PRIVATE Vellum::MirrorView_script)
             target_compile_definitions(pulp-test-pulp-vellum-editor PRIVATE
                 PULP_TEST_VELLUM_SCRIPTED_UI=1)
+            # The live-swap UI stage over a real Vellum scripted session.
+            target_sources(pulp-test-pulp-vellum-editor PRIVATE test_scripted_ui_swap_unit.cpp)
+        endif()
+        if(TARGET pulp-vellum-scripted)
+            add_executable(pulp-test-vellum-scripted-wiring test_scripted_editor_wiring.cpp)
+            target_link_libraries(pulp-test-vellum-scripted-wiring PRIVATE
+                pulp-vellum-scripted Vellum::MirrorView_script Catch2::Catch2WithMain Threads::Threads)
+            # Keep format-core's environment gate deterministic in CI. This
+            # executable records the external GPU/session and scheduler edges.
+            add_test(NAME pulp-vellum-scripted-wiring
+                COMMAND ${CMAKE_COMMAND} -E env CI=0 PULP_HEADLESS=0 PULP_TEST_MODE=0
+                    PULP_DISABLE_PLUGIN_EDITOR=0 PULP_EDITOR_PREWARM=1 DISPLAY=:0
+                    $<TARGET_FILE:pulp-test-vellum-scripted-wiring>)
+            set_tests_properties(pulp-vellum-scripted-wiring PROPERTIES
+                LABELS pulp-vellum-editor TIMEOUT 30)
+            target_compile_definitions(pulp-test-pulp-vellum-editor PRIVATE
+                PULP_TEST_VELLUM_SCRIPTED_EDITOR=1)
+            if(TARGET pulp-vellum-audio)
+                target_compile_definitions(pulp-test-vellum-scripted-wiring PRIVATE
+                    PULP_VELLUM_AUDIO=1)
+                target_compile_definitions(pulp-test-pulp-vellum-editor PRIVATE
+                    PULP_TEST_VELLUM_SCRIPTED_AUDIO=1)
+            endif()
+            _pulp_vellum_scripted_package("scripted editor fixture" _scripted_package)
+            target_link_libraries(pulp-test-pulp-vellum-editor PRIVATE "${_scripted_package}")
+            # The audio display widgets (meter, spectrum) need the view-audio
+            # provider, so without pulp-vellum-audio the script is the knob and
+            # label alone; main.js would throw at its first createMeter.
+            set(_scripted_fixture main-core.js)
+            if(TARGET pulp-vellum-audio)
+                set(_scripted_fixture main.js)
+            endif()
+            _pulp_apply_ui_script_definition(pulp-test-pulp-vellum-editor
+                "${PULP_ROOT_DIR}/test/fixtures/scripted-editor/${_scripted_fixture}")
+            set_property(TARGET pulp-test-pulp-vellum-editor PROPERTY PULP_VELLUM_SCRIPTED_EDITOR TRUE)
         endif()
         catch_discover_tests(pulp-test-pulp-vellum-editor PROPERTIES LABELS pulp-vellum-editor)
+        add_test(NAME pulp-vellum-editor-bootstrap-failure
+            COMMAND pulp-test-pulp-vellum-editor "[.bootstrap-failure]")
+        set_tests_properties(pulp-vellum-editor-bootstrap-failure PROPERTIES
+            LABELS pulp-vellum-editor)
+
+        # A VST3 host opening a Vellum editor through the view-free contract
+        # view. The cases define make_plug_view() themselves, so the
+        # create_view() path's view layer is never linked.
+        if(PULP_HAS_VST3)
+            target_compile_definitions(pulp-test-pulp-vellum-editor PRIVATE
+                PULP_TEST_VELLUM_VST3=1)
+            # The capture case decodes the host's back buffer with ImageIO.
+            if(APPLE)
+                target_link_libraries(pulp-test-pulp-vellum-editor PRIVATE
+                    "-framework CoreGraphics" "-framework ImageIO")
+            endif()
+        endif()
 
         add_executable(pulp-test-pulp-vellum-about-notices
             ${PULP_ROOT_DIR}/test/test_pulp_vellum_about_notices.cpp)

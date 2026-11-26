@@ -162,6 +162,11 @@ examples/ios-auv3-synth/
 └── CMakeLists.txt                 # uses pulp_add_ios_auv3()
 ```
 
+`pulp_add_ios_auv3(... UI <package>)` supplies the extension's editor from a UI
+package (see the `auv3` skill, "iOS AUv3 extension"). A Vellum package needs a
+Vellum SDK built for iOS; with only the macOS SDK configure fails with
+"no iOS slice" rather than producing an editorless extension.
+
 ### Required Info.plist keys (extension)
 
 ```xml

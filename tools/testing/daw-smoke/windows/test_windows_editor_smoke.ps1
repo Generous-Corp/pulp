@@ -86,7 +86,14 @@ try {
   $stageScan=Join-Path $root 'stage-scan';New-Item -ItemType Directory -Path $stageScan | Out-Null
   $stagedBundle=Stage-Vst3Plugin $stageScan $stageInput
   Check ($stagedBundle.BundleRoot -ieq $stageInput -and $stagedBundle.Staged -ieq (Join-Path $stageScan 'StageInput.vst3\Contents\x86_64-win\StageInput.vst3') -and (Test-Path -LiteralPath $stagedBundle.Staged -PathType Leaf)) 'VST3 wrapper staging accepts a bundle-directory input'
-  foreach($fixture in @(@(0x8664,'x64','vstpath64'),@(0xaa64,'arm64','vstpath_winarm64'),@(0xa641,'arm64ec','vstpath_winarm64'),@(0xa64e,'arm64x','vstpath_winarm64'))){
+  $secondPayload=Join-Path $stageInput 'Contents\arm64-win\StageInput.vst3'
+  New-Item -ItemType Directory -Force -Path (Split-Path $secondPayload) | Out-Null
+  Set-Content -LiteralPath $secondPayload -Value 'other ABI fixture'
+  Reject {Stage-Vst3Plugin $stageScan $stageInput} 'ambiguous VST3 bundle-directory input is refused'
+  $selectedScan=Join-Path $root 'selected-scan';New-Item -ItemType Directory -Path $selectedScan | Out-Null
+  $selectedStage=Stage-Vst3Plugin $selectedScan $stagePayload
+  Check ($selectedStage.Staged -ieq (Join-Path $selectedScan 'StageInput.vst3\Contents\x86_64-win\StageInput.vst3')) 'explicit ABI-selected payload is preserved in a multi-architecture bundle'
+  foreach($fixture in @(@(0x8664,'x64','vstpath64','clap_path_win64'),@(0xaa64,'arm64','vstpath_winarm64','clap_path_winarm64'),@(0xa641,'arm64ec','vstpath_winarm64','clap_path_winarm64'),@(0xa64e,'arm64x','vstpath_winarm64','clap_path_winarm64'))){
     $path=Join-Path $root ($fixture[1]+'.exe')
     $bytes=New-Object byte[] 128
     [BitConverter]::GetBytes([uint16]0x5a4d).CopyTo($bytes,0)
@@ -95,7 +102,7 @@ try {
     [BitConverter]::GetBytes([uint16]$fixture[0]).CopyTo($bytes,68)
     [IO.File]::WriteAllBytes($path,$bytes)
     $machine=Get-PeMachine $path;$keys=Get-ReaperScanKeys $machine
-    Check ($machine -eq $fixture[1] -and $keys[0] -eq $fixture[2] -and $keys[1] -eq 'clap_path') ('PE architecture/scan keys '+$fixture[1])
+    Check ($machine -eq $fixture[1] -and $keys[0] -eq $fixture[2] -and $keys[1] -eq $fixture[3]) ('PE architecture/scan keys '+$fixture[1])
   }
   function New-HybridFixture([string]$Path,[int]$Version,[bool]$BadPointer=$false) {
     $bytes=New-Object byte[] 1536;$optional=152;$section=392
@@ -251,8 +258,9 @@ try {
   # before any host process starts (Windows ACL deny on the root only).
   $locked=Join-Path $root 'locked evidence'
   New-Item -ItemType Directory -Path $locked | Out-Null
-  $who="$env:USERDOMAIN\$env:USERNAME"
+  $who="*"+[Security.Principal.WindowsIdentity]::GetCurrent().User.Value
   & icacls.exe $locked /deny "${who}:(WD)" | Out-Null
+  if($LASTEXITCODE -ne 0){throw 'Failed to create ACL-denied fixture'}
   try {
     & $engine -NoProfile -File (Join-Path $PSScriptRoot 'windows_editor_smoke.ps1') -ReaperExe $PSCommandPath -Format vst3 -PluginPath $PSCommandPath -PluginName Example -SeedProfile $root -EvidenceDir $locked 3>&1 | Out-Null
     $lockedCode=$LASTEXITCODE

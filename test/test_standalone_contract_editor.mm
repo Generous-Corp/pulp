@@ -14,6 +14,7 @@
 
 #include <pulp/format/processor.hpp>
 #include <pulp/format/standalone.hpp>
+#include <pulp/format/standalone_panel.hpp>
 #include <pulp/state/store.hpp>
 
 #include <cmath>
@@ -403,4 +404,74 @@ TEST_CASE("open_settings_window uses the registered opener and reports its resul
     answer = true;
     REQUIRE(app.open_settings_window());
     REQUIRE(calls == 2);
+}
+
+namespace {
+
+struct ShortcutPanelRecord {
+    int toggles = 0;
+    void* window_while_running = nullptr;
+    bool window_cleared = false;
+};
+ShortcutPanelRecord shortcut_record;
+
+class ShortcutPanel final : public pulp::format::StandalonePanel {
+  public:
+    std::string menu_title() const override {
+        return "Shortcut Panel";
+    }
+    char shortcut() const override {
+        return 'k';
+    }
+    bool toggle() override {
+        ++shortcut_record.toggles;
+        return true;
+    }
+    bool is_visible() const override {
+        return false;
+    }
+    void set_primary_window(void* native_window) override {
+        if (native_window != nullptr)
+            shortcut_record.window_while_running = native_window;
+        else if (shortcut_record.window_while_running != nullptr)
+            shortcut_record.window_cleared = true;
+    }
+    void drain_midi_into(pulp::midi::MidiBuffer&, int) noexcept override {}
+    void shutdown() noexcept override {}
+};
+
+std::unique_ptr<pulp::format::StandalonePanel>
+make_shortcut_panel(const pulp::format::StandalonePanelContext&) {
+    return std::make_unique<ShortcutPanel>();
+}
+
+} // namespace
+
+TEST_CASE("a standalone panel toggles on its Command shortcut from the editor window",
+          "[standalone][editor-host][standalone-contract][standalone-panel]") {
+    EditorEnvironment env;
+    reset_contract_recording();
+    pulp::format::detail::reset_standalone_panel_factories_for_testing();
+    REQUIRE(pulp::format::detail::install_standalone_panel_factory(&make_shortcut_panel));
+    shortcut_record = {};
+    const auto png = temp_png("pulp-standalone-contract-panel");
+    std::filesystem::remove(png);
+
+    pulp::format::StandaloneApp app(create_contract_processor);
+    auto config = headless_config(png);
+    // Cmd+K toggles the panel twice; Shift+Cmd+K and a bare "k" do not, and
+    // the bare "k" is the editor's.
+    config.test_key_sequence = "cmd+k,cmd+shift+k,k,cmd+k";
+    config.test_key_frame_delay = 2;
+    app.set_config(config);
+    const bool ran = app.run_with_editor(false);
+    pulp::format::detail::reset_standalone_panel_factories_for_testing();
+    std::filesystem::remove(png);
+    REQUIRE(ran);
+
+    CHECK(shortcut_record.toggles == 2);
+    CHECK(contract_log().saw("offer:char"));
+    // The panel was handed the editor window, and let go of it at close.
+    CHECK(shortcut_record.window_while_running != nullptr);
+    CHECK(shortcut_record.window_cleared);
 }

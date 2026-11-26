@@ -16,7 +16,7 @@
 #include <string>
 
 using namespace pulp::format::reload;
-using pulp::view::CapabilitySet;
+using pulp::runtime::CapabilitySet;
 namespace fs = std::filesystem;
 
 namespace {

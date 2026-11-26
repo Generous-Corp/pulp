@@ -56,4 +56,41 @@ class DriverShape(unittest.TestCase):
   chunk='<VST "VST3: Sample Region Allpass (Pulp) (mono)" "Sample Region Allpass.vst3" 0 "" 51558974{50554C5053414D50524547494F4E414C} ""\\n'
   identity=m.parse_loaded_fx_chunk('vst3',chunk)
   self.assertEqual(identity['module_name'],'Sample Region Allpass.vst3')
+class IsolatedReaperProfile(unittest.TestCase):
+ """The lane must never scan the user's plug-in folders."""
+ def test_every_launch_reads_an_isolated_profile(self):
+  import subprocess, sys
+  from unittest import mock
+  with tempfile.TemporaryDirectory() as d:
+   root=pathlib.Path(d); bundle=root/'Thing.vst3'; (bundle/'Contents'/'MacOS').mkdir(parents=True)
+   exe=bundle/'Contents'/'MacOS'/'Thing'; exe.write_bytes(b'x'); exe.chmod(0o755)
+   seen=[]
+   def fake_run(cmd, **kw):
+    seen.append(list(cmd))
+    ini=pathlib.Path(cmd[cmd.index('-cfgfile')+1]); text=ini.read_text(encoding='utf-8')
+    roots=[l.split('=',1)[1] for l in text.splitlines() if m.guard.SCAN_PATH_KEY.match(l)]
+    seen.append(roots)
+    scan=ini.parent/'scan'
+    seen.append(sorted(x.name for x in scan.iterdir()))
+    return subprocess.CompletedProcess(cmd,0,stdout='',stderr='')
+   fake=root/'REAPER'; fake.write_bytes(b'x'); fake.chmod(0o755)
+   with mock.patch.object(m, 'bundle_executable', return_value=exe), \
+        mock.patch.object(m.guard, 'running_reaper_pids', return_value=[]), \
+        mock.patch.object(m.guard, 'scoped_persistence_opt_out', contextlib.nullcontext), \
+        mock.patch.object(m.subprocess, 'run', side_effect=fake_run), \
+        mock.patch.dict('os.environ', {'REAPER_BIN': str(fake)}):
+    m.run('vst3', bundle, root/'out', 5)
+   cmd, roots, listing = seen[0], seen[1], seen[2]
+   self.assertIn('-cfgfile', cmd)
+   self.assertTrue(roots)
+   scan_root=str(pathlib.Path(cmd[cmd.index('-cfgfile')+1]).parent/'scan')
+   self.assertEqual(set(roots), {scan_root})
+   self.assertEqual(listing, ['Thing.vst3'])
+ def test_a_running_reaper_is_not_launched_over(self):
+  from unittest import mock
+  with mock.patch.object(m.guard, 'running_reaper_pids', return_value=[99]), \
+       mock.patch.object(m.subprocess, 'run') as run:
+   rec=m.run('vst3', pathlib.Path('/nonexistent/Thing.vst3'), pathlib.Path('/nonexistent/out'), 5)
+  self.assertEqual(rec['status'],'inconclusive'); self.assertIn('another REAPER', rec['reason']); run.assert_not_called()
+
 if __name__=='__main__': unittest.main()

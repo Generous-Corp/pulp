@@ -223,6 +223,30 @@ class GpuRuntimePrefixTests(unittest.TestCase):
 
 
 class RepositoryLockTests(unittest.TestCase):
+    def test_repository_lock_tracks_published_vellum_release(self) -> None:
+        lock = pulp_lock.load(LOCK_FILE)
+        vellum = lock["vellum"]
+        self.assertEqual(vellum["tag"], "v0.2.3")
+        self.assertEqual(vellum["sha"], "2191e8a3ee823ba1946b83e466c2fd20c3494e4d")
+        self.assertEqual(
+            vellum["sdk_url"],
+            "https://github.com/Generous-Corp/vellum/releases/download/"
+            "v0.2.3/vellum-sdk-0.2.3-darwin-arm64.tar.gz",
+        )
+        self.assertEqual(
+            vellum["sdk_digest"],
+            "16ccadc10cb464a573e518de7406571da9b46e5cea731dc1c8f3899dd0d47b0a",
+        )
+        self.assertEqual(
+            vellum["gpu_runtime_digest"],
+            "ee7391c267398ded016075593eb21ee4de7f2da34f49a349facb545a94441694",
+        )
+        # sha256 of gpu-runtime/renderer-lock.json at the pinned commit.
+        self.assertEqual(
+            lock["render_toolchain"]["lock_digest"],
+            "330cc21b917fc0e1cadb8f6e34117bfb9fbf13688a398c09072dce66ea436836",
+        )
+
     def test_repository_lock_validates(self) -> None:
         # The lock the build actually reads, not a temporary copy.
         self.assertEqual(LOCK_FILE.resolve(), (REPO / "pulp.lock").resolve())

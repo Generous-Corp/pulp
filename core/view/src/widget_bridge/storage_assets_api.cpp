@@ -1,6 +1,7 @@
 // widget_bridge/storage_assets_api.cpp - storage and asset-loading registrations for WidgetBridge.
 
 #include <pulp/canvas/bundled_fonts.hpp>
+#include <pulp/view/font_container.hpp>
 #include <pulp/view/widget_bridge.hpp>
 #include <pulp/view/asset_manager.hpp>
 #include <pulp/runtime/base64.hpp>
@@ -17,8 +18,10 @@
 #include <filesystem>
 #include <fstream>
 #include <iterator>
+#include <mutex>
 #include <optional>
 #include <string>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -258,6 +261,72 @@ BridgeAssetLoad load_bridge_asset(const std::string& url,
 
 std::string base64_encode_blob(const std::vector<uint8_t>& data) {
     return runtime::base64_encode(data.data(), data.size());
+}
+
+// The @font-face weight range a register call passes as its optional third
+// and fourth arguments: finite weights clamped to CSS's [1, 1000], or nothing
+// when the call names none or passes a non-finite weight.
+std::optional<std::pair<int, int>>
+declared_font_weights(const choc::javascript::ArgumentList& args) {
+    if (args.size() < 3)
+        return std::nullopt;
+    const double low = args.get<double>(2, 400.0);
+    const double high = args.size() >= 4 ? args.get<double>(3, low) : low;
+    if (!std::isfinite(low) || !std::isfinite(high))
+        return std::nullopt;
+    const auto css = [](double w) { return static_cast<int>(std::clamp(w, 1.0, 1000.0)); };
+    return std::minmax(css(low), css(high));
+}
+
+// A script can call the font API in a loop, so its diagnostics are capped.
+bool sealed_font_diagnostic_allowed() {
+    static std::atomic<int> reported{0};
+    return reported.fetch_add(1, std::memory_order_relaxed) < 32;
+}
+
+// Which panel owns each family registered from sealed bytes, keyed by the
+// bridge's storage identity so every instance and reload of one plug-in's
+// panel shares its families.
+struct SealedFamilyOwners {
+    std::mutex mutex;
+    std::unordered_map<std::string, std::string> owner_by_family;
+};
+
+SealedFamilyOwners& sealed_family_owners() {
+    static SealedFamilyOwners owners;
+    return owners;
+}
+
+// Registers a font sealed into the panel straight from its bytes. The bytes
+// are size- and signature-checked before the font parser sees them, and no
+// path is ever consulted, so a face that fails to parse cannot fall through
+// to a file lookup. Family registration is process-global, so a panel may not
+// rebind a family that host code or another panel already registered; it may
+// add faces to its own. Only the weight range is scoped to this bridge.
+bool register_sealed_font(WidgetBridge& self, const WidgetBridge::EmbeddedAsset& embedded,
+                          const std::string& family,
+                          const std::optional<std::pair<int, int>>& declared) {
+    auto& owners = sealed_family_owners();
+    const auto owner = self.storage_identity();
+    {
+        std::lock_guard lock(owners.mutex);
+        const auto it = owners.owner_by_family.find(family);
+        const bool ours = it != owners.owner_by_family.end() && it->second == owner;
+        if (!ours && pulp::canvas::is_font_registered(family)) {
+            if (sealed_font_diagnostic_allowed())
+                runtime::log_warn("WidgetBridge: registerEmbeddedFont refused '{}': the family is "
+                                  "already registered by another owner",
+                                  family);
+            return false;
+        }
+        if (!pulp::view::register_font_container(embedded.data, embedded.size, family))
+            return false;
+        owners.owner_by_family.emplace(family, owner);
+    }
+    if (declared)
+        pulp::canvas::declare_font_face_weight_range(family, declared->first, declared->second,
+                                                     self.font_weight_scope());
+    return true;
 }
 
 } // namespace
@@ -506,44 +575,46 @@ void BridgeRegistrars::register_font_assets_api(WidgetBridge& self) {
         auto family = args.get<std::string>(0, "");
         auto path = args.get<std::string>(1, "");
         if (family.empty() || path.empty()) return choc::value::createBool(false);
-        // A range is recorded only once the face is registered, and only from
-        // finite weights clamped to CSS's [1, 1000]; a bad weight declares nothing.
-        std::optional<std::pair<int, int>> declared;
-        if (args.size() >= 3) {
-            const double low = args.get<double>(2, 400.0);
-            const double high = args.size() >= 4 ? args.get<double>(3, low) : low;
-            if (std::isfinite(low) && std::isfinite(high)) {
-                const auto css = [](double w) {
-                    return static_cast<int>(std::clamp(w, 1.0, 1000.0));
-                };
-                declared = std::minmax(css(low), css(high));
-            }
-        }
-        const auto declare = [&] {
-            if (declared)
-                pulp::canvas::declare_font_face_weight_range(
-                    family, declared->first, declared->second, self.font_weight_scope());
-        };
-        if (const auto* embedded = self.embedded_asset(path)) {
-            // The face is already in memory; hand it to the font registry
-            // under a name only this bridge's embedded set can produce.
-            const std::string key =
-                "pulp-ui-embed/" + self.storage_identity() + "/" + embedded->name;
-            auto& assets = AssetManager::instance();
-            assets.register_embedded(key, embedded->data, embedded->size);
-            assets.register_font_family(family, key);
-            declare();
-            return choc::value::createBool(true);
-        }
+        // A range is recorded only once the face is registered.
+        const auto declared = declared_font_weights(args);
+        if (const auto* embedded = self.embedded_asset(path))
+            return choc::value::createBool(register_sealed_font(self, *embedded, family, declared));
         path = self.resolve_script_relative(path);
         if (path.empty() || !std::filesystem::exists(path))
             return choc::value::createBool(false);
         // register_font_family decodes the file + registers the typeface with
         // the canvas font registry (Skia on GPU builds; no-op stub otherwise).
         AssetManager::instance().register_font_family(family, path);
-        declare();
+        if (declared)
+            pulp::canvas::declare_font_face_weight_range(family, declared->first, declared->second,
+                                                         self.font_weight_scope());
         return choc::value::createBool(true);
     });
+}
+
+void BridgeRegistrars::register_embedded_font_api(WidgetBridge& self) {
+    BridgeApiContext api{self.engine_};
+    // registerEmbeddedFont(family, assetName, weightMin?, weightMax?) registers
+    // only bytes already sealed into this panel, named by their script-relative
+    // path. It never reads a path, URI, asset root or the working directory,
+    // so it needs no capability grant.
+    register_bridge_function(
+        api, "registerEmbeddedFont", [&self](choc::javascript::ArgumentList args) {
+            const auto family = args.get<std::string>(0, "");
+            const auto name = args.get<std::string>(1, "");
+            if (family.empty() || name.empty())
+                return choc::value::createBool(false);
+            const auto* embedded = self.embedded_asset(name);
+            if (!embedded) {
+                if (sealed_font_diagnostic_allowed())
+                    runtime::log_warn("WidgetBridge: registerEmbeddedFont('{}', '{}'): no sealed "
+                                      "panel asset has that name; the family is not registered",
+                                      family, name);
+                return choc::value::createBool(false);
+            }
+            return choc::value::createBool(
+                register_sealed_font(self, *embedded, family, declared_font_weights(args)));
+        });
 }
 
 } // namespace pulp::view

@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "event_id": "20261123-w-interaction-bridge-v2",
+  "kind": "exported-path-change",
+  "created_at": "2026-11-23T18:50:55Z",
+  "receipt_export_id": "20261107-f0ac0a4ff392",
+  "paths": [
+    "core/runtime/CMakeLists.txt",
+    "core/runtime/include/pulp/runtime/interaction_event.hpp",
+    "core/runtime/include/pulp/runtime/interaction_router.hpp"
+  ],
+  "vellum_inherits": false,
+  "rationale": "The tracker and router remain provider-neutral Pulp runtime transport. Vellum consumes their output through the adapter and does not inherit the runtime lifecycle implementation."
+}

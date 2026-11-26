@@ -843,7 +843,8 @@ void StateStore::reset_all_to_defaults() {
     }
 }
 
-bool StateStore::reset_triggers_rt() {
+bool StateStore::reset_triggers_rt(std::span<float> captured_values) {
+    bool writing = false;
     bool any = false;
     for (auto index : trigger_indices_) {
         // add_parameter refuses a repeated ID (see duplicate_registrations()), so
@@ -857,17 +858,22 @@ bool StateStore::reset_triggers_rt() {
         // during the block; this returns the control to its resting default.
         const auto default_value = params_[index].range.default_value;
         if (values_[index].get() != default_value) {
-            if (!any) {
+            if (!writing) {
                 active_state_writers_.fetch_add(1, std::memory_order_acq_rel);
+                writing = true;
             }
             const auto generation = advance_state_generation();
-            values_[index].set_packed_revisioned(
-                default_value, generation,
-                active_state_writers_.load(std::memory_order_acquire) + 1);
-            any = true;
+            if (values_[index].set_packed_revisioned(
+                    default_value, generation,
+                    active_state_writers_.load(std::memory_order_acquire) + 1)) {
+                if (index < captured_values.size())
+                    captured_values[index] = default_value;
+                any = true;
+            }
         }
     }
-    if (any) active_state_writers_.fetch_sub(1, std::memory_order_release);
+    if (writing)
+        active_state_writers_.fetch_sub(1, std::memory_order_release);
     return any;
 }
 

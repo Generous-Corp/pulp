@@ -6,6 +6,8 @@
 # GLOBAL: the imported Vellum targets must resolve outside this directory too,
 # where the plug-in link-floor checks walk pulp-vellum's link closure.
 find_package(Vellum CONFIG REQUIRED GLOBAL)
+# Recorded for the installed PulpConfig, which requires this exact version.
+set_property(GLOBAL PROPERTY PULP_VELLUM_SDK_VERSION "${Vellum_VERSION}")
 
 add_library(pulp-vellum STATIC
     src/mapping.cpp
@@ -32,3 +34,13 @@ target_sources(pulp-vellum PRIVATE src/about_notices.cpp src/swift_motion_bridge
 set_property(TARGET pulp-vellum PROPERTY PULP_VELLUM_HAS_SWIFT_MOTION TRUE)
 target_include_directories(pulp-vellum PRIVATE ${PULP_ROOT_DIR}/apple/Sources/PulpSwift)
 target_link_libraries(pulp-vellum PUBLIC Vellum::MirrorView_core)
+
+option(PULP_ENABLE_PULP_VELLUM_SCRIPTED
+    "Build Pulp's optional scripted Vellum editor bridge" ON)
+
+if(PULP_ENABLE_PULP_VELLUM_SCRIPTED AND TARGET Vellum::MirrorView_script)
+    add_library(pulp-vellum-scripted STATIC src/scripted_editor.cpp)
+    add_library(pulp::vellum-scripted ALIAS pulp-vellum-scripted)
+    target_link_libraries(pulp-vellum-scripted PUBLIC pulp::vellum
+        PRIVATE Vellum::MirrorView_script)
+endif()

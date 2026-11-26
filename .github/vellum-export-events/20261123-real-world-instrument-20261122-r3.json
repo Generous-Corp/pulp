@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "event_id": "20261123-real-world-instrument-20261122-r3",
+  "kind": "exported-path-change",
+  "created_at": "2026-11-23T18:35:12Z",
+  "receipt_export_id": "20261107-f0ac0a4ff392",
+  "paths": [
+    "core/runtime/include/pulp/runtime/interaction_event.hpp"
+  ],
+  "vellum_inherits": false,
+  "rationale": "Adds an ordered Pulp runtime SPSC handoff for interaction events. This remains Pulp-owned transport and is not inherited by Vellum."
+}

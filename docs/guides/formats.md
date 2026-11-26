@@ -498,7 +498,13 @@ The AU adapter stores Pulp state alongside the standard AU state dictionary:
 - A processor whose AU class already stores its own bytes in the class info can
   override `Processor::class_info_owns_plugin_state()`; the entry then holds
   parameters only and restoring it does not call `deserialize_plugin_state()`.
-- AUv3 `fullState` and VST3 still carry the `PLST` envelope.
+- AUv3 `fullState` still carries the `PLST` envelope with the full parameter store.
+- CLAP and VST3 state: a processor whose own bytes restore every parameter can
+  override `Processor::plugin_state_carries_parameters()`; the envelope then holds
+  a parameter-free store (about 8 bytes per parameter smaller). States saved with
+  the full store still load. A state saved with the opt-in and opened by an older
+  release restores the processor's bytes only, so parameters those bytes do not
+  carry keep their current value.
 
 ### Tail and Latency
 

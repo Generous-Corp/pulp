@@ -158,11 +158,11 @@ if(NOT _build_info_text MATCHES "libvellum-bundle-fixture.dylib")
 endif()
 message(STATUS "UI package libraries reach an assembled bundle and its build-info")
 
-# AUv3 cannot carry UI package libraries yet, so attaching one is refused.
-file(MAKE_DIRECTORY "${FIXTURE_DIR}/auv3")
-file(WRITE "${FIXTURE_DIR}/auv3/module.cpp" "int vellum_auv3_fixture_module() { return 0; }\n")
-file(WRITE "${FIXTURE_DIR}/auv3/root.hpp" "#pragma once\nnamespace test { struct RootView {}; }\n")
-file(WRITE "${FIXTURE_DIR}/auv3/CMakeLists.txt" "cmake_minimum_required(VERSION 3.24)\nproject(VellumAuv3 CXX)\n"
+# macOS AUv3 stages UI package libraries beside its framework binary.
+file(MAKE_DIRECTORY "${FIXTURE_DIR}/auv3-macos")
+file(WRITE "${FIXTURE_DIR}/auv3-macos/module.cpp" "int vellum_auv3_macos_fixture_module() { return 0; }\n")
+file(WRITE "${FIXTURE_DIR}/auv3-macos/root.hpp" "#pragma once\nnamespace test { struct RootView {}; }\n")
+file(WRITE "${FIXTURE_DIR}/auv3-macos/CMakeLists.txt" "cmake_minimum_required(VERSION 3.24)\nproject(VellumAuv3Macos CXX)\n"
     "add_library(pulp-vellum INTERFACE)\nadd_library(pulp::vellum ALIAS pulp-vellum)\n"
     "add_library(vellum-dylib SHARED IMPORTED)\n"
     "set_target_properties(vellum-dylib PROPERTIES IMPORTED_LOCATION \"${FIXTURE_DIR}/libvellum-bundle-fixture.dylib\")\n"
@@ -171,15 +171,111 @@ file(WRITE "${FIXTURE_DIR}/auv3/CMakeLists.txt" "cmake_minimum_required(VERSION 
     "include(\"${PULP_SOURCE_DIR}/integrations/pulp-vellum/cmake/PulpVellumEditorPackage.cmake\")\n"
     "include(\"${PULP_SOURCE_DIR}/tools/cmake/PulpEditorPackage.cmake\")\n"
     "pulp_add_vellum_editor_package(pulp::vellum-editor VIEW_HEADER root.hpp VIEW_TYPE test::RootView)\n"
-    "add_library(Plugin_AUv3Framework MODULE module.cpp)\n"
+    "set(PULP_Plugin_UI_PACKAGE pulp::vellum-editor)\n"
+    "add_library(Plugin_AUv3Framework SHARED module.cpp)\n"
+    "set_target_properties(Plugin_AUv3Framework PROPERTIES FRAMEWORK TRUE)\n"
+    "target_include_directories(Plugin_AUv3Framework PRIVATE \"${PULP_SOURCE_DIR}/core/format/include\" \"${PULP_SOURCE_DIR}/integrations/pulp-vellum/include\" \"${CMAKE_CURRENT_SOURCE_DIR}\")\n"
+    "_pulp_stage_ui_package_runtime(Plugin Plugin_AUv3Framework)\n"
+    "get_target_property(B Plugin_AUv3Framework BUILD_WITH_INSTALL_RPATH)\n"
+    "get_target_property(P Plugin_AUv3Framework INSTALL_RPATH)\n"
+    "if(APPLE)\n set(O @loader_path)\nelse()\n set(O \"\$ORIGIN\")\nendif()\n"
+    "if(NOT B OR NOT O IN_LIST P)\n message(FATAL_ERROR \"AUv3 framework staging: rpath-from-install=\${B} rpath=\${P}\")\nendif()\n")
+execute_process(COMMAND "${CMAKE_COMMAND}" -S "${FIXTURE_DIR}/auv3-macos" -B "${FIXTURE_DIR}/auv3-macos-build"
+    RESULT_VARIABLE result OUTPUT_VARIABLE output ERROR_VARIABLE error)
+if(NOT result EQUAL 0)
+    message(FATAL_ERROR "macOS AUv3 fixture configure failed:\n${output}${error}")
+endif()
+execute_process(COMMAND "${CMAKE_COMMAND}" --build "${FIXTURE_DIR}/auv3-macos-build" --target Plugin_AUv3Framework
+    RESULT_VARIABLE result OUTPUT_VARIABLE output ERROR_VARIABLE error)
+if(NOT result EQUAL 0)
+    message(FATAL_ERROR "macOS AUv3 fixture build failed:\n${output}${error}")
+endif()
+file(GLOB_RECURSE _auv3_runtime "${FIXTURE_DIR}/auv3-macos-build/*/libvellum-bundle-fixture.dylib")
+if(NOT _auv3_runtime)
+    message(FATAL_ERROR "macOS AUv3 framework did not stage the UI package library")
+endif()
+message(STATUS "macOS AUv3 stages UI package libraries beside its framework binary with @loader_path")
+
+# iOS AUv3 remains refused until its flat extension has dedicated staging.
+file(MAKE_DIRECTORY "${FIXTURE_DIR}/auv3-ios")
+file(WRITE "${FIXTURE_DIR}/auv3-ios/module.cpp" "int vellum_auv3_ios_fixture_module() { return 0; }\n")
+file(WRITE "${FIXTURE_DIR}/auv3-ios/root.hpp" "#pragma once\nnamespace test { struct RootView {}; }\n")
+file(WRITE "${FIXTURE_DIR}/auv3-ios/CMakeLists.txt" "cmake_minimum_required(VERSION 3.24)\nproject(VellumAuv3Ios CXX)\n"
+    "set(PULP_IOS ON)\n"
+    "add_library(pulp-vellum INTERFACE)\nadd_library(pulp::vellum ALIAS pulp-vellum)\n"
+    "add_library(vellum-dylib SHARED IMPORTED)\n"
+    "set_target_properties(vellum-dylib PROPERTIES IMPORTED_LOCATION \"${FIXTURE_DIR}/libvellum-bundle-fixture.dylib\")\n"
+    "add_library(vellum-view INTERFACE)\nadd_library(Vellum::MirrorView_core ALIAS vellum-view)\n"
+    "target_link_libraries(vellum-view INTERFACE vellum-dylib)\n"
+    "include(\"${PULP_SOURCE_DIR}/integrations/pulp-vellum/cmake/PulpVellumEditorPackage.cmake\")\n"
+    "include(\"${PULP_SOURCE_DIR}/tools/cmake/PulpEditorPackage.cmake\")\n"
+    "pulp_add_vellum_editor_package(pulp::vellum-editor VIEW_HEADER root.hpp VIEW_TYPE test::RootView)\n"
+    "set(PULP_Plugin_UI_PACKAGE pulp::vellum-editor)\n"
+    "add_library(Plugin_AUv3 MODULE module.cpp)\n"
     "_pulp_attach_ui_package(Plugin pulp::vellum-editor)\n")
-execute_process(COMMAND "${CMAKE_COMMAND}" -S "${FIXTURE_DIR}/auv3" -B "${FIXTURE_DIR}/auv3-build"
+execute_process(COMMAND "${CMAKE_COMMAND}" -S "${FIXTURE_DIR}/auv3-ios" -B "${FIXTURE_DIR}/auv3-ios-build"
     RESULT_VARIABLE result OUTPUT_VARIABLE output ERROR_VARIABLE error)
 if(result EQUAL 0)
-    message(FATAL_ERROR "a UI package with runtime libraries attached to an AUv3 target")
+    message(FATAL_ERROR "iOS AUv3 accepted a UI package with runtime libraries")
 endif()
-string(REGEX REPLACE "[ \t\r\n]+" " " error_flat "${error}")
-if(NOT error_flat MATCHES "AUv3 format cannot carry")
-    message(FATAL_ERROR "AUv3 refusal was not the helper's message:\n${output}${error}")
+string(REGEX REPLACE "[ \\t\\r\\n]+" " " error_flat "${error}")
+if(NOT "${output}${error}" MATCHES "iOS AUv3 cannot carry")
+    message(FATAL_ERROR "iOS AUv3 refusal was not the helper's message:\n${output}${error}")
 endif()
-message(STATUS "a UI package with runtime libraries is refused for AUv3")
+message(STATUS "iOS AUv3 refuses UI package runtime libraries")
+
+# The real macOS AUv3 wiring: _pulp_add_auv3_macos_framework and the stub
+# appex must stage the UI package libraries beside the framework binary, sign
+# them after the build, and let the stub resolve them through its own rpath.
+# The generated build graph is where those commands are visible.
+if(APPLE)
+    set(_auv3_dir "${FIXTURE_DIR}/auv3-wiring")
+    file(MAKE_DIRECTORY "${_auv3_dir}/format")
+    foreach(_stub au_adapter.mm au_view_controller_mac.mm au_v3_contract_view.mm)
+        file(WRITE "${_auv3_dir}/format/${_stub}" "// stub\n")
+    endforeach()
+    file(WRITE "${_auv3_dir}/core.cpp" "int vellum_auv3_wiring_core() { return 0; }\n")
+    file(WRITE "${_auv3_dir}/root.hpp" "#pragma once\nnamespace test { struct RootView {}; }\n")
+    file(WRITE "${_auv3_dir}/CMakeLists.txt" "cmake_minimum_required(VERSION 3.24)\nproject(VellumAuv3Wiring CXX OBJCXX)\n"
+        "include(\"${PULP_SOURCE_DIR}/tools/cmake/PulpAuv3.cmake\")\n"
+        "include(\"${PULP_SOURCE_DIR}/integrations/pulp-vellum/cmake/PulpVellumEditorPackage.cmake\")\n"
+        "include(\"${PULP_SOURCE_DIR}/tools/cmake/PulpEditorPackage.cmake\")\n"
+        "set(_PULP_AUV3_TEMPLATE_DIR \"${PULP_SOURCE_DIR}/tools/templates/auv3\")\n"
+        "set(_PULP_FORMAT_SOURCE_DIR \"${_auv3_dir}/format\")\n"
+        # The runtime-staging, ObjC-suffix and manifest helpers belong to other
+        # modules; only the AUv3 wiring is under test here.
+        "foreach(_helper pulp_stage_runtime_dependencies pulp_assert_runtime_dependencies_staged\n"
+        "        _pulp_apply_view_mac_objc_suffix _pulp_attach_plugin_runtime_manifest\n"
+        "        _pulp_attach_control_shipping)\n"
+        "    cmake_language(EVAL CODE \"function(\${_helper})\\nendfunction()\")\n"
+        "endforeach()\n"
+        "add_library(vellum-dylib SHARED IMPORTED)\n"
+        "set_target_properties(vellum-dylib PROPERTIES IMPORTED_LOCATION \"${FIXTURE_DIR}/libvellum-bundle-fixture.dylib\")\n"
+        "add_library(pulp-vellum INTERFACE)\nadd_library(pulp::vellum ALIAS pulp-vellum)\n"
+        "add_library(vellum-view INTERFACE)\nadd_library(Vellum::MirrorView_core ALIAS vellum-view)\n"
+        "target_link_libraries(vellum-view INTERFACE vellum-dylib)\n"
+        "pulp_add_vellum_editor_package(pulp::vellum-editor VIEW_HEADER root.hpp VIEW_TYPE test::RootView)\n"
+        "set(PULP_Plugin_UI_PACKAGE pulp::vellum-editor)\n"
+        "add_library(Plugin_Core OBJECT core.cpp)\n"
+        "set(PULP_Plugin_CORE_OBJECTS \"\")\n"
+        "add_library(format-target INTERFACE)\nset(_PULP_FORMAT_TARGET format-target)\n"
+        "add_library(view-target INTERFACE)\nset(PULP_Plugin_VIEW_TARGET view-target)\n"
+        "_pulp_add_auv3_macos_framework(Plugin Plugin com.test.plugin 1.0.0 \"\")\n"
+        "_pulp_add_auv3_macos_appex(Plugin Plugin com.test.plugin 1.0.0 Test Test Plug aumf aumf 65536)\n")
+    execute_process(COMMAND "${CMAKE_COMMAND}" -S "${_auv3_dir}" -B "${_auv3_dir}/build" -G Ninja
+        RESULT_VARIABLE result OUTPUT_VARIABLE output ERROR_VARIABLE error)
+    if(NOT result EQUAL 0)
+        message(FATAL_ERROR "macOS AUv3 wiring fixture configure failed:\n${output}${error}")
+    endif()
+    file(READ "${_auv3_dir}/build/build.ninja" _auv3_graph)
+    if(NOT _auv3_graph MATCHES "copy_if_different [^\n]*libvellum-bundle-fixture.dylib [^\n]*PluginAUv3Framework.framework/Versions/A")
+        message(FATAL_ERROR "the AUv3 framework does not stage the UI package library")
+    endif()
+    if(NOT _auv3_graph MATCHES "codesign --force --sign - [^\n]*PluginAUv3Framework.framework/Versions/A/libvellum-bundle-fixture.dylib")
+        message(FATAL_ERROR "the AUv3 framework does not sign the staged UI package library")
+    endif()
+    if(NOT _auv3_graph MATCHES "-rpath,@executable_path/../../../../Frameworks/PluginAUv3Framework.framework/Versions/A")
+        message(FATAL_ERROR "the AUv3 stub cannot resolve UI package libraries inside the framework")
+    endif()
+    message(STATUS "macOS AUv3 wiring stages, signs and resolves UI package libraries")
+endif()

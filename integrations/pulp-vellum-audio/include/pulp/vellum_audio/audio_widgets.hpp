@@ -1,30 +1,39 @@
 #pragma once
 
 #include <pulp/signal/spectrum_bin_mapping.hpp>
-#include <pulp/dataplane/audio_bridge.hpp>
-#include <pulp/vellum_audio/audio_display_provider.hpp>
+#include <pulp/vellum_audio/audio_display_types.hpp>
+#include <pulp/vellum_audio/audio_widget_registration.hpp>
 #include <vellum/view/accessibility.hpp>
 #include <vellum/view/data_display.hpp>
 #include <vellum/view/view.hpp>
+#include <vellum/value/value_feed.hpp>
 
 #include <array>
 #include <cstddef>
 #include <cstdint>
 #include <functional>
+#include <memory>
 #include <optional>
 #include <vector>
 
+namespace pulp::dataplane {
+struct MeterBallistics;
+} // namespace pulp::dataplane
+
 namespace pulp::vellum_audio {
+
+namespace detail {
+class AudioWidgetSampler;
+}
 
 /// A Vellum view that snapshots one meter channel at the UI tick.
 class LevelMeter final : public ::vellum::view::View,
                          public ::vellum::view::AccessibilityValueInterface,
                          public ::vellum::view::LevelDisplay {
   public:
-    explicit LevelMeter(AudioDisplayProvider* feed = nullptr) noexcept : feed_(feed) {
-        set_access_role(::vellum::view::View::AccessRole::meter);
-    }
-    void set_feed(AudioDisplayProvider* feed, std::size_t channel) noexcept;
+    explicit LevelMeter(::vellum::value::ValueFeed* feed = nullptr);
+    ~LevelMeter() override;
+    void set_feed(::vellum::value::ValueFeed* feed, std::size_t channel) noexcept;
     /// Switches channel and resets the sampling cursor and displayed state,
     /// exactly as set_feed does, so the next sample() reads the new channel.
     void set_channel(std::size_t channel) noexcept {
@@ -33,9 +42,7 @@ class LevelMeter final : public ::vellum::view::View,
     void sample() noexcept;
     void paint(::vellum::canvas::Canvas& canvas) override;
 
-    double get_current_value() const override {
-        return ballistics_.display_peak;
-    }
+    double get_current_value() const override;
     void set_current_value(double) override {}
     double get_minimum_value() const override {
         return 0.0;
@@ -62,16 +69,13 @@ class LevelMeter final : public ::vellum::view::View,
     [[nodiscard]] float peak() const noexcept {
         return peak_;
     }
-    [[nodiscard]] float displayed_peak() const noexcept {
-        return ballistics_.display_peak;
-    }
-    [[nodiscard]] float displayed_rms() const noexcept {
-        return ballistics_.display_rms;
-    }
-    [[nodiscard]] float held_peak() const noexcept {
-        return ballistics_.held_peak;
-    }
+    [[nodiscard]] float displayed_peak() const noexcept;
+    [[nodiscard]] float displayed_rms() const noexcept;
+    [[nodiscard]] float held_peak() const noexcept;
     [[nodiscard]] ::vellum::canvas::Color level_color(float level) const;
+    /// Colour paint() uses for the bar: the explicit set_level_fill() colour
+    /// when one is configured, otherwise the threshold colour for @p level.
+    [[nodiscard]] ::vellum::canvas::Color bar_color(float level) const;
     [[nodiscard]] bool stale() const noexcept {
         return stale_;
     }
@@ -80,15 +84,19 @@ class LevelMeter final : public ::vellum::view::View,
     }
 
   private:
-    AudioDisplayProvider* feed_ = nullptr;
+    friend class detail::AudioWidgetSampler;
+    ::vellum::value::ValueFeed* feed_ = nullptr;
     std::size_t channel_ = 0;
     float rms_ = 0.0f;
     float peak_ = 0.0f;
-    pulp::dataplane::MeterBallistics ballistics_;
+    // Behind a pointer so this header does not pull audio_bridge.hpp (and
+    // triple_buffer.hpp) into every widget consumer.
+    std::unique_ptr<pulp::dataplane::MeterBallistics> ballistics_;
     float bar_ratio_ = 1.0f;
     Orientation orientation_ = Orientation::vertical;
     ::vellum::canvas::Color background_{0.08f, 0.08f, 0.1f, 1.0f};
-    ::vellum::canvas::Color fill_{0.25f, 0.85f, 0.35f, 1.0f};
+    // Explicit fill from set_level_fill(); unset means theme threshold colours.
+    std::optional<::vellum::canvas::Color> fill_override_;
     AudioFrameInfo info_;
     std::uint32_t last_publish_ = 0;
     std::uint32_t quiet_ticks_ = 0;
@@ -125,12 +133,14 @@ class MidiKeyboard final : public ::vellum::view::View {
     }
     void set_show_note_names(bool show) {
         show_names_ = show;
+        request_repaint();
     }
     bool show_note_names() const {
         return show_names_;
     }
     void set_highlight_color(::vellum::canvas::Color color) {
         highlight_color_ = color;
+        request_repaint();
     }
 
     void paint(::vellum::canvas::Canvas& canvas) override;
@@ -167,8 +177,8 @@ class MidiKeyboard final : public ::vellum::view::View {
 /// A fixed-capacity analyzer scope. Bin mapping is prepared on the UI thread.
 class AnalyzerScope final : public ::vellum::view::View, public ::vellum::view::BinDisplay {
   public:
-    explicit AnalyzerScope(AudioDisplayProvider* feed = nullptr) noexcept : feed_(feed) {}
-    void set_feed(AudioDisplayProvider* feed, std::size_t channel) noexcept;
+    explicit AnalyzerScope(::vellum::value::ValueFeed* feed = nullptr) noexcept : feed_(feed) {}
+    void set_feed(::vellum::value::ValueFeed* feed, std::size_t channel) noexcept;
     /// Switches channel and resets the sampling cursor and displayed state,
     /// exactly as set_feed does, so the next sample() reads the new channel.
     void set_channel(std::size_t channel) noexcept {
@@ -193,12 +203,13 @@ class AnalyzerScope final : public ::vellum::view::View, public ::vellum::view::
     }
 
   private:
+    friend class detail::AudioWidgetSampler;
     bool map_bins_(const float* values, std::size_t count) noexcept;
-    AudioDisplayProvider* feed_ = nullptr;
+    ::vellum::value::ValueFeed* feed_ = nullptr;
     std::size_t channel_ = 0;
     pulp::signal::SpectrumBinMapping mapping_;
-    std::array<float, AudioDisplayProvider::kMaxScopeSamples> bins_{};
-    std::array<float, AudioDisplayProvider::kMaxScopeSamples> columns_{};
+    std::array<float, kMaxScopeSamples> bins_{};
+    std::array<float, kMaxScopeSamples> columns_{};
     std::size_t column_count_ = 0;   // columns drawn from the latest frame
     std::size_t mapped_columns_ = 0; // configured by configure_mapping; survives staleness
     AudioFrameInfo info_;
@@ -206,5 +217,31 @@ class AnalyzerScope final : public ::vellum::view::View, public ::vellum::view::
     std::uint32_t quiet_ticks_ = 0;
     bool stale_ = true;
 };
+
+namespace detail {
+
+/// Keeps the audio widgets in one mounted editor ready for idle sampling.
+class AudioWidgetSampler {
+  public:
+    AudioWidgetSampler(::vellum::view::View& root, ::vellum::value::ValueFeed* feed) noexcept
+        : root_(root), feed_(feed) {}
+
+    /// Unbound displays use a matching widget ID or the first channel of their shape.
+    void mount();
+    void sample();
+
+  private:
+    struct Widget {
+        ::vellum::view::ViewCapture view;
+        void (*sample)(::vellum::view::View&) noexcept;
+    };
+
+    ::vellum::view::View& root_;
+    ::vellum::value::ValueFeed* feed_;
+    std::uint64_t mounted_generation_ = 0;
+    std::vector<Widget> widgets_;
+};
+
+} // namespace detail
 
 } // namespace pulp::vellum_audio

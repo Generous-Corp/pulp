@@ -203,12 +203,38 @@ if(TARGET pulp-vellum)
     list(APPEND PULP_SDK_TARGETS pulp-vellum)
     set(PULP_SDK_HAS_VELLUM_BRIDGE ON)
 endif()
+# The Vellum version the bridge was compiled against. PulpConfig requires it
+# exactly, so a consumer never pairs these archives with another Vellum ABI.
+get_property(PULP_SDK_VELLUM_VERSION GLOBAL PROPERTY PULP_VELLUM_SDK_VERSION)
+# Whether the installed Pulp::view, Pulp::canvas, Pulp::render,
+# Pulp::view-native and Pulp::design-import come from Vellum
+# (PulpVellumUiCompat.cmake). Off while Pulp builds its own UI libraries; the
+# change that removes them turns it on. It needs the bridge and must not
+# coexist with Pulp's own view core.
+set(PULP_SDK_UI_FROM_VELLUM OFF)
+if(PULP_SDK_UI_FROM_VELLUM AND (NOT TARGET pulp-vellum OR TARGET pulp-view-core))
+    message(FATAL_ERROR
+        "PULP_SDK_UI_FROM_VELLUM needs the Vellum bridge (pulp-vellum) and no "
+        "Pulp view core (pulp-view-core) in the same SDK")
+endif()
+if(TARGET pulp-vellum-scripted)
+    list(APPEND PULP_SDK_TARGETS pulp-vellum-scripted)
+endif()
 # The optional Vellum audio meters/scopes package links Vellum::Value and
 # Vellum::MirrorView_core PUBLIC, so PulpConfig must re-find Vellum for it too.
 if(TARGET pulp-vellum-audio)
     list(APPEND PULP_SDK_TARGETS pulp-vellum-audio)
     set(PULP_SDK_HAS_VELLUM_BRIDGE ON)
     install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/integrations/pulp-vellum-audio/include/pulp/"
+        DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/pulp"
+        FILES_MATCHING PATTERN "*.hpp" PATTERN "*.h")
+endif()
+# The optional retained view components link Vellum::MirrorView_core PUBLIC for
+# the same reason.
+if(TARGET pulp-vellum-components)
+    list(APPEND PULP_SDK_TARGETS pulp-vellum-components)
+    set(PULP_SDK_HAS_VELLUM_BRIDGE ON)
+    install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/integrations/pulp-vellum-components/include/pulp/"
         DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/pulp"
         FILES_MATCHING PATTERN "*.hpp" PATTERN "*.h")
 endif()
@@ -794,9 +820,8 @@ file(WRITE "${CMAKE_BINARY_DIR}/sdk_build_type.txt"
      "${CMAKE_BUILD_TYPE}\n")
 install(FILES "${CMAKE_BINARY_DIR}/sdk_build_type.txt" DESTINATION ".")
 
-# Preserve the exact source identity in ordinary cmake --install prefixes.
-# This is local provenance only; release eligibility still requires the
-# separately verified release marker.
+# Capture fallback provenance for installs where Git is unavailable.
+# The generated install script refreshes it from the checkout when Git is present.
 find_package(Git REQUIRED)
 execute_process(COMMAND "${GIT_EXECUTABLE}" -C "${PULP_ROOT_DIR}" rev-parse HEAD
     OUTPUT_VARIABLE PULP_SOURCE_INSTALL_SHA OUTPUT_STRIP_TRAILING_WHITESPACE
@@ -1005,6 +1030,8 @@ install(FILES
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpVerifyRuntimeStaging.cmake"
     # Included by PulpConfig.cmake to find the gpu-runtime package beside the SDK.
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpGpuRuntimeRecord.cmake"
+    # Included by PulpConfig.cmake for the Vellum-backed UI target names.
+    "${CMAKE_CURRENT_SOURCE_DIR}/integrations/pulp-vellum/cmake/PulpVellumUiCompat.cmake"
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/FindSkia.cmake"
     # Included by FindSkia.cmake relative to its own directory.
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpSkiaDawnProvider.cmake"

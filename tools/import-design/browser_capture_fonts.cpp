@@ -1,5 +1,6 @@
 #include "browser_capture_fonts.hpp"
 
+#include <pulp/view/font_container.hpp>
 #include <pulp/runtime/base64.hpp>
 #include <pulp/runtime/crypto.hpp>
 
@@ -84,15 +85,10 @@ const char* font_extension(const std::string& mime) {
     return ".ttf";
 }
 
-// The containers native text can register: TrueType (0x00010000 or 'true'),
-// OpenType CFF ('OTTO') and WOFF2 ('wOF2'). Anything else would reach the
+// The containers native text can register; anything else would reach the
 // platform font manager unsanitized.
 bool is_native_font(const std::vector<uint8_t>& data) {
-    if (data.size() < 4)
-        return false;
-    const std::string_view tag(reinterpret_cast<const char*>(data.data()), 4);
-    return tag == std::string_view("\0\1\0\0", 4) || tag == "true" || tag == "OTTO" ||
-           tag == "wOF2";
+    return pulp::view::has_font_container_signature(data.data(), data.size());
 }
 
 // One captured @font-face rule and the bytes it names.

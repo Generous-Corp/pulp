@@ -50,6 +50,23 @@ def test_visual_dependency_pins_match_manifest() -> None:
         assert determinism["release_assets"][platform]["sha256"] == expected_sha
 
 
+def test_renderer_archive_selection_for_vellum_0_2_0(monkeypatch) -> None:
+    from tools.scripts.fetch_skia_for_release import manifest_asset
+
+    monkeypatch.chdir(REPO_ROOT)
+    skia = _manifest_entry("Skia")
+    mirror = skia["vellum_mirror_renderer"]
+    assert mirror["url"].endswith(
+        "/chrome/m158-attested.1/skia-build-mac-universal-gpu-release.zip"
+    )
+    assert mirror["sha256"] == "1779c7d1ba5c73a0d6a1f33b77fbf30774bbd9f7542c1c42cc5129f57e99fbd4"
+    assert mirror["libdawn_combined_sha256"] == "337d3beff192f51c0905ac0cc25fc268f9be94cfce58f868a2ede0ad4683c168"
+    for platform in ("darwin-arm64", "darwin-x64", "darwin-universal"):
+        _, asset = manifest_asset(platform)
+        assert asset["sha256"] == "dca73c0eee5b0f6d129fe357d0754f7165c6b436051e0de947aeedd3e1bde250"
+        assert asset["url"].endswith("/chrome/m158/skia-build-mac-universal-gpu-release.zip")
+
+
 def test_bundled_font_hashes_are_stable() -> None:
     for relpath, expected_sha in pins.FONT_SHA256.items():
         assert _sha256(REPO_ROOT / relpath) == expected_sha

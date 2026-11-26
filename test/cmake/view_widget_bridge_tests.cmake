@@ -13,6 +13,13 @@ if(TARGET pulp-render)
 endif()
 pulp_add_test_group(pulp-test-group-view-widgets LIBRARIES ${_pulp_view_group_libs})
 
+# The WidgetBridge cases that recurse until QuickJS's own stack limit trips need
+# more native stack than MSVC's 1 MB default, or the process overflows first.
+# The web-compat executables get the same headroom on Apple and Linux.
+if(MSVC)
+    target_link_options(pulp-test-group-view-widgets PRIVATE /STACK:16777216)
+endif()
+
 # Platform maturity tests (cursor, focus, IME, context menu, accessibility)
 pulp_add_test_suite(pulp-test-platform-maturity GROUP pulp-test-group-view-widgets
     LIBRARIES pulp::view)
@@ -882,6 +889,8 @@ endif()
 pulp_add_test_suite(pulp-test-widget-bridge-capabilities GROUP pulp-test-group-view-widgets
     LIBRARIES ${_pulp_widget_bridge_test_libs}
     COMPILE_DEFINITIONS PULP_BRIDGE_EXEC_ENABLED=${_pulp_bridge_exec_enabled})
+pulp_test_data(pulp-test-widget-bridge-capabilities
+    PATHS external/fonts/Jost-Regular.ttf packages/pulp-web-player/src/theme/inter.woff2)
 
 # Ship-safety for the shell exec bridge. The registrar body lives in
 # platform_services_api.cpp beside always-present registrars, so gating only the

@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "event_id": "20261121-pulp-12676",
+  "kind": "exported-path-change",
+  "created_at": "2026-11-21T08:58:27Z",
+  "receipt_export_id": "20261107-f0ac0a4ff392",
+  "paths": [
+    "core/state/src/store.cpp"
+  ],
+  "vellum_inherits": false,
+  "rationale": "Capture silent trigger reset values for Pulp's CLAP and VST3 automation output. This extends the Pulp format behavior and uses the existing Pulp-only disposition for host automation echo suppression."
+}

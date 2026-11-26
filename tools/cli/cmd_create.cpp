@@ -14,6 +14,7 @@
 #include <algorithm>
 #include <array>
 #include <cctype>
+#include <cstdlib>
 #include <fstream>
 #include <iomanip>
 #include <iostream>
@@ -71,6 +72,102 @@ static std::string make_mfr_code(const std::string& mfr) {
     for (char c : mfr) if (std::isalpha(c)) clean += c;
     if (clean.size() >= 4) return clean.substr(0, 4);
     return (clean + "xxxx").substr(0, 4);
+}
+
+static std::string create_flag_hint(const std::string& flag) {
+    if (flag.find('=') != std::string::npos)
+        return "did you mean `--flag <value>`?";
+    return "did you mean `--type`, `--template`, or `--manufacturer`?";
+}
+
+// True when `text` has an `add_library(Pulp::vellum ...)` declaration (not
+// `Pulp::vellum-audio`, and not a mention in a string, comment or
+// `if(TARGET ...)`).
+static bool text_declares_pulp_vellum_target(const std::string& text) {
+    static const std::string call = "add_library(";
+    static const std::string target = "Pulp::vellum";
+    std::size_t pos = 0;
+    while ((pos = text.find(call, pos)) != std::string::npos) {
+        const auto line_start = text.rfind('\n', pos);
+        const auto first =
+            text.find_first_not_of(" \t", line_start == std::string::npos ? 0 : line_start + 1);
+        const bool commented = first != std::string::npos && text[first] == '#';
+        const bool at_command_start = first == pos;
+        pos += call.size();
+        if (commented || !at_command_start)
+            continue;
+        auto name = text.find_first_not_of(" \t", pos);
+        if (name == std::string::npos || text.compare(name, target.size(), target) != 0)
+            continue;
+        const auto after = name + target.size();
+        if (after >= text.size() || std::isspace(static_cast<unsigned char>(text[after])))
+            return true;
+    }
+    return false;
+}
+
+static bool installed_pulp_package_has_vellum(const fs::path& prefix) {
+    const auto targets = prefix / "lib" / "cmake" / "Pulp" / "PulpTargets.cmake";
+    return fs::exists(targets) && text_declares_pulp_vellum_target(read_file_contents(targets));
+}
+
+static bool installed_pulp_package_exists(const fs::path& prefix) {
+    const auto cmake_dir = prefix / "lib" / "cmake" / "Pulp";
+    return fs::exists(cmake_dir / "PulpTargets.cmake") ||
+           fs::exists(cmake_dir / "PulpConfig.cmake");
+}
+
+static bool reject_missing_installed_vellum(const std::string& ui, const fs::path& sdk_dir) {
+    if (ui != "vellum")
+        return false;
+    std::vector<fs::path> prefixes;
+    if (!sdk_dir.empty())
+        prefixes.push_back(sdk_dir);
+    if (const char* env = std::getenv("CMAKE_PREFIX_PATH"); env && *env) {
+#ifdef _WIN32
+        const char separator = ';';
+#else
+        const char separator = ':';
+#endif
+        std::string value = env;
+        std::size_t start = 0;
+        while (start <= value.size()) {
+            const auto end = value.find(separator, start);
+            const auto item = value.substr(start, end == std::string::npos ? end : end - start);
+            if (!item.empty())
+                prefixes.emplace_back(item);
+            if (end == std::string::npos)
+                break;
+            start = end + 1;
+        }
+    }
+    // CMake resolves find_package(Pulp) from the first prefix that has the
+    // package, so only that prefix decides.
+    for (const auto& prefix : prefixes) {
+        if (!installed_pulp_package_exists(prefix))
+            continue;
+        if (installed_pulp_package_has_vellum(prefix))
+            return false;
+        std::cerr
+            << "Error: --ui vellum needs the Pulp SDK's optional pulp-vellum integration; "
+               "the installed SDK has no Pulp::vellum target. Install a Vellum-enabled SDK.\n";
+        return true;
+    }
+    return false;
+}
+
+// The release SDK stages the Vellum package at
+// <prefix>/share/pulp/vellum-sdk/<version>/sdk, and `pulp create` passes only
+// the Pulp prefix, so the generated find hints every CMAKE_PREFIX_PATH entry
+// itself (it may run before or after find_package(Pulp)).
+static std::string vellum_find_lines() {
+    return "set(_pulp_vellum_hints \"\")\n"
+           "foreach(_pulp_prefix IN LISTS CMAKE_PREFIX_PATH)\n"
+           "    file(GLOB _pulp_prefix_hints LIST_DIRECTORIES true\n"
+           "        \"${_pulp_prefix}/share/pulp/vellum-sdk/*/sdk\")\n"
+           "    list(APPEND _pulp_vellum_hints ${_pulp_prefix_hints})\n"
+           "endforeach()\n"
+           "find_package(Vellum CONFIG REQUIRED PATHS ${_pulp_vellum_hints})";
 }
 
 static std::string make_vst3_uid() {
@@ -289,7 +386,8 @@ int cmd_create(const std::vector<std::string>& args) {
     }
 
     // Parse args
-    std::string name, type = "effect", manufacturer = "Pulp", output_path, tmpl, targets_arg, ui;
+    std::string name, type = "effect", output_path, tmpl, targets_arg, ui;
+    std::optional<std::string> manufacturer;
     bool no_build = false;
     bool ci_mode = false;
     bool in_tree_mode = false;
@@ -316,7 +414,11 @@ int cmd_create(const std::vector<std::string>& args) {
         if (args[i] == "--type") { if (!take_value(type, "--type")) return 2; continue; }
         if (args[i] == "--mpe") { mpe_mode = true; continue; }
         if (args[i] == "--template") { if (!take_value(tmpl, "--template")) return 2; continue; }
-        if (args[i] == "--manufacturer") { if (!take_value(manufacturer, "--manufacturer")) return 2; continue; }
+        if (args[i] == "--manufacturer") {
+            if (!take_value(manufacturer.emplace(), "--manufacturer"))
+                return 2;
+            continue;
+        }
         if (args[i] == "--output") { if (!take_value(output_path, "--output")) return 2; continue; }
         if (args[i] == "--ui") {
             if (!take_value(ui, "--ui"))
@@ -340,7 +442,8 @@ int cmd_create(const std::vector<std::string>& args) {
             std::cout << "  --mpe                                Opt into MPE (per-note expression) — only with --type instrument\n";
             std::cout << "  --template <name-or-kit-dir>         Use named template (e.g. gain, "
                          "agent-toolkit) or local template kit\n";
-            std::cout << "  --manufacturer <name>                Manufacturer (default: Pulp)\n";
+            std::cout << "  --manufacturer <name>                Manufacturer (default: CHANGE-ME; "
+                         "replace before shipping)\n";
             std::cout << "  --output <dir>                       Override output directory\n";
             std::cout << "  --ui <vellum|rmlui|none>              Select UI stack; none is "
                          "audio-only (default: template behavior)\n";
@@ -361,7 +464,8 @@ int cmd_create(const std::vector<std::string>& args) {
             return 0;
         }
         if (!args[i].empty() && args[i][0] == '-') {
-            std::cerr << "pulp create: unknown flag: " << args[i] << "\n";
+            std::cerr << "pulp create: unknown flag: " << args[i] << " ("
+                      << create_flag_hint(args[i]) << ")\n";
             std::cerr << "Usage: pulp create <name> [--type effect|instrument|app|bare] [options]\n";
             return 2;
         }
@@ -443,8 +547,9 @@ int cmd_create(const std::vector<std::string>& args) {
     std::string factory = ns;
     std::string plugin_code = make_plugin_code(class_name);
     std::string aax_product_code = make_aax_product_code(class_name);
-    std::string mfr_code = make_mfr_code(manufacturer);
-    std::string bundle_id = "com." + to_namespace_name(manufacturer) + "." + ns;
+    std::string mfr_code = make_mfr_code(manufacturer ? *manufacturer : class_name);
+    const std::string vendor = manufacturer ? to_namespace_name(*manufacturer) : "example";
+    std::string bundle_id = "com." + vendor + "." + ns;
     std::string header_name = replace_all_str(lower_name, "-", "_") + ".hpp";
     std::string source_name = replace_all_str(lower_name, "-", "_") + ".cpp";
 
@@ -568,6 +673,7 @@ int cmd_create(const std::vector<std::string>& args) {
     }
 
     std::string lower_name_underscored = replace_all_str(lower_name, "-", "_");
+    std::string test_name = "test_" + lower_name_underscored + ".cpp";
 
     // Template variables
     std::vector<std::pair<std::string, std::string>> vars = {
@@ -580,13 +686,13 @@ int cmd_create(const std::vector<std::string>& args) {
         {"HEADER_NAME", header_name},
         {"SOURCE_NAME", source_name},
         {"TARGET_NAME", class_name},
-        {"MANUFACTURER", manufacturer},
+        {"MANUFACTURER", manufacturer.value_or("CHANGE-ME")},
         {"MANUFACTURER_CODE", mfr_code},
         {"BUNDLE_ID", bundle_id},
         {"VERSION", "1.0.0"},
         {"PLUGIN_CODE", plugin_code},
-        {"AAX_PRODUCT_CODE", aax_product_code},
-        {"AAX_NATIVE_CODE", plugin_code},
+        {"AAX_PRODUCT_CODE", formats.find("AAX") != std::string::npos ? aax_product_code : ""},
+        {"AAX_NATIVE_CODE", formats.find("AAX") != std::string::npos ? plugin_code : ""},
         {"FORMATS", formats},
         {"DESCRIPTION", type == "app"    ? "A standalone Pulp audio application"
                         : type == "bare" ? "A minimal Pulp project"
@@ -596,22 +702,7 @@ int cmd_create(const std::vector<std::string>& args) {
         {"UI_MODE_LINE", ui == "none" ? "NO_EDITOR" : ""},
         {"VIEW_HEADER", lower_name_underscored + "_view.hpp"},
         {"VIEW_TYPE", ns + "::" + class_name + "View"},
-        {"VELLUM_EDITOR_LINE", ui == "vellum"
-                                   ? "pulp_add_vellum_editor_package(" + class_name +
-                                         "_VellumEditor\n"
-                                         "    VIEW_HEADER \"" +
-                                         lower_name_underscored +
-                                         "_view.hpp\"\n"
-                                         "    VIEW_TYPE " +
-                                         ns + "::" + class_name +
-                                         "View\n"
-                                         "    VIEW_INCLUDE_DIRS \"${CMAKE_CURRENT_SOURCE_DIR}\"\n"
-                                         "    SOURCES \"" +
-                                         lower_name_underscored +
-                                         "_view.cpp\"\n"
-                                         ")"
-                                   : ""},
-        {"VELLUM_FIND_LINE", ui == "vellum" ? "find_package(Vellum CONFIG REQUIRED)" : ""},
+        {"VELLUM_FIND_LINE", ui == "vellum" ? vellum_find_lines() : std::string()},
         {"VELLUM_HELPER_LINE",
          ui == "vellum"
              ? "if(DEFINED PULP_ROOT_DIR)\n"
@@ -693,18 +784,39 @@ int cmd_create(const std::vector<std::string>& args) {
         }
     }
 
+    const auto cmake_template = cmake_template_dir / "CMakeLists.txt.template";
+    const auto cmake_content = read_file_contents(cmake_template);
+    const bool organized_layout =
+        !template_kit && cmake_content.find("tests/test_{{LOWER_NAME}}.cpp") != std::string::npos;
+    const std::string source_prefix = organized_layout ? "src/" : "";
+    const std::string entry_prefix = organized_layout ? "src/entry/" : "";
+    const std::string test_prefix = organized_layout ? "tests/" : "";
+
     if (ui == "vellum") {
-        const auto cmake_template = cmake_template_dir / "CMakeLists.txt.template";
         const bool has_view_templates = fs::exists(source_template_dir / "view.hpp.template") &&
                                         fs::exists(source_template_dir / "view.cpp.template");
-        if (!fs::exists(cmake_template) ||
-            read_file_contents(cmake_template).find("{{UI_LINE}}") == std::string::npos ||
+        if (!fs::exists(cmake_template) || cmake_content.find("{{UI_LINE}}") == std::string::npos ||
             !has_view_templates) {
             std::cerr << "Error: --ui vellum is not available for the " << template_key
                       << " template yet; it uses a script UI\n";
             return 1;
         }
     }
+    if (standalone_mode && reject_missing_installed_vellum(ui, sdk_dir))
+        return 1;
+
+    std::string vellum_editor;
+    if (ui == "vellum") {
+        const auto view_include =
+            organized_layout ? "${CMAKE_CURRENT_SOURCE_DIR}/src" : "${CMAKE_CURRENT_SOURCE_DIR}";
+        vellum_editor = "pulp_add_vellum_editor_package(" + class_name + "_VellumEditor\n";
+        vellum_editor += "    VIEW_HEADER \"" + lower_name_underscored + "_view.hpp\"\n";
+        vellum_editor += "    VIEW_TYPE " + ns + "::" + class_name + "View\n";
+        vellum_editor += std::string("    VIEW_INCLUDE_DIRS \"") + view_include + "\"\n";
+        vellum_editor +=
+            "    SOURCES \"" + source_prefix + lower_name_underscored + "_view.cpp\"\n)";
+    }
+    vars.emplace_back("VELLUM_EDITOR_LINE", vellum_editor);
 
     fs::create_directories(out_dir);
     if (standalone_mode) {
@@ -723,20 +835,19 @@ int cmd_create(const std::vector<std::string>& args) {
     log("Creating " + name + " (" + type + ") at " + out_dir.string() + "\n\n");
 
     struct FileMapping { std::string tmpl; std::string output; };
-    std::string test_name = "test_" + replace_all_str(lower_name, "-", "_") + ".cpp";
     std::vector<FileMapping> file_map = {
-        {"processor.hpp.template", header_name},
-        {"processor.cpp.template", source_name},
-        {"view.hpp.template", lower_name_underscored + "_view.hpp"},
-        {"view.cpp.template", lower_name_underscored + "_view.cpp"},
-        {"agent_operations.cpp.template", "agent_operations.cpp"},
+        {"processor.hpp.template", source_prefix + header_name},
+        {"processor.cpp.template", source_prefix + source_name},
+        {"view.hpp.template", source_prefix + lower_name_underscored + "_view.hpp"},
+        {"view.cpp.template", source_prefix + lower_name_underscored + "_view.cpp"},
+        {"agent_operations.cpp.template", source_prefix + "agent_operations.cpp"},
         {"CMakeLists.txt.template", "CMakeLists.txt"},
-        {"clap_entry.cpp.template", "clap_entry.cpp"},
-        {"vst3_entry.cpp.template", "vst3_entry.cpp"},
-        {"lv2_entry.cpp.template", "lv2_entry.cpp"},
-        {"au_v2_entry.cpp.template", "au_v2_entry.cpp"},
-        {"aax_entry.cpp.template", "aax_entry.cpp"},
-        {"test.cpp.template", test_name},
+        {"clap_entry.cpp.template", entry_prefix + "clap_entry.cpp"},
+        {"vst3_entry.cpp.template", entry_prefix + "vst3_entry.cpp"},
+        {"lv2_entry.cpp.template", entry_prefix + "lv2_entry.cpp"},
+        {"au_v2_entry.cpp.template", entry_prefix + "au_v2_entry.cpp"},
+        {"aax_entry.cpp.template", entry_prefix + "aax_entry.cpp"},
+        {"test.cpp.template", test_prefix + test_name},
     };
 
     if (mpe_mode && type != "instrument") {
@@ -775,14 +886,18 @@ int cmd_create(const std::vector<std::string>& args) {
                     "\n#include <pulp/midi/mpe_buffer.hpp>");
             }
         }
+        fs::create_directories((out_dir / outfile).parent_path());
         std::ofstream f(out_dir / outfile);
         f << expanded;
-        log("  Created " + outfile + (mpe_mode && outfile == header_name ? " (MPE)" : "") + "\n");
+        log("  Created " + outfile +
+            (mpe_mode && tmpl_file == "processor.hpp.template" ? " (MPE)" : "") + "\n");
     }
 
     // Standalone main.cpp
     if (formats.find("Standalone") != std::string::npos) {
-        std::ofstream f(out_dir / "main.cpp");
+        const auto main_path = out_dir / (source_prefix + "main.cpp");
+        fs::create_directories(main_path.parent_path());
+        std::ofstream f(main_path);
         f << "#include \"" << header_name << "\"\n";
         f << "#include <pulp/format/standalone.hpp>\n\n";
         f << "int main() {\n";
@@ -797,7 +912,7 @@ int cmd_create(const std::vector<std::string>& args) {
         f << "    app.set_config(config);\n";
         f << "    return app.run_with_editor(false) ? 0 : 1;\n";
         f << "}\n";
-        log("  Created main.cpp\n");
+        log("  Created " + source_prefix + "main.cpp\n");
     }
 
     // Copy UI script directory if template includes one
@@ -835,14 +950,37 @@ int cmd_create(const std::vector<std::string>& args) {
         } else {
             f << "sdk_version = \"latest\"\n";
         }
-        if (!root.empty()) {
-            auto local_sdk_dir = local_sdk_cache_path(sdk_version);
-            f << "sdk_path = \"" << local_sdk_dir.generic_string() << "\"\n";
-            f << "sdk_checkout = \"" << root.generic_string() << "\"\n";
-        }
+        const char* sha = std::getenv("PULP_BUILD_INFO_GIT_SHA");
+        f << "generated_by = \"pulp " << PULP_SDK_VERSION << " (" << (sha && *sha ? sha : "unknown")
+          << ")\"\n";
         log("  Created pulp.toml\n");
         if (!pin_at_create) {
             log("  SDK mode: floating (tracks latest installed) — pin with `pulp project pin <version>`\n");
+        }
+    }
+
+    if (standalone_mode && organized_layout) {
+        const auto common = templates_base / "standalone" / "common";
+        for (const auto& [input, output] : std::array<FileMapping, 4>{{
+                 {"README.md.template", "README.md"},
+                 {"ci.yml.template", ".github/workflows/ci.yml"},
+                 {"gitignore.template", ".gitignore"},
+                 {"Testing.cmake.template", "cmake/Testing.cmake"},
+             }}) {
+            const auto source = common / input;
+            const auto destination = out_dir / output;
+            if (!fs::is_regular_file(source)) {
+                std::cerr << "Error: missing template " << source.string() << "\n";
+                return 1;
+            }
+            fs::create_directories(destination.parent_path());
+            std::ofstream file(destination);
+            file << expand_template_str(read_file_contents(source), vars);
+            if (!file) {
+                std::cerr << "Error: could not write " << destination.string() << "\n";
+                return 1;
+            }
+            log("  Created " + output + "\n");
         }
     }
 
@@ -928,6 +1066,9 @@ int cmd_create(const std::vector<std::string>& args) {
     }
 
     log("\n");
+
+    if (!manufacturer)
+        std::cout << "Note: Set --manufacturer before shipping.\n";
 
     if (no_build) {
         log("Scaffolding complete. Run `pulp build` to build.\n");

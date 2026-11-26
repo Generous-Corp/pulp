@@ -1495,6 +1495,33 @@ public:
         return skew_ == 1.0f ? p : std::pow(p, 1.0f / skew_);
     }
 
+    static float thumb_axis_position(float box_length, float leading_border, float trailing_border,
+                                     float thumb_extent, float normalized_position) {
+        const float content = std::max(0.0f, box_length - leading_border - trailing_border);
+        const float usable = std::max(0.0f, content - std::max(0.0f, thumb_extent));
+        return leading_border + std::max(0.0f, thumb_extent) * 0.5f +
+               std::clamp(normalized_position, 0.0f, 1.0f) * usable;
+    }
+
+    /// Distance from the widget's edge to its content box on one side: the
+    /// border plus the padding, the box a browser range thumb travels inside.
+    float effective_axis_border(bool vertical, bool leading) const {
+        const auto& f = flex();
+        auto side_padding = [&](float side) { return side >= 0.0f ? side : f.padding; };
+        float border;
+        float padding;
+        if (vertical) {
+            border = leading ? (has_border_top_set() ? border_top_width() : border_width())
+                             : (has_border_bottom_set() ? border_bottom_width() : border_width());
+            padding = side_padding(leading ? f.padding_top : f.padding_bottom);
+        } else {
+            border = leading ? (has_border_left_set() ? border_left_width() : border_width())
+                             : (has_border_right_set() ? border_right_width() : border_width());
+            padding = side_padding(leading ? f.padding_left : f.padding_right);
+        }
+        return border + std::max(0.0f, padding);
+    }
+
     // Custom body shader comes from CustomShaderHost.
     void set_widget_schema(std::string json) { widget_schema_ = std::move(json); }
     const std::string& widget_schema() const { return widget_schema_; }

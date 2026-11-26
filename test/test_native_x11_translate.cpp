@@ -6,6 +6,9 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
+#include <vector>
+
 using namespace pulp::native;
 
 TEST_CASE("X11 keysyms map to physical keys", "[native][input][x11]") {
@@ -96,4 +99,20 @@ TEST_CASE("the display scale comes from Xft.dpi over 96 text", "[native][surface
     REQUIRE(scale_from_xft_dpi("Xft.dpi:\tabc\n") == 0.0);
     REQUIRE(scale_from_xft_dpi("Xft.dpi:\t-96\n") == 0.0);
     REQUIRE(scale_from_xft_dpi("Other.Xft.dpi:\t192\n") == 0.0);
+}
+
+TEST_CASE("every cursor maps to an X cursor-font shape", "[native][input][x11]") {
+    REQUIRE(x11_cursor_shape(Cursor::arrow) == 68);         // XC_left_ptr
+    REQUIRE(x11_cursor_shape(Cursor::pointing_hand) == 60); // XC_hand2
+    REQUIRE(x11_cursor_shape(Cursor::ibeam) == 152);        // XC_xterm
+    REQUIRE(x11_cursor_shape(Cursor::busy) == 150);         // XC_watch
+    // The named cursors are all distinct shapes.
+    std::vector<unsigned> shapes;
+    for (auto c : {Cursor::arrow, Cursor::pointing_hand, Cursor::open_hand, Cursor::closed_hand,
+                   Cursor::ibeam, Cursor::crosshair, Cursor::busy, Cursor::resize_horizontal,
+                   Cursor::resize_vertical, Cursor::resize_diagonal_nesw,
+                   Cursor::resize_diagonal_nwse, Cursor::not_allowed})
+        shapes.push_back(x11_cursor_shape(c));
+    std::sort(shapes.begin(), shapes.end());
+    REQUIRE(std::adjacent_find(shapes.begin(), shapes.end()) == shapes.end());
 }

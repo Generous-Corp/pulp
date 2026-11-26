@@ -118,23 +118,26 @@ struct PulpPluginEditorFactoryRegistrar {
 } // namespace
 " @ONLY)
 
-    # An AUv3 extension loads its editor from a framework inside a container
-    # app, and nothing stages UI package libraries there yet. Refuse instead
-    # of shipping an extension whose editor cannot load.
+    # iOS AUv3 is a flat extension bundle and needs its own runtime staging.
+    # macOS AUv3 stages package libraries beside its framework binary.
     get_target_property(_runtime_libraries "${ui}" PULP_EDITOR_RUNTIME_LIBRARIES)
-    if(_runtime_libraries AND (TARGET "${target}_AUv3" OR TARGET "${target}_AUv3Framework"))
+    if(_runtime_libraries AND PULP_IOS AND TARGET "${target}_AUv3")
         message(FATAL_ERROR
             "pulp_add_plugin(${target}): UI package '${ui}' needs runtime libraries "
-            "(${_runtime_libraries}), which the AUv3 format cannot carry yet; drop AUv3 "
+            "(${_runtime_libraries}), which iOS AUv3 cannot carry yet; drop AUv3 "
             "from FORMATS for this plug-in")
     endif()
 
+    get_property(_vellum_scripted TARGET "${ui}" PROPERTY PULP_VELLUM_SCRIPTED_EDITOR)
     foreach(_suffix IN LISTS _PULP_UI_PACKAGE_TARGET_SUFFIXES)
         set(_format_target "${target}_${_suffix}")
         if(TARGET "${_format_target}")
             target_sources("${_format_target}" PRIVATE "${_source}")
             target_link_libraries("${_format_target}" PRIVATE "${ui}")
             set_property(TARGET "${_format_target}" PROPERTY PULP_UI_PACKAGE "${ui}")
+            if(_vellum_scripted)
+                set_property(TARGET "${_format_target}" PROPERTY PULP_VELLUM_SCRIPTED_EDITOR TRUE)
+            endif()
         endif()
     endforeach()
     _pulp_warn_ui_package_formats("${target}" "${ui}")

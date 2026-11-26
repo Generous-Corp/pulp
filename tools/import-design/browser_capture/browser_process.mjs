@@ -755,11 +755,19 @@ export async function createEmptyProfile(profileArg) {
   return profileDir;
 }
 
+// chrome-headless-shell is headless by construction; only the full browser
+// needs the headless-mode flag.
+export function headlessModeArguments(browserPath) {
+  const name = path.basename(String(browserPath ?? ""));
+  return name === "chrome-headless-shell" || name === "chrome-headless-shell.exe"
+    ? [] : ["--headless=new"];
+}
+
 export async function launchBrowser(
   browserPath, profileDir, timeoutMs, onSpawn = () => {},
   extraArgs = []) {
   const args = [
-    "--headless=new",
+    ...headlessModeArguments(browserPath),
     "--remote-debugging-pipe",
     `--user-data-dir=${profileDir}`,
     "--disable-background-networking",

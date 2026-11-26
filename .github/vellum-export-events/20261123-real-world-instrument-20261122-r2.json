@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "event_id": "20261123-real-world-instrument-20261122-r2",
+  "kind": "exported-path-change",
+  "created_at": "2026-11-23T04:22:20Z",
+  "receipt_export_id": "20261107-f0ac0a4ff392",
+  "paths": [
+    "core/runtime/CMakeLists.txt"
+  ],
+  "vellum_inherits": false,
+  "rationale": "Adds a provider-neutral Pulp runtime interaction event batch for real-world input. Vellum does not inherit this runtime-only API change."
+}

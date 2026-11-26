@@ -64,6 +64,34 @@ NO_OP_MARKERS = (
     "stub",
 )
 
+_JS = "core/view/js/"
+
+# Scripts whose union backs the Element prototype evidence.
+ELEMENT_SCRIPT_PATHS = tuple(
+    _JS + name
+    for name in (
+        "web-compat-element.js",
+        "web-compat-element-events.js",
+        "web-compat-dom-ops.js",
+        "web-compat-animation.js",
+        "web-compat.js",
+        "web-compat-selector.js",
+        "web-compat-runtime-apis.js",
+    )
+)
+
+# Scripts whose union backs the `document.<member>` evidence.
+DOCUMENT_SCRIPT_PATHS = (
+    _JS + "web-compat-document.js",
+    _JS + "web-compat.js",
+)
+
+DOM_OPS_SCRIPT_PATH = _JS + "web-compat-dom-ops.js"
+
+HTML_SCRIPT_PATHS = tuple(
+    dict.fromkeys(ELEMENT_SCRIPT_PATHS + DOCUMENT_SCRIPT_PATHS + (DOM_OPS_SCRIPT_PATH,))
+)
+
 
 @register_adapter("html")
 class HtmlAdapter(AdapterBase):
@@ -90,30 +118,14 @@ class HtmlAdapter(AdapterBase):
         # shims moved to web-compat-runtime-apis.js. Both siblings join the
         # union so the prototype/selector evidence regexes still see the full
         # surface after the split.
-        self._element_js = "\n".join(
-            self._read(p)
-            for p in (
-                "core/view/js/web-compat-element.js",
-                "core/view/js/web-compat-element-events.js",
-                "core/view/js/web-compat-dom-ops.js",
-                "core/view/js/web-compat-animation.js",
-                "core/view/js/web-compat.js",
-                "core/view/js/web-compat-selector.js",
-                "core/view/js/web-compat-runtime-apis.js",
-            )
-        )
+        scripts = {path: self._read(path) for path in HTML_SCRIPT_PATHS}
+        self._element_js = "\n".join(scripts[p] for p in ELEMENT_SCRIPT_PATHS)
         # `document.<member>` is defined either inside the
         # `var document = { ... }` literal in web-compat-document.js OR as a
         # post-init `document.<X> = ...` patch in web-compat.js. Concatenate
         # for the same reason.
-        self._document_js = "\n".join(
-            self._read(p)
-            for p in (
-                "core/view/js/web-compat-document.js",
-                "core/view/js/web-compat.js",
-            )
-        )
-        self._dom_ops_js = self._read("core/view/js/web-compat-dom-ops.js")
+        self._document_js = "\n".join(scripts[p] for p in DOCUMENT_SCRIPT_PATHS)
+        self._dom_ops_js = scripts[DOM_OPS_SCRIPT_PATH]
         self._bridge_cpp = self._read_bridge_sources()
 
     # ── Oracle + source loading ──────────────────────────────────────
@@ -132,9 +144,12 @@ class HtmlAdapter(AdapterBase):
 
     def _read(self, rel: str) -> str:
         p = self.repo_root / rel
-        if not p.exists():
-            return ""
-        return p.read_text(encoding="utf-8", errors="replace")
+        if not p.is_file():
+            raise ValueError(f"HTML harness script is missing: {rel}")
+        text = p.read_text(encoding="utf-8", errors="replace")
+        if not text.strip():
+            raise ValueError(f"HTML harness script is empty: {rel}")
+        return text
 
     def _read_bridge_sources(self) -> str:
         sources: list[Path] = []

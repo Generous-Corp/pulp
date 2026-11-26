@@ -2558,7 +2558,7 @@ https://www.apache.org/licenses/LICENSE-2.0
 
 gpu-runtime, the GPU device layer Pulp's macOS device targets forward to: a
 self-contained subproject of the Vellum repository (`gpu-runtime/`), pinned to
-commit `d361ea5b855707391798b7315183d99b6cbe69b6`. It adds no third-party code to a Pulp build; its Dawn is
+commit `2191e8a3ee823ba1946b83e466c2fd20c3494e4d`. It adds no third-party code to a Pulp build; its Dawn is
 the Skia toolchain's, covered under Dawn and Skia above.
 
 MIT License
@@ -2584,6 +2584,16 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 ---
+
+## vellum-sdk
+
+The lock-pinned Vellum SDK release (`pulp.lock` `vellum.sdk_url`, tag and
+SHA-256 digest verified by the darwin-arm64 release leg), staged whole under the
+Pulp SDK's `share/pulp/vellum-sdk/<version>/sdk` and used to build the optional
+pulp-vellum bridge. It redistributes a Node.js runtime, TypeScript, esbuild,
+RmlUi, three.js and fonts under their own licenses, whose notices the bundler
+merges into the SDK's NOTICE.md. Vellum itself is MIT licensed, as for
+vellum-gpu-runtime above.
 
 ## VST3 SDK
 

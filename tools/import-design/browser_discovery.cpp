@@ -143,9 +143,19 @@ bool path_is_within(const fs::path& child, const fs::path& root) {
     return true;
 }
 
-std::optional<fs::path> managed_current_browser(const fs::path& root) {
+struct ManagedRecord {
+    std::string version;
+    std::string platform;
+    fs::path executable;
+};
+
+// Reads one managed install record (`current.json` or `headless-shell.json`)
+// and resolves its executable, which must sit under <version>/<directory>/
+// inside `root`, where `directory` is the record's platform plus `suffix`.
+std::optional<ManagedRecord> managed_record(const fs::path& root, const char* name,
+                                            std::string_view suffix) {
     if (root.empty()) return std::nullopt;
-    std::ifstream input(root / "current.json", std::ios::binary);
+    std::ifstream input(root / name, std::ios::binary);
     if (!input) return std::nullopt;
     const std::string body{
         std::istreambuf_iterator<char>(input),
@@ -163,10 +173,9 @@ std::optional<fs::path> managed_current_browser(const fs::path& root) {
     const fs::path relative(*executable);
     if (relative.is_absolute() || relative.empty()) return std::nullopt;
     const auto normalized = relative.lexically_normal();
-    if (normalized.begin() == normalized.end() ||
-        *normalized.begin() != fs::path(*version) ||
+    if (normalized.begin() == normalized.end() || *normalized.begin() != fs::path(*version) ||
         std::next(normalized.begin()) == normalized.end() ||
-        *std::next(normalized.begin()) != fs::path(*platform)) {
+        *std::next(normalized.begin()) != fs::path(*platform + std::string(suffix))) {
         return std::nullopt;
     }
     for (const auto& component : normalized) {
@@ -180,28 +189,65 @@ std::optional<fs::path> managed_current_browser(const fs::path& root) {
     const auto canonical_candidate = fs::canonical(candidate, ec);
     if (ec || !path_is_within(canonical_candidate, canonical_root))
         return std::nullopt;
-    return candidate;
+    return ManagedRecord{*version, *platform, candidate};
 }
+
+std::optional<fs::path> managed_current_browser(const fs::path& root) {
+    const auto current = managed_record(root, "current.json", "");
+    if (!current)
+        return std::nullopt;
+    return current->executable;
+}
+
+// The chrome-headless-shell `pulp tool install chrome-for-testing` installs
+// beside the browser. It is used only when it is the release and platform
+// `current.json` names, so it is never a different browser than the pinned one.
+std::optional<fs::path> managed_headless_shell(const fs::path& root) {
+    const auto current = managed_record(root, "current.json", "");
+    if (!current)
+        return std::nullopt;
+    const auto shell = managed_record(root, "headless-shell.json", "-headless-shell");
+    if (!shell || shell->version != current->version || shell->platform != current->platform) {
+        return std::nullopt;
+    }
+    return shell->executable;
+}
+
+#ifdef __APPLE__
+bool has_app_bundle_component(const fs::path& path) {
+    return std::any_of(path.begin(), path.end(),
+                       [](const fs::path& component) { return component.extension() == ".app"; });
+}
+
+// True when `path`, or the file it resolves to through symlinks, lives in a
+// macOS .app bundle.
+bool inside_app_bundle(const fs::path& path) {
+    if (has_app_bundle_component(path))
+        return true;
+    std::error_code ec;
+    const auto resolved = fs::canonical(path, ec);
+    return !ec && has_app_bundle_component(resolved);
+}
+
+bool in_agent_sandbox() {
+    const char* value = std::getenv("CODEX_SANDBOX");
+    return value && *value;
+}
+#endif
 
 std::vector<fs::path> default_system_browser_paths() {
     std::vector<fs::path> paths;
 #ifdef __APPLE__
-    paths.emplace_back(
-        "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome");
-    paths.emplace_back(
-        "/Applications/Google Chrome for Testing.app/Contents/MacOS/"
-        "Google Chrome for Testing");
-    paths.emplace_back(
-        "/Applications/Chromium.app/Contents/MacOS/Chromium");
+    paths.emplace_back("/Applications/Google Chrome.app/Contents/MacOS/Google Chrome");
+    paths.emplace_back("/Applications/Google Chrome for Testing.app/Contents/MacOS/"
+                       "Google Chrome for Testing");
+    paths.emplace_back("/Applications/Chromium.app/Contents/MacOS/Chromium");
     if (const char* home = std::getenv("HOME"); home && *home) {
         const fs::path applications = fs::path(home) / "Applications";
-        paths.push_back(
-            applications / "Google Chrome.app/Contents/MacOS/Google Chrome");
-        paths.push_back(
-            applications / "Google Chrome for Testing.app/Contents/MacOS/"
-            "Google Chrome for Testing");
-        paths.push_back(applications /
-                        "Chromium.app/Contents/MacOS/Chromium");
+        paths.push_back(applications / "Google Chrome.app/Contents/MacOS/Google Chrome");
+        paths.push_back(applications / "Google Chrome for Testing.app/Contents/MacOS/"
+                                       "Google Chrome for Testing");
+        paths.push_back(applications / "Chromium.app/Contents/MacOS/Chromium");
     }
 #elif defined(_WIN32)
     auto append_from = [&](const char* variable, const fs::path& suffix) {
@@ -272,6 +318,11 @@ BrowserModeSelection resolve_browser_mode(
 
 std::vector<BrowserCandidate>
 collect_browser_candidates(const BrowserDiscoveryOptions& options) {
+    return collect_browser_candidates(options, nullptr);
+}
+
+std::vector<BrowserCandidate> collect_browser_candidates(const BrowserDiscoveryOptions& options,
+                                                         std::vector<fs::path>* sandbox_omitted) {
     std::vector<BrowserCandidate> candidates;
     std::set<std::string> seen;
     if (options.explicit_path && !options.explicit_path->empty()) {
@@ -297,18 +348,40 @@ collect_browser_candidates(const BrowserDiscoveryOptions& options) {
     if (*selection.mode != BrowserMode::system) {
         const auto root =
             options.managed_root.value_or(default_managed_root());
+        // Captures are headless, and the shell has no window-server
+        // connection, so it cannot stall behind another application's modal
+        // UI the way the full browser can. The full browser of the same
+        // release stays the fallback.
+        if (const auto shell = managed_headless_shell(root)) {
+            append_candidate(candidates, seen, *shell, BrowserOrigin::managed);
+        }
         if (const auto current = managed_current_browser(root)) {
             append_candidate(
                 candidates, seen, *current, BrowserOrigin::managed);
         }
     }
     if (*selection.mode != BrowserMode::managed) {
-        for (const auto& path : options.system_candidates)
+        // An installed macOS app cannot start in an agent sandbox (the window
+        // server denies it and macOS files a crash report), so system
+        // candidates inside an .app bundle, directly or through a symlink, are
+        // dropped there. Explicit and environment overrides return above and
+        // are never filtered.
+        const auto append_system = [&](const fs::path& path) {
+#ifdef __APPLE__
+            if (in_agent_sandbox() && inside_app_bundle(path)) {
+                std::error_code ec;
+                if (sandbox_omitted && fs::exists(path, ec))
+                    sandbox_omitted->push_back(path);
+                return;
+            }
+#endif
             append_candidate(candidates, seen, path, BrowserOrigin::system);
+        };
+        for (const auto& path : options.system_candidates)
+            append_system(path);
         if (options.include_default_system_candidates) {
             for (const auto& path : default_system_browser_paths())
-                append_candidate(
-                    candidates, seen, path, BrowserOrigin::system);
+                append_system(path);
         }
     }
     return candidates;

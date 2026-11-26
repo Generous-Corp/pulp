@@ -339,6 +339,7 @@ including the Intel `darwin-x64` CLI+SDK pair, which is now a REQUIRED leg
 |-------|---------|
 | `appcast.xml` | Sparkle auto-update feed; consumed by `pulp upgrade --check-only` |
 | `pulp-darwin-arm64.tar.gz` | CLI tarball (`pulp`, `pulp-cpp`, `pulp-mcp`, `pulp-import-design`, the health-only `pulp-control-broker`, browser-capture runtime, the sibling `jsx-runtime/materialized_binding_contract.mjs` contract, and GPU runtime library) |
+| `pulp-darwin-arm64.tar.gz` (SDK) | The darwin-arm64 SDK also stages the lock-pinned Vellum SDK (SHA-256 verified against `pulp.lock`) under `share/pulp/vellum-sdk/<version>/sdk` and builds the optional `pulp-vellum`, `pulp-vellum-audio` and `pulp-vellum-scripted` bridge archives; `check_vellum_sdk_staging.py` fails the release if the installed SDK lacks them. The asset grows from about 253 MB to about 334 MB. |
 | `pulp-darwin-x64.tar.gz` | Intel (x86_64) CLI tarball — cross-compiled on Apple Silicon |
 | `pulp-linux-arm64.tar.gz` | " |
 | `pulp-linux-x64.tar.gz` | " |
@@ -569,6 +570,30 @@ if(UNIX AND NOT APPLE AND NOT ANDROID)
     endforeach()
 endif()
 ```
+
+### Plug-in modules
+
+The pass above covers executables and any shared or module library defined in
+the Pulp tree, and a plug-in built from an installed SDK with `pulp_add_plugin()`
+already ends up with `libfontconfig` as a needed library. A MODULE library that
+links the SDK's static `Pulp::view` / `Pulp::canvas` directly is a different
+case: a module may leave symbols undefined, so the link succeeds with the `Fc*`
+references from `libskia.a` unresolved and no `libfontconfig` in `ldd`. Such a
+module loads only in a host that already has fontconfig.
+
+The installed package config therefore calls `pulp_attach_fontconfig_to_canvas()`
+(`PulpLinkFontconfig.cmake`) right after it attaches Skia to `Pulp::canvas`. That
+appends `libfontconfig` to the canvas link interface under `--no-as-needed`, so
+it follows the Skia archive and survives Ubuntu's default `--as-needed`.
+`cmake-canvas-fontconfig-link` checks the resulting interface and that the
+package config makes the call after Skia is attached. The
+`no-unresolved-symbols-*` tests run `ldd -r` on built plug-in modules as a
+regression guard (`PulpReloadHostFixture_CLAP` in the core test tree, the
+PulpEffect modules when examples are built); the in-tree link already names
+fontconfig, so they guard against a regression there and do not prove the
+installed-SDK change. `no-unresolved-symbols-control` runs the same probe on a
+module with a deliberate undefined symbol and must report it. SDK consumers need
+`libfontconfig-dev` at build time and `libfontconfig1` at run time.
 
 ## When to update this doc
 

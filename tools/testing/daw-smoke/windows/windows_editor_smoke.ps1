@@ -92,7 +92,7 @@ try {
   # the scan root makes a valid packaged icudtl.dat invisible and causes a
   # misleading paragraph fatal.  CLAP remains a flat module.
   if ($Format -eq 'vst3') {
-    $staging = Stage-Vst3Plugin $scan $plugin
+    $staging = Stage-Vst3Plugin $scan $pluginBinary
     $bundleRoot = $staging.BundleRoot
     $staged = $staging.Staged
   } else {
@@ -115,7 +115,7 @@ try {
   $section=$null;$out=New-Object 'System.Collections.Generic.List[string]';$inserted=$false
   foreach($line in $lines){
     if($line -match '^\[(.+)\]$'){$section=$Matches[1]}
-    if($section -eq 'REAPER' -and $line -match '^(vstpath64|vstpath_winarm64|clap_path(?:_windows-[^=]+)?|lastproject|loadlastproj|vstfullstate)='){continue}
+    if($section -eq 'REAPER' -and $line -match '^(vstpath64|vstpath_winarm64|clap_path(?:_[^=]+)?|lastproject|loadlastproj|vstfullstate)='){continue}
     $out.Add($line)
     if($line -eq '[REAPER]'){
       # Staged root last wins duplicate VST3 class IDs; loaded-PE binding below

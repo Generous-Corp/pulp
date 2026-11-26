@@ -831,12 +831,15 @@ class ReleaseArtifactContentsTests(unittest.TestCase):
     def test_installed_sdk_archives_match_release_matrix(self) -> None:
         install_text = INSTALL_RULES.read_text(encoding="utf-8")
         archive_targets = installed_sdk_targets(install_text) - interface_library_targets()
-        for optional in ("pulp-vellum", "pulp-vellum-audio"):
+        for optional in ("pulp-vellum", "pulp-vellum-audio", "pulp-vellum-components", "pulp-vellum-scripted"):
             if conditional_sdk_target_append(install_text, optional):
                 archive_targets.discard(optional)
         matrix_targets = set(rac.DEFAULT_MATRIX.pulp_library_stems)
         for platform_targets in rac.DEFAULT_MATRIX.platform_library_stems.values():
             matrix_targets.update(platform_targets)
+        # The optional Vellum bridge archives are conditional in the install
+        # rules but listed for darwin-arm64 in the matrix.
+        matrix_targets -= {"pulp-vellum", "pulp-vellum-audio", "pulp-vellum-components", "pulp-vellum-scripted"}
         self.assertEqual(
             archive_targets,
             matrix_targets,
@@ -845,13 +848,16 @@ class ReleaseArtifactContentsTests(unittest.TestCase):
 
     def test_optional_vellum_archive_is_conditional_in_installed_sdk_contract(self) -> None:
         text = INSTALL_RULES.read_text(encoding="utf-8")
-        self.assertTrue(conditional_sdk_target_append(text, "pulp-vellum"))
+        for optional in ("pulp-vellum", "pulp-vellum-audio", "pulp-vellum-components", "pulp-vellum-scripted"):
+            with self.subTest(target=optional):
+                self.assertTrue(conditional_sdk_target_append(text, optional))
 
     def test_optional_vellum_unconditional_append_after_endif_is_rejected(self) -> None:
-        text = "if(TARGET pulp-vellum)\nendif()\nlist(APPEND PULP_SDK_TARGETS pulp-vellum)\n"
-        self.assertFalse(conditional_sdk_target_append(text, "pulp-vellum"))
-        self.assertNotIn("pulp-vellum", rac.DEFAULT_MATRIX.pulp_library_stems)
-        self.assertNotIn("pulp-vellum-audio", rac.DEFAULT_MATRIX.pulp_library_stems)
+        for optional in ("pulp-vellum", "pulp-vellum-audio", "pulp-vellum-components", "pulp-vellum-scripted"):
+            with self.subTest(target=optional):
+                text = f"if(TARGET {optional})\nendif()\nlist(APPEND PULP_SDK_TARGETS {optional})\n"
+                self.assertFalse(conditional_sdk_target_append(text, optional))
+                self.assertNotIn(optional, rac.DEFAULT_MATRIX.pulp_library_stems)
 
     def test_native_surface_is_expected_on_every_sdk_platform(self) -> None:
         # PulpInstallRules.cmake installs pulp-native wherever the target

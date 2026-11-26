@@ -334,10 +334,22 @@ jobs:
     needs: windows-runner
     if: github.event_name != 'schedule' || github.repository == vars.PULP_PRIMARY_REPO
     runs-on: ${{ fromJSON(needs.windows-runner.outputs.runs_on) }}
-    timeout-minutes: 180
+    # A cold hosted build takes about 2.5 hours (4 vCPUs, no remote ccache) and
+    # the suite about 30 minutes more; 180 cancelled the job mid-suite. The
+    # hosted ceiling is 360, and a ccache restored below makes later runs short.
+    timeout-minutes: 300
     env:
       PULP_BUILD_DIR: build-windows
     steps:
+      # Git for Windows ships core.autocrlf=true, so the checkout rewrites every
+      # LF to CRLF. Tests that compare a committed text file with a regenerated
+      # one, or hash it against a pinned digest, then read bytes no pin
+      # describes. Pin LF before the checkout, as release-cli.yml does.
+      - name: Check out sources with upstream LF bytes
+        shell: bash
+        run: |
+          git config --global core.autocrlf false
+          git config --global core.eol lf
       - uses: actions/checkout@v7.0.1
         with:
           lfs: false
@@ -359,6 +371,30 @@ jobs:
       - name: Point ccache at the host's remote storage
         shell: bash
         run: python3 tools/ci/ccache_remote_storage.py --github-env "$GITHUB_ENV"
+
+      # A GitHub-hosted runner starts empty and has no remote ccache storage, so
+      # every build compiled from scratch. Cache the compiler cache itself:
+      # restore the newest entry; only the nightly on main saves, so a pull request
+      # or dispatch cannot churn the repository's 10 GB cache budget. A self-hosted runner keeps its own storage.
+      - name: Restore ccache (GitHub-hosted)
+        if: runner.environment == 'github-hosted'
+        id: ccache-restore
+        uses: actions/cache/restore@v6
+        with:
+          path: ${{ github.workspace }}/.ccache
+          key: ccache-windows-x64-msvc14-${{ hashFiles('tools/cmake/PulpDependencies.cmake', 'tools/deps/manifest.json') }}-${{ github.run_id }}
+          restore-keys: |
+            ccache-windows-x64-msvc14-${{ hashFiles('tools/cmake/PulpDependencies.cmake', 'tools/deps/manifest.json') }}-
+            ccache-windows-x64-msvc14-
+
+      - name: Point ccache at the restored directory (GitHub-hosted)
+        if: runner.environment == 'github-hosted'
+        shell: bash
+        run: |
+          {
+            echo "CCACHE_DIR=${GITHUB_WORKSPACE}/.ccache"
+            echo "CCACHE_MAXSIZE=1G"
+          } >> "$GITHUB_ENV"
 
       - name: Bootstrap repository dependencies
         run: ./setup.sh --ci --deps-only
@@ -432,6 +468,14 @@ jobs:
             echo "ccache not available; skipping stats"
           fi
 
+      - name: Save ccache (GitHub-hosted)
+        if: ${{ always() && runner.environment == 'github-hosted' && steps.build.outcome != 'skipped' && github.ref == 'refs/heads/main' && (github.event_name == 'schedule' || github.event_name == 'push') }}
+        continue-on-error: true
+        uses: actions/cache/save@v6
+        with:
+          path: ${{ github.workspace }}/.ccache
+          key: ccache-windows-x64-msvc14-${{ hashFiles('tools/cmake/PulpDependencies.cmake', 'tools/deps/manifest.json') }}-${{ github.run_id }}
+
       - name: Test (UTF-8 code page wrapped)
         # Runs after a build that finished with errors, not only after a clean
         # one. MSBuild keeps building the other projects when one fails, so a
@@ -456,10 +500,18 @@ jobs:
         # IMMEDIATELY after `ctest` (before `type` overwrites it), then
         # `exit /b` with that saved code so a Windows test failure
         # correctly fails the step.
+        # `source-selftest` is excluded here because those registrations read
+        # only the checkout and already run on ubuntu-latest in the required
+        # `Enforce version & skill sync` job (tools/ci/source_selftests.json);
+        # many assume POSIX tools. Linux enforces them on every merge group.
+        # `browser-capture` is excluded because those registrations launch a
+        # real Chrome, whose CDP probe times out on a loaded hosted runner;
+        # the macOS gate runs them on every merge group. `windows-pr-quarantine`
+        # is the label build.yml's Windows lane already excludes.
         shell: cmd
         run: |
           chcp 65001
-          ctest --test-dir "%PULP_BUILD_DIR%" --output-on-failure -C Release -LE "validation|slow" -j8 --timeout 120 --exclude-regex "STFT|VisualizationBridge|Clipboard|Toolbar add items" > test-windows.log 2>&1
+          ctest --test-dir "%PULP_BUILD_DIR%" --output-on-failure -C Release -LE "validation|slow|source-selftest|browser-capture|windows-pr-quarantine" -j8 --timeout 120 --exclude-regex "STFT|VisualizationBridge|Clipboard|Toolbar add items" > test-windows.log 2>&1
           set CTEST_RC=%ERRORLEVEL%
           type test-windows.log
           echo ctest exit code: %CTEST_RC%

@@ -1,0 +1,49 @@
+{
+  "id": "webclap-host-echo-source-closure",
+  "title": "WebCLAP host echo dependency source-closure guard",
+  "classification": "ci_test_only",
+  "delivery_state": "pending",
+  "claim_id": "repair-lane-61704",
+  "owned_paths": [
+    "tools/scripts/web_timeline_source_closure_check.py",
+    "tools/scripts/test_web_timeline_source_closure_check.py",
+    "docs/status/sequencer-exposure/rows/webclap-host-echo-source-closure.json"
+  ],
+  "evidence": [
+    {
+      "path": "tools/scripts/web_timeline_source_closure_check.py",
+      "needles": [
+        "adapter_dependencies",
+        "core/format/src/host_parameter_edit.cpp"
+      ]
+    },
+    {
+      "path": "tools/scripts/test_web_timeline_source_closure_check.py",
+      "needles": [
+        "test_webclap_host_echo_dependency_must_be_in_the_dsp_source_set"
+      ]
+    }
+  ],
+  "surfaces": {
+    "installed_sdk": {
+      "disposition": "not_applicable",
+      "rationale": "This row covers the build-time closure guard and its tests, not an installed SDK API or header change."
+    },
+    "offline_timeline_cli": {
+      "disposition": "not_applicable",
+      "rationale": "No timeline command, argument, or output changes."
+    },
+    "offline_timeline_mcp": {
+      "disposition": "not_applicable",
+      "rationale": "No MCP operation, schema, or handler changes."
+    },
+    "live_product_control": {
+      "disposition": "not_applicable",
+      "rationale": "The static closure check adds no runtime operation or control authority."
+    },
+    "design_time_agent_manifest": {
+      "disposition": "not_applicable",
+      "rationale": "The dependency guard advertises no authorable capability."
+    }
+  }
+}

@@ -1,8 +1,10 @@
 #include <pulp/vellum_audio/audio_display_provider.hpp>
 #include <pulp/vellum_audio/audio_widgets.hpp>
+#include <vellum/view/data_display.hpp>
 
 #include <vellum/view/screenshot.hpp>
 
+#include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 
 #include "support/thread_progress.hpp"
@@ -13,6 +15,8 @@
 #include <chrono>
 #include <cstdint>
 #include <memory>
+#include <optional>
+#include <string>
 #include <thread>
 #include <vector>
 
@@ -56,6 +60,12 @@ void require_feed_render_contract(const RenderedFrame& first, const RenderedFram
         }
     }
     CHECK(changed);
+}
+
+// Repaint requests Vellum has recorded process-wide; a paint-input setter that
+// forgets request_repaint() leaves this unchanged.
+std::uint64_t repaint_requests() {
+    return ::vellum::view::View::damage_request_count();
 }
 
 } // namespace
@@ -184,6 +194,83 @@ TEST_CASE("Vellum audio widgets snapshot feed values", "[pulp-vellum-audio]") {
     CHECK(scope.column_count() == 3);
 }
 
+TEST_CASE("Vellum audio widgets register scripted display factories",
+          "[pulp-vellum-audio][scripted-editor]") {
+    using Provider = pulp::vellum_audio::AudioDisplayProvider;
+    Provider provider({{"meter", "", vellum::value::ChannelShape::meter},
+                       {"scope", "", vellum::value::ChannelShape::vector}});
+    pulp::vellum_audio::register_audio_widgets();
+
+    auto meter = vellum::view::make_data_display("pulp.level");
+    auto scope = vellum::view::make_data_display("pulp.bins");
+    REQUIRE(meter);
+    REQUIRE(scope);
+    auto* level = dynamic_cast<pulp::vellum_audio::LevelMeter*>(meter.get());
+    auto* analyzer = dynamic_cast<pulp::vellum_audio::AnalyzerScope*>(scope.get());
+    REQUIRE(level);
+    REQUIRE(analyzer);
+
+    const std::array<float, 1> rms{0.6f};
+    const std::array<float, 1> peak{0.8f};
+    provider.publish_meter(0, rms, peak);
+    const std::array<float, 3> bins{-60.0f, -30.0f, -6.0f};
+    provider.publish_scope(1, bins);
+    level->set_feed(&provider, 0);
+    analyzer->set_feed(&provider, 1);
+    level->sample();
+    analyzer->sample();
+    CHECK(level->rms() == Catch::Approx(0.6f));
+    CHECK(level->peak() == Catch::Approx(0.8f));
+    CHECK(analyzer->column_count() == bins.size());
+    CHECK_FALSE(level->stale());
+    CHECK_FALSE(analyzer->stale());
+}
+
+TEST_CASE("Vellum audio widget ticks preserve channel bindings", "[pulp-vellum-audio]") {
+    using namespace pulp::vellum_audio;
+    using Shape = vellum::value::ChannelShape;
+    AudioDisplayProvider provider({{.name = "input", .shape = Shape::meter},
+                                   {.name = "output", .shape = Shape::meter},
+                                   {.name = "input-spectrum", .shape = Shape::vector},
+                                   {.name = "output-spectrum", .shape = Shape::vector}});
+    const auto input = provider.find("input", Shape::meter);
+    const auto output = provider.find("output", Shape::meter);
+    const auto output_spectrum = provider.find("output-spectrum", Shape::vector);
+    REQUIRE(input);
+    REQUIRE(output);
+    REQUIRE(output_spectrum);
+
+    vellum::view::View root;
+    auto make_widget = [&]<typename Widget>() -> Widget& {
+        auto widget = std::make_unique<Widget>();
+        auto& added = *widget;
+        root.add_child(std::move(widget));
+        return added;
+    };
+    auto& input_meter = make_widget.operator()<LevelMeter>();
+    auto& output_meter = make_widget.operator()<LevelMeter>();
+    auto& default_meter = make_widget.operator()<LevelMeter>();
+    auto& output_scope = make_widget.operator()<AnalyzerScope>();
+    input_meter.set_feed(&provider, *input);
+    output_meter.set_feed(&provider, *output);
+    output_scope.set_feed(&provider, *output_spectrum);
+
+    for (int tick = 0; tick < 60; ++tick) {
+        const float input_level = tick % 2 == 0 ? 0.25f : 0.375f;
+        const float output_level = tick % 2 == 0 ? 0.75f : 0.875f;
+        provider.publish_meter(*input, std::array{input_level}, std::array{input_level});
+        provider.publish_meter(*output, std::array{output_level}, std::array{output_level});
+        provider.publish_scope(*output_spectrum, std::array{-60.0f, -24.0f});
+        sample_audio_widgets(root, &provider);
+
+        CAPTURE(tick);
+        CHECK(input_meter.rms() == input_level);
+        CHECK(default_meter.rms() == input_level);
+        REQUIRE(output_meter.rms() == output_level);
+        REQUIRE(output_scope.column_count() == 2);
+    }
+}
+
 TEST_CASE("Vellum AnalyzerScope keeps its mapping across stale periods and set_feed",
           "[pulp-vellum-audio]") {
     pulp::vellum_audio::AudioDisplayProvider provider({
@@ -289,6 +376,117 @@ TEST_CASE("Vellum LevelMeter matches legacy thresholds, ballistics, hold, and ac
         meter.set_levels(0.0f, 0.0f);
     CHECK(meter.displayed_peak() < 0.01f);
     CHECK(meter.held_peak() < held);
+}
+
+TEST_CASE("Vellum LevelMeter honours an explicit level fill over threshold colours",
+          "[pulp-vellum-audio][level-meter]") {
+    pulp::vellum_audio::LevelMeter meter;
+    const ::vellum::canvas::Color blue{0.0f, 0.0f, 1.0f, 1.0f};
+    CHECK(meter.bar_color(0.5f) == meter.level_color(0.5f));
+    meter.set_level_fill(std::nullopt, {blue});
+    CHECK(meter.bar_color(0.5f) == blue);
+    CHECK(meter.bar_color(0.95f) == blue);
+    meter.clear_level_fill();
+    CHECK(meter.bar_color(0.5f) == meter.level_color(0.5f));
+    CHECK(meter.bar_color(0.95f) == meter.level_color(0.95f));
+}
+
+TEST_CASE("Vellum LevelMeter renders its explicit level fill colour",
+          "[pulp-vellum-audio][level-meter][render]") {
+    if (!::vellum::view::raw_rgba_render_available())
+        SKIP("Vellum CPU raster backend unavailable");
+    pulp::vellum_audio::LevelMeter meter;
+    meter.set_bounds({0, 0, 128, 96});
+    meter.set_level_fill(::vellum::canvas::Color{0.0f, 0.0f, 0.0f, 1.0f},
+                         {::vellum::canvas::Color{0.0f, 0.0f, 1.0f, 1.0f}});
+    meter.set_levels(1.0f, 0.0f); // full-height bar after one ballistics tick
+    for (int i = 0; i < 120; ++i)
+        meter.set_levels(1.0f, 0.0f);
+    const auto frame = render(meter);
+    REQUIRE(frame.width == 128);
+    // Sample near the bottom centre, inside the bar and away from peak lines.
+    const auto offset = static_cast<std::size_t>(90) * frame.width * 4 + 64 * 4;
+    CHECK(frame.pixels[offset + 0] < 32);
+    CHECK(frame.pixels[offset + 1] < 32);
+    CHECK(frame.pixels[offset + 2] > 220);
+}
+
+TEST_CASE("Vellum LevelMeter requests repaint while decaying without new publications",
+          "[pulp-vellum-audio][level-meter]") {
+    pulp::vellum_audio::AudioDisplayProvider provider({
+        {.name = "level", .shape = ::vellum::value::ChannelShape::meter},
+    });
+    const auto level = provider.find("level", ::vellum::value::ChannelShape::meter);
+    REQUIRE(level);
+    pulp::vellum_audio::LevelMeter meter(&provider);
+    meter.set_channel(*level);
+    meter.set_bounds({0, 0, 16, 96});
+    provider.publish_meter(*level, std::array{0.8f}, std::array{0.9f});
+    meter.sample();
+    const auto before = repaint_requests();
+    meter.sample(); // same publication: ballistics decay, so paint inputs changed
+    CHECK(repaint_requests() > before);
+    for (int i = 0; i < 600; ++i) // let decay and peak hold settle completely
+        meter.sample();
+    const auto settled = repaint_requests();
+    for (int i = 0; i < 10; ++i)
+        meter.sample();
+    CHECK(repaint_requests() == settled); // an idle meter does not repaint every tick
+}
+
+TEST_CASE("Vellum MidiKeyboard gives a lone accidental range usable geometry",
+          "[pulp-vellum-audio][midi-keyboard]") {
+    for (const auto orientation : {pulp::vellum_audio::MidiKeyboard::Orientation::horizontal,
+                                   pulp::vellum_audio::MidiKeyboard::Orientation::vertical}) {
+        pulp::vellum_audio::MidiKeyboard keyboard;
+        keyboard.set_range(61, 61);
+        keyboard.set_orientation(orientation);
+        keyboard.set_bounds({0, 0, 200, 80});
+        std::vector<int> ons;
+        keyboard.on_note_on = [&](int note, float) { ons.push_back(note); };
+        keyboard.on_mouse_down({100.0f, 40.0f});
+        REQUIRE(ons.size() == 1);
+        CHECK(ons.front() == 61);
+        keyboard.on_mouse_up({100.0f, 40.0f});
+    }
+}
+
+TEST_CASE("Vellum MidiKeyboard keeps boundary accidentals fully inside the keyboard",
+          "[pulp-vellum-audio][midi-keyboard]") {
+    using Orientation = pulp::vellum_audio::MidiKeyboard::Orientation;
+    struct Case {
+        int first, last, accidental;
+        float probe; // inside the shifted key, outside one centred off the edge
+    };
+    // 61-62 starts on C#, 60-61 ends on C#: the accidental sits at an edge.
+    for (const auto c : {Case{61, 62, 61, 100.0f}, Case{60, 61, 61, 100.0f}}) {
+        for (const auto orientation : {Orientation::horizontal, Orientation::vertical}) {
+            pulp::vellum_audio::MidiKeyboard keyboard;
+            keyboard.set_range(c.first, c.last);
+            keyboard.set_orientation(orientation);
+            keyboard.set_bounds({0, 0, 200, 200});
+            std::vector<int> ons;
+            keyboard.on_note_on = [&](int note, float) { ons.push_back(note); };
+            const ::vellum::view::Point edge = orientation == Orientation::horizontal
+                                                   ? ::vellum::view::Point{c.probe, 10.0f}
+                                                   : ::vellum::view::Point{10.0f, c.probe};
+            keyboard.on_mouse_down(edge);
+            REQUIRE(ons.size() == 1);
+            CHECK(ons.front() == c.accidental);
+            keyboard.on_mouse_up(edge);
+        }
+    }
+}
+
+TEST_CASE("Vellum MidiKeyboard appearance setters request repaint",
+          "[pulp-vellum-audio][midi-keyboard]") {
+    pulp::vellum_audio::MidiKeyboard keyboard;
+    auto before = repaint_requests();
+    keyboard.set_show_note_names(true);
+    CHECK(repaint_requests() > before);
+    before = repaint_requests();
+    keyboard.set_highlight_color({1.0f, 0.0f, 0.0f, 1.0f});
+    CHECK(repaint_requests() > before);
 }
 
 TEST_CASE("Vellum MidiKeyboard hit-tests black keys and emits editor MIDI callbacks",

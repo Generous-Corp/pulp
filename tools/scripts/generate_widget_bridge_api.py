@@ -14,7 +14,7 @@ from pathlib import Path
 
 MANIFEST = Path("core/view/src/widget_bridge_api_manifest.tsv")
 AUTOCAPS = Path("core/view/include/pulp/view/reload_autocaps.hpp")
-CAPABILITIES = Path("core/view/include/pulp/view/reload_capabilities.hpp")
+CAPABILITIES = Path("core/runtime/include/pulp/runtime/reload_capabilities.hpp")
 TYPES_OUT = Path("packages/pulp-react/src/bridge-globals.generated.d.ts")
 MOCK_OUT = Path("packages/pulp-react/src/bridge-mock-functions.generated.ts")
 SAFE_MOCK_OUT = Path("packages/pulp-react/src/bridge-mock-safe-functions.generated.ts")
@@ -301,6 +301,7 @@ SIGNATURE_OVERRIDES: dict[str, str] = {
     "readClipboard": "() => string",
     "registerContextMenu": "(id: string, callbackName: string) => void",
     "registerDrop": "(id: string) => void",
+    "registerEmbeddedFont": "(family: string, assetName: string, weightMin?: number, weightMax?: number) => boolean",
     "registerFont": "(family: string, path: string, weightMin?: number, weightMax?: number) => boolean",
     "registerGesture": "(id: string) => void",
     "registerHover": "(id: string) => void",

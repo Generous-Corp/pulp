@@ -276,6 +276,18 @@ bool clap_init(const clap_plugin_t* plugin) {
     self->panic_state->attach(self->processor->descriptor().produces_midi);
     self->sample_accurate_params = self->processor->wants_sample_accurate_parameters();
     self->param_events_monitor.arm(!self->sample_accurate_params, &self->param_events);
+    // Register before giving the store to the plug-in: a listener may rewrite
+    // a value recursively, and capture must observe the outer write BEFORE
+    // the nested write so that the final processor value wins.
+    self->processor_param_listener = self->store.add_listener(
+        [self](state::ParamID id, float value) {
+            if (!g_clap_process_running || g_clap_host_writing_param)
+                return;
+            const auto index = boundary::find_param_index(self->store.all_params(), id);
+            if (index < self->processor_param_values.size())
+                self->processor_param_values[index] = value;
+        },
+        state::ListenerThread::Audio);
     self->processor->set_state_store(&self->store);
     self->processor->define_parameters(self->store);
     self->editor_factory = self->processor->editor_factory();
@@ -306,8 +318,21 @@ bool clap_init(const clap_plugin_t* plugin) {
         });
     self->outbound_param_listener = self->store.add_listener(
         [self](state::ParamID id, float value) {
-            if (g_clap_host_writing_param || g_clap_process_running ||
-                std::this_thread::get_id() != self->main_thread_id) return;
+            // A write the host made off the main thread (process() applying
+            // automation, or params.flush on the audio thread) is remembered
+            // so the plug-in mirroring it back on the main thread is not
+            // reported as an edit.
+            const bool on_main = std::this_thread::get_id() == self->main_thread_id;
+            if (g_clap_host_writing_param && (g_clap_process_running || !on_main)) {
+                self->host_write_echo_guard.note_host_write(id);
+                return;
+            }
+            if (g_clap_process_running)
+                return;
+            if (g_clap_host_writing_param || !on_main)
+                return;
+            if (self->host_write_echo_guard.is_echo(self->store, id))
+                return;
             queue_outbound_param_event(
                 self, {OutboundParamEventKind::Value, id, value});
         },
@@ -482,6 +507,7 @@ bool clap_activate(const clap_plugin_t* plugin, double sr, uint32_t, uint32_t ma
     self->ump_buffer.reserve(kRealtimeMidiEventCapacity);
     self->ump_buffer.set_realtime_capacity_limit(true);
     self->param_snapshot.reserve(self->store.all_params().size());
+    self->processor_param_values.reserve(self->store.all_params().size());
     self->latest_param_value.assign(self->store.all_params().size(), 0.0f);
     self->latest_param_pending.assign(self->store.all_params().size(), 0);
     self->latest_param_touched.clear();
@@ -744,6 +770,7 @@ static bool clap_phase_validate_layout(PulpClapPlugin* self,
 
 static void clap_phase_decode_param_events(PulpClapPlugin* self,
                                            const clap_process_t* process) {
+    ScopedClapHostParamWrite host_write;
     // Reset per-buffer modulation offsets before applying new events
     self->store.reset_all_mod();
     self->param_events.clear();
@@ -1179,6 +1206,7 @@ static void clap_phase_snapshot_params(
     self->pre_process_generation = self->store.state_generation();
     boundary::refresh_param_snapshot(self->store, all_params, self->param_snapshot,
                                      self->snapshot_state, self->pre_process_generation);
+    self->processor_param_values.assign(self->param_snapshot.begin(), self->param_snapshot.end());
     self->output_param_has_event.assign(all_params.size(), 0);
 }
 
@@ -1600,7 +1628,9 @@ static void clap_phase_emit_output(
         }
         for (std::size_t i = 0; store_moved && i < all_params.size(); ++i) {
             if (self->output_param_has_event[i]) continue;
-            float current = self->store.get_value(all_params[i].id);
+            // The fallback reports processor writes and adapter-owned resets.
+            // UI writes use the queue above if they pass echo suppression.
+            const float current = self->processor_param_values[i];
             if (boundary::changed_since_snapshot(current,
                                                  self->param_snapshot[i])) {
                 clap_event_param_value_t ev{};
@@ -2264,7 +2294,7 @@ clap_process_status clap_process(const clap_plugin_t* plugin, const clap_process
     // Return trigger / momentary params (panic, reset, tap) to their default
     // now that the Processor has observed this block. Done before the
     // output-event scan below so the host records the auto-reset as automation.
-    self->store.reset_triggers_rt();
+    self->store.reset_triggers_rt(self->processor_param_values);
 
     clap_phase_emit_output(self, process, all_params);
 

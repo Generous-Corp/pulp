@@ -1,0 +1,10 @@
+{
+ "name": "clap-conformance-checker-robustness",
+ "record": {
+  "entry": "tools/audio/clap-conformance/test_clap_conformance.py",
+  "inputs": [
+   "tools/audio/clap-conformance/test_clap_conformance.py"
+  ],
+  "kind": "python"
+ }
+}

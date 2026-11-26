@@ -209,6 +209,11 @@ void GlSurface::set_keyboard_focus(KeyboardFocus focus) {
     impl_->apply_keyboard_focus();
 }
 
+void GlSurface::set_cursor(Cursor cursor) {
+    impl_->cursor = cursor;
+    impl_->apply_cursor();
+}
+
 void GlSurface::set_scale(double scale) {
     impl_->scale_override = scale > 0.0 ? scale : 0.0;
     impl_->apply_scale();

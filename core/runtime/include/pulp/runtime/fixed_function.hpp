@@ -147,23 +147,40 @@ class FixedFunction<R(Args...), Capacity, Alignment> {
         R (*invoke)(void* target, Args&&... args);
         void (*relocate)(void* dst, void* src) noexcept; // move-construct into dst, destroy src
         void (*destroy)(void* target) noexcept;
+
+        // Explicit constructor so MSVC does not treat the constexpr table as
+        // zero-filled by an implicit default constructor (warning C4268).
+        constexpr VTable(R (*invoke_fn)(void*, Args&&...),
+                         void (*relocate_fn)(void*, void*) noexcept,
+                         void (*destroy_fn)(void*) noexcept) noexcept
+            : invoke(invoke_fn), relocate(relocate_fn), destroy(destroy_fn) {}
     };
+
+    // Named static functions (not lambdas): MSVC rejects lambda-to-function-
+    // pointer conversion inside a constexpr variable-template initialiser.
+    template <typename D> static R invoke_impl(void* target, Args&&... args) {
+        D& callable = *static_cast<D*>(target);
+        if constexpr (std::is_void_v<R>) {
+            callable(std::forward<Args>(args)...);
+        } else {
+            return callable(std::forward<Args>(args)...);
+        }
+    }
+
+    template <typename D> static void relocate_impl(void* dst, void* src) noexcept {
+        ::new (dst) D(std::move(*static_cast<D*>(src)));
+        std::destroy_at(static_cast<D*>(src));
+    }
+
+    template <typename D> static void destroy_impl(void* target) noexcept {
+        std::destroy_at(static_cast<D*>(target));
+    }
 
     template <typename D>
     static constexpr VTable vtable_for = {
-        [](void* target, Args&&... args) -> R {
-            D& callable = *static_cast<D*>(target);
-            if constexpr (std::is_void_v<R>) {
-                callable(std::forward<Args>(args)...);
-            } else {
-                return callable(std::forward<Args>(args)...);
-            }
-        },
-        [](void* dst, void* src) noexcept {
-            ::new (dst) D(std::move(*static_cast<D*>(src)));
-            std::destroy_at(static_cast<D*>(src));
-        },
-        [](void* target) noexcept { std::destroy_at(static_cast<D*>(target)); },
+        &invoke_impl<D>,
+        &relocate_impl<D>,
+        &destroy_impl<D>,
     };
 
     void take(FixedFunction& other) noexcept {

@@ -6,6 +6,7 @@
     "tools/ci/test_source_selftests.py": "walks temporary trees",
     "tools/scripts/test_configure_only.py": "walks the temporary build trees it configures",
     "tools/scripts/test_check_apple_bundle_signing.py": "walks the temporary bundles it builds",
+    "tools/scripts/test_check_vellum_sdk_staging.py": "walks the temporary SDK staging trees it builds",
     "tools/ci/test_drift_fast.py": "walks test/ for registration names; tools/ci routes to the native build",
     "tools/scripts/gate_python_imports_check.py": "reads the configured ctest inventory; runs in the pr-fast tier on the native gate",
     "tools/scripts/gpu_audio_p2_campaign.py": "authenticates the canonical tracked campaign driver with git ls-files; it does not walk tools/ payloads or scan non-native source trees",
@@ -26,6 +27,7 @@
     "tools/scripts/test_build_combined_installer.py": "walks a built bundle",
     "tools/scripts/test_classify_changes.py": "walks CMake the iOS configure reaches",
     "tools/scripts/test_configure_check_cache.py": "walks a temporary cache dir",
+    "tools/scripts/test_refresh_push_check.py": "globs only temporary fixture repositories' .git/worktrees metadata and temporary pulp-merge-tree-* directories to check checkout cleanup; it does not walk live tools/ content",
     "tools/scripts/test_gpu_first_visible_a3_role_producers.py": "walks a temporary tree",
     "tools/scripts/test_gpu_probe_acceptance.py": "walks temporary directories",
     "tools/scripts/test_gpu_test_resource_locks.py": "walks test/ and tools/cli CMake",
@@ -47,6 +49,7 @@
     "tools/scripts/design_unit_boundary_check.py": "walks the include roots of the configured design targets under core/; its only tools/scripts content is vellum_policy.json, read through the vellum_policy import, which the reference search follows by stem",
     "tools/scripts/core_vellum_direction.py": "walks the core/ roots (CMake files and the GPU forward-declaration roots), the root CMakeLists.txt and tools/cmake/** for Vellum references; it reads no tools/scripts, tools/testing or tools/import-validation content",
     "tools/scripts/test_agent_capability_store.py": "globs tools/scripts/agent_capability_catalog_*.py and walks the capability record directories (or temporary copies); every one of those inputs, and this file, routes to the native build through AGENT_CAPABILITY_INSTALLED_SDK_PATTERNS",
-    "tools/scripts/test_script_test_inputs.py": "walks the temporary trees it writes its fixtures into; its live-tree reads are the configured ctest inventory and test/ctest_script_inputs/, as for script_test_inputs.py"
+    "tools/scripts/test_script_test_inputs.py": "walks the temporary trees it writes its fixtures into; its live-tree reads are the configured ctest inventory and test/ctest_script_inputs/, as for script_test_inputs.py",
+    "tools/cmake/test_pulp_plugin_identity.py": "globs tools/templates/*/vst3_entry.cpp.template and reads tools/cmake/PulpPlugin.cmake and tools/cmake/PulpInfoPlist.*.in; it reads no tools/scripts, tools/testing or tools/import-validation content, and tools/cmake and tools/templates route to the native build"
   }
 }

@@ -92,7 +92,16 @@ function(pulp_reload_host target)
     if(WIN32)
         return()
     elseif(APPLE)
-        target_link_options(${target} PRIVATE -Wl,-export_dynamic)
+        # Export only the Pulp ABI needed by thin reload logic. -export_dynamic
+        # publishes every global symbol in the executable, including Dawn,
+        # Tint, Skia, and abseil internals that may be provided by another
+        # image in the process.
+        target_link_options(${target} PRIVATE
+            "-Wl,-exported_symbol,__ZN4pulp*"
+            "-Wl,-exported_symbol,__ZNK4pulp*"
+            "-Wl,-exported_symbol,__ZTVN4pulp*"
+            "-Wl,-exported_symbol,__ZTIN4pulp*"
+            "-Wl,-exported_symbol,__ZTSN4pulp*")
     else()  # Linux / other ELF
         target_link_options(${target} PRIVATE -rdynamic)
         # A Linux plug-in's version script exports only its entry points
@@ -123,7 +132,21 @@ endfunction()
 # makes them resolvable by the dlopened logic. Force-loads ONLY the tiny
 # curated-surface lib, NOT all of view-core (which drags in the mac-incompatible
 # SDL-host TU).
+#
+# An SDK that serves Pulp::view from Vellum has no Pulp editor surface to
+# export, so a thin logic could not build its own Pulp view there. Refuse
+# instead of degrading to pulp_reload_host() and leaving the logic to fail at
+# dlopen: in that SDK the logic stays DSP-only and the editor comes from a UI
+# package bound to the reload shell.
 function(pulp_reload_host_ui target)
+    _pulp_ui_provider(_pulp_reload_ui_provider)
+    if(_pulp_reload_ui_provider STREQUAL "vellum")
+        message(FATAL_ERROR
+            "pulp_reload_host_ui(${target}): this Pulp SDK serves Pulp::view from Vellum, "
+            "so it has no Pulp editor surface for a reload logic to resolve. Keep the logic "
+            "DSP-only, call pulp_reload_host(${target}), and give the plug-in a Vellum UI "
+            "package (UI <package>); that editor reloads itself after each DSP swap.")
+    endif()
     pulp_reload_host(${target})
     if(TARGET pulp-view-reload-exports)
         target_link_libraries(${target} PRIVATE pulp-view-reload-exports)

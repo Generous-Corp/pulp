@@ -6,6 +6,8 @@
 // driver, receipt and synthetic lanes do not share a file with the retained
 // and live slot experiments.
 
+#include "tools/import-design/sealed_font_files.hpp"
+
 #include <pulp/view/design_ir.hpp>
 #include <pulp/view/view.hpp>
 
@@ -208,6 +210,7 @@ class IrLiveFixture final : public BenchmarkFixture {
     std::unique_ptr<view::View> root_;
     std::unique_ptr<view::ScriptEngine> engine_;
     std::unique_ptr<state::StateStore> store_;
+    import_design::SealedFontFiles sealed_fonts_;
     std::unique_ptr<view::WidgetBridge> bridge_;
     std::vector<std::uint64_t> slot_instance_ids_;
     int js_evaluations_ = 0;

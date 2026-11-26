@@ -14,7 +14,7 @@ functions:
 
   - name: pulp_add_plugin
     status: usable
-    summary: Create plugin targets for multiple formats from a single declaration.
+    summary: Create plugin targets for multiple formats from a single declaration, including macOS AUv3 framework staging for UI package runtime libraries.
     required:
       - FORMATS
     optional:
@@ -100,6 +100,13 @@ functions:
   - name: pulp_reload_host
     status: usable
     summary: Export a host target's SDK symbols so thin (RESOLVE_FROM_HOST) reload logic can resolve pulp::* at dlopen. No-op on Windows.
+    required:
+      - target
+    docs: guides/dsp-hot-reload.md
+
+  - name: pulp_reload_host_ui
+    status: usable
+    summary: Like pulp_reload_host, and also force-retains and exports Pulp's editor surface so a thin reload logic can build its own Pulp view. Refuses configure in an SDK that serves Pulp::view from Vellum, where the logic stays DSP-only and the editor comes from a UI package.
     required:
       - target
     docs: guides/dsp-hot-reload.md
@@ -253,6 +260,7 @@ functions:
       - AU_TYPE
       - ACCEPTS_MIDI
       - SOURCES
+      - UI
     creates:
       - ${target}_Core
       - ${target}_AUv3

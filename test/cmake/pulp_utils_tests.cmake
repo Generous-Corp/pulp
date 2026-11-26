@@ -8,3 +8,19 @@ add_test(NAME cmake-pulp-utils-compat
 set_tests_properties(cmake-pulp-utils-compat PROPERTIES
     LABELS "cmake;sdk;compat"
     TIMEOUT 180)
+
+add_test(NAME cmake-executable-export-hygiene
+    COMMAND ${CMAKE_COMMAND}
+        -DPULP_SOURCE_DIR=${CMAKE_SOURCE_DIR}
+        -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/test_executable_export_hygiene.cmake)
+set_tests_properties(cmake-executable-export-hygiene PROPERTIES
+    LABELS "cmake;sdk;exports"
+    TIMEOUT 60)
+
+add_test(NAME cmake-shared-test-seams-contract
+    COMMAND ${CMAKE_COMMAND}
+        -DPULP_SOURCE_DIR=${CMAKE_SOURCE_DIR}
+        -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/test_shared_test_seams.cmake)
+set_tests_properties(cmake-shared-test-seams-contract PROPERTIES
+    LABELS "cmake;sdk;test-seams"
+    TIMEOUT 60)

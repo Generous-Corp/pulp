@@ -1,13 +1,13 @@
 {
   "schema": "pulp.lock.v1",
   "vellum": {
-    "tag": "v0.2.0",
-    "sha": "d361ea5b855707391798b7315183d99b6cbe69b6",
-    "sdk_url": "https://github.com/Generous-Corp/vellum/releases/download/v0.2.0/vellum-sdk-0.2.0-darwin-arm64.tar.gz",
-    "sdk_digest": "cd7d443591115a6e4b8680f6eb125cce45b048f00869fb6b8eeff5a04d6f6fc7",
-    "gpu_runtime_digest": "f0ed5c873c9513725044cbca30d3604fbcb6f6dfdca99ee588dca1050b3d857c"
+    "tag": "v0.2.3",
+    "sha": "2191e8a3ee823ba1946b83e466c2fd20c3494e4d",
+    "sdk_url": "https://github.com/Generous-Corp/vellum/releases/download/v0.2.3/vellum-sdk-0.2.3-darwin-arm64.tar.gz",
+    "sdk_digest": "16ccadc10cb464a573e518de7406571da9b46e5cea731dc1c8f3899dd0d47b0a",
+    "gpu_runtime_digest": "ee7391c267398ded016075593eb21ee4de7f2da34f49a349facb545a94441694"
   },
   "render_toolchain": {
-    "lock_digest": "ab93d57549381c225cbd5adcc6dc30976b7c473a120a898c62a38de0c084a88e"
+    "lock_digest": "330cc21b917fc0e1cadb8f6e34117bfb9fbf13688a398c09072dce66ea436836"
   }
 }

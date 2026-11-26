@@ -165,6 +165,20 @@ function(_pulp_apply_macho_exports target file_stem)
         "LINKER:-exported_symbols_list,${_pulp_export_file}")
 endfunction()
 
+# Executables must keep third-party SDK internals out of their dynamic export
+# table. Callers that genuinely host thin reload logic add the narrow Pulp ABI
+# patterns through pulp_reload_host().
+function(_pulp_apply_macho_executable_exports target file_stem)
+    if(NOT APPLE)
+        return()
+    endif()
+
+    set(_pulp_export_file "${CMAKE_CURRENT_BINARY_DIR}/${file_stem}.exports")
+    file(WRITE "${_pulp_export_file}" "")
+    target_link_options(${target} PRIVATE
+        "LINKER:-exported_symbols_list,${_pulp_export_file}")
+endfunction()
+
 # Linux plug-in images export only their format's entry points.
 #
 # A Linux MODULE exports every default-visibility symbol, and the archives a

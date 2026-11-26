@@ -18,6 +18,12 @@ if(TARGET pulp-native)
     target_link_libraries(pulp-test-native-x11-translate PRIVATE
         pulp::native Catch2::Catch2WithMain)
     catch_discover_tests(pulp-test-native-x11-translate)
+
+    # The Win32 translation tables are pure too.
+    add_executable(pulp-test-native-win32-translate test_native_win32_translate.cpp)
+    target_link_libraries(pulp-test-native-win32-translate PRIVATE
+        pulp::native Catch2::Catch2WithMain)
+    catch_discover_tests(pulp-test-native-win32-translate)
 endif()
 
 if(NOT APPLE AND TARGET pulp-native)
@@ -46,6 +52,14 @@ if(UNIX AND NOT APPLE AND TARGET pulp-native AND PULP_NATIVE_HAS_X11)
         target_include_directories(pulp-test-native-gl-surface-x11 PRIVATE
             ${PULP_X11_XTEST_INCLUDE_DIR})
         target_compile_definitions(pulp-test-native-gl-surface-x11 PRIVATE PULP_TEST_HAS_XTEST=1)
+    endif()
+    find_library(PULP_X11_XFIXES_LIBRARY Xfixes)
+    find_path(PULP_X11_XFIXES_INCLUDE_DIR X11/extensions/Xfixes.h)
+    if(PULP_X11_XFIXES_LIBRARY AND PULP_X11_XFIXES_INCLUDE_DIR)
+        target_link_libraries(pulp-test-native-gl-surface-x11 PRIVATE ${PULP_X11_XFIXES_LIBRARY})
+        target_include_directories(pulp-test-native-gl-surface-x11 PRIVATE
+            ${PULP_X11_XFIXES_INCLUDE_DIR})
+        target_compile_definitions(pulp-test-native-gl-surface-x11 PRIVATE PULP_TEST_HAS_XFIXES=1)
     endif()
     set(_pulp_x11_test_env "")
     find_program(PULP_XVFB_RUN xvfb-run)

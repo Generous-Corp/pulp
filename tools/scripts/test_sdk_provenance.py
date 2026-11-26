@@ -127,6 +127,25 @@ class SdkProvenanceTests(unittest.TestCase):
             0o644,
         )
 
+    def test_windows_arm64ec_marker_round_trip(self):
+        (self.prefix / "lib/pulp-view-script.lib").write_bytes(b"EC archive fixture")
+        marker = self.marker(platform="windows-arm64ec")
+        provenance.write_atomically(self.prefix / "sdk-provenance.json", marker)
+        self.assertEqual(provenance.verify_release_marker(
+            self.prefix, expected_platform="windows-arm64ec", expected_source_sha=self.sha), marker)
+        for other in ("windows-arm64", "windows-x64"):
+            with self.subTest(consumer=other):
+                with self.assertRaises(provenance.ProvenanceError):
+                    provenance.verify_release_marker(
+                        self.prefix, expected_platform=other, expected_source_sha=self.sha)
+
+    def test_stamp_rejects_unknown_platform_before_creating_marker(self):
+        for platform in ("darwin-arm64ec", "linux-arm64ec", "windows-arm64x",
+                         "windows-arm64ec-extra", "windows-arm64ec\n"):
+            with self.subTest(platform=platform):
+                with self.assertRaisesRegex(provenance.ProvenanceError, "unsupported SDK platform"):
+                    self.marker(platform=platform)
+
     def install_gpu_audio_capabilities(self, *, shared=True, exact=True, convolver=True):
         facts = {"shared_provider": shared, "shared_convolver": convolver,
                  "exact_provider_proof": exact}

@@ -30,6 +30,59 @@ It does not capture devices, request permissions, run inference, own model
 weights, or write saved parameters from a provider thread. Those responsibilities
 stay with your application.
 
+## Native editor interaction
+
+Runtime interaction producers publish discrete events to an
+`InteractionTracker`, which validates source and epoch ordering, ages active
+objects, and synthesizes cancels on source loss, reset, or timeout. The
+`InteractionRouter` fans the tracker's accepted events and cancels to separate
+bounded SPSC queues for UI and audio consumers. A queue overflow retains one
+pending cancel per affected object until that consumer can receive it. The
+optional Pulp-to-Vellum bridge consumes tracker output through the router and
+`pulp::vellum::InteractionAdapter` scales normalized coordinates into view
+bounds, recycles pointer IDs, and maps tracker cancels to Vellum cancelled
+mouse events. Vellum's `MouseEvent` has no hold, velocity, or confidence
+metadata, so hold is represented as a drag tick and those fields are not
+forwarded.
+
+A planned optional audio seam would map note-like interactions to the existing MPE voice tracker and `MpeVoiceAllocator` APIs. This change does not add it, and it will not add a parallel expression model. Camera, sensor, inference, and permission lifecycle code belongs in the editor or application layer. It must publish into the router from a provider or worker thread and never enter `Processor` or the audio callback.
+
+## The default provider recipe
+
+For a new real-world demo, use this sequence before choosing a provider SDK:
+
+1. Capture or receive a complete observation away from the audio callback.
+2. Translate it into `ExternalInputFrame<N>` and publish it through one existing
+   bounded handoff such as `TripleBuffer`, OSC/IPC, MIDI, or WAM ingress. For
+   discrete interactions, use `InteractionEventQueue<N>` or an equivalent
+   ordered SPSC queue because a latest-value buffer can overwrite a release
+   before the audio reader sees it.
+3. Submit it to `ExternalInputGate<N>` with a policy that defines confidence,
+   expiry, and restart behavior.
+4. Map only accepted values or events to existing parameters, modulation, MIDI,
+   or DSP state.
+5. Record the observation stream so the same input can be replayed without the
+   device or model.
+
+This recipe works for hand, face, pose, audio-feature, motion, HID, and custom
+ML providers. The provider adapter owns permissions, model loading, calibration,
+and provider-specific names. Pulp owns bounded transport expectations,
+validation, expiry, and the audio-side fallback. A provider can therefore be
+replaced without changing the processor.
+
+The first acceptance pass should prove three independent surfaces: provider
+permission and capture, accepted observation and mapping, and audible or MIDI
+output. A camera preview or successful model load proves only the first part.
+
+Use `pulp/runtime/interaction_event.hpp` when a provider produces discrete,
+object-owned actions such as a press, pluck, strum, drum hit, drag, or release.
+Use `ExternalInputFrame<N>` when the provider produces a coherent continuous
+snapshot such as position, pose, tilt, level, or confidence values. A demo can
+use both surfaces. The event batch is fixed-capacity and trivially copyable so
+it can cross an ordered bounded handoff without allocations. Read through its
+bounded `events_view()` accessor. Mapping events to notes, parameters, or DSP
+remains the consumer's responsibility.
+
 ## How the contract works
 
 A provider publishes one complete observation at a time. The frame carries a
@@ -98,6 +151,23 @@ orientation cannot be assembled from different updates. The
 `examples/cv-control` application shows a fuller mapping and ingress example;
 its `ControlSample` and `SignalMapping` remain application-owned.
 
+### One observation, two musical outputs
+
+A recognition application can keep one provider-neutral observation and choose
+its musical destination at the application boundary. In a MIDI-effect mode, the
+validated gesture becomes bounded note-on and note-off messages for a host
+instrument. In a virtual-instrument mode, the same gesture is applied to the
+plugin's own voice state. The provider, camera permission, confidence checks,
+restart handling, and replay fixture are shared. The audio callback still sees
+only validated events or the safe fallback.
+
+This split keeps a camera or model out of the processor while supporting both a
+browser page and native plugin formats. A browser page can show the camera and
+run inference in the UI thread, then use WAM/WebCLAP MIDI ingress. A native
+plugin can receive the same observation from a companion process, OSC/IPC, or a
+replay source. A visible camera preview is an application diagnostic and does
+not grant the audio plugin direct device access.
+
 ```mermaid
 flowchart LR
     A[Camera, sensor, MIDI, OSC, or ML worker] --> B[Application-owned handoff]
@@ -112,7 +182,7 @@ flowchart LR
 
 | Source and consumer | Recommended existing path |
 |---|---|
-| Native provider to the same application or plugin process | Application-owned `TripleBuffer<T>` or another existing bounded runtime primitive. |
+| Native provider to the same application or plugin process | `TripleBuffer<T>` for continuous frames, or `InteractionEventQueue<N>` for ordered discrete events. |
 | External process to a desktop/plugin consumer | Existing OSC or IPC. Keep the external process responsible for camera/device permissions and inference. |
 | Browser provider to a WAM processor | Existing WAM MIDI ingress; the example reserves channel-16 pitch bend for one compact control packet. |
 | Host automation or musical control | Existing MIDI/MPE and StateStore/modulation paths. |
@@ -157,6 +227,32 @@ non-blocking after preparation.
   ML APIs belong to the application adapter. Permissions and pause/resume are
   platform-owned. AUv3 or other mobile plugin sandboxes may require an app or
   companion process to provide the input.
+
+### Camera access from audio-plugin hosts
+
+An AUv2 component normally runs inside the host process. Its bundle cannot add
+the host's camera usage description or change the host's camera authorization.
+If a host has no camera usage description, or its sandbox and TCC policy deny
+camera access, a plugin must treat the camera as unavailable. A host that scans
+or isolates components in another process still owns that process's permission
+decision. An AUv2 bundle's own `Info.plist` is therefore not evidence that a
+DAW can grant it camera access.
+
+AUv3 and other mobile plugin extensions have the same product boundary from the
+consumer's perspective. The containing app owns camera permission, lifecycle,
+and model loading. The extension should receive normalized frames or ordered
+interaction events through an application-owned handoff. A standalone app or
+editor host can own the camera when its own `Info.plist` declares
+`NSCameraUsageDescription` and it requests access on a non-audio thread.
+
+Use two acceptance receipts when evaluating camera-driven audio. First prove
+the installed plugin with replay, MIDI, OSC, or IPC input and verify its audio
+or MIDI output in the target host. Then prove camera permission, capture, and
+inference in the standalone app or companion process and record the resulting
+provider frames. Do not call the AU or AUv3 camera path supported because an
+AU bundle loads or `auval` passes. This split keeps the plugin useful when a
+host denies camera access and makes the same mapping reusable by a browser,
+Swift app, Android app, or another provider.
 
 ### Mobile adapter recipe
 

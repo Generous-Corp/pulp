@@ -326,6 +326,8 @@ set(PULP_RUNTIME_UNIT_HEADERS
     include/pulp/runtime/i18n.hpp
     include/pulp/runtime/identity.hpp
     include/pulp/runtime/inter_process_lock.hpp
+    include/pulp/runtime/interaction_event.hpp
+    include/pulp/runtime/interaction_router.hpp
     include/pulp/runtime/ip_address.hpp
     include/pulp/runtime/json_rpc.hpp
     include/pulp/runtime/license.hpp
@@ -343,6 +345,7 @@ set(PULP_RUNTIME_UNIT_HEADERS
     include/pulp/runtime/node_abi.hpp
     include/pulp/runtime/primes.hpp
     include/pulp/runtime/range.hpp
+    include/pulp/runtime/reload_capabilities.hpp
     include/pulp/runtime/result.hpp
     include/pulp/runtime/runtime.hpp
     include/pulp/runtime/safe_relative_path.hpp

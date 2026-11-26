@@ -271,6 +271,8 @@ for**: every Mach-O / ELF / PE file under a bundle, found by image header, or
 the loose file itself. The build's ctests already hold the list on the artifact
 classes they build; this holds it on the bytes that get signed and notarized.
 
+Product test seams are registered in the same list as `test-seam.<product>` entries with the `dev-env-off` gate. Code reads them through `PULP_TEST_ENV`, which compiles them out of Release, and the scan proves no seam name survives in a shipped artifact.
+
 - **Gates come from evidence, not from the command line.** The guard
   (`tools/cli/ship_artifact_scan_guard.hpp`, unit-tested in
   `test/test_ship_artifact_scan_guard.cpp`) mirrors
@@ -913,6 +915,16 @@ each artifact's signature and **skips (does not submit) any unsigned `.pkg`/
 artifact" warning instead of a failed notarytool submission. `notarize --path`
 likewise rejects a raw `.app` (notarytool needs a `.dmg`/`.pkg`/`.zip`
 container — use `share` for an app).
+
+### Nested code is not re-signed (AUv3 with UI package dylibs)
+
+`pulp ship sign` auto-scans only `VST3`, `CLAP` and `AU` bundles, and
+`pulp ship sign --path` runs one `codesign --force --sign <id> --timestamp
+--options runtime <path>` on the artifact it is given. Neither walks nested code
+inner-out, so the ad-hoc signed dylibs a macOS AUv3 build stages inside
+`<fw>.framework/Versions/A` (Vellum runtime libraries) keep their build-time
+signature. Sign each nested dylib, then the framework, the `.appex` and the
+host `.app`, by hand (see the manual sign recipe below) before notarizing.
 
 ### AUv3 Xcode handoff: `pulp ship auv3-xcodeproj`
 
@@ -2264,6 +2276,14 @@ Facts worth keeping (measured):
   (e.g. both `pulp-host-m5` and `pulp-host-macstudio`) makes `pin` land somewhere you
   did not choose. Check the labels before trusting a pin.
 
+## The macOS SDK must carry every editor integration a template needs
+
+`pulp create --ui vellum` depends on the pulp-vellum bridge in the SDK. The
+darwin-arm64 release leg stages it from the `pulp.lock` Vellum SDK (digest
+checked) and `check_vellum_sdk_staging.py` fails the release when the headers,
+library or `Pulp::vellum` target are missing. Check an SDK by hand with
+`python3 tools/scripts/check_vellum_sdk_staging.py <sdk-prefix>`.
+
 ## cmd_ship shells out with shell_quote(), never concatenated quotes
 
 Every shell-out in `tools/cli/cmd_ship.cpp` goes through `shell_quote()` from
@@ -2353,3 +2373,11 @@ a known-bad input proves nothing, so include the historical tags that failed
   posted; for example an `update` rule comes back without its parameters.
 - `gh attestation verify --bundle <file>` refuses a bundle whose name does not
   end in `.json` or `.jsonl`; name a downloaded bundle accordingly.
+
+## Optional Vellum packages are built into the release SDK by flag
+
+`release-cli.yml` turns on `PULP_ENABLE_PULP_VELLUM`, `_AUDIO` and `_COMPONENTS`
+for the darwin-arm64 SDK leg. A new optional package must be listed in the same
+flag array, in `release_product_matrix.json` (darwin-arm64 stems) and in the
+conditional `PULP_SDK_TARGETS` append in `PulpInstallRules.cmake`, or the SDK
+archive silently omits it.

@@ -467,6 +467,115 @@ TEST_CASE("browser discovery honors explicit, environment, managed, then system"
     }
 }
 
+TEST_CASE("browser discovery omits macOS app bundles in agent sandboxes",
+          "[import-design][browser-capture]") {
+#ifdef __APPLE__
+    TempTree tree("sandbox-app");
+    const auto exec_perms = fs::perms::owner_read | fs::perms::owner_write | fs::perms::owner_exec;
+    const auto bundled = tree.write("Chromium.app/Contents/MacOS/Chromium", "#!/bin/sh\nexit 0\n");
+    fs::permissions(bundled, exec_perms);
+    const auto plain = tree.write("bin/chromium", "#!/bin/sh\nexit 0\n");
+    fs::permissions(plain, exec_perms);
+
+    capture::BrowserDiscoveryOptions options;
+    options.environment_override = "";
+    options.mode_override = "system";
+    options.include_default_system_candidates = false;
+    options.system_candidates = {bundled, plain};
+
+    {
+        ScopedEnv sandbox("CODEX_SANDBOX", "");
+        const auto candidates = capture::collect_browser_candidates(options);
+        REQUIRE(candidates.size() == 2);
+        CHECK(candidates[0].executable == bundled);
+        CHECK(candidates[1].executable == plain);
+    }
+    {
+        ScopedEnv sandbox("CODEX_SANDBOX", "seatbelt");
+        std::vector<fs::path> omitted;
+        const auto candidates = capture::collect_browser_candidates(options, &omitted);
+        REQUIRE(candidates.size() == 1);
+        CHECK(candidates[0].executable == plain);
+        REQUIRE(omitted.size() == 1);
+        CHECK(omitted[0] == bundled);
+
+        // The default table never offers an .app executable in a sandbox,
+        // whatever this host has installed.
+        options.system_candidates.clear();
+        options.include_default_system_candidates = true;
+        for (const auto& candidate : capture::collect_browser_candidates(options))
+            CHECK(candidate.executable.string().find(".app/") == std::string::npos);
+    }
+#else
+    SUCCEED("macOS app bundle discovery is platform-specific");
+#endif
+}
+
+TEST_CASE("browser discovery omits PATH symlinks into app bundles in agent sandboxes",
+          "[import-design][browser-capture]") {
+#ifdef __APPLE__
+    TempTree tree("sandbox-symlink");
+    const auto exec_perms = fs::perms::owner_read | fs::perms::owner_write | fs::perms::owner_exec;
+    const auto bundled =
+        tree.write("Fake Chrome.app/Contents/MacOS/Google Chrome", "#!/bin/sh\nexit 0\n");
+    fs::permissions(bundled, exec_perms);
+    const auto plain = tree.write("plain/chromium", "#!/bin/sh\nexit 0\n");
+    fs::permissions(plain, exec_perms);
+    fs::create_directories(tree.root() / "bin");
+    fs::create_symlink(bundled, tree.root() / "bin" / "google-chrome");
+    fs::create_symlink(plain, tree.root() / "bin" / "chromium");
+
+    capture::BrowserDiscoveryOptions options;
+    options.environment_override = "";
+    options.mode_override = "system";
+    options.include_default_system_candidates = true;
+    ScopedEnv path("PATH", (tree.root() / "bin").string() + ":/usr/bin:/bin");
+    ScopedEnv sandbox("CODEX_SANDBOX", "seatbelt");
+    const auto candidates = capture::collect_browser_candidates(options);
+
+    const auto listed = [&](const fs::path& name) {
+        return std::any_of(candidates.begin(), candidates.end(), [&](const auto& candidate) {
+            return candidate.executable.filename() == name &&
+                   candidate.executable.parent_path() == tree.root() / "bin";
+        });
+    };
+    CHECK_FALSE(listed("google-chrome"));
+    CHECK(listed("chromium"));
+#else
+    SUCCEED("macOS app bundle discovery is platform-specific");
+#endif
+}
+
+TEST_CASE("browser discovery explains sandbox browser prerequisite",
+          "[import-design][browser-capture]") {
+    capture::BrowserDiscoveryOptions options;
+    options.environment_override = "";
+    options.mode_override = "system";
+    options.include_default_system_candidates = false;
+    ScopedEnv sandbox("CODEX_SANDBOX", "seatbelt");
+
+    // Nothing was dropped, so the sandbox is not blamed.
+    const auto empty = capture::discover_browser(options);
+    REQUIRE_FALSE(empty.ok());
+    CHECK(empty.diagnostic.message.find("sandbox") == std::string::npos);
+    CHECK(empty.diagnostic.message.find("No compatible") != std::string::npos);
+
+#ifdef __APPLE__
+    TempTree tree("sandbox-diagnostic");
+    const auto bundled =
+        tree.write("Google Chrome.app/Contents/MacOS/Google Chrome", "#!/bin/sh\nexit 0\n");
+    fs::permissions(bundled,
+                    fs::perms::owner_read | fs::perms::owner_write | fs::perms::owner_exec);
+    options.system_candidates = {bundled};
+    const auto result = capture::discover_browser(options);
+    REQUIRE_FALSE(result.ok());
+    CHECK(result.probes.empty());
+    CHECK(result.diagnostic.message.find("cannot start in a sandbox") != std::string::npos);
+    CHECK(result.diagnostic.message.find("managed browser or pass one explicitly") !=
+          std::string::npos);
+#endif
+}
+
 TEST_CASE("browser modes constrain managed and system discovery",
           "[import-design][browser-capture]") {
     TempTree tree("modes");
@@ -581,6 +690,73 @@ TEST_CASE("managed discovery trusts only exact current json",
         CHECK(capture::collect_browser_candidates(options).empty());
     }
 #endif
+}
+
+TEST_CASE("managed discovery prefers the same-release headless shell",
+          "[import-design][browser-capture]") {
+    TempTree tree("managed-shell");
+    const auto browser = tree.write(
+        (fs::path("managed/9.9.9/host/payload") / managed_browser_name()).generic_string(),
+        "browser");
+    const auto shell =
+        tree.write("managed/9.9.9/host-headless-shell/payload/chrome-headless-shell", "shell");
+    tree.write("managed/current.json", "{\"schema\":1,\"version\":\"9.9.9\",\"platform\":\"host\","
+                                       "\"executable\":\"9.9.9/host/payload/" +
+                                           managed_browser_name().generic_string() + "\"}");
+    const std::string shell_record =
+        "{\"schema\":1,\"version\":\"9.9.9\",\"platform\":\"host\","
+        "\"executable\":\"9.9.9/host-headless-shell/payload/chrome-headless-shell\"}";
+    capture::BrowserDiscoveryOptions options;
+    options.environment_override = "";
+    options.mode_override = "managed";
+    options.managed_root = tree.root() / "managed";
+    options.include_default_system_candidates = false;
+
+    SECTION("without a shell record only the browser is offered") {
+        const auto candidates = capture::collect_browser_candidates(options);
+        REQUIRE(candidates.size() == 1);
+        CHECK(candidates[0].executable == browser);
+    }
+
+    SECTION("a shell of the current release comes first, the browser second") {
+        tree.write("managed/headless-shell.json", shell_record);
+        const auto candidates = capture::collect_browser_candidates(options);
+        REQUIRE(candidates.size() == 2);
+        CHECK(candidates[0].executable == shell);
+        CHECK(candidates[0].origin == capture::BrowserOrigin::managed);
+        CHECK(candidates[1].executable == browser);
+    }
+
+    SECTION("a shell of another release is not used") {
+        tree.write("managed/headless-shell.json",
+                   replace_once(replace_once(shell_record, "\"9.9.9\"", "\"9.9.8\""),
+                                "9.9.9/host-headless-shell", "9.9.8/host-headless-shell"));
+        tree.write("managed/9.9.8/host-headless-shell/payload/chrome-headless-shell", "old shell");
+        const auto candidates = capture::collect_browser_candidates(options);
+        REQUIRE(candidates.size() == 1);
+        CHECK(candidates[0].executable == browser);
+    }
+
+    SECTION("a shell record cannot name the browser directory") {
+        tree.write("managed/headless-shell.json",
+                   replace_once(shell_record, "host-headless-shell", "host"));
+        tree.write("managed/9.9.9/host/payload/chrome-headless-shell", "planted");
+        const auto candidates = capture::collect_browser_candidates(options);
+        REQUIRE(candidates.size() == 1);
+        CHECK(candidates[0].executable == browser);
+    }
+
+    SECTION("a shell without a current browser is not used") {
+        tree.write("managed/headless-shell.json", shell_record);
+        tree.write("managed/current.json", "{}");
+        CHECK(capture::collect_browser_candidates(options).empty());
+    }
+
+    SECTION("system mode never offers the managed shell") {
+        tree.write("managed/headless-shell.json", shell_record);
+        options.mode_override = "system";
+        CHECK(capture::collect_browser_candidates(options).empty());
+    }
 }
 
 TEST_CASE("browser capture rejects unsafe viewport allocations before launch",

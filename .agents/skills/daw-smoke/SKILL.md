@@ -216,6 +216,45 @@ ditto "$SRC" "$DST" && codesign --verify --deep --strict "$DST"
 knowing when reading such an error; `--deep --strict` treats everything in
 `MacOS/` as a subcomponent.)
 
+### Shared-host REAPER: isolate the scan, scope the restore alert, name a stall
+
+Measured on REAPER 7.84 on a shared Mac where another team's stale VST3s in
+`~/Library/Audio/Plug-Ins/VST3` crashed REAPER's scan subprocess on every
+scan of that folder.
+
+- **The temp scan path IS honored on 7.84.** A `-cfgfile` profile whose
+  `vstpath*`/`clap_path*` keys all name the temp dir caches only REAPER's
+  built-ins plus the plug-in under test. Any harness that stages into
+  `~/Library/Audio/Plug-Ins/<fmt>` (or leaves one scan key at the user's
+  value) scans everyone's plug-ins, and one bad bundle poisons every run.
+  `reaper_host_guard.isolated_ini_text` rewrites every scan key, and the
+  session refuses to continue if the pre-warm cache names a foreign bundle.
+- **One crash arms AppKit's "reopen windows?" alert for every later
+  launch,** including the `-__vst_scan__` subprocess, which then waits
+  forever. `-ApplePersistenceIgnoreState YES` on the command line fixes the
+  main process without touching defaults (REAPER logs
+  `ApplePersistenceIgnoreState: Existing state will not be touched`), but the
+  scan subprocess is relaunched as `REAPER -cfgfile <ini> -__vst_scan__ <bundle>`
+  without it. So the harness also sets the per-app default for the run only and
+  restores the exact prior state on exit (`scoped_persistence_opt_out`).
+- **Argument order matters.** REAPER stops reading its own options at the
+  first one it does not know. With the persistence pair before `-cfgfile`,
+  REAPER ignored the isolated profile and opened the user's real one. The pair
+  goes last; `profile_in_use` reports `NOT-ISOLATED` if the temp profile was
+  not adopted within 10 s.
+- **Never launch while another REAPER runs.** `pgrep -x REAPER` (never `-f`)
+  first; the harness SKIPs, or waits `--wait-for-host` seconds. Set
+  `PULP_DAW_SMOKE_BUSY_FILE` to a host's on-screen busy flag to honor it too.
+- **Name a stall instead of waiting out the cap.** A scan subprocess never owns
+  a window, so one that does is an alert (`BLOCKED-MODAL`); one alive past
+  `--scan-seconds` is `SCAN-HUNG` and its argv names the bundle; a main
+  process idle past `--stall-seconds` with only alert-sized windows is
+  `BLOCKED-MODAL`. Window owner, layer and size come from `CGWindowList`
+  without a Screen Recording grant. Layer-8 (modal-panel level) windows appear
+  on every normal startup (scan progress), so layer alone is not a modal signal.
+- **AU is not isolated.** AudioComponent registration is system-wide, and
+  REAPER's AU scan sees every installed component.
+
 ### "FX not found / flaky launch": the likely cause was the pre-warm, fixed 2026-10-22
 
 Measured on REAPER 7.79/7.82, CLAP and VST3 from the temp scan path: REAPER
@@ -446,3 +485,12 @@ the requested tracing sentinel state. Keep its source/build/toolchain artifacts
 with the campaign; an already-built bundle or receipt assertion is not proof.
 
 A3 v2 additionally binds each DAW campaign's sample provenance and exact trace bytes, then reruns the prepared analyzer and checks campaign, instance, process, GPU-evidence, trace-evidence, category, and completeness identity. A JSON sidecar alone is never terminal proof.
+
+### Windows exact-artifact scan routing
+
+Use `tools/testing/daw-smoke/windows/windows_editor_smoke.ps1` from the active
+Windows desktop. Windows REAPER reads `clap_path_win64` for x64 hosts and
+`clap_path_winarm64` for ARM hosts, rather than the unsuffixed `clap_path`.
+A system plugin can otherwise be selected despite a staged scan directory.
+Require the actual loaded module path/hash to match the staged manifest;
+parameter registration or editor presence alone cannot establish identity.

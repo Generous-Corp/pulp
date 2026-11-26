@@ -98,6 +98,14 @@ def codemodel_source_root(build: Path) -> Path:
     return Path(model["paths"]["source"])
 
 
+WINDOWS_ABSOLUTE_RE = re.compile(r"^[A-Za-z]:/")
+
+
+def is_host_absolute(path: str) -> bool:
+    """True for a normalized absolute path outside the checkout, on POSIX or Windows."""
+    return path.startswith("/") or WINDOWS_ABSOLUTE_RE.match(path) is not None
+
+
 def norm_path(raw: str, source: Path, build: Path) -> str:
     p = Path(raw)
     if not p.is_absolute():
@@ -114,7 +122,9 @@ def norm_path(raw: str, source: Path, build: Path) -> str:
         try:
             return p.resolve().relative_to(source.resolve()).as_posix()
         except ValueError:
-            return str(p.resolve())
+            # Forward slashes on every host, so a Windows path is recognized
+            # as absolute and classified as an external input.
+            return p.resolve().as_posix()
 
 
 def resolve_include(name: str, origin: Path, include_dirs: list[Path], source: Path) -> Path | None:
@@ -1827,7 +1837,7 @@ def target_manifest(source: Path, build: Path, names: list[str], synthetic: dict
                 external_paths.add(rel)
                 continue
         generated.add(rel)
-    external_paths.update(p for p in normalized if p.startswith("/") and not p.startswith(str(source.resolve())))
+    external_paths.update(p for p in normalized if is_host_absolute(p) and not p.startswith(source.resolve().as_posix()))
     external = [resolver.identify(p) for p in sorted(external_paths)]
     # Keep the exact CMake/script producers of the generated inputs this
     # closure actually holds, so the receipt can prove which repository rules
@@ -1840,7 +1850,7 @@ def target_manifest(source: Path, build: Path, names: list[str], synthetic: dict
         if candidate.is_file():
             all_files.add(candidate.resolve())
             normalized.append(producer)
-    files = sorted({p for p in normalized if p not in external_paths and not p.startswith("/") and not p.startswith("@build/")})
+    files = sorted({p for p in normalized if p not in external_paths and not is_host_absolute(p) and not p.startswith("@build/")})
     generated_rows = []
     for rel in sorted(generated - external_paths):
         candidate = build / rel.removeprefix("@build/")
@@ -2176,13 +2186,17 @@ def os_release_image_name(text: str) -> str:
 def export_metadata(environ: dict, platform: str, renderer_asset: str,
                     image_name_input: str = "", os_release: str = "") -> dict:
     """The export.json document, or SystemExit when the runner image is not fully named."""
-    sha = environ.get("GITHUB_SHA", "")
+    # Windows environment names are case-insensitive and Python upper-cases
+    # them in os.environ, so a hosted Windows runner's ImageVersion arrives as
+    # IMAGEVERSION. Look every name up without regard to case.
+    folded = {key.upper(): value for key, value in environ.items()}
+    sha = folded.get("GITHUB_SHA", "")
     if not FULL_SHA_RE.match(sha):
         raise SystemExit("GITHUB_SHA is not a full commit id")
     if not EXPORT_PLATFORM_RE.fullmatch(platform):
         raise SystemExit(f"{platform!r} is not a platform key")
-    version = environ.get("ImageVersion", "").strip()
-    image_os = environ.get("ImageOS", "").strip()
+    version = folded.get("IMAGEVERSION", "").strip()
+    image_os = folded.get("IMAGEOS", "").strip()
     name = image_name_input.strip() or os_release_image_name(os_release)
     if version.lower() in UNNAMED_IMAGE:
         raise SystemExit("the runner image declares no ImageVersion (a self-hosted runner or VM does not set it); "

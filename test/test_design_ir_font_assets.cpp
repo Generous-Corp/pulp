@@ -3,10 +3,14 @@
 // serialize exactly as they did before the descriptors existed.
 #include <catch2/catch_test_macros.hpp>
 
+#include <pulp/view/design_codegen.hpp>
 #include <pulp/view/design_ir_io.hpp>
 #include <pulp/view/design_sources.hpp>
+#include <pulp/view/reload_autocaps.hpp>
+#include <pulp/view/reload_capabilities.hpp>
 
 #include <string>
+#include <vector>
 
 using namespace pulp::view;
 
@@ -97,4 +101,59 @@ TEST_CASE("Figma plugin font assets carry no captured @font-face descriptors",
     const auto json = serialize_design_ir(ir);
     for (const char* key : {"fontStyle", "weightMax", "unicodeRange"})
         CHECK(json.find(key) == std::string::npos);
+}
+
+TEST_CASE("codegen registers a font beside the script by its sealed name",
+          "[design-import][fonts][security]") {
+    DesignIR ir;
+    ir.root.type = "frame";
+    IRAssetRef asset;
+    asset.asset_id = "userfont-1";
+    asset.local_path = "assets/0123abcd.ttf"; // what the export pass localizes to
+    ir.asset_manifest.assets.push_back(asset);
+    IRFontAsset fa;
+    fa.family = "Sealed Grotesk";
+    fa.weight = 400;
+    fa.weight_max = 700;
+    fa.asset_id = "userfont-1";
+    fa.resolved_path = "assets/0123abcd.ttf";
+    ir.font_family_assets.push_back(fa);
+
+    CHECK(sealed_font_asset_name(ir, fa) == "assets/0123abcd.ttf");
+    const auto js = generate_pulp_js(ir);
+    CHECK(js.find("if (typeof registerEmbeddedFont === 'function') registerEmbeddedFont("
+                  "'Sealed Grotesk', 'assets/0123abcd.ttf', 400, 700);") != std::string::npos);
+    // The manifest id is not an embedded file name and never reaches the call.
+    CHECK(js.find("'userfont-1'") == std::string::npos);
+    // A sealed face emits no Filesystem-gated call, so the panel infers an
+    // empty capability set and runs under an empty grant.
+    CHECK(js.find("registerFont") == std::string::npos);
+    CHECK(infer_capability_names_from_js(js).empty());
+
+    // A face reachable only by an absolute path keeps the gated fallback, and
+    // the panel honestly declares Filesystem for it.
+    DesignIR absolute = ir;
+    absolute.asset_manifest.assets[0].local_path = "/design/pack/clash.ttf";
+    absolute.font_family_assets[0].resolved_path = "/design/pack/clash.ttf";
+    CHECK(sealed_font_asset_name(absolute, absolute.font_family_assets[0]).empty());
+    const auto absolute_js = generate_pulp_js(absolute);
+    CHECK(absolute_js.find("registerEmbeddedFont") == std::string::npos);
+    CHECK(absolute_js.find("registerFont('Sealed Grotesk', '/design/pack/clash.ttf', 400, 700)") !=
+          std::string::npos);
+    CHECK(infer_capability_names_from_js(absolute_js) ==
+          std::vector<std::string>{std::string(capability_name(ReloadCapability::Filesystem))});
+
+    // Names that are not script-relative are never offered as sealed.
+    for (const char* unsafe : {"../assets/0123abcd.ttf", "assets/../../x.ttf",
+                               "file://assets/x.ttf", "/etc/hosts", "C:/fonts/x.ttf"}) {
+        DesignIR probe = ir;
+        probe.asset_manifest.assets.clear();
+        probe.font_family_assets[0].resolved_path = unsafe;
+        INFO(unsafe);
+        CHECK(sealed_font_asset_name(probe, probe.font_family_assets[0]).empty());
+    }
+    // A leading ./ normalizes to the embedded name.
+    DesignIR dotted = ir;
+    dotted.asset_manifest.assets[0].local_path = "./assets/0123abcd.ttf";
+    CHECK(sealed_font_asset_name(dotted, dotted.font_family_assets[0]) == "assets/0123abcd.ttf");
 }

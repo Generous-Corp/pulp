@@ -152,7 +152,25 @@ function(_pulp_add_auv3_macos_framework target name bundle_id version auv3_entry
     # installed-SDK builds, and the old `if(COMMAND ...)` guard is what let
     # a missing definition silently skip staging entirely.
     pulp_stage_runtime_dependencies(${fw_target})
+    _pulp_stage_ui_package_runtime(${target} ${fw_target})
     pulp_assert_runtime_dependencies_staged(${fw_target})
+
+    # Sign package dylibs before the framework is signed by the outer bundle
+    # step. Nested code must be signed from the inside out.
+    set(_ui_package "${PULP_${target}_UI_PACKAGE}")
+    if(_ui_package AND TARGET "${_ui_package}")
+        get_target_property(_ui_runtime_libraries "${_ui_package}" PULP_EDITOR_RUNTIME_LIBRARIES)
+        if(_ui_runtime_libraries)
+            find_program(_pulp_codesign codesign REQUIRED)
+            foreach(_ui_runtime_library IN LISTS _ui_runtime_libraries)
+                add_custom_command(TARGET ${fw_target} POST_BUILD
+                    COMMAND "${_pulp_codesign}" --force --sign -
+                        "$<TARGET_FILE_DIR:${fw_target}>/$<TARGET_FILE_NAME:${_ui_runtime_library}>"
+                    COMMENT "Signing $<TARGET_FILE_NAME:${_ui_runtime_library}> inside ${fw_target}"
+                    VERBATIM)
+            endforeach()
+        endif()
+    endif()
     _pulp_attach_plugin_runtime_manifest(${target} ${fw_target})
     _pulp_attach_control_shipping(${target} ${fw_target} AUv3Framework)
 endfunction()
@@ -225,6 +243,17 @@ function(_pulp_add_auv3_macos_appex target name bundle_id version manufacturer m
         BUILD_WITH_INSTALL_RPATH TRUE
         INSTALL_RPATH "@executable_path/../../../../Frameworks"
     )
+    # UI package libraries are staged inside the framework, but CMake also puts
+    # them on this stub's link line, so dyld resolves them against the stub's
+    # own rpaths as well.
+    set(_ui_package "${PULP_${target}_UI_PACKAGE}")
+    if(_ui_package AND TARGET "${_ui_package}")
+        get_target_property(_ui_runtime_libraries "${_ui_package}" PULP_EDITOR_RUNTIME_LIBRARIES)
+        if(_ui_runtime_libraries)
+            set_property(TARGET ${appex_target} APPEND PROPERTY INSTALL_RPATH
+                "@executable_path/../../../../Frameworks/${name}AUv3Framework.framework/Versions/A")
+        endif()
+    endif()
     target_link_options(${appex_target} PRIVATE
         "-e" "_NSExtensionMain"
         "-fapplication-extension"
@@ -585,7 +614,7 @@ endfunction()
 function(pulp_add_ios_auv3)
     cmake_parse_arguments(AUV3
         "ACCEPTS_MIDI"
-        "NAME;BUNDLE_ID;MANUFACTURER;MANUFACTURER_CODE;SUBTYPE_CODE;AU_TYPE;VERSION"
+        "NAME;BUNDLE_ID;MANUFACTURER;MANUFACTURER_CODE;SUBTYPE_CODE;AU_TYPE;VERSION;UI"
         "SOURCES"
         ${ARGN}
     )
@@ -624,6 +653,26 @@ function(pulp_add_ios_auv3)
     endif()
 
     set(target "${AUV3_NAME}")
+
+    # UI <package>: the extension's editor comes from a UI package through the
+    # editor-host contract (PulpEditorPackage.cmake), the way pulp_add_plugin's
+    # UI keyword supplies it to the macOS formats. Checked before any target is
+    # created so a refusal leaves nothing half-built, and so an extension is
+    # never silently built editorless when a UI was asked for.
+    set(PULP_${target}_UI_PACKAGE "" CACHE INTERNAL "")
+    if(AUV3_UI AND NOT AUV3_UI STREQUAL "none")
+        _pulp_resolve_ui_package("pulp_add_ios_auv3(${AUV3_NAME})" "${AUV3_UI}"
+            _auv3_ui_function _auv3_ui_header)
+        get_target_property(_auv3_ui_runtime "${AUV3_UI}" PULP_EDITOR_RUNTIME_LIBRARIES)
+        if(_auv3_ui_runtime)
+            message(FATAL_ERROR
+                "pulp_add_ios_auv3(${AUV3_NAME}): UI package '${AUV3_UI}' needs shared "
+                "runtime libraries (${_auv3_ui_runtime}). An iOS app extension cannot load "
+                "loose shared libraries; the package must be built from static libraries "
+                "for iOS.")
+        endif()
+        set(PULP_${target}_UI_PACKAGE "${AUV3_UI}" CACHE INTERNAL "")
+    endif()
 
     # The iOS-only helper bypasses pulp_add_plugin(), so establish the same
     # production shipping declaration before _pulp_add_auv3() attaches its
@@ -668,6 +717,14 @@ function(pulp_add_ios_auv3)
 
     if(TARGET ${target}_AUv3)
         target_link_libraries(${target}_AUv3 PRIVATE ${target}_Core)
+    endif()
+    if(PULP_${target}_UI_PACKAGE)
+        if(NOT TARGET ${target}_AUv3)
+            message(FATAL_ERROR
+                "pulp_add_ios_auv3(${AUV3_NAME}): UI ${AUV3_UI} was given but no AUv3 "
+                "extension target was created for it")
+        endif()
+        _pulp_attach_ui_package(${target} "${PULP_${target}_UI_PACKAGE}")
     endif()
     set(PULP_${target}_SOURCE_GIT_SHA "" CACHE INTERNAL "")
     set(PULP_${target}_SOURCE_GIT_DIRTY "" CACHE INTERNAL "")

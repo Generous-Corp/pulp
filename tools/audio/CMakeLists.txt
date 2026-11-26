@@ -62,3 +62,15 @@ if(APPLE AND TARGET pulp-host)
     )
     install(TARGETS pulp-au-effect-ab RUNTIME DESTINATION bin)
 endif()
+
+# Headless CLAP host-conformance checker: scan cost, automation echo, input
+# ports and state round trip against any .clap module. Needs only the CLAP
+# headers and dlopen, so it links no Pulp code.
+if(TARGET clap AND NOT WIN32 AND NOT IOS AND NOT ANDROID AND NOT EMSCRIPTEN)
+    add_executable(pulp-clap-conformance clap-conformance/clap_conformance.cpp)
+    target_link_libraries(pulp-clap-conformance PRIVATE clap ${CMAKE_DL_LIBS})
+    if(APPLE)
+        target_link_libraries(pulp-clap-conformance PRIVATE "-framework CoreFoundation")
+    endif()
+    install(TARGETS pulp-clap-conformance RUNTIME DESTINATION bin)
+endif()

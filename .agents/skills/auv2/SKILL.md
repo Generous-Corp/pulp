@@ -1028,6 +1028,20 @@ plug-in host normalizes `NSEvent.deltaX/deltaY` into Pulp's positive-down
 native deltas and suppresses the duplicate point-only legacy callback. Product
 code supplies only its size/aspect policy through `on_resize`.
 
+### Tracing contract-editor geometry in a real host
+
+The contract container (`au_v2_contract_view.mm`) logs every geometry step
+with `PULP_AU_RESIZE_TRACE`: the frame it returns, each frame the host sets
+(`host-frame#N`, with the snap decision), every editor or snap-correction
+request and its result, and the move into the host's window. It is off unless
+`PULP_AUV2_RESIZE_TRACE=1` is in the plug-in's environment or the touch file
+`~/Library/Logs/Pulp/au-resize-trace.enabled` exists. Logic hosts AU v2 out
+of process, where a shell variable never arrives, so use the touch file there;
+lines append to `~/Library/Logs/Pulp/au-resize-trace.log` (rolled at 1 MiB to
+`.log.1`). The home is resolved with `getpwuid`, not `HOME`, because a
+sandboxed hosting service points `HOME` at its container; a sandbox that also
+denies the write leaves only the stderr copy, which Console shows.
+
 ### Out-of-process Logic starves the CPU editor's paint — drive it from the pump
 
 Logic hosts AU v2 **out-of-process** (`AUHostingServiceXPC`). A CPU
@@ -1733,3 +1747,18 @@ registering the same ID twice keeps both entries in `all_params()`.
   already applied. Legacy `pulp-state` class infos still restore their payload.
 * **CRC-32** is `StateStore::crc32` (table driven, same value as the bitwise
   definition); the parameter blob, PLST envelope and compact blob share it.
+
+## Host automation mirrored back by the plug-in is not an edit
+
+A plug-in that writes a host-automated value back into the store on the main
+thread (e.g. after quantising it) must not reach the host as an edit: hosts
+treat the parameter as touched and stop applying its envelope. the listener in `wire_host_parameter_bridge`, shares
+`HostWriteEchoGuard` with the VST3 bridge: off-main-thread host writes are
+remembered per parameter and a non-host write inside `kWindowNs` is not
+reported unless a gesture is open on it. Do not report from a new listener
+without consulting the guard.
+
+`wire_host_parameter_bridge` has an injectable notification sink overload for
+listener regression coverage; the production overload still uses
+`AUEventListenerNotify`. `[echo-wiring]` checks suppression, gestures, untouched
+parameters, and expiration through this actual listener.
