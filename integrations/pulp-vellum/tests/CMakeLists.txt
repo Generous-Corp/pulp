@@ -87,6 +87,11 @@ if(PULP_BUILD_TESTS AND TARGET Catch2::Catch2WithMain)
         if(PULP_HAS_VST3)
             target_compile_definitions(pulp-test-pulp-vellum-editor PRIVATE
                 PULP_TEST_VELLUM_VST3=1)
+            # The capture case decodes the host's back buffer with ImageIO.
+            if(APPLE)
+                target_link_libraries(pulp-test-pulp-vellum-editor PRIVATE
+                    "-framework CoreGraphics" "-framework ImageIO")
+            endif()
         endif()
 
         add_executable(pulp-test-pulp-vellum-about-notices
