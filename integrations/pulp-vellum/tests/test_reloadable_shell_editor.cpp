@@ -281,9 +281,9 @@ TEST_CASE("A host-driven editor session keeps a real Vellum scripted editor acro
     // The adapter path a plug-in format takes: the package factory, bound to
     // the shell, attached to a stand-in native parent with no window, and
     // ticked by the host.
-    auto session = ContractEditorSession::create(shell, store,
-                                                 *pulp::vellum::scripted_editor_factory(), {},
-                                                 ContractEditorSession::IdleSource::host_driven);
+    auto session =
+        ContractEditorSession::create(shell, store, *pulp::vellum::scripted_editor_factory(), {},
+                                      ContractEditorSession::IdleSource::host_driven);
     REQUIRE(session);
     REQUIRE(root);
     REQUIRE(host);
