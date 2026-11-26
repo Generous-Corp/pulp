@@ -1130,10 +1130,11 @@ def prelude_inputs(source: Path) -> list[Path] | None:
     if len(declarations) != 1 or set_count != 1 or list_mutation or unset_mutation:
         return None
     expected_names = [
-        "set", "set", "set", "find_package", "set", "foreach",
-        "get_filename_component", "string", "string", "endforeach", "string",
-        "set", "if", "file", "endif", "if", "file", "endif",
-        "add_custom_command", "target_sources",
+        "set", "set", "set", "foreach", "if", "list", "endif", "endforeach",
+        "if", "list", "message", "endif", "set", "set", "find_package", "set",
+        "foreach", "get_filename_component", "string", "string", "endforeach", "string",
+        "set", "if", "file", "endif", "if", "file", "endif", "add_custom_command",
+        "target_sources",
     ]
     if parsed is None or [name for name, _ in parsed] != expected_names:
         return None
@@ -1145,7 +1146,19 @@ def prelude_inputs(source: Path) -> list[Path] | None:
 
     expected_preludes = ["PULP_JS_PRELUDES"]
     expected_commands = [
+        ["PULP_VIEW_JS_DIR", '"${CMAKE_CURRENT_SOURCE_DIR}/js"', "CACHE", "PATH",
+         '"Directory holding the embedded web-compat JS preludes"'],
         expected_preludes,
+        ["_pulp_missing_preludes", '""'],
+        ["_prelude", "IN", "LISTS", "PULP_JS_PRELUDES"],
+        ["NOT", "EXISTS", '"${_prelude}"'],
+        ["APPEND", "_pulp_missing_preludes", '"${_prelude}"'],
+        [],
+        [],
+        ["_pulp_missing_preludes"],
+        ["JOIN", "_pulp_missing_preludes", '"\\n  "', "_pulp_missing_list"],
+        ["FATAL_ERROR", '"PULP_VIEW_JS_DIR (${PULP_VIEW_JS_DIR}) is missing embedded preludes:\\n  ${_pulp_missing_list}"'],
+        [],
         ["PULP_JS_EMBEDDED_HEADER", "${CMAKE_CURRENT_BINARY_DIR}/web_compat_preludes_gen.hpp"],
         ["PULP_JS_EMBEDDED_SOURCE", "${CMAKE_CURRENT_BINARY_DIR}/web_compat_preludes_gen.cpp"],
         ["Python3", "REQUIRED", "COMPONENTS", "Interpreter"],
@@ -1169,21 +1182,21 @@ def prelude_inputs(source: Path) -> list[Path] | None:
     if parsed is None or len(parsed) != len(expected_commands):
         return None
     for index, ((actual_name, actual), expected) in enumerate(zip(parsed, expected_commands)):
-        if index == 0:
+        if index == 1:
             if actual_name != "set" or not actual or actual[0] != "PULP_JS_PRELUDES":
                 return None
             expected_preludes = actual
             continue
         if actual != expected:
             return None
-    tokens = parsed[0][1][1:]
-    prefix = "${CMAKE_CURRENT_SOURCE_DIR}/"
+    tokens = parsed[1][1][1:]
+    prefixes = ("${PULP_VIEW_JS_DIR}/", "${CMAKE_CURRENT_SOURCE_DIR}/js/")
     paths: list[Path] = []
     for token in tokens:
-        if not token.startswith(prefix + "js/"):
+        prefix = next((candidate for candidate in prefixes if token.startswith(candidate)), None)
+        if prefix is None:
             return None
-        token = token.removeprefix(prefix)
-        rel = Path(token)
+        rel = Path("js") / token.removeprefix(prefix)
         if rel.is_absolute() or ".." in rel.parts:
             return None
         path = source / "core/view" / rel
@@ -1416,8 +1429,17 @@ def configure_record(build: Path) -> dict:
     """
     cache = _cmake_cache_typed(build)
     options: dict[str, str] = {}
+    source_root = cache.get("CMAKE_HOME_DIRECTORY", ("", ""))[1]
     for key, (kind, value) in cache.items():
-        if (key.startswith("PULP_") and kind in {"BOOL", "STRING"}) or (key.startswith("PULP_HAS_") and kind == "INTERNAL") \
+        if key == "PULP_VIEW_JS_DIR":
+            # The prelude closure can reproduce only the tracked default
+            # directory. Record it relative to the configured source root so
+            # an external override can be rejected before export.
+            try:
+                options[key] = Path(value).resolve().relative_to(Path(source_root).resolve()).as_posix()
+            except (OSError, ValueError):
+                options[key] = "@host-path"
+        elif (key.startswith("PULP_") and kind in {"BOOL", "STRING"}) or (key.startswith("PULP_HAS_") and kind == "INTERNAL") \
                 or key == "CMAKE_BUILD_TYPE":
             options[key] = "@host-path" if host_path(value) else value
     system = {}
@@ -1454,6 +1476,8 @@ def configure_violations(data: dict) -> list[str]:
         return ["configure record is malformed"]
     options, identity = configure["options"], configure["identity"]
     violations: list[str] = []
+    if options.get("PULP_VIEW_JS_DIR") not in {None, "core/view/js"}:
+        violations.append("configure PULP_VIEW_JS_DIR points outside the tracked prelude directory")
     if configure.get("options_sha256") != configure_options_sha256(options):
         violations.append("configure options digest does not match the recorded options")
     for field, option in (("gpu", "PULP_ENABLE_GPU"), ("skia", "PULP_HAS_SKIA"), ("text_shaping", "PULP_TEXT_SHAPING")):

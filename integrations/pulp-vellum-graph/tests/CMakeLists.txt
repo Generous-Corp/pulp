@@ -10,9 +10,8 @@ if(PULP_BUILD_TESTS AND TARGET Catch2::Catch2WithMain)
     # The editor must link pulp::host and Vellum's view layer and none of
     # Pulp's own view stack directly. Walk the link closure now, while every
     # target exists, and let ctest run the check script over the result.
-    # pulp::host is a leaf of the walk: it links the pulp::format umbrella,
-    # which carries pulp::format-view and with it Pulp's view stack, so what is
-    # reached through the host belongs to the host's own link line.
+    # The walk passes through pulp::host, so a view-stack dependency that
+    # returns to the host's link line fails the check here.
     function(_pulp_vellum_graph_closure out_var root)
         set(_pending "${root}")
         set(_seen "")
@@ -27,9 +26,6 @@ if(PULP_BUILD_TESTS AND TARGET Catch2::Catch2WithMain)
             endif()
             list(APPEND _seen "${_name}")
             if(NOT TARGET "${_name}")
-                continue()
-            endif()
-            if(_name STREQUAL "pulp::host")
                 continue()
             endif()
             get_target_property(_aliased "${_name}" ALIASED_TARGET)
