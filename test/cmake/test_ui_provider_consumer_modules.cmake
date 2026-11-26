@@ -58,7 +58,7 @@ function(_stand_ins mode out)
             "include(\"${PULP_SOURCE_DIR}/integrations/pulp-vellum/cmake/PulpVellumUiCompat.cmake\")\n"
             "pulp_define_vellum_ui_compat_targets()\n"
             "list(LENGTH PULP_SDK_VELLUM_UI_COMPAT_TARGETS n)\n"
-            "if(NOT n EQUAL 5)\n"
+            "if(NOT n EQUAL 4)\n"
             "  message(FATAL_ERROR \"compat module defined [\${PULP_SDK_VELLUM_UI_COMPAT_TARGETS}]\")\n"
             "endif()\n")
     else()
