@@ -316,13 +316,21 @@ def added_lines(base: str, head: str | None) -> dict[str, list[tuple[int, str]]]
     return result
 
 
-def tracked_lines(ref: str | None = None) -> dict[str, list[tuple[int, str]]]:
+def tracked_lines(ref: str | None = None,
+                  only: set[str] | None = None) -> dict[str, list[tuple[int, str]]]:
+    """Lines of every in-scope tracked file, or only those named in `only`.
+
+    The listing is always complete, so which files count as tracked does not
+    change; `only` just skips reading files the caller will discard.
+    """
     result: dict[str, list[tuple[int, str]]] = {}
     listing = _git(["ls-tree", "-r", "--name-only", "-z", ref, "tools"]) if ref else _git(["ls-files", "-z", "tools"])
     for rel in listing.split("\0"):
         if not rel:
             continue
         if not in_scope(rel):
+            continue
+        if only is not None and rel not in only:
             continue
         if ref is None:
             if not (ROOT / rel).is_file():
@@ -365,7 +373,7 @@ def main(argv: list[str]) -> int:
             print(f"clock_in_tests_lint: setup failed: {error}", file=sys.stderr)
             return 2
         try:
-            all_tracked = tracked_lines(args.head) if args.head else tracked_lines()
+            all_tracked = tracked_lines(args.head or None, only=set(added))
         except RuntimeError as error:
             print(f"clock_in_tests_lint: {error}", file=sys.stderr)
             return 1

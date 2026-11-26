@@ -304,7 +304,7 @@ class GpuRuntimePinTests(unittest.TestCase):
         run = audit.run_gpu_runtime_driver(self.root, self.GPU, "0.2.0")
         (_, declare), = run.named("FetchContent_Declare")
         self.assertEqual(declare, ["vellum_gpu_runtime", "GIT_REPOSITORY", self.URL, "GIT_TAG",
-                                   "2a01d9d61855c8682db44b96ec27ca3d2566ed81", "SOURCE_SUBDIR",
+                                   "2191e8a3ee823ba1946b83e466c2fd20c3494e4d", "SOURCE_SUBDIR",
                                    "gpu-runtime"])
         self.assertTrue(run.stopped)
 

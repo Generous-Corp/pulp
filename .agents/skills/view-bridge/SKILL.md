@@ -4023,6 +4023,24 @@ for exactly that, and a linker applies no predicate.
 definition in that file: it is compiled per-plugin, so the symbol resolves the
 same way `PulpPlugView`'s constructor always did.
 
+## Tool windows in the view-free standalone are panels
+
+`pulp::standalone-contract` (a UI package plug-in's Standalone) cannot own a
+Pulp view, so tool windows such as the musical typing keyboard reach it as
+`StandalonePanel`s (`pulp/format/standalone_panel.hpp`) that a UI integration
+installs at static init. Things that are easy to get wrong:
+
+- The registrar must be linked into the Standalone. A static-init object in an
+  archive member that nothing references is dropped, so an integration needs a
+  generated per-target source that calls its install function.
+- The shortcut toggle runs from the editor content view's
+  `performKeyEquivalent:`, not only from the menu. A headless run has no menu,
+  and the key driver offers `performKeyEquivalent:` first, so
+  `PULP_TEST_KEY_SEQUENCE=cmd+k` reaches it.
+- `drain_midi_into` runs on the audio thread until the standalone destroys the
+  panel, which happens after audio stops. A panel must not free what drain reads
+  in `shutdown()`.
+
 ## The standalone harness can press keys, not just move a pointer
 
 `core/format/src/standalone.cpp` arms three harness hooks off `StandaloneConfig`
@@ -4039,6 +4057,13 @@ Shape, if you are extending it:
   no window and no AppKit, so both are unit-tested directly
   (`test/test_standalone_key_sequence.cpp`). Only the delivery is
   platform-specific (`standalone_key_driver_mac.mm`, stub elsewhere).
+- Those headers are view-free on purpose: the contract standalone
+  (`pulp::standalone-contract`, the app a `UI <package>` plug-in ships) links
+  them and compiles with no view include root. A step names its key with
+  `detail::SequenceKey` and `kSequenceMod*`, which carry `view::KeyCode` and
+  `view::Modifier`'s values; do not reach for `pulp/view/input_events.hpp`
+  there again, because that build fails on it and
+  `format_header_view_boundary.py` flags it.
 - Delivery goes through `WindowHost::native_content_view_handle()` — the public
   `void*` NSView seam — so the driver lives entirely in `core/format` and needs
   no edit to `core/view/platform/mac/window_host_mac.mm`. It also needs no

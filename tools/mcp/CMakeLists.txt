@@ -98,7 +98,8 @@ add_library(pulp-mcp-core STATIC
     mcp_trace_tools.cpp
     mcp_kit_content_tools.cpp
     mcp_audio_tools.cpp
-    mcp_inspect_tools.cpp)
+    mcp_inspect_tools.cpp
+    mcp_ui_tools.cpp)
 target_compile_features(pulp-mcp-core PRIVATE cxx_std_20)
 target_include_directories(pulp-mcp-core PUBLIC
     "${CMAKE_CURRENT_SOURCE_DIR}"
