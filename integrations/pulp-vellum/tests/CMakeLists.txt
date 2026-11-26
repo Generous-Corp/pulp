@@ -38,6 +38,8 @@ if(PULP_BUILD_TESTS AND TARGET Catch2::Catch2WithMain)
             target_link_libraries(pulp-test-pulp-vellum-editor PRIVATE Vellum::MirrorView_script)
             target_compile_definitions(pulp-test-pulp-vellum-editor PRIVATE
                 PULP_TEST_VELLUM_SCRIPTED_UI=1)
+            # The live-swap UI stage over a real Vellum scripted session.
+            target_sources(pulp-test-pulp-vellum-editor PRIVATE test_scripted_ui_swap_unit.cpp)
         endif()
         if(TARGET pulp-vellum-scripted)
             add_executable(pulp-test-vellum-scripted-wiring test_scripted_editor_wiring.cpp)
