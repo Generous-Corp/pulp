@@ -326,6 +326,9 @@ Writes `/tmp/keys/key-00-initial.png` (before any key), then
   window; the screenshot one-shot owns the exit. Give the screenshot a frame
   delay past the sequence's own length or it fires mid-sequence.
 - **No audio device** — same as any screenshot-only launch (see above).
+- **It works in the view-free standalone too.** The parser and the macOS
+  driver live in format-core (`SequenceKey`, not `view::KeyCode`), so a
+  `UI <package>` plug-in's Standalone accepts the same spec.
 
 ### Why it enters through `performKeyEquivalent:` first
 

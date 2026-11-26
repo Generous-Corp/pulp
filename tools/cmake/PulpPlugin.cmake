@@ -168,9 +168,9 @@ function(pulp_add_plugin target)
         if(NOT PLUGIN_UI_ENGINE STREQUAL "vellum")
             message(FATAL_ERROR "pulp_add_plugin(${target}): UI_ENGINE must be vellum")
         endif()
-        if(NOT PLUGIN_UI_SCRIPT OR DEFINED PLUGIN_UI OR PLUGIN_NO_EDITOR)
+        if(DEFINED PLUGIN_UI OR PLUGIN_NO_EDITOR)
             message(FATAL_ERROR
-                "pulp_add_plugin(${target}): UI_ENGINE vellum requires UI_SCRIPT and cannot be combined with UI or NO_EDITOR")
+                "pulp_add_plugin(${target}): UI_ENGINE vellum cannot be combined with UI or NO_EDITOR")
         endif()
         _pulp_reject_unknown_formats("pulp_add_plugin(${target} UI_ENGINE vellum)"
             "${PLUGIN_FORMATS}" VST3 CLAP AU Standalone)
@@ -181,8 +181,13 @@ function(pulp_add_plugin target)
             message(FATAL_ERROR
                 "pulp_add_plugin(${target}): UI_ENGINE vellum requires PULP_ENABLE_PULP_VELLUM=ON")
         endif()
-        _pulp_vellum_scripted_package("pulp_add_plugin(${target})" PLUGIN_UI)
-        set(_pulp_vellum_scripted TRUE)
+        if(PLUGIN_UI_SCRIPT)
+            _pulp_vellum_scripted_package("pulp_add_plugin(${target})" PLUGIN_UI)
+            set(_pulp_vellum_scripted TRUE)
+        else()
+            # No script: the generated parameter editor on Vellum views.
+            _pulp_vellum_auto_ui_package("pulp_add_plugin(${target})" PLUGIN_UI)
+        endif()
     endif()
 
     # Defaults

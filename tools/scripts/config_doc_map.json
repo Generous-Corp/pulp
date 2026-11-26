@@ -29,6 +29,7 @@
    "paths": [
     ".github/workflows/build.yml",
     ".github/workflows/build-macos.yml",
+    ".github/workflows/cross-platform-check.yml",
     ".github/workflows/macos-ci-label-reset.yml",
     ".github/workflows/macos-tier-record.yml",
     ".github/workflows/macos-ci-deferred-disarm.yml",
