@@ -6,6 +6,7 @@ if(PULP_BUILD_TESTS AND TARGET Catch2::Catch2WithMain)
         ${CMAKE_CURRENT_SOURCE_DIR}/multi_meter_test.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/musical_typing_keyboard_test.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/musical_typing_test.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/piano_roll_gesture_test.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/piano_roll_view_test.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/spectrogram_view_test.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/step_grid_view_test.cpp
