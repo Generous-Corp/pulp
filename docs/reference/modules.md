@@ -219,6 +219,9 @@ with it (`format::reload::evaluate_remote_ux_update`) without any UI layer, and
 the scripted-UI bridge enforces the grant (`<pulp/view/reload_capabilities.hpp>`
 keeps the `pulp::view` names as aliases). Vellum's scripted UI reads the same
 wire names; `integrations/pulp-vellum` tests the two lists against each other.
+`<pulp/runtime/reload_autocaps.hpp>` infers the least-privilege capability list
+from a bundle's JS (`infer_capability_names_from_js`), which
+`format::reload::build_signable_manifest` writes into an unsigned pack manifest.
 
 ### XML — Parse and generate XML
 
