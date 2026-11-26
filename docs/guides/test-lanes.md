@@ -276,9 +276,14 @@ stopped compiling and no Pulp check noticed.
   artifact. Any lookup or digest failure fails the step; nothing falls back.
 - **Runs without an SDK are passed over.** A green push run whose change the
   classifier skipped (an observatory-only commit, for example) builds and
-  uploads nothing. `resolve` therefore walks the full page of Vellum main's
-  newest successful runs and takes the first with an unexpired evidence
-  artifact. If none of the returned runs has one, the step fails and says so.
+  uploads nothing. A reused proof names its source run in a "Tree <sha> was
+  proven by <run URL>" notice on the GPU job, which `resolve` reads from the
+  check-run annotations (the job log only when a job has none) and follows,
+  hop by hop, to the source artifact. A chain that loops, runs too deep, or ends
+  at an expired artifact is skipped, and `resolve` then walks the rest of the
+  full page of Vellum main's newest successful runs. If nothing in the page
+  yields an unexpired evidence artifact, the step fails and names the first
+  reuse failure.
 - **Pinned minimum.** `resolve --min-vellum-sha` refuses a run whose head does
   not contain the given Vellum commit (checked through Vellum's compare endpoint
   before any download). The workflow sets it to the commit that introduced the
