@@ -36,6 +36,11 @@ include("${PULP_ROOT_DIR}/tools/cmake/PulpWgslShaders.cmake")
 pulp_add_wgsl_shaders(pulp-vellum-renderer3d
     FILES shaders/renderer3d_scene.wgsl
     NAMESPACE pulp::vellum_renderer3d::shaders)
+
+# Prints the same fields as core/render's pulp-renderer3d-probe, so
+# tools/scene3d/verify_renderer_probe.py checks it against the goldens.
+add_executable(pulp-vellum-renderer3d-probe tools/renderer3d_probe.cpp)
+target_link_libraries(pulp-vellum-renderer3d-probe PRIVATE pulp::vellum-renderer3d)
 # skia::skia carries libdawn_combined, the one Dawn in the image: gpu-runtime's
 # device and every wgpu call here bind to it. Skia itself encodes the PNG.
 target_link_libraries(pulp-vellum-renderer3d

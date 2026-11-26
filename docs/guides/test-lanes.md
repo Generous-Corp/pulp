@@ -317,8 +317,9 @@ stopped compiling and no Pulp check noticed.
   (ctest label `pulp-vellum-renderer3d`, also matched by `-L pulp-vellum`)
   renders through gpu-runtime's device and, while `core/render` still has the
   legacy renderer, renders each frame with both and requires identical pixels.
-  On Metal it also checks the frame fingerprint that `renderer3d-goldens.json`
-  records. PRs touching
+  On Metal it also checks the frame fingerprints that `renderer3d-goldens.json`
+  records, and `pulp-vellum-renderer3d-probe-{hardcoded,boxtextured}` and their
+  `-manifest` twins run the package's probe against those goldens. PRs touching
   `integrations/pulp-vellum-renderer3d/**` run the lane.
 - **Vellum-backed UI target names.** The `pulp-vellum` filter also runs
   `cmake-vellum-ui-compat-real` and `cmake-vellum-ui-compat-wrong-version`. In a
