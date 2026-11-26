@@ -2,6 +2,7 @@
 // editor package includes it.
 #include <pulp/runtime/interaction_event.hpp>
 #include <pulp/runtime/interaction_router.hpp>
+#include <pulp/vellum/auto_ui.hpp>
 #include <pulp/vellum/editor.hpp>
 #include <pulp/vellum/interaction_adapter.hpp>
 
@@ -16,7 +17,9 @@
 #include <vellum/graphics/dawn_bootstrap.hpp>
 #include <vellum/value/param_model.hpp>
 #include <vellum/view/plugin_view_host.hpp>
+#include <vellum/view/ui_components.hpp>
 #include <vellum/view/view.hpp>
+#include <vellum/view/widgets.hpp>
 #if defined(PULP_TEST_VELLUM_SCRIPTED_UI)
 #include <vellum/view/scripted_ui.hpp>
 #include <vellum/view/widgets.hpp>
@@ -1914,3 +1917,225 @@ TEST_CASE("A VST3 host whose parent refuses the Vellum view never opens the edit
 }
 
 #endif // PULP_TEST_VELLUM_VST3
+
+// AutoUi on Vellum views: the generated editor over a processor's parameters.
+namespace {
+
+struct AutoUiFixture {
+    pulp::state::StateStore store;
+    std::unique_ptr<pulp::format::StateStoreParamPort> port;
+    std::unique_ptr<pulp::vellum::ParamPortModel> model;
+
+    void add(pulp::state::ParamID id, std::string name, std::string unit,
+             pulp::state::ParamRange range, int group = 0) {
+        pulp::state::ParamInfo info;
+        info.id = id;
+        info.name = std::move(name);
+        info.unit = std::move(unit);
+        info.range = range;
+        info.group_id = group;
+        store.add_parameter(info);
+    }
+    // The port snapshots the parameter list, so it is made after they are.
+    std::unique_ptr<::vellum::view::View> build() {
+        port = std::make_unique<pulp::format::StateStoreParamPort>(store);
+        model = std::make_unique<pulp::vellum::ParamPortModel>(*port);
+        return pulp::vellum::AutoUi::build(*port, *model);
+    }
+};
+
+template <typename Widget> Widget* auto_ui_widget(::vellum::view::View& view, std::string_view id) {
+    if (view.id() == id)
+        if (auto* widget = dynamic_cast<Widget*>(&view))
+            return widget;
+    for (std::size_t i = 0; i < view.child_count(); ++i)
+        if (auto* widget = auto_ui_widget<Widget>(*view.child_at(i), id))
+            return widget;
+    return nullptr;
+}
+
+} // namespace
+
+TEST_CASE("Vellum AutoUi builds a knob tile per parameter with its rows below the dial",
+          "[pulp-vellum][auto-ui]") {
+    using namespace ::vellum::view;
+    AutoUiFixture fixture;
+    fixture.add(1, "Gain", "dB", {-60.0f, 12.0f, 0.0f});
+    fixture.add(2, "Mix", "%", {0.0f, 100.0f, 100.0f});
+    fixture.add(3, "Bypass", "", {0.0f, 1.0f, 0.0f, 1.0f});
+    auto root = fixture.build();
+    REQUIRE(root);
+
+    // root: [title, body]; body: [grid]; grid: one tile per parameter.
+    REQUIRE(root->child_count() == 2);
+    auto* body = root->child_at(1);
+    REQUIRE(body->child_count() == 1);
+    auto* grid = body->child_at(0);
+    REQUIRE(grid->child_count() == 3);
+
+    auto* gain_tile = grid->child_at(0);
+    REQUIRE(gain_tile->child_count() == 3);
+    auto* gain = dynamic_cast<Knob*>(gain_tile->child_at(0));
+    REQUIRE(gain);
+    CHECK_FALSE(gain->show_label());
+    CHECK_FALSE(gain->show_value());
+    auto* name = dynamic_cast<Label*>(gain_tile->child_at(1));
+    auto* value = dynamic_cast<Label*>(gain_tile->child_at(2));
+    REQUIRE(name);
+    REQUIRE(value);
+    CHECK(name->text() == "Gain");
+    CHECK(value->text() == "0.00 dB");
+    CHECK(auto_ui_widget<Toggle>(*root, "Bypass") != nullptr);
+}
+
+TEST_CASE("Vellum AutoUi opens large enough to fit every parameter",
+          "[pulp-vellum][auto-ui][fit]") {
+    using namespace ::vellum::view;
+    for (std::size_t n :
+         {std::size_t{1}, std::size_t{4}, std::size_t{7}, std::size_t{16}, std::size_t{32}}) {
+        AutoUiFixture fixture;
+        for (std::size_t i = 1; i <= n; ++i)
+            fixture.add(static_cast<pulp::state::ParamID>(i), "P" + std::to_string(i), "",
+                        {0.0f, 1.0f, 0.5f});
+        auto root = fixture.build();
+        const auto fit = pulp::vellum::AutoUi::preferred_size(*fixture.port);
+        INFO("n=" << n << " fit=" << fit.width << "x" << fit.height);
+        CHECK(fit.width >= 320);
+        CHECK(fit.height >= 240);
+        root->set_bounds(
+            {0.0f, 0.0f, static_cast<float>(fit.width), static_cast<float>(fit.height)});
+        root->layout_children();
+        auto* body = dynamic_cast<ScrollView*>(root->child_at(1));
+        REQUIRE(body);
+        CHECK(body->content_size().height <= body->local_bounds().height + 1.0f);
+        CHECK_FALSE(body->wants_wheel_scroll());
+        CHECK(auto_ui_widget<Knob>(*root, "P" + std::to_string(n)) != nullptr);
+    }
+}
+
+TEST_CASE("Vellum AutoUi shows registered groups as sections and keeps the rest in Other",
+          "[pulp-vellum][auto-ui][groups]") {
+    using namespace ::vellum::view;
+    AutoUiFixture fixture;
+    fixture.store.add_group({1, "Registered", 0});
+    fixture.add(1, "Registered param", "", {0.0f, 1.0f, 0.5f}, 1);
+    fixture.add(2, "Unknown group param", "", {0.0f, 1.0f, 0.5f}, 999);
+    fixture.add(3, "Ungrouped param", "", {0.0f, 1.0f, 0.5f});
+    auto root = fixture.build();
+    root->set_bounds({0, 0, 400, 300});
+    root->layout_children();
+
+    auto* body = dynamic_cast<ScrollView*>(root->child_at(1));
+    REQUIRE(body);
+    REQUIRE(body->child_count() == 1);
+    auto* content = body->child_at(0);
+    REQUIRE(content->child_count() == 2);
+    auto* registered = dynamic_cast<GroupBox*>(content->child_at(0));
+    auto* other = dynamic_cast<GroupBox*>(content->child_at(1));
+    REQUIRE(registered);
+    REQUIRE(other);
+    CHECK(registered->title() == "Registered");
+    CHECK(other->title() == "Other");
+    CHECK(auto_ui_widget<Knob>(*root, "Unknown group param") != nullptr);
+    CHECK(auto_ui_widget<Knob>(*root, "Ungrouped param") != nullptr);
+}
+
+TEST_CASE("Vellum AutoUi controls write back through one host gesture each",
+          "[pulp-vellum][auto-ui][gesture]") {
+    using namespace ::vellum::view;
+    AutoUiFixture fixture;
+    fixture.add(1, "Frequency", "Hz", {55.0f, 1760.0f, 440.0f});
+    fixture.add(2, "Bypass", "", {0.0f, 1.0f, 0.0f, 1.0f});
+    std::vector<pulp::state::ParamID> begins;
+    std::vector<pulp::state::ParamID> ends;
+    fixture.store.set_gesture_callbacks([&](pulp::state::ParamID id) { begins.push_back(id); },
+                                        [&](pulp::state::ParamID id) { ends.push_back(id); });
+    auto root = fixture.build();
+    auto* frequency = auto_ui_widget<Knob>(*root, "Frequency");
+    auto* bypass = auto_ui_widget<Toggle>(*root, "Bypass");
+    REQUIRE(frequency);
+    REQUIRE(bypass);
+    REQUIRE(frequency->on_gesture_begin);
+    REQUIRE(frequency->on_gesture_end);
+
+    frequency->on_gesture_begin();
+    frequency->on_change(0.75f);
+    frequency->on_change(0.80f);
+    frequency->on_gesture_end();
+    bypass->on_toggle(true);
+
+    CHECK(fixture.store.get_normalized(1) == Catch::Approx(0.80f).margin(0.001f));
+    CHECK(fixture.store.get_normalized(2) == Catch::Approx(1.0f).margin(0.001f));
+    CHECK(begins == std::vector<pulp::state::ParamID>{1, 2});
+    CHECK(ends == std::vector<pulp::state::ParamID>{1, 2});
+    CHECK(fixture.store.open_gesture_count() == 0);
+}
+
+TEST_CASE("Vellum AutoUi knobs and value rows follow automation", "[pulp-vellum][auto-ui]") {
+    using namespace ::vellum::view;
+    AutoUiFixture fixture;
+    fixture.add(7, "Cutoff", "Hz", {0.0f, 100.0f, 50.0f});
+    auto root = fixture.build();
+    auto* knob = auto_ui_widget<Knob>(*root, "Cutoff");
+    REQUIRE(knob);
+    std::vector<pulp::state::ParamID> begins;
+    fixture.store.set_gesture_callbacks([&](pulp::state::ParamID id) { begins.push_back(id); },
+                                        [](pulp::state::ParamID) {});
+
+    fixture.store.set_value(7, 80.0f);
+    fixture.store.pump_listeners();
+    CHECK(knob->value() == Catch::Approx(0.8f).margin(1e-5f));
+    auto* tile = knob->parent();
+    REQUIRE(tile);
+    auto* row = dynamic_cast<Label*>(tile->child_at(2));
+    REQUIRE(row);
+    CHECK(row->text() == "80.0 Hz");
+    // Automation is not an edit: nothing opened a gesture.
+    CHECK(begins.empty());
+}
+
+TEST_CASE("Vellum AutoUi editor opens at the fit size unless the processor declares one",
+          "[pulp-vellum][auto-ui][editor]") {
+    struct SizedProcessor final : public pulp::format::Processor {
+        pulp::format::PluginDescriptor descriptor() const override {
+            return {};
+        }
+        void define_parameters(pulp::state::StateStore&) override {}
+        void prepare(const pulp::format::PrepareContext&) override {}
+        void process(pulp::audio::BufferView<float>&, const pulp::audio::BufferView<const float>&,
+                     pulp::midi::MidiBuffer&, pulp::midi::MidiBuffer&,
+                     const pulp::format::ProcessContext&) override {}
+        std::pair<uint32_t, uint32_t> editor_size() const override {
+            return declared;
+        }
+        std::pair<uint32_t, uint32_t> declared{400, 300};
+    };
+    FactoryReset reset;
+    ::vellum::view::PluginViewHost::set_factory(
+        [](::vellum::view::View&, const ::vellum::view::PluginViewHost::Options& options) {
+            return std::make_unique<StubHost>(options.size);
+        });
+    AutoUiFixture fixture;
+    for (pulp::state::ParamID id = 1; id <= 16; ++id)
+        fixture.add(id, "P" + std::to_string(id), "", {0.0f, 1.0f, 0.5f});
+    fixture.port = std::make_unique<pulp::format::StateStoreParamPort>(fixture.store);
+    Context context(*fixture.port);
+    const auto fit = pulp::vellum::AutoUi::preferred_size(*fixture.port);
+    REQUIRE((fit.width != 400 || fit.height != 300));
+    auto* factory = pulp::vellum::auto_ui_editor_factory();
+    REQUIRE(factory);
+
+    SizedProcessor by_default;
+    auto fitted = factory->create(by_default, context, pulp::format::EditorRole::editor);
+    REQUIRE(fitted);
+    CHECK(fitted->size().width == fit.width);
+    CHECK(fitted->size().height == fit.height);
+    CHECK(fitted->size_hints().aspect_ratio > 0.0);
+
+    SizedProcessor declared;
+    declared.declared = {500, 260};
+    auto kept = factory->create(declared, context, pulp::format::EditorRole::editor);
+    REQUIRE(kept);
+    CHECK(kept->size().width == 500);
+    CHECK(kept->size().height == 260);
+}
