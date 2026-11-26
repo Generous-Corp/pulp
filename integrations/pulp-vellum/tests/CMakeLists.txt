@@ -69,6 +69,14 @@ if(PULP_BUILD_TESTS AND TARGET Catch2::Catch2WithMain)
                     # In the build tree: macOS dyld refuses an unsigned image
                     # from a world-writable temp directory.
                     RELOAD_WATCH_DIR="${CMAKE_CURRENT_BINARY_DIR}")
+                # The real scripted editor, opened through a host-driven editor
+                # session, reads the knob-and-label fixture script.
+                _pulp_vellum_scripted_package("reload shell editor fixture" _reload_package)
+                target_link_libraries(pulp-test-vellum-reload-shell PRIVATE "${_reload_package}")
+                _pulp_apply_ui_script_definition(pulp-test-vellum-reload-shell
+                    "${PULP_ROOT_DIR}/test/fixtures/scripted-editor/main-core.js")
+                set_property(TARGET pulp-test-vellum-reload-shell
+                    PROPERTY PULP_VELLUM_SCRIPTED_EDITOR TRUE)
                 catch_discover_tests(pulp-test-vellum-reload-shell PROPERTIES
                     LABELS pulp-vellum-editor TIMEOUT 60)
             endif()

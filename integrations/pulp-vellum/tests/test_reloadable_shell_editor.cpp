@@ -10,9 +10,14 @@
 
 #include <catch2/catch_test_macros.hpp>
 #include <pulp/audio/buffer.hpp>
+#include <pulp/format/contract_editor_session.hpp>
+#include <pulp/format/editor_assets.hpp>
 #include <pulp/format/reload/reloadable_shell_core.hpp>
 #include <pulp/midi/buffer.hpp>
 #include <pulp/state/store.hpp>
+#include <pulp/vellum/scripted_editor.hpp>
+
+#include <vellum/view/widgets.hpp>
 
 #include <chrono>
 #include <filesystem>
@@ -85,16 +90,23 @@ class NullHost final : public ::vellum::view::PluginViewHost {
     ::vellum::view::NativeViewHandle native_handle() override {
         return this;
     }
-    void attach_to_parent(::vellum::view::NativeViewHandle) override {}
-    bool is_attached() const noexcept override {
-        return false;
+    void attach_to_parent(::vellum::view::NativeViewHandle parent) override {
+        attached_ = parent == this;
     }
-    void detach() override {}
+    bool is_attached() const noexcept override {
+        return attached_;
+    }
+    void detach() override {
+        attached_ = false;
+    }
     void repaint() override {}
     void set_size(uint32_t, uint32_t) override {}
     Size get_size() const override {
         return {};
     }
+
+  private:
+    bool attached_ = false;
 };
 
 struct FactoryReset {
@@ -141,6 +153,20 @@ bool wait_for(const std::function<bool()>& done) {
         std::this_thread::sleep_for(std::chrono::milliseconds(50));
     }
     return done();
+}
+
+// The text of the fixture script's 'initial' label, which it fills from
+// getParam('Gain') when the script evaluates.
+std::string initial_label(::vellum::view::View& view) {
+    if (view.id() == "initial")
+        if (auto* label = dynamic_cast<::vellum::view::Label*>(&view))
+            return std::string(label->text());
+    for (std::size_t i = 0; i < view.child_count(); ++i) {
+        auto text = initial_label(*view.child_at(i));
+        if (!text.empty())
+            return text;
+    }
+    return {};
 }
 
 } // namespace
@@ -218,6 +244,78 @@ TEST_CASE("Vellum scripted editor reloads once per hot swap of a reloadable shel
         CHECK(CountingSession::reloads == 3);
     }
 
+    shell.release();
+    std::error_code ec;
+    fs::remove(watched, ec);
+}
+
+TEST_CASE("A host-driven editor session keeps a real Vellum scripted editor across shell hot swaps",
+          "[pulp-vellum][scripted-editor][reload]") {
+    using pulp::format::ContractEditorSession;
+    FactoryReset reset;
+    ::vellum::view::View* root = nullptr;
+    NullHost* host = nullptr;
+    ::vellum::view::PluginViewHost::set_factory(
+        [&](::vellum::view::View& view, const ::vellum::view::PluginViewHost::Options&) {
+            root = &view;
+            auto made = std::make_unique<NullHost>();
+            host = made.get();
+            return made;
+        });
+    REQUIRE(pulp::format::embeds_editor_script(pulp::format::registered_editor_assets()));
+
+    const fs::path watched = fs::path(RELOAD_WATCH_DIR) / "pulp_vellum_shell_session.dylib";
+    install(RELOAD_LOGIC_UNITY, watched, 0);
+    ReloadableShellCore shell(watched.string());
+    pulp::state::StateStore store;
+    shell.define_parameters(store);
+    REQUIRE(store.all_params().size() == 1);
+    shell.set_state_store(&store);
+    store.set_value(1, 0.5f);
+    pulp::format::PrepareContext prepare;
+    prepare.sample_rate = 48000.0;
+    prepare.max_buffer_size = 64;
+    shell.prepare(prepare);
+    REQUIRE(render_one(shell) == 0.5f);
+
+    // The adapter path a plug-in format takes: the package factory, bound to
+    // the shell, attached to a stand-in native parent with no window, and
+    // ticked by the host.
+    auto session = ContractEditorSession::create(shell, store,
+                                                 *pulp::vellum::scripted_editor_factory(), {},
+                                                 ContractEditorSession::IdleSource::host_driven);
+    REQUIRE(session);
+    REQUIRE(root);
+    REQUIRE(host);
+    REQUIRE(session->attach({.kind = pulp::format::NativeParentKind::cocoa_view, .handle = host}));
+    const auto opened = initial_label(*root);
+    REQUIRE_FALSE(opened.empty());
+
+    // A parameter change alone does not re-evaluate the script.
+    store.set_value(1, 1.5f);
+    session->tick();
+    CHECK(initial_label(*root) == opened);
+
+    // A DSP hot swap does, once, on the next host tick.
+    const auto before = shell.editor_reload_generation();
+    install(RELOAD_LOGIC_COMPATIBLE, watched, 1);
+    REQUIRE(wait_for([&] { return shell.editor_reload_generation() != before; }));
+    REQUIRE(render_steady(shell) == 3.0f); // 2x logic at Gain 1.5
+    session->tick();
+    const auto swapped = initial_label(*root);
+    CHECK(swapped != opened);
+
+    // A rejected build leaves the editor alone.
+    store.set_value(1, 0.25f);
+    const auto attempts = shell.reload_attempts();
+    install(RELOAD_LOGIC_INCOMPATIBLE, watched, 2);
+    REQUIRE(wait_for([&] { return shell.reload_attempts() > attempts; }));
+    REQUIRE(shell.last_status() == ReloadOutcome::Status::RejectedContract);
+    session->tick();
+    CHECK(initial_label(*root) == swapped);
+
+    session->detach();
+    session.reset();
     shell.release();
     std::error_code ec;
     fs::remove(watched, ec);
