@@ -3378,7 +3378,8 @@ Without the second line a zero is ambiguous between "not wired" and "bad grep".
 `.github/workflows/scene3d-advisory.yml` now covers that surface: path-filtered,
 advisory, `macos-15`, SCENE3D ON, not on `merge_group`. The `Vellum SDK
 consumer` lane also turns SCENE3D ON, for `integrations/pulp-vellum-renderer3d`
-(the scene3d renderer on gpu-runtime's device): that package refuses to
+(the scene3d renderer on gpu-runtime's device) and `integrations/pulp-vellum-scene`
+(Vellum's Draco decoder behind the glTF loader hook): those packages refuse to
 configure without `pulp::scene`. Three things about the scene3d lane
 generalize to any lane you add:
 

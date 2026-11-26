@@ -339,6 +339,14 @@ stopped compiling and no Pulp check noticed.
   Vellum's view layer and names no Pulp view target; its negative control runs
   the same check over a closure with `pulp::view-core` added and must fail.
   PRs touching `integrations/pulp-vellum-graph/**` run the lane.
+- **Draco and glTF scene loading.** The same configure turns on
+  `PULP_ENABLE_SCENE3D` and `PULP_ENABLE_PULP_VELLUM_SCENE`, and
+  `pulp-test-pulp-vellum-scene` (ctest label `pulp-vellum-scene`, also matched
+  by `-L pulp-vellum`) loads the BoxTextured and DracoTriangle fixtures through
+  `pulp::scene` with Vellum's installed Draco decoder behind the loader hook.
+  An SDK whose decoder was built without Draco is reported by name and the
+  fixture is then refused with `gltf.draco_unavailable`; it is never loaded as
+  an empty mesh. PRs touching `integrations/pulp-vellum-scene/**` run the lane.
 - **Vellum-backed UI target names.** The `pulp-vellum` filter also runs
   `cmake-vellum-ui-compat-real` and `cmake-vellum-ui-compat-wrong-version`. In a
   configure that found Vellum they get that label and `REQUIRE_VELLUM`, so they
