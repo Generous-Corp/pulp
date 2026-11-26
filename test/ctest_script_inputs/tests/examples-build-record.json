@@ -1,0 +1,12 @@
+{
+ "name": "examples-build-record",
+ "record": {
+  "entry": "tools/scripts/examples_build_matrix.py",
+  "inputs": [
+   "docs/status/examples-build-record.json",
+   "docs/status/examples-manifest.json",
+   "tools/scripts/examples_build_matrix.py"
+  ],
+  "kind": "python"
+ }
+}
