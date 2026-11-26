@@ -56,6 +56,8 @@ use without hard-coding macOS, Windows, Linux, iOS, or Web behavior.
 
 The component inspector window is here too. `InspectorWindow` is a view (a host places it in a window or panel and calls `refresh()` once per frame) with a tool strip above an Elements tab: the inspected view tree beside collapsable Identity, Layout, Visual, Widget and Theme Colors sections. A tree-row click selects and fires `on_view_selected`; `reflect_selection()` mirrors a canvas selection without firing it; `set_selection_readonly(true)` shows properties without driving the selection; the tool strip reports Select or Text picks through `on_tool_picked`. A widget outside Vellum's view core shows its rows through `vellum::view::InspectorFacts`.
 
+`ViewInspector` is the read-only introspection of a Vellum view tree behind the component inspector: `to_json()`, `find_by_id()`, `find_by_anchor()` (an empty anchor never matches), `count_views()`, `populate_tree()`, `view_properties()` and `absolute_bounds()` (which honours a scrolled `ScrollView`'s child offset). A widget outside Vellum's view core describes itself to it through `vellum::view::InspectorFacts`.
+
 ## simd
 
 Portable block kernels for DSP: elementwise buffer arithmetic (`add`, `sub`,
