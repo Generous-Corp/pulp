@@ -175,7 +175,7 @@ def run_host(host: Path, tree: dict[str, Any]) -> dict[str, Any]:
         bundle.write_text(bundle_for(tree), encoding="utf-8")
         done = subprocess.run(
             [str(host), "--bundle", str(bundle), "--no-window", "--dump-tree", str(dump)],
-            check=False, capture_output=True, text=True, timeout=HOST_TIMEOUT_SECONDS,
+            check=False, capture_output=True, text=True, encoding="utf-8", timeout=HOST_TIMEOUT_SECONDS,
             env=dict(os.environ, MTL_DEBUG_LAYER="0"),
         )
         if done.returncode != 0:
