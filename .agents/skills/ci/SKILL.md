@@ -13988,3 +13988,8 @@ main's SDK. A new optional Vellum integration package needs its option, its
 `pulp-test-*` target and a `paths:` entry added there, or no lane compiles it
 against main. The tests' ctest label should start with `pulp-vellum` so the
 lane's `-L pulp-vellum` filter runs them.
+
+The same lane also runs the MCP UI tool cases (`pulp-test-mcp-server "[ui]"`)
+against the SDK's `bin/vellum-app-host` through `PULP_TEST_VELLUM_APP_HOST`. The
+step greps the output for `SKIPPED`, because Catch2 reports a skipped live case
+as a pass: keep that check if the step is edited.
