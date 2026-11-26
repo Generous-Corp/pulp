@@ -3,6 +3,7 @@
 #include <pulp/vellum_components/lasso.hpp>
 #include <pulp/vellum_components/model_manager_view.hpp>
 #include <pulp/vellum_components/preferences_panel.hpp>
+#include <pulp/vellum_components/preset_browser.hpp>
 
 #include <functional>
 #include <utility>
@@ -34,6 +35,12 @@ const std::vector<Entry>& entries() {
          }},
         {"pulp.model_manager",
          [](const PulpViewComponentContext&) { return std::make_unique<ModelManagerView>(); }},
+        {"pulp.preset_browser",
+         [](const PulpViewComponentContext& ctx) -> std::unique_ptr<View> {
+             if (!ctx.presets)
+                 return nullptr;
+             return std::make_unique<PresetBrowser>(*ctx.presets);
+         }},
     };
     return table;
 }

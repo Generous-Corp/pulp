@@ -16,6 +16,8 @@
 #include <pulp/vellum_components/aliases.hpp>
 #include <pulp/vellum_components/panic_button.hpp>
 
+#include <pulp/state/preset_manager.hpp>
+
 #include <memory>
 #include <string_view>
 #include <vector>
@@ -27,6 +29,9 @@ namespace pulp::vellum_components {
 struct PulpViewComponentContext {
     /// Where the panic button raises its request. Empty means unavailable.
     PanicTarget panic;
+    /// The manager the preset browser lists. The browser holds a reference to
+    /// it, so the catalogue returns no `pulp.preset_browser` while it is null.
+    state::PresetManager* presets = nullptr;
 };
 
 /// Ids accepted by `make_pulp_view_component`, in catalogue order.
