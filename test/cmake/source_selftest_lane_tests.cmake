@@ -170,6 +170,17 @@ add_test(NAME examples-manifest-guard-selftest
         "${CMAKE_SOURCE_DIR}/tools/scripts/test_examples_manifest_guard.py")
 set_tests_properties(examples-manifest-guard-selftest PROPERTIES TIMEOUT 120)
 
+# Target selection and receipts of the per-example build driver.
+add_test(NAME examples-build-matrix-selftest
+    COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/scripts/test_examples_build_matrix.py")
+set_tests_properties(examples-build-matrix-selftest PROPERTIES TIMEOUT 120)
+# The committed per-example build receipts cover exactly the retained examples.
+add_test(NAME examples-build-record
+    COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/scripts/examples_build_matrix.py" --check-record)
+set_tests_properties(examples-build-record PROPERTIES TIMEOUT 120)
+
 set(_pulp_source_selftest_manifest "${CMAKE_SOURCE_DIR}/tools/ci/source_selftests.json")
 set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
     "${_pulp_source_selftest_manifest}")

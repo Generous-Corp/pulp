@@ -84,5 +84,39 @@ class ReceiptTest(unittest.TestCase):
             self.assertEqual(receipt["reason"], "PULP_HAS_RACK")
 
 
+class CheckRecordTest(unittest.TestCase):
+    MANIFEST = SelectedExamplesTest.MANIFEST
+    GOOD = {"examples": {
+        "keep": {"status": "built", "targets": ["k"], "exit_code": 0},
+        "ui": {"status": "not-configured", "reason": "PULP_HAS_RACK"},
+    }}
+
+    def test_complete_record_passes(self):
+        self.assertEqual(matrix.check_record(self.MANIFEST, self.GOOD), [])
+
+    def test_missing_receipt_fails(self):
+        record = {"examples": {"keep": self.GOOD["examples"]["keep"]}}
+        problems = matrix.check_record(self.MANIFEST, record)
+        self.assertEqual(problems, ["ui: retained example has no build receipt"])
+
+    def test_receipt_for_unknown_example_fails(self):
+        record = {"examples": {**self.GOOD["examples"], "ghost": {"status": "built"}}}
+        self.assertTrue(any(p.startswith("ghost:") for p in matrix.check_record(self.MANIFEST, record)))
+
+    def test_failed_build_fails(self):
+        record = {"examples": {**self.GOOD["examples"],
+                               "keep": {"status": "failed", "targets": ["k"], "exit_code": 1}}}
+        self.assertTrue(any("status must be" in p for p in matrix.check_record(self.MANIFEST, record)))
+
+    def test_built_without_targets_fails(self):
+        record = {"examples": {**self.GOOD["examples"], "keep": {"status": "built", "exit_code": 0}}}
+        self.assertTrue(any("needs targets" in p for p in matrix.check_record(self.MANIFEST, record)))
+
+    def test_real_record_covers_real_manifest(self):
+        manifest = json.loads((REPO_ROOT / matrix.MANIFEST).read_text(encoding="utf-8"))
+        record = json.loads((REPO_ROOT / matrix.RECORD).read_text(encoding="utf-8"))
+        self.assertEqual(matrix.check_record(manifest, record), [])
+
+
 if __name__ == "__main__":
     unittest.main()

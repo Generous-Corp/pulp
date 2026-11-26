@@ -1,0 +1,812 @@
+{
+ "schema_version": 1,
+ "description": "Per-example build receipts for every retained example that is not iOS, Android or web only. Produced by tools/scripts/examples_build_matrix.py. 'built' means the named targets compiled and linked in the configuration below; 'not-configured' means the example created no target there, with the reason.",
+ "configuration": "macOS arm64, Release, Ninja, -DPULP_BUILD_EXAMPLES=ON -DPULP_BUILD_WEBVIEW=ON -DPULP_GPU_AUDIO_FAULT_HOOKS=ON, Skia GPU on, planning submodule not initialized, no Vellum options",
+ "examples": {
+  "PulpDrums": {
+   "class": "audio-only",
+   "status": "built",
+   "targets": [
+    "PulpDrums_CLAP",
+    "pulp-drums-test"
+   ],
+   "exit_code": 0
+  },
+  "PulpSampler": {
+   "class": "audio-only",
+   "status": "built",
+   "targets": [
+    "PulpSampler_CLAP",
+    "pulp-sampler-test"
+   ],
+   "exit_code": 0
+  },
+  "PulpSequence": {
+   "class": "audio-only",
+   "status": "built",
+   "targets": [
+    "PulpSequence_CLAP"
+   ],
+   "exit_code": 0
+  },
+  "PulpSynth": {
+   "class": "audio-only",
+   "status": "built",
+   "targets": [
+    "PulpSynth_CLAP",
+    "pulp-synth-test"
+   ],
+   "exit_code": 0
+  },
+  "PulpTempoSampler": {
+   "class": "moves-to-vellum",
+   "status": "built",
+   "targets": [
+    "PulpTempoSampler_CLAP",
+    "pulp-tempo-sampler-shot",
+    "pulp-tempo-sampler-test"
+   ],
+   "exit_code": 0
+  },
+  "StepSequencer": {
+   "class": "audio-only",
+   "status": "built",
+   "targets": [
+    "StepSequencer_CLAP"
+   ],
+   "exit_code": 0
+  },
+  "a10-routing-hosting-consumer": {
+   "class": "audio-only",
+   "status": "not-configured",
+   "reason": "no CMake target in this configuration (SDK project or source-only)"
+  },
+  "a2-modular-instrument-consumer": {
+   "class": "audio-only",
+   "status": "not-configured",
+   "reason": "no CMake target in this configuration (SDK project or source-only)"
+  },
+  "a3-spectral-replay-consumer": {
+   "class": "audio-only",
+   "status": "not-configured",
+   "reason": "no CMake target in this configuration (SDK project or source-only)"
+  },
+  "agent-toolkit-synth": {
+   "class": "audio-only",
+   "status": "built",
+   "targets": [
+    "AgentToolkitSynth_Standalone"
+   ],
+   "exit_code": 0
+  },
+  "ara-pitch-tracker": {
+   "class": "audio-only",
+   "status": "built",
+   "targets": [
+    "AraPitchTracker_CLAP"
+   ],
+   "exit_code": 0
+  },
+  "audio-inspector-demo": {
+   "class": "moves-to-vellum",
+   "status": "built",
+   "targets": [
+    "pulp-audio-inspector-demo",
+    "pulp-audio-inspector-demo-render"
+   ],
+   "exit_code": 0
+  },
+  "audio-rate-processor-node": {
+   "class": "audio-only",
+   "status": "built",
+   "targets": [
+    "pulp-audio-rate-processor-node"
+   ],
+   "exit_code": 0
+  },
+  "capability-control": {
+   "class": "audio-only",
+   "status": "not-configured",
+   "reason": "no CMake target in this configuration (SDK project or source-only)"
+  },
+  "clap-identity-consumer": {
+   "class": "audio-only",
+   "status": "not-configured",
+   "reason": "no CMake target in this configuration (SDK project or source-only)"
+  },
+  "cmajor-gain": {
+   "class": "audio-only",
+   "status": "not-configured",
+   "reason": "no CMake target in this configuration (SDK project or source-only)"
+  },
+  "combined-bundle-demo": {
+   "class": "audio-only",
+   "status": "built",
+   "targets": [
+    "CombinedBundleDemo_CLAP",
+    "pulp-test-combined-bundle-clap"
+   ],
+   "exit_code": 0
+  },
+  "component-shots": {
+   "class": "moves-to-vellum",
+   "status": "built",
+   "targets": [
+    "pulp-component-shots"
+   ],
+   "exit_code": 0
+  },
+  "cv-control": {
+   "class": "audio-only",
+   "status": "built",
+   "targets": [
+    "CvFaceTone_CLAP",
+    "pulp-cv-control-standalone",
+    "pulp-cv-control-test"
+   ],
+   "exit_code": 0
+  },
+  "design-import-standalone": {
+   "class": "moves-to-vellum",
+   "status": "built",
+   "targets": [
+    "pulp-design-import-standalone"
+   ],
+   "exit_code": 0
+  },
+  "design-panel-instrument": {
+   "class": "moves-to-vellum",
+   "status": "built",
+   "targets": [
+    "PulpDesignSynth_CLAP",
+    "pulp-design-synth-render-adapter-editor",
+    "pulp-design-synth-render-editor",
+    "pulp-design-synth-test"
+   ],
+   "exit_code": 0
+  },
+  "design-panel-midi-effect": {
+   "class": "moves-to-vellum",
+   "status": "built",
+   "targets": [
+    "PulpDesignArp_CLAP",
+    "pulp-design-arp-render-adapter-editor",
+    "pulp-design-arp-render-editor",
+    "pulp-design-arp-test"
+   ],
+   "exit_code": 0
+  },
+  "design-panel-plugin": {
+   "class": "moves-to-vellum",
+   "status": "not-configured",
+   "reason": "PULP_HAS_SKIA AND the PULP_DESIGN_PANEL_IR file (panel.design.pulp.json is not in the tree)"
+  },
+  "design-tool": {
+   "class": "moves-to-vellum",
+   "status": "built",
+   "targets": [
+    "pulp-design-tool"
+   ],
+   "exit_code": 0
+  },
+  "eq-curve-demo": {
+   "class": "moves-to-vellum",
+   "status": "built",
+   "targets": [
+    "EqCurveDemo_CLAP",
+    "eq-curve-demo-test"
+   ],
+   "exit_code": 0
+  },
+  "faust-filter": {
+   "class": "audio-only",
+   "status": "built",
+   "targets": [
+    "pulp-faust-filter-test"
+   ],
+   "exit_code": 0
+  },
+  "faust-gain": {
+   "class": "audio-only",
+   "status": "built",
+   "targets": [
+    "pulp-faust-gain-test"
+   ],
+   "exit_code": 0
+  },
+  "faust-rt-sdk-consumer": {
+   "class": "audio-only",
+   "status": "not-configured",
+   "reason": "no CMake target in this configuration (SDK project or source-only)"
+  },
+  "faust-tremolo": {
+   "class": "audio-only",
+   "status": "built",
+   "targets": [
+    "pulp-faust-tremolo-test"
+   ],
+   "exit_code": 0
+  },
+  "forge-modular": {
+   "class": "moves-to-vellum",
+   "status": "not-configured",
+   "reason": "PULP_HAS_RACK"
+  },
+  "g10-routed-consumer": {
+   "class": "audio-only",
+   "status": "not-configured",
+   "reason": "no CMake target in this configuration (SDK project or source-only)"
+  },
+  "g11-live-retune-consumer": {
+   "class": "audio-only",
+   "status": "not-configured",
+   "reason": "no CMake target in this configuration (SDK project or source-only)"
+  },
+  "g11-recording-publication": {
+   "class": "audio-only",
+   "status": "not-configured",
+   "reason": "no CMake target in this configuration (SDK project or source-only)"
+  },
+  "g11-tuning-cookbook": {
+   "class": "audio-only",
+   "status": "not-configured",
+   "reason": "no CMake target in this configuration (SDK project or source-only)"
+  },
+  "g2-processor-restore-consumer": {
+   "class": "audio-only",
+   "status": "not-configured",
+   "reason": "no CMake target in this configuration (SDK project or source-only)"
+  },
+  "g3-d4-prepared-export-consumer": {
+   "class": "audio-only",
+   "status": "not-configured",
+   "reason": "no CMake target in this configuration (SDK project or source-only)"
+  },
+  "g3-io-gain-consumer": {
+   "class": "audio-only",
+   "status": "not-configured",
+   "reason": "no CMake target in this configuration (SDK project or source-only)"
+  },
+  "g3-resolved-identity-consumer": {
+   "class": "audio-only",
+   "status": "not-configured",
+   "reason": "no CMake target in this configuration (SDK project or source-only)"
+  },
+  "g4-voice-bank-consumer": {
+   "class": "audio-only",
+   "status": "not-configured",
+   "reason": "no CMake target in this configuration (SDK project or source-only)"
+  },
+  "g5-control-index-filter": {
+   "class": "audio-only",
+   "status": "not-configured",
+   "reason": "no CMake target in this configuration (SDK project or source-only)"
+  },
+  "g5-event-consumer": {
+   "class": "audio-only",
+   "status": "not-configured",
+   "reason": "no CMake target in this configuration (SDK project or source-only)"
+  },
+  "g5-host-event-consumer": {
+   "class": "audio-only",
+   "status": "not-configured",
+   "reason": "no CMake target in this configuration (SDK project or source-only)"
+  },
+  "g5-trigger-admission-consumer": {
+   "class": "audio-only",
+   "status": "not-configured",
+   "reason": "no CMake target in this configuration (SDK project or source-only)"
+  },
+  "g5-trigger-runtime-consumer": {
+   "class": "audio-only",
+   "status": "not-configured",
+   "reason": "no CMake target in this configuration (SDK project or source-only)"
+  },
+  "g6-voice-bank-consumer": {
+   "class": "audio-only",
+   "status": "not-configured",
+   "reason": "no CMake target in this configuration (SDK project or source-only)"
+  },
+  "g6-voice-contract-consumer": {
+   "class": "audio-only",
+   "status": "not-configured",
+   "reason": "no CMake target in this configuration (SDK project or source-only)"
+  },
+  "g7-latency-pdc-consumer": {
+   "class": "audio-only",
+   "status": "not-configured",
+   "reason": "no CMake target in this configuration (SDK project or source-only)"
+  },
+  "g9-isolated-clap-consumer": {
+   "class": "audio-only",
+   "status": "not-configured",
+   "reason": "no CMake target in this configuration (SDK project or source-only)"
+  },
+  "gesture-touch-demo": {
+   "class": "moves-to-vellum",
+   "status": "built",
+   "targets": [
+    "pulp-gesture-touch-demo"
+   ],
+   "exit_code": 0
+  },
+  "gpu-demo": {
+   "class": "moves-to-vellum",
+   "status": "built",
+   "targets": [
+    "pulp-gpu-demo"
+   ],
+   "exit_code": 0
+  },
+  "gpu-fault-continuity": {
+   "class": "moves-to-vellum",
+   "status": "built",
+   "targets": [
+    "PulpGpuFaultContinuity_CLAP",
+    "gpu-fault-continuity-test"
+   ],
+   "exit_code": 0
+  },
+  "graph-agent-loop": {
+   "class": "audio-only",
+   "status": "not-configured",
+   "reason": "no CMake target in this configuration (SDK project or source-only)"
+  },
+  "graph-agent-loop-replay": {
+   "class": "audio-only",
+   "status": "not-configured",
+   "reason": "no CMake target in this configuration (SDK project or source-only)"
+  },
+  "graph-control-event-probe": {
+   "class": "audio-only",
+   "status": "built",
+   "targets": [
+    "pulp-graph-control-event-probe"
+   ],
+   "exit_code": 0
+  },
+  "graph-edge-probe": {
+   "class": "audio-only",
+   "status": "not-configured",
+   "reason": "no CMake target in this configuration (SDK project or source-only)"
+  },
+  "graph-file-reload-consumer": {
+   "class": "audio-only",
+   "status": "not-configured",
+   "reason": "no CMake target in this configuration (SDK project or source-only)"
+  },
+  "graph-hello": {
+   "class": "audio-only",
+   "status": "not-configured",
+   "reason": "no CMake target in this configuration (SDK project or source-only)"
+  },
+  "graph-named-bus-cookbook": {
+   "class": "audio-only",
+   "status": "not-configured",
+   "reason": "no CMake target in this configuration (SDK project or source-only)"
+  },
+  "graph-patch-consumer": {
+   "class": "audio-only",
+   "status": "not-configured",
+   "reason": "no CMake target in this configuration (SDK project or source-only)"
+  },
+  "graph-spatial-cookbook": {
+   "class": "audio-only",
+   "status": "not-configured",
+   "reason": "no CMake target in this configuration (SDK project or source-only)"
+  },
+  "host-bench-plugin": {
+   "class": "audio-only",
+   "status": "built",
+   "targets": [
+    "PulpHostBench_CLAP",
+    "pulp-host-bench-test"
+   ],
+   "exit_code": 0
+  },
+  "hot-reload-demo": {
+   "class": "audio-only",
+   "status": "built",
+   "targets": [
+    "HotReloadDemo_CLAP",
+    "hot-reload-demo-logic"
+   ],
+   "exit_code": 0
+  },
+  "hot-reload-morph": {
+   "class": "moves-to-vellum",
+   "status": "built",
+   "targets": [
+    "HotReloadMorph_CLAP",
+    "hot-reload-morph-capture",
+    "hot-reload-morph-logic-harsh",
+    "hot-reload-morph-logic-warm"
+   ],
+   "exit_code": 0
+  },
+  "hot-reload-synth": {
+   "class": "audio-only",
+   "status": "built",
+   "targets": [
+    "HotReloadSynth_CLAP",
+    "hot-reload-synth-logic",
+    "hot-reload-synth-logic-saw"
+   ],
+   "exit_code": 0
+  },
+  "ink-signal-sampler": {
+   "class": "moves-to-vellum",
+   "status": "built",
+   "targets": [
+    "pulp-ink-signal-sampler"
+   ],
+   "exit_code": 0
+  },
+  "ink-signal-showcase": {
+   "class": "moves-to-vellum",
+   "status": "built",
+   "targets": [
+    "pulp-ink-signal-showcase"
+   ],
+   "exit_code": 0
+  },
+  "jsfx-delay": {
+   "class": "audio-only",
+   "status": "not-configured",
+   "reason": "no CMake target in this configuration (SDK project or source-only)"
+  },
+  "jsfx-gain": {
+   "class": "audio-only",
+   "status": "not-configured",
+   "reason": "no CMake target in this configuration (SDK project or source-only)"
+  },
+  "jsfx-tremolo": {
+   "class": "audio-only",
+   "status": "not-configured",
+   "reason": "no CMake target in this configuration (SDK project or source-only)"
+  },
+  "midi-learn-demo": {
+   "class": "moves-to-vellum",
+   "status": "built",
+   "targets": [
+    "MidiLearnDemo_CLAP"
+   ],
+   "exit_code": 0
+  },
+  "modal-specs": {
+   "class": "audio-only",
+   "status": "not-configured",
+   "reason": "no CMake target in this configuration (SDK project or source-only)"
+  },
+  "moonbase-activation": {
+   "class": "moves-to-vellum",
+   "status": "not-configured",
+   "reason": "PULP_BUILD_MOONBASE_EXAMPLE"
+  },
+  "mpe-synth": {
+   "class": "audio-only",
+   "status": "built",
+   "targets": [
+    "PulpMpeSynth_CLAP",
+    "pulp-mpe-synth-test"
+   ],
+   "exit_code": 0
+  },
+  "mtk-demo": {
+   "class": "moves-to-vellum",
+   "status": "built",
+   "targets": [
+    "pulp-mtk-demo"
+   ],
+   "exit_code": 0
+  },
+  "offline-stretch": {
+   "class": "audio-only",
+   "status": "built",
+   "targets": [
+    "stretchcli"
+   ],
+   "exit_code": 0
+  },
+  "p1-event-admission-consumer": {
+   "class": "audio-only",
+   "status": "not-configured",
+   "reason": "no CMake target in this configuration (SDK project or source-only)"
+  },
+  "plugin-host-demo": {
+   "class": "moves-to-vellum",
+   "status": "built",
+   "targets": [
+    "pulp-plugin-host-demo"
+   ],
+   "exit_code": 0
+  },
+  "process-timing-consumer": {
+   "class": "audio-only",
+   "status": "not-configured",
+   "reason": "no CMake target in this configuration (SDK project or source-only)"
+  },
+  "pulp-compressor": {
+   "class": "audio-only",
+   "status": "built",
+   "targets": [
+    "PulpCompressor_CLAP",
+    "pulp-compressor-test"
+   ],
+   "exit_code": 0
+  },
+  "pulp-delay": {
+   "class": "moves-to-vellum",
+   "status": "built",
+   "targets": [
+    "PulpDelay_CLAP",
+    "pulp-delay-test",
+    "pulp-delay-ui-shots"
+   ],
+   "exit_code": 0
+  },
+  "pulp-effect": {
+   "class": "moves-to-vellum",
+   "status": "built",
+   "targets": [
+    "PulpEffect_CLAP",
+    "pulp-au-bundle-lifecycle-test",
+    "pulp-clap-bundle-lifecycle-test",
+    "pulp-effect-test"
+   ],
+   "exit_code": 0
+  },
+  "pulp-gain": {
+   "class": "audio-only",
+   "status": "built",
+   "targets": [
+    "PulpGainHeadless_CLAP",
+    "PulpGain_CLAP",
+    "pulp-gain-test"
+   ],
+   "exit_code": 0
+  },
+  "pulp-multi-out": {
+   "class": "audio-only",
+   "status": "built",
+   "targets": [
+    "PulpMultiOut_CLAP",
+    "pulp-multi-out-test"
+   ],
+   "exit_code": 0
+  },
+  "pulp-pluck": {
+   "class": "audio-only",
+   "status": "built",
+   "targets": [
+    "PulpPluck_CLAP",
+    "pulp-pluck-test"
+   ],
+   "exit_code": 0
+  },
+  "pulp-tone": {
+   "class": "audio-only",
+   "status": "built",
+   "targets": [
+    "PulpTone_CLAP",
+    "pulp-tone-test"
+   ],
+   "exit_code": 0
+  },
+  "pulp-transpose": {
+   "class": "audio-only",
+   "status": "built",
+   "targets": [
+    "PulpTranspose_CLAP",
+    "pulp-transpose-test"
+   ],
+   "exit_code": 0
+  },
+  "rust-gain": {
+   "class": "audio-only",
+   "status": "not-configured",
+   "reason": "PULP_BUILD_NATIVE_COMPONENT_RUST_TESTS"
+  },
+  "sample-region-allpass": {
+   "class": "audio-only",
+   "status": "built",
+   "targets": [
+    "SampleRegionAllpass_CLAP",
+    "sample-region-allpass-consumer",
+    "sample-region-allpass-control-editable",
+    "sample-region-allpass-control-frozen",
+    "sample-region-allpass-core"
+   ],
+   "exit_code": 0
+  },
+  "sdf-effects-demo": {
+   "class": "moves-to-vellum",
+   "status": "built",
+   "targets": [
+    "pulp-sdf-effects-demo"
+   ],
+   "exit_code": 0
+  },
+  "sdf-text-demo": {
+   "class": "moves-to-vellum",
+   "status": "built",
+   "targets": [
+    "pulp-sdf-text-demo"
+   ],
+   "exit_code": 0
+  },
+  "sdf-vs-msdf-demo": {
+   "class": "moves-to-vellum",
+   "status": "built",
+   "targets": [
+    "pulp-sdf-vs-msdf-demo"
+   ],
+   "exit_code": 0
+  },
+  "showcase": {
+   "class": "moves-to-vellum",
+   "status": "not-configured",
+   "reason": "script-only: no target, run through ui-preview --script"
+  },
+  "spectral-frame-codec-consumer": {
+   "class": "audio-only",
+   "status": "not-configured",
+   "reason": "no CMake target in this configuration (SDK project or source-only)"
+  },
+  "spectral-lab": {
+   "class": "moves-to-vellum",
+   "status": "built",
+   "targets": [
+    "SpectralLab_CLAP",
+    "spectral-lab-bench",
+    "spectral-lab-processor-test",
+    "spectral-lab-shot",
+    "spectral-lab-test"
+   ],
+   "exit_code": 0
+  },
+  "spectral-resynthesis-consumer": {
+   "class": "audio-only",
+   "status": "not-configured",
+   "reason": "no CMake target in this configuration (SDK project or source-only)"
+  },
+  "stream-demo": {
+   "class": "audio-only",
+   "status": "built",
+   "targets": [
+    "pulp-stream-demo"
+   ],
+   "exit_code": 0
+  },
+  "super-convolver": {
+   "class": "moves-to-vellum",
+   "status": "built",
+   "targets": [
+    "SuperConvolver_CLAP",
+    "super-convolver-bench",
+    "super-convolver-field-shot",
+    "super-convolver-gpu-hammer",
+    "super-convolver-shot",
+    "super-convolver-test"
+   ],
+   "exit_code": 0
+  },
+  "text-input-test": {
+   "class": "moves-to-vellum",
+   "status": "built",
+   "targets": [
+    "pulp-text-input-test"
+   ],
+   "exit_code": 0
+  },
+  "threejs-native-demo": {
+   "class": "moves-to-vellum",
+   "status": "built",
+   "targets": [
+    "pulp-threejs-native-demo"
+   ],
+   "exit_code": 0
+  },
+  "timeline-phase1": {
+   "class": "audio-only",
+   "status": "built",
+   "targets": [
+    "pulp-timeline-audio-player",
+    "pulp-timeline-multitrack-arrangement",
+    "pulp-timeline-phase1-examples",
+    "pulp-timeline-step-sequencer"
+   ],
+   "exit_code": 0
+  },
+  "timeline-plugin-proof": {
+   "class": "moves-to-vellum",
+   "status": "built",
+   "targets": [
+    "TimelinePluginProof_CLAP",
+    "timeline-plugin-proof-test"
+   ],
+   "exit_code": 0
+  },
+  "timeline-sdk-consumer": {
+   "class": "audio-only",
+   "status": "not-configured",
+   "reason": "no CMake target in this configuration (SDK project or source-only)"
+  },
+  "timeline-session": {
+   "class": "audio-only",
+   "status": "built",
+   "targets": [
+    "pulp-timeline-daw-project",
+    "pulp-timeline-launch-session",
+    "pulp-timeline-project-session",
+    "pulp-timeline-project-session-shell",
+    "pulp-timeline-session-examples"
+   ],
+   "exit_code": 0
+  },
+  "trace-demo": {
+   "class": "audio-only",
+   "status": "not-configured",
+   "reason": "PULP_TRACING"
+  },
+  "trace-plugin-chain": {
+   "class": "audio-only",
+   "status": "not-configured",
+   "reason": "PULP_TRACING"
+  },
+  "ui-preview": {
+   "class": "moves-to-vellum",
+   "status": "built",
+   "targets": [
+    "pulp-ui-preview"
+   ],
+   "exit_code": 0
+  },
+  "view-bridge-demo": {
+   "class": "moves-to-vellum",
+   "status": "built",
+   "targets": [
+    "pulp-view-bridge-demo"
+   ],
+   "exit_code": 0
+  },
+  "virtual-list-sample-manager": {
+   "class": "moves-to-vellum",
+   "status": "built",
+   "targets": [
+    "pulp-virtual-list-sample-manager"
+   ],
+   "exit_code": 0
+  },
+  "webview-monaco": {
+   "class": "moves-to-vellum",
+   "status": "not-configured",
+   "reason": "PULP_BUILD_WEBVIEW AND PULP_MONACO_BUNDLE_DIR (prebundled assets)"
+  },
+  "webview-palette": {
+   "class": "moves-to-vellum",
+   "status": "built",
+   "targets": [
+    "pulp-webview-palette",
+    "pulp_webview_palette_assets"
+   ],
+   "exit_code": 0
+  },
+  "webview-plugin": {
+   "class": "moves-to-vellum",
+   "status": "built",
+   "targets": [
+    "PulpWebViewPlugin_CLAP"
+   ],
+   "exit_code": 0
+  },
+  "widget-gallery": {
+   "class": "moves-to-vellum",
+   "status": "built",
+   "targets": [
+    "pulp-widget-gallery"
+   ],
+   "exit_code": 0
+  }
+ }
+}

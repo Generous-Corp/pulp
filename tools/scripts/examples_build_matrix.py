@@ -15,6 +15,10 @@ The build directory needs a file-API query before it is configured:
     mkdir -p <build>/.cmake/api/v1/query && touch <build>/.cmake/api/v1/query/codemodel-v2
     cmake <build>
 
+Check that the committed record covers the manifest:
+
+    python3 tools/scripts/examples_build_matrix.py --check-record
+
 Usage (run under the host build lease so the job count is a share, not the
 machine):
 
@@ -34,6 +38,7 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 MANIFEST = Path("docs/status/examples-manifest.json")
+RECORD = Path("docs/status/examples-build-record.json")
 RETAINED = ("audio-only", "moves-to-vellum")
 BUILT_TYPES = ("EXECUTABLE", "MODULE_LIBRARY", "SHARED_LIBRARY", "STATIC_LIBRARY")
 FORMAT_PREFERENCE = ("_CLAP", "_Standalone", "_VST3", "_AU")
@@ -98,7 +103,40 @@ def selected_examples(manifest: dict, only: list[str]) -> list[tuple[str, dict]]
     return out
 
 
+def check_record(manifest: dict, record: dict) -> list[str]:
+    """Problems that stop the committed record from covering the manifest."""
+    problems: list[str] = []
+    expected = {name for name, _ in selected_examples(manifest, [])}
+    entries = record.get("examples", {})
+    for name in sorted(expected - set(entries)):
+        problems.append(f"{name}: retained example has no build receipt")
+    for name in sorted(set(entries) - expected):
+        problems.append(f"{name}: receipt for an example that is not a retained macOS example")
+    for name in sorted(expected & set(entries)):
+        receipt = entries[name]
+        status = receipt.get("status")
+        if status == "built":
+            if not receipt.get("targets") or receipt.get("exit_code") != 0:
+                problems.append(f"{name}: 'built' needs targets and exit_code 0")
+        elif status == "not-configured":
+            if not str(receipt.get("reason", "")).strip():
+                problems.append(f"{name}: 'not-configured' needs a reason")
+        else:
+            problems.append(f"{name}: status must be built or not-configured (got {status!r})")
+    return problems
+
+
 def run(args: argparse.Namespace) -> int:
+    if args.check_record:
+        manifest = json.loads((args.repo_root / MANIFEST).read_text(encoding="utf-8"))
+        record = json.loads((args.repo_root / RECORD).read_text(encoding="utf-8"))
+        problems = check_record(manifest, record)
+        for problem in problems:
+            print(f"examples-build-record: {problem}", file=sys.stderr)
+        if not problems:
+            print("examples-build-record: ok")
+        return 1 if problems else 0
+
     manifest = json.loads((args.repo_root / MANIFEST).read_text(encoding="utf-8"))
     by_dir = example_targets(args.build_dir)
     receipts: dict[str, dict] = {}
@@ -132,12 +170,17 @@ def run(args: argparse.Namespace) -> int:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--repo-root", type=Path, default=REPO_ROOT)
-    parser.add_argument("--build-dir", type=Path, required=True)
-    parser.add_argument("--out", type=Path, required=True)
+    parser.add_argument("--check-record", action="store_true",
+                        help="check docs/status/examples-build-record.json against the manifest")
+    parser.add_argument("--build-dir", type=Path)
+    parser.add_argument("--out", type=Path)
     parser.add_argument("--only", nargs="*", default=[])
     parser.add_argument("--plan", action="store_true", help="list targets without building")
     parser.add_argument("--timeout", type=int, default=3000, help="seconds per example")
-    return run(parser.parse_args(argv))
+    args = parser.parse_args(argv)
+    if not args.check_record and (args.build_dir is None or args.out is None):
+        parser.error("--build-dir and --out are required unless --check-record is given")
+    return run(args)
 
 
 if __name__ == "__main__":
