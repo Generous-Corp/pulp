@@ -1522,6 +1522,14 @@ the required `Enforce version & skill sync` job, so the Windows copy added
 failures from POSIX-only fixtures and about 48 minutes of serial time, not
 coverage. A Windows-specific script belongs outside that manifest.
 
+The same ctest also excludes `browser-capture` and `windows-pr-quarantine`.
+Hosted Windows images do carry Chrome, but its CDP capability probe times out
+under the `-j8` load, so those tests report a missing browser that is really a
+slow one; the macOS gate runs them on every merge group. `windows-pr-quarantine`
+is the label `build.yml`'s Windows PR lane already excludes. When a Windows
+failure group looks like "no browser", read the probe's timeout line before
+concluding the runner lacks Chrome.
+
 ## Android minimum-API allocation check
 
 The Android workflow compiles and links the public aligned DSP buffer for both
