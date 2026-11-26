@@ -1,6 +1,7 @@
 find_package(Threads REQUIRED)
 if(PULP_BUILD_TESTS AND TARGET Catch2::Catch2WithMain)
     add_executable(pulp-test-pulp-vellum-components
+        ${CMAKE_CURRENT_SOURCE_DIR}/arranger_session_test.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/arranger_view_test.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/panic_button_test.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/lasso_test.cpp
