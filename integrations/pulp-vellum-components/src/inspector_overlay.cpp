@@ -113,6 +113,10 @@ bool InspectorOverlay::handle_key_event(const ::vellum::view::KeyEvent& event) {
         set_tool(Tool::text);
         return true;
     }
+    if (event.key == KeyCode::p && event.modifiers == 0) {
+        toggle_pass_viewer();
+        return true;
+    }
     if (event.key == KeyCode::m && event.modifiers == 0) {
         toggle_selection_mode();
         return true;
@@ -220,11 +224,16 @@ void InspectorOverlay::paint(canvas::Canvas& canvas) {
     if (!active_)
         return;
     drop_stale_views();
+    // Record the frame whether or not the viewer is showing, so turning it on
+    // shows history already gathered.
+    capture_pass_frame();
     paint_highlight(canvas);
     paint_distance_lines(canvas);
     if (selected_)
         paint_box_model(canvas, *selected_);
     paint_text_edit(canvas);
+    if (pass_viewer_enabled_)
+        paint_pass_panel(canvas);
     // Last, so the magnified grid sits on top of the highlights.
     if (zoom_active_)
         paint_zoom_panel(canvas);

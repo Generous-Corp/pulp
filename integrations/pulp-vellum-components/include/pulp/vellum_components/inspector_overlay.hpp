@@ -14,6 +14,7 @@
 #include <pulp/vellum_components/aliases.hpp>
 #include <pulp/vellum_components/field_edit.hpp>
 #include <pulp/vellum_components/overlay_geometry.hpp>
+#include <pulp/vellum_components/render_pass_stats.hpp>
 #include <pulp/vellum_components/text_edit.hpp>
 
 #include <vellum/view/input_events.hpp>
@@ -24,6 +25,7 @@
 #include <string_view>
 #include <utility>
 #include <variant>
+#include <vector>
 
 namespace pulp::vellum_components {
 
@@ -262,6 +264,47 @@ class InspectorOverlay {
         return text_editing() && selected_ != nullptr && selected_ == text_target_;
     }
 
+    /// The render pass viewer: a panel docked to the top right that shows,
+    /// for each pass type, the last, mean and peak CPU time and draw calls
+    /// over the last `overlay::kPassHistoryFrames` frames, with a sparkline
+    /// and a count of frames over budget. `P` toggles it. It reads a
+    /// `RenderPassSource` the host supplies and borrows (null, the default,
+    /// shows "No render pass source attached"). The timings are CPU
+    /// wall-time, not GPU time.
+    void set_render_pass_source(const overlay::RenderPassSource* source) {
+        pass_source_ = source;
+    }
+    const overlay::RenderPassSource* render_pass_source() const {
+        return pass_source_;
+    }
+    /// Record the source's last frame into the history. Every paint calls
+    /// this, so the history keeps filling while the viewer is hidden. True when
+    /// a new frame was recorded; false with no source, no frame run or a frame
+    /// already recorded.
+    bool capture_pass_frame();
+    /// Every pass type in compositing order with its statistics.
+    std::vector<overlay::PassAttribution> pass_attribution() const {
+        return pass_history_.attribution();
+    }
+    const overlay::PassHistory& pass_history() const {
+        return pass_history_;
+    }
+    int budget_overrun_count() const {
+        return pass_history_.overrun_count();
+    }
+    std::uint64_t pass_frames_captured() const {
+        return pass_history_.frames_captured();
+    }
+    bool pass_viewer_enabled() const {
+        return pass_viewer_enabled_;
+    }
+    void set_pass_viewer_enabled(bool enabled) {
+        pass_viewer_enabled_ = enabled;
+    }
+    void toggle_pass_viewer() {
+        pass_viewer_enabled_ = !pass_viewer_enabled_;
+    }
+
     /// Offer a key to the overlay. Cmd+I (Ctrl+I elsewhere) toggles it. While
     /// a text edit is open it owns the keyboard: Enter commits, Esc cancels
     /// and returns to the Select tool, Backspace and Delete remove, the
@@ -274,8 +317,8 @@ class InspectorOverlay {
     /// Right, Home and End move the caret, Backspace trims, Enter commits, Esc
     /// cancels and Tab commits and moves to the next field (Shift+Tab to the
     /// previous); every other key falls through to the view tree untouched.
-    /// Otherwise, while active, V and T pick the tool, Escape deselects and
-    /// keeps the overlay on, M
+    /// Otherwise, while active, V and T pick the tool, P toggles the render
+    /// pass viewer, Escape deselects and keeps the overlay on, M
     /// flips the selection mode and Z toggles the loupe. Returns true when the
     /// key was consumed.
     bool handle_key_event(const ::vellum::view::KeyEvent& event);
@@ -340,6 +383,7 @@ class InspectorOverlay {
     bool handle_text_key(const ::vellum::view::KeyEvent& event);
     bool mouse_text_tool(const ::vellum::view::MouseEvent& event, bool is_press);
     void paint_text_edit(canvas::Canvas& canvas);
+    void paint_pass_panel(canvas::Canvas& canvas);
     bool text_target_reachable() const;
     void push_text_to_target();
     void clear_text_edit();
@@ -375,6 +419,9 @@ class InspectorOverlay {
     overlay::TextEditBuffer text_edit_;
     overlay::TextClipboard clipboard_ = overlay::TextClipboard::system();
     std::string text_tweak_path_ = "text";
+    const overlay::RenderPassSource* pass_source_ = nullptr;
+    overlay::PassHistory pass_history_;
+    bool pass_viewer_enabled_ = false;
 
     static constexpr float kFontSize = 11.0f;
     bool zoom_active_ = false;
@@ -391,6 +438,10 @@ class InspectorOverlay {
     static constexpr float kBadgeHeight = 16.0f;
     static constexpr float kHandleHalfSide = 4.0f;
     static constexpr float kCaretWidth = 1.5f;
+    static constexpr float kPanelWidth = 260.0f;
+    static constexpr float kPanelMargin = 12.0f;
+    static constexpr float kPanelPadding = 8.0f;
+    static constexpr float kPassChipWidth = 8.0f;
     static constexpr float kFallbackFontSize = 13.0f;
 };
 

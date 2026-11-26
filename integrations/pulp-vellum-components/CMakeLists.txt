@@ -10,10 +10,12 @@ add_library(pulp-vellum-components STATIC
     src/field_edit.cpp
     src/inspector_overlay.cpp
     src/inspector_overlay_field_edit.cpp
+    src/inspector_overlay_pass_panel.cpp
     src/inspector_overlay_text_edit.cpp
     src/inspector_overlay_zoom.cpp
     src/inspector_window.cpp
     src/overlay_geometry.cpp
+    src/render_pass_stats.cpp
     src/text_edit.cpp)
 add_library(pulp::vellum-components ALIAS pulp-vellum-components)
 target_include_directories(pulp-vellum-components PUBLIC
