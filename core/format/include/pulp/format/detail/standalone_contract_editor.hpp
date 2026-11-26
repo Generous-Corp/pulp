@@ -30,6 +30,7 @@ class StateStore;
 namespace pulp::format {
 class EditorFactory;
 class Processor;
+class StandalonePanel;
 } // namespace pulp::format
 
 namespace pulp::format::detail {
@@ -57,6 +58,11 @@ struct StandaloneContractEditorOptions {
     /// zero. Zero reads the main screen's visible frame.
     double screen_visible_width = 0.0;
     double screen_visible_height = 0.0;
+    /// Tool windows to offer beside the editor (standalone_panel.hpp): each
+    /// gets a menu item when the window has a menu, its shortcut with the
+    /// main modifier toggles it from the editor window, and it is handed the
+    /// editor window so it can open beside it. Owned by the caller.
+    std::vector<StandalonePanel*> panels;
     /// Called once with the native window (an `NSWindow*` on macOS) before
     /// the loop runs, so a test can reach its delegate.
     std::function<void(void* native_window)> on_window_ready;

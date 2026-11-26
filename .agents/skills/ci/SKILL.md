@@ -121,6 +121,15 @@ on a real PR. Do them in order.
    Commit the event(s) before re-running — both checkers read the commit
    range, never the working tree. Run `python3 tools/scripts/vellum_watch_preflight.py --enforce`
    on its own for just the Vellum verdict.
+
+   A new `integrations/pulp-vellum-*` package is built and tested by the
+   `Vellum SDK consumer` lane only: add its directory to that workflow's
+   `paths:` list and its `PULP_ENABLE_*` flag to the bridge configure line, and
+   give its ctest targets a label that starts with `pulp-vellum` so
+   `labelled-targets` selects them. Any new TU that includes a tracked core
+   header (for example `pulp/host/signal_graph.hpp`) trips the header fan-out
+   guard; the package needs a `Fanout-Grow: all reason="..."` trailer naming
+   the legacy TU it replaces.
 2. **Know the required contexts, and only those.** They come from branch
    protection, not from the check list on the PR page:
 
@@ -1509,6 +1518,11 @@ build is about 2.5 hours and the suite 30 minutes, so its `timeout-minutes` is
 300; when a hosted Windows run is cancelled at the limit, read the step timings
 before blaming the test step.
 
+A hosted Windows checkout must keep LF bytes: Git for Windows defaults to
+`core.autocrlf=true`, so `cross-platform-check.yml` sets `core.autocrlf=false`
+and `core.eol=lf` before `actions/checkout`. Without it, tests that diff a
+committed artifact against a regenerated one fail on CRLF nobody committed.
+
 ## The Windows nightly skips the source-selftest lane
 
 `cross-platform-check.yml`'s Windows ctest excludes the `source-selftest` label.
@@ -1516,6 +1530,14 @@ Those Python registrations read only the checkout and run on ubuntu-latest in
 the required `Enforce version & skill sync` job, so the Windows copy added
 failures from POSIX-only fixtures and about 48 minutes of serial time, not
 coverage. A Windows-specific script belongs outside that manifest.
+
+The same ctest also excludes `browser-capture` and `windows-pr-quarantine`.
+Hosted Windows images do carry Chrome, but its CDP capability probe times out
+under the `-j8` load, so those tests report a missing browser that is really a
+slow one; the macOS gate runs them on every merge group. `windows-pr-quarantine`
+is the label `build.yml`'s Windows PR lane already excludes. When a Windows
+failure group looks like "no browser", read the probe's timeout line before
+concluding the runner lacks Chrome.
 
 ## Android minimum-API allocation check
 
@@ -13980,3 +14002,8 @@ The lane's `-L pulp-vellum` run includes the GPU adapter probe and its
 empty-adapter negative control (`PASS_REGULAR_EXPRESSION` on the fail JSON, since
 the control must exit non-zero). The probe target is picked up by the
 `labelled-targets` derivation, so it needs no workflow edit.
+
+The same lane also runs the MCP UI tool cases (`pulp-test-mcp-server "[ui]"`)
+against the SDK's `bin/vellum-app-host` through `PULP_TEST_VELLUM_APP_HOST`. The
+step greps the output for `SKIPPED`, because Catch2 reports a skipped live case
+as a pass: keep that check if the step is edited.

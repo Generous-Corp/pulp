@@ -102,6 +102,19 @@ Two consequences worth keeping:
   be reported, exercised against the real `lsof` probe — without it, a probe
   that always answered "nobody holds this" would pass every other assertion.
 
+### The WidgetBridge freshness row hashes the generator's own input list
+
+The `WidgetBridge generated API` row in `tools/cli/cli_doctor_helpers.cpp`
+recomputes the generator's input fingerprint without running Python, so its
+`input_rels` list must match `FINGERPRINT_INPUTS` in
+`tools/scripts/generate_widget_bridge_api.py` exactly, in order and by path:
+each relative path is hashed along with the file's bytes. Moving one of those
+inputs (the capability vocabulary moved to `pulp/runtime/reload_capabilities.hpp`)
+means changing the generator, the doctor list and the paths the doctor tests in
+`test/test_cli_project_command.cpp` write, then regenerating the outputs. A
+forwarding header left at the old path still exists, so a missed doctor path
+reports the checked-in outputs as stale rather than missing.
+
 ### `pulp doctor gpu` is a typed diagnostic subcommand
 
 `pulp doctor gpu [--no-render] [--json]` performs bounded render/readback and
@@ -4469,3 +4482,12 @@ probe executable that fills the structs from Vellum's GPU runtime lives in
 `integrations/pulp-vellum` and compiles that source directly; it is not part of
 the `pulp doctor gpu` or `pulp gpu probe` recipe registry. `unavailable` (no
 device) and `fail` (device came up wrong) stay distinct exit codes (2 and 1).
+
+## `pulp audio` image PNGs are encoded without the render layer
+
+`tools/cli/audio_png_encoder.cpp` writes the scope, waveform and spectrogram
+PNGs from a raw RGBA buffer over the runtime's `zlib_compress`; `cmd_audio.cpp`
+includes no `pulp/render` header. Keep it that way: a new image verb hands its
+pixels to `encode_png_rgba` and never reaches for a surface. The unit test
+parses the bytes by hand (CRCs, IHDR, inflate, filter bytes), so an encoder
+change that a viewer would forgive still fails there.

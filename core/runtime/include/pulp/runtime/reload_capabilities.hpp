@@ -1,0 +1,171 @@
+#pragma once
+// Capability model for reloadable scripted content. A hot-reloaded or remotely
+// pushed UI declares the capabilities it needs; the host grants a set. The
+// scripted-UI bridge registers an effectful API group only when its capability
+// is granted, so an ungranted JS symbol is absent rather than merely guarded.
+// Pure-UI groups (canvas, css, layout, widgets, gpu) carry no effect and are
+// always registered.
+//
+// This is the blast-radius bound for an untrusted or compromised UI: a UI granted
+// no `network`, `filesystem` or `exec` cannot reach those native surfaces at all,
+// even if it is otherwise valid. It is deliberately not a sandbox for native
+// code: native modules are trusted by provenance (signature), never gated here.
+//
+// The vocabulary lives in runtime, below both the view layer that enforces it
+// and the format layer that signs, installs and validates the declared names in
+// a content pack, so a pack can be checked without any UI layer present. The
+// wire names are the contract and must match every other editor runtime that
+// reads the same signed manifest.
+#include <cstdint>
+#include <optional>
+#include <string>
+#include <string_view>
+#include <vector>
+
+namespace pulp::runtime {
+
+/// A capability gates one effectful bridge-API group. Ungranted: the group's JS
+/// functions are absent. Ordering is stable (persisted/signed by name, never index).
+enum class ReloadCapability : std::uint8_t {
+    Exec,          ///< shell exec/execAsync; also compiled out unless the
+                   ///< PULP_DEV_BRIDGE_EXEC CMake option is ON (release/SDK: OFF)
+    Clipboard,     ///< read/write the system clipboard
+    Filesystem,    ///< read arbitrary file paths (asset file loads, native dialogs)
+    Storage,       ///< persistent key/value + preset temp files
+    Ai,            ///< AI-CLI bridge
+    RuntimeImport, ///< evaluate a runtime-imported JS bundle (dynamic code load)
+    Network,       ///< outbound network (reserved; used by remote-UX-push, not the
+                   ///< bridge today)
+};
+
+/// Stable wire name for a capability (used in the SIGNED pack manifest + config).
+/// Names are the contract; never serialize the enum index.
+inline std::string_view capability_name(ReloadCapability c) {
+    switch (c) {
+    case ReloadCapability::Exec:
+        return "exec";
+    case ReloadCapability::Clipboard:
+        return "clipboard";
+    case ReloadCapability::Filesystem:
+        return "filesystem";
+    case ReloadCapability::Storage:
+        return "storage";
+    case ReloadCapability::Ai:
+        return "ai";
+    case ReloadCapability::RuntimeImport:
+        return "runtime_import";
+    case ReloadCapability::Network:
+        return "network";
+    }
+    return "unknown";
+}
+
+/// Parse a wire name; returns false on an unknown token (caller fails closed: an
+/// unrecognized capability must never silently grant nothing-or-everything).
+inline bool capability_from_name(std::string_view s, ReloadCapability& out) {
+    if (s == "exec") {
+        out = ReloadCapability::Exec;
+        return true;
+    }
+    if (s == "clipboard") {
+        out = ReloadCapability::Clipboard;
+        return true;
+    }
+    if (s == "filesystem") {
+        out = ReloadCapability::Filesystem;
+        return true;
+    }
+    if (s == "storage") {
+        out = ReloadCapability::Storage;
+        return true;
+    }
+    if (s == "ai") {
+        out = ReloadCapability::Ai;
+        return true;
+    }
+    if (s == "runtime_import") {
+        out = ReloadCapability::RuntimeImport;
+        return true;
+    }
+    if (s == "network") {
+        out = ReloadCapability::Network;
+        return true;
+    }
+    return false;
+}
+
+/// A granted-capability set. Small fixed universe → a bitmask. Default = EMPTY
+/// (most restrictive), which is the consumer/protected-dev default; local-dev
+/// constructs `all()` (unenforced).
+class CapabilitySet {
+  public:
+    CapabilitySet() = default;
+
+    static CapabilitySet all() {
+        CapabilitySet s;
+        s.bits_ = kAllBits;
+        s.legacy_default_ = true;
+        return s;
+    }
+
+    void grant(ReloadCapability c) {
+        bits_ |= bit(c);
+    }
+    bool has(ReloadCapability c) const {
+        return (bits_ & bit(c)) != 0;
+    }
+    bool empty() const {
+        return bits_ == 0;
+    }
+
+    /// True only for a set produced by all(): the unenforced grant every
+    /// trusted/local realm still receives by default. A policy that must not
+    /// fire until that default is replaced by an explicit grant keys on this,
+    /// so an EXPLICIT grant of the same capabilities counts as a decision
+    /// while the legacy default does not. Parsing a manifest or granting onto
+    /// an empty set never yields a legacy-default set.
+    bool is_legacy_default() const noexcept {
+        return legacy_default_;
+    }
+
+    /// Return the first granted effectful capability in stable declaration
+    /// order. All current reload capabilities expose native side effects, so a
+    /// live-realm evaluator must require this to be empty rather than trying to
+    /// hide selected globals inside the same realm.
+    std::optional<ReloadCapability> first_effectful() const noexcept {
+        for (const auto capability :
+             {ReloadCapability::Exec, ReloadCapability::Clipboard, ReloadCapability::Filesystem,
+              ReloadCapability::Storage, ReloadCapability::Ai, ReloadCapability::RuntimeImport,
+              ReloadCapability::Network}) {
+            if (has(capability))
+                return capability;
+        }
+        return std::nullopt;
+    }
+
+    /// Parse a declared-capability name list (from the signed manifest). Returns
+    /// false if any token is unknown (fail closed: reject the whole set).
+    static bool parse(const std::vector<std::string>& names, CapabilitySet& out) {
+        CapabilitySet s;
+        for (const auto& n : names) {
+            ReloadCapability c;
+            if (!capability_from_name(n, c))
+                return false; // unknown: fail closed
+            s.grant(c);
+        }
+        out = s;
+        return true;
+    }
+
+  private:
+    static std::uint32_t bit(ReloadCapability c) {
+        return std::uint32_t{1} << static_cast<std::uint8_t>(c);
+    }
+    static constexpr std::uint32_t kAllBits =
+        (std::uint32_t{1} << 7) - 1; // 7 capabilities (Exec..Network)
+
+    std::uint32_t bits_ = 0;
+    bool legacy_default_ = false;
+};
+
+} // namespace pulp::runtime

@@ -191,6 +191,12 @@ pulp_reload_host(MyPlugin_Standalone)   # and _CLAP / _VST3, the capture tool, e
 symbols so that resolution succeeds. (DSP-only logic doesn't pull `pulp::view`, so
 the default static model is fine there — use thin whenever the logic builds UI.)
 
+A host whose thin logic builds a Pulp view calls `pulp_reload_host_ui()`, which
+also exports the editor surface. In an SDK that serves `Pulp::view` from Vellum
+there is no Pulp editor surface, so `pulp_reload_host_ui()` stops configure:
+keep the logic DSP-only, call `pulp_reload_host()`, and take the editor from a
+UI package, which reloads itself after each DSP swap.
+
 > **Thin reload is validated for *executable* hosts** (standalone apps, tools).
 > A DAW loads a VST3/CLAP *bundle* with `RTLD_LOCAL`, so the bundle's exported
 > symbols are not in the scope the thin logic binds against at `dlopen` — in-DAW
