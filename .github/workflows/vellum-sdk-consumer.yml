@@ -42,6 +42,9 @@ on:
       - 'integrations/CMakeLists.txt'
       - 'CMakeLists.txt'
       - 'test/test_pulp_vellum_param_bridge.cpp'
+      # The view-free DAW reload shell that pulp-test-vellum-reload-shell drives
+      # under the Vellum scripted editor.
+      - 'core/format/include/pulp/format/reload/reloadable_shell_core.hpp'
       - 'test/cmake/editor_host_slice_tests.cmake'
       - 'tools/scripts/editor_host_acceptance.py'
       - 'tools/ci/vellum_sdk_consumer.py'

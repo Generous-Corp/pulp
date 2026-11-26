@@ -407,6 +407,7 @@
       "pulp/format/reload/reload_transaction.hpp",
       "pulp/format/reload/reload_trust_policy.hpp",
       "pulp/format/reload/reloadable_shell.hpp",
+      "pulp/format/reload/reloadable_shell_core.hpp",
       "pulp/format/reload/remote_update.hpp",
       "pulp/format/reload/remote_update_fetch.hpp",
       "pulp/format/reload/revocation.hpp",
@@ -1766,7 +1767,7 @@
       },
       "build_scope": {
         "PULP_BUILD_TESTS": "ON",
-        "PULP_BUILD_EXAMPLES": "OFF"
+        "PULP_BUILD_EXAMPLES": "ON"
       },
       "summary": {
         "installed_target_count": 90,
@@ -10021,24 +10022,8 @@
             "closure_node_count": 85
           },
           {
-            "exported_as": "Pulp::inspect-graph-runtime",
-            "closure_node_count": 83
-          },
-          {
-            "exported_as": "Pulp::inspect-sample-region-runtime",
-            "closure_node_count": 83
-          },
-          {
             "exported_as": "Pulp::inspect-agent-toolkit",
             "closure_node_count": 80
-          },
-          {
-            "exported_as": "Pulp::view-graph-editor",
-            "closure_node_count": 78
-          },
-          {
-            "exported_as": "Pulp::host",
-            "closure_node_count": 77
           },
           {
             "exported_as": "Pulp::standalone",
@@ -10065,6 +10050,10 @@
             "closure_node_count": 71
           },
           {
+            "exported_as": "Pulp::view-graph-editor",
+            "closure_node_count": 70
+          },
+          {
             "exported_as": "Pulp::view",
             "closure_node_count": 66
           },
@@ -10075,6 +10064,14 @@
           {
             "exported_as": "Pulp::view-audio",
             "closure_node_count": 61
+          },
+          {
+            "exported_as": "Pulp::inspect-graph-runtime",
+            "closure_node_count": 54
+          },
+          {
+            "exported_as": "Pulp::inspect-sample-region-runtime",
+            "closure_node_count": 54
           },
           {
             "exported_as": "Pulp::view-platform",
@@ -10099,6 +10096,10 @@
           {
             "exported_as": "Pulp::inspect-telemetry",
             "closure_node_count": 50
+          },
+          {
+            "exported_as": "Pulp::host",
+            "closure_node_count": 48
           },
           {
             "exported_as": "Pulp::view-core",
@@ -12137,19 +12138,12 @@
           "type": "STATIC_LIBRARY",
           "source_dir": "core/host",
           "closure": {
-            "node_count": 77,
+            "node_count": 48,
             "pulp_targets": [
               "pulp-audio",
-              "pulp-bundled-fonts",
-              "pulp-canvas",
               "pulp-dataplane",
-              "pulp-dataplane-audio",
-              "pulp-design-import",
-              "pulp-design-ir",
               "pulp-events",
-              "pulp-format",
               "pulp-format-core",
-              "pulp-format-view",
               "pulp-foundation",
               "pulp-graph",
               "pulp-host",
@@ -12164,16 +12158,9 @@
               "pulp-simd",
               "pulp-state",
               "pulp-timebase",
-              "pulp-timeline",
-              "pulp-view-audio",
-              "pulp-view-core",
-              "pulp-view-script",
-              "pulp-view-tooling"
+              "pulp-timeline"
             ],
             "third_party_targets": [
-              "SDL3-static",
-              "SDL3_Headers",
-              "SheenBidi",
               "ausdk",
               "clap",
               "everest",
@@ -12185,17 +12172,12 @@
               "p256m",
               "pulp-cpp-httplib",
               "pulp-tracing",
-              "vst3-sdk",
-              "yaml-cpp",
-              "yogacore"
+              "vst3-sdk"
             ]
           },
           "external_dependencies": {
-            "count": 47,
+            "count": 29,
             "third_party_targets": [
-              "SDL3-static",
-              "SDL3_Headers",
-              "SheenBidi",
               "ausdk",
               "clap",
               "everest",
@@ -12207,9 +12189,7 @@
               "p256m",
               "pulp-cpp-httplib",
               "pulp-tracing",
-              "vst3-sdk",
-              "yaml-cpp",
-              "yogacore"
+              "vst3-sdk"
             ],
             "prebuilt_archives": [],
             "imported_targets": [],
@@ -12219,33 +12199,20 @@
               "AppKit",
               "AudioToolbox",
               "AudioUnit",
-              "Carbon",
               "Cocoa",
               "CoreAudio",
               "CoreAudioKit",
               "CoreBluetooth",
               "CoreFoundation",
-              "CoreGraphics",
-              "CoreHaptics",
               "CoreMIDI",
-              "CoreMedia",
               "CoreServices",
-              "CoreText",
-              "CoreVideo",
-              "ForceFeedback",
               "Foundation",
-              "GameController",
-              "IOKit",
-              "ImageIO",
-              "Metal",
-              "QuartzCore",
               "Security",
               "UniformTypeIdentifiers",
               "UserNotifications"
             ],
             "system_libraries": [
-              "bsm",
-              "m"
+              "bsm"
             ]
           },
           "public_headers": {
@@ -12266,7 +12233,7 @@
             "framework:CoreFoundation",
             "lv2-headers",
             "pulp-audio",
-            "pulp-format",
+            "pulp-format-core",
             "pulp-graph",
             "pulp-midi",
             "pulp-native-components",
@@ -12648,19 +12615,12 @@
           "type": "STATIC_LIBRARY",
           "source_dir": "inspect",
           "closure": {
-            "node_count": 83,
+            "node_count": 54,
             "pulp_targets": [
               "pulp-audio",
-              "pulp-bundled-fonts",
-              "pulp-canvas",
               "pulp-dataplane",
-              "pulp-dataplane-audio",
-              "pulp-design-import",
-              "pulp-design-ir",
               "pulp-events",
-              "pulp-format",
               "pulp-format-core",
-              "pulp-format-view",
               "pulp-foundation",
               "pulp-graph",
               "pulp-host",
@@ -12677,16 +12637,9 @@
               "pulp-timebase",
               "pulp-timeline",
               "pulp-timeline-editor",
-              "pulp-tool-gpu-health-model",
-              "pulp-view-audio",
-              "pulp-view-core",
-              "pulp-view-script",
-              "pulp-view-tooling"
+              "pulp-tool-gpu-health-model"
             ],
             "third_party_targets": [
-              "SDL3-static",
-              "SDL3_Headers",
-              "SheenBidi",
               "ausdk",
               "clap",
               "everest",
@@ -12702,17 +12655,12 @@
               "pulp-inspect-protocol",
               "pulp-inspect-runtime",
               "pulp-tracing",
-              "vst3-sdk",
-              "yaml-cpp",
-              "yogacore"
+              "vst3-sdk"
             ]
           },
           "external_dependencies": {
-            "count": 51,
+            "count": 33,
             "third_party_targets": [
-              "SDL3-static",
-              "SDL3_Headers",
-              "SheenBidi",
               "ausdk",
               "clap",
               "everest",
@@ -12728,9 +12676,7 @@
               "pulp-inspect-protocol",
               "pulp-inspect-runtime",
               "pulp-tracing",
-              "vst3-sdk",
-              "yaml-cpp",
-              "yogacore"
+              "vst3-sdk"
             ],
             "prebuilt_archives": [],
             "imported_targets": [],
@@ -12740,33 +12686,20 @@
               "AppKit",
               "AudioToolbox",
               "AudioUnit",
-              "Carbon",
               "Cocoa",
               "CoreAudio",
               "CoreAudioKit",
               "CoreBluetooth",
               "CoreFoundation",
-              "CoreGraphics",
-              "CoreHaptics",
               "CoreMIDI",
-              "CoreMedia",
               "CoreServices",
-              "CoreText",
-              "CoreVideo",
-              "ForceFeedback",
               "Foundation",
-              "GameController",
-              "IOKit",
-              "ImageIO",
-              "Metal",
-              "QuartzCore",
               "Security",
               "UniformTypeIdentifiers",
               "UserNotifications"
             ],
             "system_libraries": [
-              "bsm",
-              "m"
+              "bsm"
             ]
           },
           "public_headers": {
@@ -13073,19 +13006,12 @@
           "type": "STATIC_LIBRARY",
           "source_dir": "inspect",
           "closure": {
-            "node_count": 83,
+            "node_count": 54,
             "pulp_targets": [
               "pulp-audio",
-              "pulp-bundled-fonts",
-              "pulp-canvas",
               "pulp-dataplane",
-              "pulp-dataplane-audio",
-              "pulp-design-import",
-              "pulp-design-ir",
               "pulp-events",
-              "pulp-format",
               "pulp-format-core",
-              "pulp-format-view",
               "pulp-foundation",
               "pulp-graph",
               "pulp-host",
@@ -13102,16 +13028,9 @@
               "pulp-timebase",
               "pulp-timeline",
               "pulp-timeline-editor",
-              "pulp-tool-gpu-health-model",
-              "pulp-view-audio",
-              "pulp-view-core",
-              "pulp-view-script",
-              "pulp-view-tooling"
+              "pulp-tool-gpu-health-model"
             ],
             "third_party_targets": [
-              "SDL3-static",
-              "SDL3_Headers",
-              "SheenBidi",
               "ausdk",
               "clap",
               "everest",
@@ -13127,17 +13046,12 @@
               "pulp-inspect-runtime",
               "pulp-inspect-sample-region-runtime",
               "pulp-tracing",
-              "vst3-sdk",
-              "yaml-cpp",
-              "yogacore"
+              "vst3-sdk"
             ]
           },
           "external_dependencies": {
-            "count": 51,
+            "count": 33,
             "third_party_targets": [
-              "SDL3-static",
-              "SDL3_Headers",
-              "SheenBidi",
               "ausdk",
               "clap",
               "everest",
@@ -13153,9 +13067,7 @@
               "pulp-inspect-runtime",
               "pulp-inspect-sample-region-runtime",
               "pulp-tracing",
-              "vst3-sdk",
-              "yaml-cpp",
-              "yogacore"
+              "vst3-sdk"
             ],
             "prebuilt_archives": [],
             "imported_targets": [],
@@ -13165,33 +13077,20 @@
               "AppKit",
               "AudioToolbox",
               "AudioUnit",
-              "Carbon",
               "Cocoa",
               "CoreAudio",
               "CoreAudioKit",
               "CoreBluetooth",
               "CoreFoundation",
-              "CoreGraphics",
-              "CoreHaptics",
               "CoreMIDI",
-              "CoreMedia",
               "CoreServices",
-              "CoreText",
-              "CoreVideo",
-              "ForceFeedback",
               "Foundation",
-              "GameController",
-              "IOKit",
-              "ImageIO",
-              "Metal",
-              "QuartzCore",
               "Security",
               "UniformTypeIdentifiers",
               "UserNotifications"
             ],
             "system_libraries": [
-              "bsm",
-              "m"
+              "bsm"
             ]
           },
           "public_headers": {
@@ -15077,10 +14976,7 @@
           },
           "public_headers": {
             "roots": [
-              "core/canvas/include",
-              "core/format/include",
-              "core/view/audio/include",
-              "core/view/include"
+              "core/format/include"
             ],
             "generated_include_roots": 0
           },
@@ -15877,19 +15773,15 @@
           "type": "STATIC_LIBRARY",
           "source_dir": "core/view/audio",
           "closure": {
-            "node_count": 78,
+            "node_count": 70,
             "pulp_targets": [
               "pulp-audio",
               "pulp-bundled-fonts",
               "pulp-canvas",
               "pulp-dataplane",
-              "pulp-dataplane-audio",
-              "pulp-design-import",
               "pulp-design-ir",
               "pulp-events",
-              "pulp-format",
               "pulp-format-core",
-              "pulp-format-view",
               "pulp-foundation",
               "pulp-graph",
               "pulp-host",
@@ -15905,11 +15797,8 @@
               "pulp-state",
               "pulp-timebase",
               "pulp-timeline",
-              "pulp-view-audio",
               "pulp-view-core",
-              "pulp-view-graph-editor",
-              "pulp-view-script",
-              "pulp-view-tooling"
+              "pulp-view-graph-editor"
             ],
             "third_party_targets": [
               "SDL3-static",
@@ -15927,12 +15816,11 @@
               "pulp-cpp-httplib",
               "pulp-tracing",
               "vst3-sdk",
-              "yaml-cpp",
               "yogacore"
             ]
           },
           "external_dependencies": {
-            "count": 47,
+            "count": 46,
             "third_party_targets": [
               "SDL3-static",
               "SDL3_Headers",
@@ -15949,7 +15837,6 @@
               "pulp-cpp-httplib",
               "pulp-tracing",
               "vst3-sdk",
-              "yaml-cpp",
               "yogacore"
             ],
             "prebuilt_archives": [],
@@ -16530,24 +16417,8 @@
             "closure_node_count": 83
           },
           {
-            "exported_as": "Pulp::inspect-graph-runtime",
-            "closure_node_count": 81
-          },
-          {
-            "exported_as": "Pulp::inspect-sample-region-runtime",
-            "closure_node_count": 81
-          },
-          {
             "exported_as": "Pulp::inspect-agent-toolkit",
             "closure_node_count": 78
-          },
-          {
-            "exported_as": "Pulp::view-graph-editor",
-            "closure_node_count": 76
-          },
-          {
-            "exported_as": "Pulp::host",
-            "closure_node_count": 75
           },
           {
             "exported_as": "Pulp::inspect-ui-runtime",
@@ -16574,6 +16445,10 @@
             "closure_node_count": 69
           },
           {
+            "exported_as": "Pulp::view-graph-editor",
+            "closure_node_count": 68
+          },
+          {
             "exported_as": "Pulp::view",
             "closure_node_count": 66
           },
@@ -16584,6 +16459,14 @@
           {
             "exported_as": "Pulp::view-audio",
             "closure_node_count": 61
+          },
+          {
+            "exported_as": "Pulp::inspect-graph-runtime",
+            "closure_node_count": 52
+          },
+          {
+            "exported_as": "Pulp::inspect-sample-region-runtime",
+            "closure_node_count": 52
           },
           {
             "exported_as": "Pulp::view-platform",
@@ -16612,6 +16495,10 @@
           {
             "exported_as": "Pulp::view-core",
             "closure_node_count": 48
+          },
+          {
+            "exported_as": "Pulp::host",
+            "closure_node_count": 46
           },
           {
             "exported_as": "Pulp::sequence",
@@ -18578,19 +18465,12 @@
           "type": "STATIC_LIBRARY",
           "source_dir": "core/host",
           "closure": {
-            "node_count": 75,
+            "node_count": 46,
             "pulp_targets": [
               "pulp-audio",
-              "pulp-bundled-fonts",
-              "pulp-canvas",
               "pulp-dataplane",
-              "pulp-dataplane-audio",
-              "pulp-design-import",
-              "pulp-design-ir",
               "pulp-events",
-              "pulp-format",
               "pulp-format-core",
-              "pulp-format-view",
               "pulp-foundation",
               "pulp-graph",
               "pulp-host",
@@ -18605,16 +18485,9 @@
               "pulp-simd",
               "pulp-state",
               "pulp-timebase",
-              "pulp-timeline",
-              "pulp-view-audio",
-              "pulp-view-core",
-              "pulp-view-script",
-              "pulp-view-tooling"
+              "pulp-timeline"
             ],
             "third_party_targets": [
-              "SDL3-static",
-              "SDL3_Headers",
-              "SheenBidi",
               "clap",
               "everest",
               "hwy",
@@ -18624,17 +18497,12 @@
               "mbedx509",
               "p256m",
               "pulp-cpp-httplib",
-              "pulp-tracing",
-              "yaml-cpp",
-              "yogacore"
+              "pulp-tracing"
             ]
           },
           "external_dependencies": {
-            "count": 45,
+            "count": 27,
             "third_party_targets": [
-              "SDL3-static",
-              "SDL3_Headers",
-              "SheenBidi",
               "clap",
               "everest",
               "hwy",
@@ -18644,9 +18512,7 @@
               "mbedx509",
               "p256m",
               "pulp-cpp-httplib",
-              "pulp-tracing",
-              "yaml-cpp",
-              "yogacore"
+              "pulp-tracing"
             ],
             "prebuilt_archives": [],
             "imported_targets": [],
@@ -18656,33 +18522,20 @@
               "AppKit",
               "AudioToolbox",
               "AudioUnit",
-              "Carbon",
               "Cocoa",
               "CoreAudio",
               "CoreAudioKit",
               "CoreBluetooth",
               "CoreFoundation",
-              "CoreGraphics",
-              "CoreHaptics",
               "CoreMIDI",
-              "CoreMedia",
               "CoreServices",
-              "CoreText",
-              "CoreVideo",
-              "ForceFeedback",
               "Foundation",
-              "GameController",
-              "IOKit",
-              "ImageIO",
-              "Metal",
-              "QuartzCore",
               "Security",
               "UniformTypeIdentifiers",
               "UserNotifications"
             ],
             "system_libraries": [
-              "bsm",
-              "m"
+              "bsm"
             ]
           },
           "public_headers": {
@@ -18703,7 +18556,7 @@
             "framework:CoreFoundation",
             "lv2-headers",
             "pulp-audio",
-            "pulp-format",
+            "pulp-format-core",
             "pulp-graph",
             "pulp-midi",
             "pulp-native-components",
@@ -19080,19 +18933,12 @@
           "type": "STATIC_LIBRARY",
           "source_dir": "inspect",
           "closure": {
-            "node_count": 81,
+            "node_count": 52,
             "pulp_targets": [
               "pulp-audio",
-              "pulp-bundled-fonts",
-              "pulp-canvas",
               "pulp-dataplane",
-              "pulp-dataplane-audio",
-              "pulp-design-import",
-              "pulp-design-ir",
               "pulp-events",
-              "pulp-format",
               "pulp-format-core",
-              "pulp-format-view",
               "pulp-foundation",
               "pulp-graph",
               "pulp-host",
@@ -19109,16 +18955,9 @@
               "pulp-timebase",
               "pulp-timeline",
               "pulp-timeline-editor",
-              "pulp-tool-gpu-health-model",
-              "pulp-view-audio",
-              "pulp-view-core",
-              "pulp-view-script",
-              "pulp-view-tooling"
+              "pulp-tool-gpu-health-model"
             ],
             "third_party_targets": [
-              "SDL3-static",
-              "SDL3_Headers",
-              "SheenBidi",
               "clap",
               "everest",
               "hwy",
@@ -19132,17 +18971,12 @@
               "pulp-inspect-graph-runtime",
               "pulp-inspect-protocol",
               "pulp-inspect-runtime",
-              "pulp-tracing",
-              "yaml-cpp",
-              "yogacore"
+              "pulp-tracing"
             ]
           },
           "external_dependencies": {
-            "count": 49,
+            "count": 31,
             "third_party_targets": [
-              "SDL3-static",
-              "SDL3_Headers",
-              "SheenBidi",
               "clap",
               "everest",
               "hwy",
@@ -19156,9 +18990,7 @@
               "pulp-inspect-graph-runtime",
               "pulp-inspect-protocol",
               "pulp-inspect-runtime",
-              "pulp-tracing",
-              "yaml-cpp",
-              "yogacore"
+              "pulp-tracing"
             ],
             "prebuilt_archives": [],
             "imported_targets": [],
@@ -19168,33 +19000,20 @@
               "AppKit",
               "AudioToolbox",
               "AudioUnit",
-              "Carbon",
               "Cocoa",
               "CoreAudio",
               "CoreAudioKit",
               "CoreBluetooth",
               "CoreFoundation",
-              "CoreGraphics",
-              "CoreHaptics",
               "CoreMIDI",
-              "CoreMedia",
               "CoreServices",
-              "CoreText",
-              "CoreVideo",
-              "ForceFeedback",
               "Foundation",
-              "GameController",
-              "IOKit",
-              "ImageIO",
-              "Metal",
-              "QuartzCore",
               "Security",
               "UniformTypeIdentifiers",
               "UserNotifications"
             ],
             "system_libraries": [
-              "bsm",
-              "m"
+              "bsm"
             ]
           },
           "public_headers": {
@@ -19497,19 +19316,12 @@
           "type": "STATIC_LIBRARY",
           "source_dir": "inspect",
           "closure": {
-            "node_count": 81,
+            "node_count": 52,
             "pulp_targets": [
               "pulp-audio",
-              "pulp-bundled-fonts",
-              "pulp-canvas",
               "pulp-dataplane",
-              "pulp-dataplane-audio",
-              "pulp-design-import",
-              "pulp-design-ir",
               "pulp-events",
-              "pulp-format",
               "pulp-format-core",
-              "pulp-format-view",
               "pulp-foundation",
               "pulp-graph",
               "pulp-host",
@@ -19526,16 +19338,9 @@
               "pulp-timebase",
               "pulp-timeline",
               "pulp-timeline-editor",
-              "pulp-tool-gpu-health-model",
-              "pulp-view-audio",
-              "pulp-view-core",
-              "pulp-view-script",
-              "pulp-view-tooling"
+              "pulp-tool-gpu-health-model"
             ],
             "third_party_targets": [
-              "SDL3-static",
-              "SDL3_Headers",
-              "SheenBidi",
               "clap",
               "everest",
               "hwy",
@@ -19549,17 +19354,12 @@
               "pulp-inspect-protocol",
               "pulp-inspect-runtime",
               "pulp-inspect-sample-region-runtime",
-              "pulp-tracing",
-              "yaml-cpp",
-              "yogacore"
+              "pulp-tracing"
             ]
           },
           "external_dependencies": {
-            "count": 49,
+            "count": 31,
             "third_party_targets": [
-              "SDL3-static",
-              "SDL3_Headers",
-              "SheenBidi",
               "clap",
               "everest",
               "hwy",
@@ -19573,9 +19373,7 @@
               "pulp-inspect-protocol",
               "pulp-inspect-runtime",
               "pulp-inspect-sample-region-runtime",
-              "pulp-tracing",
-              "yaml-cpp",
-              "yogacore"
+              "pulp-tracing"
             ],
             "prebuilt_archives": [],
             "imported_targets": [],
@@ -19585,33 +19383,20 @@
               "AppKit",
               "AudioToolbox",
               "AudioUnit",
-              "Carbon",
               "Cocoa",
               "CoreAudio",
               "CoreAudioKit",
               "CoreBluetooth",
               "CoreFoundation",
-              "CoreGraphics",
-              "CoreHaptics",
               "CoreMIDI",
-              "CoreMedia",
               "CoreServices",
-              "CoreText",
-              "CoreVideo",
-              "ForceFeedback",
               "Foundation",
-              "GameController",
-              "IOKit",
-              "ImageIO",
-              "Metal",
-              "QuartzCore",
               "Security",
               "UniformTypeIdentifiers",
               "UserNotifications"
             ],
             "system_libraries": [
-              "bsm",
-              "m"
+              "bsm"
             ]
           },
           "public_headers": {
@@ -21481,10 +21266,7 @@
           },
           "public_headers": {
             "roots": [
-              "core/canvas/include",
-              "core/format/include",
-              "core/view/audio/include",
-              "core/view/include"
+              "core/format/include"
             ],
             "generated_include_roots": 0
           },
@@ -22277,19 +22059,15 @@
           "type": "STATIC_LIBRARY",
           "source_dir": "core/view/audio",
           "closure": {
-            "node_count": 76,
+            "node_count": 68,
             "pulp_targets": [
               "pulp-audio",
               "pulp-bundled-fonts",
               "pulp-canvas",
               "pulp-dataplane",
-              "pulp-dataplane-audio",
-              "pulp-design-import",
               "pulp-design-ir",
               "pulp-events",
-              "pulp-format",
               "pulp-format-core",
-              "pulp-format-view",
               "pulp-foundation",
               "pulp-graph",
               "pulp-host",
@@ -22305,11 +22083,8 @@
               "pulp-state",
               "pulp-timebase",
               "pulp-timeline",
-              "pulp-view-audio",
               "pulp-view-core",
-              "pulp-view-graph-editor",
-              "pulp-view-script",
-              "pulp-view-tooling"
+              "pulp-view-graph-editor"
             ],
             "third_party_targets": [
               "SDL3-static",
@@ -22325,12 +22100,11 @@
               "p256m",
               "pulp-cpp-httplib",
               "pulp-tracing",
-              "yaml-cpp",
               "yogacore"
             ]
           },
           "external_dependencies": {
-            "count": 45,
+            "count": 44,
             "third_party_targets": [
               "SDL3-static",
               "SDL3_Headers",
@@ -22345,7 +22119,6 @@
               "p256m",
               "pulp-cpp-httplib",
               "pulp-tracing",
-              "yaml-cpp",
               "yogacore"
             ],
             "prebuilt_archives": [],
@@ -22896,28 +22669,12 @@
             "closure_node_count": 113
           },
           {
-            "exported_as": "Pulp::inspect-graph-runtime",
-            "closure_node_count": 104
-          },
-          {
-            "exported_as": "Pulp::inspect-sample-region-runtime",
-            "closure_node_count": 104
-          },
-          {
             "exported_as": "Pulp::inspect-agent-toolkit",
             "closure_node_count": 101
           },
           {
             "exported_as": "Pulp::inspect",
             "closure_node_count": 99
-          },
-          {
-            "exported_as": "Pulp::view-graph-editor",
-            "closure_node_count": 99
-          },
-          {
-            "exported_as": "Pulp::host",
-            "closure_node_count": 98
           },
           {
             "exported_as": "Pulp::inspect-ui-runtime",
@@ -22942,6 +22699,10 @@
           {
             "exported_as": "Pulp::format-view",
             "closure_node_count": 92
+          },
+          {
+            "exported_as": "Pulp::view-graph-editor",
+            "closure_node_count": 91
           },
           {
             "exported_as": "Pulp::inspect-runtime-eval",
@@ -22994,6 +22755,18 @@
           {
             "exported_as": "Pulp::gpu-audio",
             "closure_node_count": 63
+          },
+          {
+            "exported_as": "Pulp::inspect-graph-runtime",
+            "closure_node_count": 53
+          },
+          {
+            "exported_as": "Pulp::inspect-sample-region-runtime",
+            "closure_node_count": 53
+          },
+          {
+            "exported_as": "Pulp::host",
+            "closure_node_count": 47
           },
           {
             "exported_as": "Pulp::gpu-device",
@@ -25304,22 +25077,13 @@
           "type": "STATIC_LIBRARY",
           "source_dir": "core/host",
           "closure": {
-            "node_count": 98,
+            "node_count": 47,
             "pulp_targets": [
               "pulp-audio",
-              "pulp-bundled-fonts",
-              "pulp-canvas",
               "pulp-dataplane",
-              "pulp-dataplane-audio",
-              "pulp-design-import",
-              "pulp-design-ir",
               "pulp-events",
-              "pulp-format",
               "pulp-format-core",
-              "pulp-format-view",
               "pulp-foundation",
-              "pulp-gpu-device",
-              "pulp-gpu-device-api",
               "pulp-graph",
               "pulp-host",
               "pulp-midi",
@@ -25327,30 +25091,18 @@
               "pulp-native-components",
               "pulp-platform",
               "pulp-playback",
-              "pulp-render",
               "pulp-runtime",
               "pulp-sample-bank-manifest",
               "pulp-signal",
               "pulp-simd",
               "pulp-state",
               "pulp-timebase",
-              "pulp-timeline",
-              "pulp-view-audio",
-              "pulp-view-core",
-              "pulp-view-script",
-              "pulp-view-tooling"
+              "pulp-timeline"
             ],
             "third_party_targets": [
-              "SDL3-static",
-              "SDL3_Headers",
-              "SheenBidi",
-              "VellumGpuRuntime::Dawn",
               "clap",
               "everest",
-              "gpu-runtime-bootstrap",
-              "gpu-runtime-device",
               "gpu-runtime-device-api",
-              "gpu-runtime-skia-log-bridge",
               "hwy",
               "lv2-headers",
               "mbedcrypto",
@@ -25358,25 +25110,15 @@
               "mbedx509",
               "p256m",
               "pulp-cpp-httplib",
-              "pulp-tracing",
-              "skia::skia",
-              "yaml-cpp",
-              "yogacore"
+              "pulp-tracing"
             ]
           },
           "external_dependencies": {
-            "count": 65,
+            "count": 28,
             "third_party_targets": [
-              "SDL3-static",
-              "SDL3_Headers",
-              "SheenBidi",
-              "VellumGpuRuntime::Dawn",
               "clap",
               "everest",
-              "gpu-runtime-bootstrap",
-              "gpu-runtime-device",
               "gpu-runtime-device-api",
-              "gpu-runtime-skia-log-bridge",
               "hwy",
               "lv2-headers",
               "mbedcrypto",
@@ -25384,24 +25126,9 @@
               "mbedx509",
               "p256m",
               "pulp-cpp-httplib",
-              "pulp-tracing",
-              "skia::skia",
-              "yaml-cpp",
-              "yogacore"
+              "pulp-tracing"
             ],
-            "prebuilt_archives": [
-              "libdawn_combined.a",
-              "libjsonreader.a",
-              "libskia.a",
-              "libskottie.a",
-              "libskparagraph.a",
-              "libskresources.a",
-              "libsksg.a",
-              "libskshaper.a",
-              "libskunicode_core.a",
-              "libskunicode_icu.a",
-              "libsvg.a"
-            ],
+            "prebuilt_archives": [],
             "imported_targets": [],
             "frameworks": [
               "AVFoundation",
@@ -25409,36 +25136,20 @@
               "AppKit",
               "AudioToolbox",
               "AudioUnit",
-              "Carbon",
               "Cocoa",
               "CoreAudio",
               "CoreAudioKit",
               "CoreBluetooth",
               "CoreFoundation",
-              "CoreGraphics",
-              "CoreHaptics",
               "CoreMIDI",
-              "CoreMedia",
               "CoreServices",
-              "CoreText",
-              "CoreVideo",
-              "ForceFeedback",
               "Foundation",
-              "GameController",
-              "IOKit",
-              "IOSurface",
-              "ImageIO",
-              "Metal",
-              "MetalKit",
-              "QuartzCore",
               "Security",
               "UniformTypeIdentifiers",
               "UserNotifications"
             ],
             "system_libraries": [
-              "bsm",
-              "m",
-              "objc"
+              "bsm"
             ]
           },
           "public_headers": {
@@ -25459,7 +25170,7 @@
             "framework:CoreFoundation",
             "lv2-headers",
             "pulp-audio",
-            "pulp-format",
+            "pulp-format-core",
             "pulp-graph",
             "pulp-midi",
             "pulp-native-components",
@@ -26037,22 +25748,13 @@
           "type": "STATIC_LIBRARY",
           "source_dir": "inspect",
           "closure": {
-            "node_count": 104,
+            "node_count": 53,
             "pulp_targets": [
               "pulp-audio",
-              "pulp-bundled-fonts",
-              "pulp-canvas",
               "pulp-dataplane",
-              "pulp-dataplane-audio",
-              "pulp-design-import",
-              "pulp-design-ir",
               "pulp-events",
-              "pulp-format",
               "pulp-format-core",
-              "pulp-format-view",
               "pulp-foundation",
-              "pulp-gpu-device",
-              "pulp-gpu-device-api",
               "pulp-graph",
               "pulp-host",
               "pulp-midi",
@@ -26060,7 +25762,6 @@
               "pulp-native-components",
               "pulp-platform",
               "pulp-playback",
-              "pulp-render",
               "pulp-runtime",
               "pulp-sample-bank-manifest",
               "pulp-signal",
@@ -26069,23 +25770,12 @@
               "pulp-timebase",
               "pulp-timeline",
               "pulp-timeline-editor",
-              "pulp-tool-gpu-health-model",
-              "pulp-view-audio",
-              "pulp-view-core",
-              "pulp-view-script",
-              "pulp-view-tooling"
+              "pulp-tool-gpu-health-model"
             ],
             "third_party_targets": [
-              "SDL3-static",
-              "SDL3_Headers",
-              "SheenBidi",
-              "VellumGpuRuntime::Dawn",
               "clap",
               "everest",
-              "gpu-runtime-bootstrap",
-              "gpu-runtime-device",
               "gpu-runtime-device-api",
-              "gpu-runtime-skia-log-bridge",
               "hwy",
               "lv2-headers",
               "mbedcrypto",
@@ -26097,25 +25787,15 @@
               "pulp-inspect-graph-runtime",
               "pulp-inspect-protocol",
               "pulp-inspect-runtime",
-              "pulp-tracing",
-              "skia::skia",
-              "yaml-cpp",
-              "yogacore"
+              "pulp-tracing"
             ]
           },
           "external_dependencies": {
-            "count": 69,
+            "count": 32,
             "third_party_targets": [
-              "SDL3-static",
-              "SDL3_Headers",
-              "SheenBidi",
-              "VellumGpuRuntime::Dawn",
               "clap",
               "everest",
-              "gpu-runtime-bootstrap",
-              "gpu-runtime-device",
               "gpu-runtime-device-api",
-              "gpu-runtime-skia-log-bridge",
               "hwy",
               "lv2-headers",
               "mbedcrypto",
@@ -26127,24 +25807,9 @@
               "pulp-inspect-graph-runtime",
               "pulp-inspect-protocol",
               "pulp-inspect-runtime",
-              "pulp-tracing",
-              "skia::skia",
-              "yaml-cpp",
-              "yogacore"
+              "pulp-tracing"
             ],
-            "prebuilt_archives": [
-              "libdawn_combined.a",
-              "libjsonreader.a",
-              "libskia.a",
-              "libskottie.a",
-              "libskparagraph.a",
-              "libskresources.a",
-              "libsksg.a",
-              "libskshaper.a",
-              "libskunicode_core.a",
-              "libskunicode_icu.a",
-              "libsvg.a"
-            ],
+            "prebuilt_archives": [],
             "imported_targets": [],
             "frameworks": [
               "AVFoundation",
@@ -26152,36 +25817,20 @@
               "AppKit",
               "AudioToolbox",
               "AudioUnit",
-              "Carbon",
               "Cocoa",
               "CoreAudio",
               "CoreAudioKit",
               "CoreBluetooth",
               "CoreFoundation",
-              "CoreGraphics",
-              "CoreHaptics",
               "CoreMIDI",
-              "CoreMedia",
               "CoreServices",
-              "CoreText",
-              "CoreVideo",
-              "ForceFeedback",
               "Foundation",
-              "GameController",
-              "IOKit",
-              "IOSurface",
-              "ImageIO",
-              "Metal",
-              "MetalKit",
-              "QuartzCore",
               "Security",
               "UniformTypeIdentifiers",
               "UserNotifications"
             ],
             "system_libraries": [
-              "bsm",
-              "m",
-              "objc"
+              "bsm"
             ]
           },
           "public_headers": {
@@ -26662,22 +26311,13 @@
           "type": "STATIC_LIBRARY",
           "source_dir": "inspect",
           "closure": {
-            "node_count": 104,
+            "node_count": 53,
             "pulp_targets": [
               "pulp-audio",
-              "pulp-bundled-fonts",
-              "pulp-canvas",
               "pulp-dataplane",
-              "pulp-dataplane-audio",
-              "pulp-design-import",
-              "pulp-design-ir",
               "pulp-events",
-              "pulp-format",
               "pulp-format-core",
-              "pulp-format-view",
               "pulp-foundation",
-              "pulp-gpu-device",
-              "pulp-gpu-device-api",
               "pulp-graph",
               "pulp-host",
               "pulp-midi",
@@ -26685,7 +26325,6 @@
               "pulp-native-components",
               "pulp-platform",
               "pulp-playback",
-              "pulp-render",
               "pulp-runtime",
               "pulp-sample-bank-manifest",
               "pulp-signal",
@@ -26694,23 +26333,12 @@
               "pulp-timebase",
               "pulp-timeline",
               "pulp-timeline-editor",
-              "pulp-tool-gpu-health-model",
-              "pulp-view-audio",
-              "pulp-view-core",
-              "pulp-view-script",
-              "pulp-view-tooling"
+              "pulp-tool-gpu-health-model"
             ],
             "third_party_targets": [
-              "SDL3-static",
-              "SDL3_Headers",
-              "SheenBidi",
-              "VellumGpuRuntime::Dawn",
               "clap",
               "everest",
-              "gpu-runtime-bootstrap",
-              "gpu-runtime-device",
               "gpu-runtime-device-api",
-              "gpu-runtime-skia-log-bridge",
               "hwy",
               "lv2-headers",
               "mbedcrypto",
@@ -26722,25 +26350,15 @@
               "pulp-inspect-protocol",
               "pulp-inspect-runtime",
               "pulp-inspect-sample-region-runtime",
-              "pulp-tracing",
-              "skia::skia",
-              "yaml-cpp",
-              "yogacore"
+              "pulp-tracing"
             ]
           },
           "external_dependencies": {
-            "count": 69,
+            "count": 32,
             "third_party_targets": [
-              "SDL3-static",
-              "SDL3_Headers",
-              "SheenBidi",
-              "VellumGpuRuntime::Dawn",
               "clap",
               "everest",
-              "gpu-runtime-bootstrap",
-              "gpu-runtime-device",
               "gpu-runtime-device-api",
-              "gpu-runtime-skia-log-bridge",
               "hwy",
               "lv2-headers",
               "mbedcrypto",
@@ -26752,24 +26370,9 @@
               "pulp-inspect-protocol",
               "pulp-inspect-runtime",
               "pulp-inspect-sample-region-runtime",
-              "pulp-tracing",
-              "skia::skia",
-              "yaml-cpp",
-              "yogacore"
+              "pulp-tracing"
             ],
-            "prebuilt_archives": [
-              "libdawn_combined.a",
-              "libjsonreader.a",
-              "libskia.a",
-              "libskottie.a",
-              "libskparagraph.a",
-              "libskresources.a",
-              "libsksg.a",
-              "libskshaper.a",
-              "libskunicode_core.a",
-              "libskunicode_icu.a",
-              "libsvg.a"
-            ],
+            "prebuilt_archives": [],
             "imported_targets": [],
             "frameworks": [
               "AVFoundation",
@@ -26777,36 +26380,20 @@
               "AppKit",
               "AudioToolbox",
               "AudioUnit",
-              "Carbon",
               "Cocoa",
               "CoreAudio",
               "CoreAudioKit",
               "CoreBluetooth",
               "CoreFoundation",
-              "CoreGraphics",
-              "CoreHaptics",
               "CoreMIDI",
-              "CoreMedia",
               "CoreServices",
-              "CoreText",
-              "CoreVideo",
-              "ForceFeedback",
               "Foundation",
-              "GameController",
-              "IOKit",
-              "IOSurface",
-              "ImageIO",
-              "Metal",
-              "MetalKit",
-              "QuartzCore",
               "Security",
               "UniformTypeIdentifiers",
               "UserNotifications"
             ],
             "system_libraries": [
-              "bsm",
-              "m",
-              "objc"
+              "bsm"
             ]
           },
           "public_headers": {
@@ -28962,10 +28549,7 @@
           },
           "public_headers": {
             "roots": [
-              "core/canvas/include",
-              "core/format/include",
-              "core/view/audio/include",
-              "core/view/include"
+              "core/format/include"
             ],
             "generated_include_roots": 0
           },
@@ -29889,19 +29473,15 @@
           "type": "STATIC_LIBRARY",
           "source_dir": "core/view/audio",
           "closure": {
-            "node_count": 99,
+            "node_count": 91,
             "pulp_targets": [
               "pulp-audio",
               "pulp-bundled-fonts",
               "pulp-canvas",
               "pulp-dataplane",
-              "pulp-dataplane-audio",
-              "pulp-design-import",
               "pulp-design-ir",
               "pulp-events",
-              "pulp-format",
               "pulp-format-core",
-              "pulp-format-view",
               "pulp-foundation",
               "pulp-gpu-device",
               "pulp-gpu-device-api",
@@ -29920,11 +29500,8 @@
               "pulp-state",
               "pulp-timebase",
               "pulp-timeline",
-              "pulp-view-audio",
               "pulp-view-core",
-              "pulp-view-graph-editor",
-              "pulp-view-script",
-              "pulp-view-tooling"
+              "pulp-view-graph-editor"
             ],
             "third_party_targets": [
               "SDL3-static",
@@ -29946,12 +29523,11 @@
               "pulp-cpp-httplib",
               "pulp-tracing",
               "skia::skia",
-              "yaml-cpp",
               "yogacore"
             ]
           },
           "external_dependencies": {
-            "count": 65,
+            "count": 64,
             "third_party_targets": [
               "SDL3-static",
               "SDL3_Headers",
@@ -29972,7 +29548,6 @@
               "pulp-cpp-httplib",
               "pulp-tracing",
               "skia::skia",
-              "yaml-cpp",
               "yogacore"
             ],
             "prebuilt_archives": [
