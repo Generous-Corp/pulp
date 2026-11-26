@@ -9,6 +9,8 @@ if(PULP_BUILD_TESTS AND TARGET Catch2::Catch2WithMain)
         ${CMAKE_CURRENT_SOURCE_DIR}/catalogue_test.cpp)
     target_link_libraries(pulp-test-pulp-vellum-components PRIVATE
         pulp::vellum-components Catch2::Catch2WithMain Threads::Threads)
+    target_compile_definitions(pulp-test-pulp-vellum-components PRIVATE
+        PULP_VELLUM_COMPONENTS_INCLUDE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/../include")
     include(Catch)
     catch_discover_tests(pulp-test-pulp-vellum-components PROPERTIES LABELS pulp-vellum-components)
 endif()

@@ -17,6 +17,10 @@
 #include <chrono>
 #include <cstdint>
 #include <filesystem>
+#include <fstream>
+#include <regex>
+#include <set>
+#include <sstream>
 #include <string>
 #if defined(_WIN32)
 #include <process.h>
@@ -306,4 +310,28 @@ TEST_CASE("PropertyPanel: multi_choice with no options keeps no indices",
     REQUIRE(c.get_multi_choice("mc") == std::vector<int>{0, 1});
     REQUIRE(c.set_multi_choice("mc", {1, 7, -1}));
     REQUIRE(c.get_multi_choice("mc") == std::vector<int>{1});
+}
+
+TEST_CASE("PropertyPanel: every member the header documents exists", "[property-panel][docs]") {
+    const std::filesystem::path header = std::filesystem::path(PULP_VELLUM_COMPONENTS_INCLUDE_DIR) /
+                                         "pulp" / "vellum_components" / "property_panel.hpp";
+    std::ifstream in(header);
+    REQUIRE(in.good());
+
+    std::string doc, code;
+    for (std::string line; std::getline(in, line);) {
+        const auto first = line.find_first_not_of(" \t");
+        const bool is_doc = first != std::string::npos && line.compare(first, 3, "///") == 0;
+        (is_doc ? doc : code) += line + "\n";
+    }
+
+    // Every `name(` or `name` a doc comment backticks as a member must be
+    // declared in the code, so a consumer following the contract compiles.
+    std::set<std::string> documented;
+    const std::regex call(R"re(`((?:get|set|add|simulate|bind)_[a-z_]*|value_for)(?:\(|`))re");
+    for (std::sregex_iterator it(doc.begin(), doc.end(), call), end; it != end; ++it)
+        documented.insert((*it)[1]);
+    REQUIRE_FALSE(documented.empty());
+    for (const auto& name : documented)
+        CHECK(code.find(name + "(") != std::string::npos);
 }

@@ -12,7 +12,8 @@
 /// Button, MultiChoice, Text), and a typed value. The panel exposes:
 ///
 ///   - `add_*` builders for each typed variant,
-///   - `value_for(key)` / `set_value(key, ...)` typed getters/setters,
+///   - `get_bool` / `get_choice` / `get_slider` / `get_multi_choice` /
+///     `get_text` and the matching `set_*(key, ...)` typed getters/setters,
 ///   - `simulate_*` test helpers (toggle, choose, slide, click,
 ///     multi-check, set-text) that fire the same logic a real UI event
 ///     would,
