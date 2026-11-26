@@ -224,7 +224,11 @@ std::optional<NoteEvent> PianoRollView::replacement_at(const Drag& drag,
     NoteEvent replacement = *drag.grabbed;
     if (drag.kind == DragKind::Move) {
         const auto tick = layout_->time.tick_at(position.x);
-        replacement.start = snapped(clamp_tick(tick.value - drag.grab_offset_ticks));
+        // A target left of the clip stays negative so `admissible` refuses it;
+        // clamping it to zero here would commit a different move than the one
+        // dragged for.
+        const auto target = tick.value - drag.grab_offset_ticks;
+        replacement.start = target < 0 ? timebase::TickPosition{target} : snapped({target});
         replacement.pitch = layout_->pitch.pitch_at(position.y);
     } else if (drag.kind == DragKind::Resize) {
         const auto end = snapped(layout_->time.tick_at(position.x));
