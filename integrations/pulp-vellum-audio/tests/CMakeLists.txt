@@ -7,11 +7,14 @@ if(PULP_BUILD_TESTS AND TARGET Catch2::Catch2WithMain)
         ${CMAKE_CURRENT_SOURCE_DIR}/register_audio_widgets_test.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/musical_typing_keyboard_test.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/musical_typing_test.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/piano_roll_view_test.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/spectrogram_view_test.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/step_grid_view_test.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/waveform_editor_test.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/waveform_recorder_view_test.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/waveform_view_test.cpp)
+    # The timeline fixtures are shared with the core timeline tests.
+    target_include_directories(pulp-test-pulp-vellum-audio PRIVATE ${PULP_ROOT_DIR}/test)
     target_link_libraries(pulp-test-pulp-vellum-audio PRIVATE
         pulp::vellum-audio Vellum::MirrorView_script Catch2::Catch2WithMain Threads::Threads)
     include(Catch)

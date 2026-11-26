@@ -3,6 +3,8 @@
  "record": {
   "entry": "tools/scripts/test_inspector_truth_check.py",
   "inputs": [
+   ".claude/commands/inspect.md",
+   ".claude/commands/trace.md",
    ".github/workflows",
    "docs/status/cli-commands.yaml",
    "experimental/pulp-rs/src/cmd",
