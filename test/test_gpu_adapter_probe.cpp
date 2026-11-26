@@ -62,7 +62,7 @@ TEST_CASE("an empty adapter name fails even when the pixels are right", "[gpu-pr
 }
 
 TEST_CASE("a device that never came up is unavailable, not failed", "[gpu-probe][adapter]") {
-    Evidence evidence;  // available == false
+    Evidence evidence; // available == false
     const auto result = classify(evidence, nullptr);
     CHECK(result.verdict == Verdict::unavailable);
     CHECK(exit_code(result.verdict) == 2);

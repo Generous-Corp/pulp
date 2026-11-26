@@ -27,9 +27,12 @@ std::string quote(std::string_view text) {
 
 const char* name(Verdict verdict) {
     switch (verdict) {
-    case Verdict::pass: return "pass";
-    case Verdict::fail: return "fail";
-    case Verdict::unavailable: return "unavailable";
+    case Verdict::pass:
+        return "pass";
+    case Verdict::fail:
+        return "fail";
+    case Verdict::unavailable:
+        return "unavailable";
     }
     return "fail";
 }
@@ -76,9 +79,12 @@ Result classify(const Evidence& evidence, const Frame* frame) {
 
 int exit_code(Verdict verdict) {
     switch (verdict) {
-    case Verdict::pass: return 0;
-    case Verdict::fail: return 1;
-    case Verdict::unavailable: return 2;
+    case Verdict::pass:
+        return 0;
+    case Verdict::fail:
+        return 1;
+    case Verdict::unavailable:
+        return 2;
     }
     return 1;
 }

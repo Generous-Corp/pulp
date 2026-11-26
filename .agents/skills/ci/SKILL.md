@@ -13975,3 +13975,8 @@ main's SDK. A new optional Vellum integration package needs its option, its
 `pulp-test-*` target and a `paths:` entry added there, or no lane compiles it
 against main. The tests' ctest label should start with `pulp-vellum` so the
 lane's `-L pulp-vellum` filter runs them.
+
+The lane's `-L pulp-vellum` run includes the GPU adapter probe and its
+empty-adapter negative control (`PASS_REGULAR_EXPRESSION` on the fail JSON, since
+the control must exit non-zero). The probe target is picked up by the
+`labelled-targets` derivation, so it needs no workflow edit.
