@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import tarfile
 import sys
 import tempfile
@@ -19,12 +20,19 @@ class ArchiveSdkTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary) / "pulp-sdk"
             root.mkdir()
-            (root / "file.txt").write_text("payload", encoding="utf-8")
+            payload = root / "file.txt"
+            payload.write_text("payload", encoding="utf-8")
+            future = time.time() + 8 * 3600
+            os.utime(payload, (future, future))
+            os.utime(root, (future, future))
             archive = Path(temporary) / "sdk.tar.gz"
             archive_tree(root, archive, 123456789)
             self.assertEqual(check_archive(archive, 123456789), [])
             with tarfile.open(archive, "r:gz") as tar:
                 self.assertEqual({member.mtime for member in tar.getmembers()}, {123456789})
+            with archive.open("rb") as raw:
+                header = raw.read(8)
+            self.assertEqual(int.from_bytes(header[4:8], "little"), 123456789)
 
     def test_checker_rejects_future_tar_member(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

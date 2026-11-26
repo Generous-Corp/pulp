@@ -45,6 +45,12 @@ class ReleaseContentWiring(unittest.TestCase):
         self.assertLess(resign, stamp)
         self.assertLess(stamp, archive)
 
+    def test_sdk_archives_are_built_and_checked_by_the_normalizing_helper(self) -> None:
+        self.assertNotIn("tar czf pulp-sdk-", RELEASE)
+        self.assertNotIn("Compress-Archive -Path pulp-sdk", RELEASE)
+        self.assertEqual(RELEASE.count("tools/scripts/archive_sdk.py"), 2)
+        self.assertEqual(RELEASE.count("tools/scripts/check_archive_mtimes.py"), 2)
+
     def test_backfill_uses_tag_matrix_or_pre_contract_fallback(self) -> None:
         self.assertIn('if [ ! -f "$path" ]', RELEASE)
         self.assertIn("tools/scripts/release_product_matrix.json", RELEASE)
