@@ -153,7 +153,7 @@ TEST_CASE("V and T switch tools, and set_tool and toggle_tool mirror them",
     REQUIRE(overlay.tool() == Tool::select);
 
     // A modified T or V is not a tool key.
-    REQUIRE_FALSE(overlay.handle_key_event(key(KeyCode::t, kModShift)));
+    REQUIRE_FALSE(overlay.handle_key_event(key(KeyCode::t, kModAlt)));
     REQUIRE(overlay.tool() == Tool::select);
 }
 

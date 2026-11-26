@@ -52,6 +52,11 @@ inline const Color kBarLow = Color::rgba(0.35f, 0.85f, 0.45f, 1.0f);
 inline const Color kBarMid = Color::rgba(0.95f, 0.65f, 0.25f, 1.0f);
 inline const Color kBarHigh = Color::rgba(0.95f, 0.40f, 0.38f, 1.0f);
 
+// The knob panel's agent field.
+inline const Color kFieldFocusFill = Color::rgba(0.95f, 0.6f, 0.2f, 0.18f);
+inline const Color kFieldCaret = Color::rgba(0.95f, 0.6f, 0.2f, 1.0f);
+inline const Color kPanelHighlight = Color::rgba(0.25f, 0.5f, 1.0f, 0.25f);
+
 inline const Color kZoomPanelBackground = Color::rgba(0.06f, 0.06f, 0.08f, 0.97f);
 inline const Color kZoomBorder = Color::rgba(0.25f, 0.5f, 1.0f, 0.9f);
 inline const Color kZoomGridLine = Color::rgba(0.0f, 0.0f, 0.0f, 0.25f);

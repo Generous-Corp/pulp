@@ -14,6 +14,7 @@
 #include <pulp/vellum_components/aliases.hpp>
 #include <pulp/vellum_components/atlas_inventory.hpp>
 #include <pulp/vellum_components/field_edit.hpp>
+#include <pulp/vellum_components/knob_panel.hpp>
 #include <pulp/vellum_components/overlay_geometry.hpp>
 #include <pulp/vellum_components/render_pass_stats.hpp>
 #include <pulp/vellum_components/text_edit.hpp>
@@ -22,6 +23,7 @@
 
 #include <cstddef>
 #include <functional>
+#include <map>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -333,8 +335,98 @@ class InspectorOverlay {
         return atlas_row_count_;
     }
 
+    /// The knob panel: a panel docked to the bottom right with one row of
+    /// segments for each knob of a schema, and, once an agent request sink is
+    /// set, an "Ask agent" field with a Send button. `Shift+T` shows and hides
+    /// it. Choosing a segment records it (`knob_selection`) and reports the
+    /// knob id and the value the segment emits through the apply sink, and the
+    /// overlay changes no file: whatever applies the knob owns the design.
+    void set_knob_schema(overlay::KnobSchema schema) {
+        knob_schema_ = std::move(schema);
+    }
+    const overlay::KnobSchema& knob_schema() const {
+        return knob_schema_;
+    }
+    bool knob_panel_visible() const {
+        return knob_panel_visible_;
+    }
+    void set_knob_panel_visible(bool visible) {
+        knob_panel_visible_ = visible;
+    }
+    void toggle_knob_panel() {
+        knob_panel_visible_ = !knob_panel_visible_;
+    }
+
+    /// A knob choice: the knob's id, and the value its segment emits (a
+    /// slider's numeric anchor, otherwise the label).
+    struct KnobApplyEdit {
+        std::string knob_id;
+        std::string value;
+    };
+    void set_knob_apply_sink(std::function<void(const KnobApplyEdit&)> sink) {
+        knob_apply_sink_ = std::move(sink);
+    }
+    /// The value last chosen for a knob, or empty before any choice. The
+    /// overlay tracks it for display only; what applies the knob owns the
+    /// real state.
+    std::string knob_selection(std::string_view knob_id) const;
+
+    /// A free-text request typed into the agent field. The field and its Send
+    /// button show only while a sink is set, since a control that goes nowhere
+    /// would mislead.
+    struct AgentRequestEdit {
+        std::string text;
+    };
+    void set_agent_request_sink(std::function<void(const AgentRequestEdit&)> sink) {
+        agent_request_sink_ = std::move(sink);
+    }
+    bool has_agent_request_sink() const {
+        return static_cast<bool>(agent_request_sink_);
+    }
+
+    /// Where a built request goes. It is a hand-off, not a send: the overlay
+    /// makes no model call, and a host's handler queues the payload for the
+    /// agent to pick up on its next turn.
+    using AgentRequestHandoff = std::function<void(const overlay::AgentRequestPayload&)>;
+    /// Install an agent request sink that builds the payload for each request
+    /// from `context` and `now` (both optional) and passes it to `handoff`. A
+    /// null `handoff` removes the sink.
+    void set_agent_request_handoff(AgentRequestHandoff handoff,
+                                   std::function<overlay::AgentRequestContext()> context = {},
+                                   std::function<std::string()> now = {});
+
+    /// One segment's rectangle from the last paint, in root space, for a
+    /// driver that wants to click it without redoing the layout.
+    struct KnobHit {
+        std::string knob_id;
+        std::string value;
+        overlay::Rect bounds;
+    };
+    const std::vector<KnobHit>& knob_hits() const {
+        return knob_hits_;
+    }
+    overlay::Rect agent_field_bounds() const {
+        return agent_field_bounds_;
+    }
+    overlay::Rect agent_send_bounds() const {
+        return agent_send_bounds_;
+    }
+    /// The panel's rectangle from the last paint; empty while it is hidden.
+    overlay::Rect knob_panel_bounds() const {
+        return knob_panel_bounds_;
+    }
+    /// The draft in the agent field, and whether it has the keyboard.
+    const std::string& agent_text_buffer() const {
+        return agent_edit_.text();
+    }
+    bool agent_field_active() const {
+        return agent_field_active_;
+    }
+
     /// Offer a key to the overlay. Cmd+I (Ctrl+I elsewhere) toggles it. While
-    /// a text edit is open it owns the keyboard: Enter commits, Esc cancels
+    /// the agent field has focus it owns the keyboard: Enter sends, Esc defocuses
+    /// and keeps the draft, Backspace and Left and Right edit it, and every
+    /// other key is declined. While a text edit is open it owns the keyboard: Enter commits, Esc cancels
     /// and returns to the Select tool, Backspace and Delete remove, the
     /// arrows, Home, End and Alt-arrows move (Shift extends), and the main
     /// modifier with A, C, X and V selects, copies, cuts and pastes; every
@@ -346,7 +438,7 @@ class InspectorOverlay {
     /// cancels and Tab commits and moves to the next field (Shift+Tab to the
     /// previous); every other key falls through to the view tree untouched.
     /// Otherwise, while active, V and T pick the tool, P toggles the render
-    /// pass viewer, A the atlas viewer, Escape deselects and keeps the overlay on, M
+    /// pass viewer, A the atlas viewer, Shift+T the knob panel, Escape deselects and keeps the overlay on, M
     /// flips the selection mode and Z toggles the loupe. Returns true when the
     /// key was consumed.
     bool handle_key_event(const ::vellum::view::KeyEvent& event);
@@ -412,6 +504,10 @@ class InspectorOverlay {
     bool mouse_text_tool(const ::vellum::view::MouseEvent& event, bool is_press);
     void paint_text_edit(canvas::Canvas& canvas);
     void paint_pass_panel(canvas::Canvas& canvas);
+    void paint_knob_panel(canvas::Canvas& canvas);
+    bool mouse_knob_panel(const ::vellum::view::MouseEvent& event, bool is_press);
+    bool handle_agent_key(const ::vellum::view::KeyEvent& event);
+    void submit_agent_request();
     void paint_atlas_panel(canvas::Canvas& canvas);
     bool text_target_reachable() const;
     void push_text_to_target();
@@ -453,6 +549,17 @@ class InspectorOverlay {
     bool pass_viewer_enabled_ = false;
     const overlay::AtlasInventory* atlas_inventory_ = nullptr;
     bool atlas_viewer_visible_ = false;
+    overlay::KnobSchema knob_schema_;
+    bool knob_panel_visible_ = false;
+    std::map<std::string, std::string> knob_selection_;
+    std::function<void(const KnobApplyEdit&)> knob_apply_sink_;
+    std::function<void(const AgentRequestEdit&)> agent_request_sink_;
+    std::vector<KnobHit> knob_hits_;
+    overlay::Rect agent_field_bounds_;
+    overlay::Rect agent_send_bounds_;
+    overlay::Rect knob_panel_bounds_;
+    overlay::TextEditBuffer agent_edit_;
+    bool agent_field_active_ = false;
     std::size_t atlas_row_count_ = 0;
 
     static constexpr float kFontSize = 11.0f;

@@ -49,6 +49,8 @@ void InspectorOverlay::set_active(bool active) {
     if (!active) {
         cancel_field_edit();
         cancel_text_edit();
+        // The draft stays; the keyboard does not.
+        agent_field_active_ = false;
     }
     active_ = active;
     if (!active) {
@@ -93,6 +95,8 @@ bool InspectorOverlay::handle_key_event(const ::vellum::view::KeyEvent& event) {
     // An open edit owns the keyboard, so a letter typed into it can never
     // flip a mode: whatever the edit does not take falls through to the view
     // tree.
+    if (agent_field_active_)
+        return handle_agent_key(event);
     if (text_editing())
         return handle_text_key(event);
     if (field_edit_.active())
@@ -105,6 +109,10 @@ bool InspectorOverlay::handle_key_event(const ::vellum::view::KeyEvent& event) {
         hovered_ = nullptr;
         alt_hover_target_ = nullptr;
         distance_anchor_ = nullptr;
+        return true;
+    }
+    if (event.key == KeyCode::t && event.modifiers == ::vellum::view::kModShift) {
+        toggle_knob_panel();
         return true;
     }
     if (event.key == KeyCode::v && event.modifiers == 0) {
@@ -142,6 +150,10 @@ bool InspectorOverlay::handle_mouse_event(const ::vellum::view::MouseEvent& even
     // the pointer through a press and a drag. It never consumes one.
     if (zoom_active_)
         zoom_sample_center_ = event.position;
+
+    // The knob panel sits over the canvas, so it sees a press first.
+    if (mouse_knob_panel(event, event.hasExplicitPhase() ? event.isPress() : event.is_down))
+        return true;
 
     // The Text tool decides first, so a press never starts a selection.
     if (mouse_text_tool(event, event.hasExplicitPhase() ? event.isPress() : event.is_down))
@@ -238,6 +250,7 @@ void InspectorOverlay::paint(canvas::Canvas& canvas) {
     if (selected_)
         paint_box_model(canvas, *selected_);
     paint_text_edit(canvas);
+    paint_knob_panel(canvas);
     // The pass viewer wins the docked panel when both viewers are on.
     if (pass_viewer_enabled_) {
         atlas_row_count_ = 0;

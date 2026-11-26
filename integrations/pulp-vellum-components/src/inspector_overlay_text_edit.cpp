@@ -166,6 +166,12 @@ void InspectorOverlay::text_delete_forward() {
 }
 
 bool InspectorOverlay::handle_text_input(const TextInputEvent& event) {
+    // The agent field takes character input while it has the keyboard.
+    if (active_ && agent_field_active_) {
+        if (!event.text.empty())
+            agent_edit_.insert(event.text);
+        return true;
+    }
     if (!active_ || !text_editing())
         return false;
     if (!text_target_reachable()) {
