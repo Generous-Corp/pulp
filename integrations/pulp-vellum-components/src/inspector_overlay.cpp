@@ -5,6 +5,7 @@
 #include <vellum/view/inspector_facts.hpp>
 
 #include <algorithm>
+#include <cmath>
 #include <string>
 
 namespace pulp::vellum_components {
@@ -181,6 +182,9 @@ void InspectorOverlay::paint(canvas::Canvas& canvas) {
         return;
     drop_stale_views();
     paint_highlight(canvas);
+    paint_distance_lines(canvas);
+    if (selected_)
+        paint_box_model(canvas, *selected_);
 }
 
 void InspectorOverlay::paint_highlight(canvas::Canvas& canvas) {
@@ -245,6 +249,101 @@ void InspectorOverlay::paint_highlight(canvas::Canvas& canvas) {
     paint_handle(mid_x, r.y + r.height);
     paint_handle(r.x + r.width, mid_y);
     paint_handle(r.x, mid_y);
+}
+
+void InspectorOverlay::paint_distance_lines(canvas::Canvas& canvas) {
+    const auto paint_one = [&](const View* from, const View* to) {
+        if (!from || !to || from == to)
+            return;
+        const auto a = overlay::bounds_in_root(from, root_);
+        const auto b = overlay::bounds_in_root(to, root_);
+        const float ax = a.x + a.width / 2;
+        const float ay = a.y + a.height / 2;
+        const float bx = b.x + b.width / 2;
+        const float by = b.y + b.height / 2;
+
+        canvas.set_stroke_color(overlay::kDistanceLine);
+        canvas.set_line_width(1.0f);
+        canvas.stroke_line(ax, ay, bx, by);
+
+        const float dx = bx - ax;
+        const float dy = by - ay;
+        const std::string label =
+            std::to_string(static_cast<int>(std::sqrt(dx * dx + dy * dy))) + "px";
+        const float mx = (ax + bx) / 2;
+        const float my = (ay + by) / 2;
+        canvas.set_font("monospace", kFontSize);
+        const float text_w = canvas.measure_text(label);
+        canvas.set_fill_color(overlay::kDistanceLine);
+        canvas.fill_rounded_rect(mx - text_w / 2 - 4, my - 8, text_w + 8, 16, 3);
+        canvas.set_fill_color(overlay::kBadgeText);
+        canvas.fill_text(label, mx - text_w / 2, my + 4);
+    };
+
+    // The sticky anchor and the live Alt-hover target can both be showing.
+    paint_one(distance_anchor_, selected_);
+    if (alt_hover_target_ && selected_ && alt_hover_target_ != distance_anchor_)
+        paint_one(selected_, alt_hover_target_);
+}
+
+void InspectorOverlay::paint_box_model(canvas::Canvas& canvas, const View& view) {
+    // The root has no parent to measure against.
+    if (!view.parent())
+        return;
+    const auto r = overlay::bounds_in_root(&view, root_);
+    const auto& f = view.flex();
+
+    // Padding sits inside the view, margin outside it; a negative per-side
+    // value means "use the uniform one".
+    const float pad_t = f.padding_top >= 0 ? f.padding_top : f.padding;
+    const float pad_r = f.padding_right >= 0 ? f.padding_right : f.padding;
+    const float pad_b = f.padding_bottom >= 0 ? f.padding_bottom : f.padding;
+    const float pad_l = f.padding_left >= 0 ? f.padding_left : f.padding;
+    if (pad_t > 0 || pad_r > 0 || pad_b > 0 || pad_l > 0) {
+        canvas.set_fill_color(overlay::kPaddingColor);
+        if (pad_t > 0)
+            canvas.fill_rect(r.x, r.y, r.width, pad_t);
+        if (pad_b > 0)
+            canvas.fill_rect(r.x, r.y + r.height - pad_b, r.width, pad_b);
+        if (pad_l > 0)
+            canvas.fill_rect(r.x, r.y + pad_t, pad_l, r.height - pad_t - pad_b);
+        if (pad_r > 0)
+            canvas.fill_rect(r.x + r.width - pad_r, r.y + pad_t, pad_r, r.height - pad_t - pad_b);
+    }
+
+    const float mar_t = f.margin_t();
+    const float mar_r = f.margin_r();
+    const float mar_b = f.margin_b();
+    const float mar_l = f.margin_l();
+    if (mar_t > 0 || mar_r > 0 || mar_b > 0 || mar_l > 0) {
+        canvas.set_fill_color(overlay::kMarginColor);
+        if (mar_t > 0)
+            canvas.fill_rect(r.x - mar_l, r.y - mar_t, r.width + mar_l + mar_r, mar_t);
+        if (mar_b > 0)
+            canvas.fill_rect(r.x - mar_l, r.y + r.height, r.width + mar_l + mar_r, mar_b);
+        if (mar_l > 0)
+            canvas.fill_rect(r.x - mar_l, r.y, mar_l, r.height);
+        if (mar_r > 0)
+            canvas.fill_rect(r.x + r.width, r.y, mar_r, r.height);
+    }
+
+    // The gap to each parent edge, labelled when it is wide enough to read.
+    const auto p = overlay::bounds_in_root(view.parent(), root_);
+    const float to_top = r.y - p.y;
+    const float to_left = r.x - p.x;
+    const float to_bottom = (p.y + p.height) - (r.y + r.height);
+    const float to_right = (p.x + p.width) - (r.x + r.width);
+    canvas.set_font("monospace", kEdgeFontSize);
+    canvas.set_fill_color(overlay::kDistanceLine);
+    const auto label = [](float v) { return std::to_string(static_cast<int>(v)); };
+    if (to_top > 2)
+        canvas.fill_text(label(to_top), r.x + r.width / 2, r.y - 3);
+    if (to_left > 2)
+        canvas.fill_text(label(to_left), r.x - 20, r.y + r.height / 2);
+    if (to_bottom > 2)
+        canvas.fill_text(label(to_bottom), r.x + r.width / 2, r.y + r.height + 10);
+    if (to_right > 2)
+        canvas.fill_text(label(to_right), r.x + r.width + 3, r.y + r.height / 2);
 }
 
 void install_inspector_hooks(InspectorOverlay& inspector) {

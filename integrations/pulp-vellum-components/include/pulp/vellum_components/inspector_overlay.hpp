@@ -2,8 +2,9 @@
 
 /// @file inspector_overlay.hpp
 /// The inspector's canvas overlay for a Vellum view tree: hover and selection
-/// state, the selection box with its handles, and the type badge, painted over
-/// the inspected root.
+/// state, the selection box with its handles, the type badge, and the
+/// measurements (padding and margin bands, distances to the parent and
+/// between views), painted over the inspected root.
 ///
 /// The overlay paints no side panel, so the whole canvas stays live for
 /// picking. The inspector window is the tree and property surface; a host
@@ -124,7 +125,10 @@ class InspectorOverlay {
     bool handle_mouse_event(const ::vellum::view::MouseEvent& event);
 
     /// Paint the overlay into `canvas`, which is already showing the inspected
-    /// root. Selection and hover that no longer point into the tree are
+    /// root: the highlight, then a line with its pixel distance from the
+    /// measurement anchor, and from the Alt-hover target, to the selection,
+    /// then the selection's padding and margin bands and its distances to its
+    /// parent. Selection and hover that no longer point into the tree are
     /// dropped first. A no-op while inactive.
     void paint(canvas::Canvas& canvas);
 
@@ -140,6 +144,8 @@ class InspectorOverlay {
   private:
     void drop_stale_views();
     void paint_highlight(canvas::Canvas& canvas);
+    void paint_distance_lines(canvas::Canvas& canvas);
+    void paint_box_model(canvas::Canvas& canvas, const View& view);
     bool select_with_mouse(const ::vellum::view::MouseEvent& event, bool is_press,
                            bool is_drag_tick, bool is_release);
 
@@ -153,6 +159,7 @@ class InspectorOverlay {
     bool dragging_enabled_ = false;
 
     static constexpr float kFontSize = 11.0f;
+    static constexpr float kEdgeFontSize = 9.0f;
     static constexpr float kBadgeHeight = 16.0f;
     static constexpr float kHandleHalfSide = 4.0f;
 };
