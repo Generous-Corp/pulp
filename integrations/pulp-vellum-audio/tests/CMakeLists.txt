@@ -22,5 +22,5 @@ if(TARGET pulp::vellum-widget-gallery AND TARGET Catch2::Catch2WithMain)
     target_link_libraries(pulp-test-vellum-widget-gallery PRIVATE
         pulp::vellum-widget-gallery Catch2::Catch2WithMain)
     include(Catch)
-    catch_discover_tests(pulp-test-vellum-widget-gallery PROPERTIES LABELS vellum-widget-gallery)
+    catch_discover_tests(pulp-test-vellum-widget-gallery PROPERTIES LABELS pulp-vellum)
 endif()

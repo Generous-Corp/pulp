@@ -4,12 +4,16 @@
 #include <vellum/canvas/canvas.hpp>
 #include <vellum/view/gap_widgets.hpp>
 #include <vellum/view/input_events.hpp>
+#include <vellum/view/screenshot.hpp>
 #include <vellum/view/text_editor.hpp>
 #include <vellum/view/theme_presets.hpp>
 #include <vellum/view/ui_components.hpp>
 #include <vellum/view/widgets.hpp>
 
 #include <cstddef>
+#include <cstdint>
+#include <cstdlib>
+#include <string>
 #include <vector>
 
 using namespace pulp::vellum_audio;
@@ -136,4 +140,53 @@ TEST_CASE("Vellum widget gallery scrolls to the full board in either axis", "[ga
     scroll->on_mouse_event(wheel);
     CHECK(scroll->scroll_x() == scroll->content_size().width - viewport_width);
     CHECK(scroll->scroll_y() == scroll->content_size().height - viewport_height);
+}
+
+TEST_CASE("Vellum widget gallery paints its meters and keyboard onto the board",
+          "[gallery][render]") {
+    if (!raw_rgba_render_available())
+        SKIP("Vellum CPU raster backend unavailable");
+    auto board = build_widget_gallery(ink_signal(true));
+    const auto width = static_cast<std::uint32_t>(board->bounds().width);
+    const auto height = static_cast<std::uint32_t>(board->bounds().height);
+    std::uint32_t out_w = 0;
+    std::uint32_t out_h = 0;
+    const auto px = render_to_rgba(*board, width, height, 1.0f, &out_w, &out_h);
+    REQUIRE(out_w == width);
+    REQUIRE(out_h == height);
+    if (const char* dir = std::getenv("PULP_VELLUM_AUDIO_PNG_DIR"))
+        CHECK(render_to_file(*board, width, height, std::string(dir) + "/widget-gallery.png", 1.0f,
+                             ScreenshotBackend::skia));
+
+    const auto at = [&](float x, float y, int channel) {
+        const auto o = (static_cast<std::size_t>(y) * out_w + static_cast<std::size_t>(x)) * 4;
+        return static_cast<int>(px[o + static_cast<std::size_t>(channel)]);
+    };
+    const auto differs = [&](float x0, float y0, float x1, float y1) {
+        int delta = 0;
+        for (int c = 0; c < 3; ++c)
+            delta = std::max(delta, std::abs(at(x0, y0, c) - at(x1, y1, c)));
+        return delta;
+    };
+
+    // A seeded meter fills from its base: a pixel just above the base is the fill,
+    // and one near the top (above the 0.82 peak) is the empty track.
+    const auto meters = specimens<LevelMeter>(*board);
+    REQUIRE(meters.size() == 2);
+    for (const auto* meter : meters) {
+        const auto b = meter->bounds();
+        const float cx = b.x + b.width * 0.5f;
+        CHECK(differs(cx, b.y + b.height - 4.0f, cx, b.y + 2.0f) > 40);
+    }
+
+    // The keyboard's white keys are light against the dark board, and its black keys are dark.
+    const auto keyboards = specimens<MidiKeyboard>(*board);
+    REQUIRE(keyboards.size() == 1);
+    const auto kb = keyboards.front()->bounds();
+    const float white_y = kb.y + kb.height - 3.0f;
+    int light = 0;
+    for (float x = kb.x + 2.0f; x < kb.x + kb.width - 2.0f; x += 3.0f)
+        if (at(x, white_y, 0) > 180 && at(x, white_y, 1) > 180 && at(x, white_y, 2) > 180)
+            ++light;
+    CHECK(light > 10);
 }
