@@ -1472,12 +1472,17 @@ TEST_CASE("A Vellum root that does not opt in keeps immediate presentation",
 #include <vellum/view/text_editor.hpp>
 
 #if defined(__APPLE__)
+#include <vellum/view/native_view_host.hpp>
+#include <vellum/view/web_view.hpp>
+
+#include <CoreFoundation/CoreFoundation.h>
 #include <CoreGraphics/CoreGraphics.h>
 #include <ImageIO/ImageIO.h>
 #endif
 
 #include <cstdlib>
 #include <fstream>
+#include <functional>
 #include <string>
 
 using pulp::format::vst3::ContractPlugView;
@@ -1669,11 +1674,12 @@ struct Vst3Fixture {
     Vst3EditorEnvironment env;
     Vst3FocusReset focus;
     Vst3HostApp host_app;
-    PulpVst3Processor processor{create_vst3_field_processor};
+    PulpVst3Processor processor;
     ::vellum::view::View parent_root;
     std::unique_ptr<PluginViewHost> parent;
 
-    Vst3Fixture() {
+    explicit Vst3Fixture(pulp::format::ProcessorFactory make = create_vst3_field_processor)
+        : processor(make) {
         g_vst3_root = {};
         REQUIRE(processor.initialize(&host_app) == Steinberg::kResultOk);
     }
@@ -1703,6 +1709,104 @@ Steinberg::tresult press(ContractPlugView& view, Steinberg::char16 key, Steinber
                          Steinberg::int16 modifiers = 0) {
     return view.onKeyDown(key, code, modifiers);
 }
+
+#if defined(__APPLE__)
+
+/// A processor that owns a WKWebView, so the page outlives an editor close.
+class Vst3WebViewProcessor final : public pulp::format::Processor {
+  public:
+    pulp::format::PluginDescriptor descriptor() const override {
+        pulp::format::PluginDescriptor d;
+        d.name = "Vellum VST3 WebView Editor";
+        d.manufacturer = "Pulp";
+        d.bundle_id = "dev.pulp.test.vst3-vellum-webview";
+        d.version = "1.0.0";
+        d.input_buses = {{"Audio In", 2}};
+        d.output_buses = {{"Audio Out", 2}};
+        return d;
+    }
+    void define_parameters(pulp::state::StateStore&) override {}
+    void prepare(const pulp::format::PrepareContext&) override {}
+    void process(pulp::audio::BufferView<float>& out, const pulp::audio::BufferView<const float>&,
+                 pulp::midi::MidiBuffer&, pulp::midi::MidiBuffer&,
+                 const pulp::format::ProcessContext&) override {
+        out.clear();
+    }
+    pulp::format::EditorFactory* editor_factory() override;
+
+    ::vellum::view::WebViewPanel* panel() {
+        if (!panel_)
+            panel_ = ::vellum::view::WebViewPanel::create();
+        return panel_.get();
+    }
+
+  private:
+    std::unique_ptr<::vellum::view::WebViewPanel> panel_;
+};
+
+/// What the WebView root saw, reset by each case.
+struct Vst3WebViewLog {
+    ::vellum::view::WebViewPanel* panel = nullptr;
+    ::vellum::view::NativeViewHost* pane = nullptr;
+    ::vellum::view::View* root = nullptr;
+};
+Vst3WebViewLog g_vst3_webview;
+
+/// One NativeViewHost that fills the editor and borrows the processor's
+/// WebView, the shape of a WebView plug-in editor on Vellum.
+class Vst3WebViewRoot final : public ::vellum::view::View {
+  public:
+    Vst3WebViewRoot(pulp::vellum::EditorEnv&, pulp::format::Processor& processor) {
+        auto* panel = dynamic_cast<Vst3WebViewProcessor&>(processor).panel();
+        auto pane = std::make_unique<::vellum::view::NativeViewHost>();
+        pane->flex().flex_grow = 1.0f;
+        if (panel && panel->native_handle())
+            pane->set_native_child(panel->native_handle(),
+                                   [panel](uint32_t, uint32_t) { return panel->snapshot_png(); });
+        g_vst3_webview = {panel, pane.get(), this};
+        add_child(std::move(pane));
+    }
+    ~Vst3WebViewRoot() override {
+        g_vst3_webview.pane = nullptr;
+        g_vst3_webview.root = nullptr;
+    }
+    pulp::format::ViewSize editor_view_size() const {
+        return {.preferred_width = 400, .preferred_height = 300};
+    }
+};
+
+pulp::format::EditorFactory* Vst3WebViewProcessor::editor_factory() {
+    return pulp::vellum::editor_factory<Vst3WebViewRoot>();
+}
+
+std::unique_ptr<pulp::format::Processor> create_vst3_webview_processor() {
+    return std::make_unique<Vst3WebViewProcessor>();
+}
+
+bool pump_until(const std::function<bool()>& done, std::chrono::milliseconds timeout) {
+    const auto deadline = std::chrono::steady_clock::now() + timeout;
+    while (!done() && std::chrono::steady_clock::now() < deadline)
+        CFRunLoopRunInMode(kCFRunLoopDefaultMode, 0.01, true);
+    return done();
+}
+
+/// Evaluates `js` until its JSON result equals `expected`, pumping the run loop.
+bool page_reads(::vellum::view::WebViewPanel& panel, const std::string& js,
+                const std::string& expected) {
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+    while (std::chrono::steady_clock::now() < deadline) {
+        auto result = std::make_shared<std::optional<std::string>>();
+        panel.evaluate_js(js, [result](const std::string& json, const std::string& error) {
+            *result = error.empty() ? json : std::string("error: ") + error;
+        });
+        pump_until([&] { return result->has_value(); }, std::chrono::milliseconds(500));
+        if (result->has_value() && **result == expected)
+            return true;
+    }
+    return false;
+}
+
+#endif // __APPLE__
 
 /// A PNG decoded to 8-bit sRGB RGBA, rows top to bottom.
 struct DecodedPng {
@@ -1839,6 +1943,85 @@ TEST_CASE("A VST3 host's Vellum editor paints its root through the macOS view ho
     REQUIRE(view->removed() == Steinberg::kResultTrue);
     view->release();
 }
+
+#if defined(__APPLE__)
+TEST_CASE("A VST3 host opens a Vellum WebView editor through the macOS view host",
+          "[pulp-vellum][vst3][editor-host][webview]") {
+    Vst3Fixture fx(create_vst3_webview_processor);
+    auto* view = fx.create_view();
+    REQUIRE(g_vst3_webview.root != nullptr);
+    auto* panel = g_vst3_webview.panel;
+    auto* pane = g_vst3_webview.pane;
+    REQUIRE(panel != nullptr);
+    REQUIRE(pane != nullptr);
+    REQUIRE(pump_until([&] { return panel->is_ready(); }, std::chrono::seconds(5)));
+
+    // Opening the editor embeds the WKWebView in the Vellum host's NSView at
+    // the editor's laid-out size.
+    REQUIRE(view->attached(fx.native_parent(), Steinberg::kPlatformTypeNSView) ==
+            Steinberg::kResultTrue);
+    auto* host = g_vst3_webview.root->plugin_view_host();
+    REQUIRE(host != nullptr);
+    host->present_first_frame();
+    pane->update_native_layout();
+    CHECK(pane->is_native_attached());
+    CHECK(pane->computed_child_frame().width == 400);
+    CHECK(pane->computed_child_frame().height == 300);
+
+    // Page and native code exchange structured messages through the bridge.
+    std::string seen_type;
+    panel->set_message_handler([&](const ::vellum::view::WebViewMessage& message) {
+        seen_type = message.type;
+        return std::string(R"({"accepted":true})");
+    });
+    panel->set_html(std::string("<!doctype html><html><body style=\"margin:0;background:#1e90ff;"
+                                "color:#fff;font:bold 28px sans-serif\">"
+                                "<p style=\"margin:24px\">WebView editor on Vellum</p><script>") +
+                    ::vellum::view::make_webview_bridge_bootstrap_script() + R"JS(
+window.fromNative = '';
+window.pulp.on('host.hello', function(m) { window.fromNative = m.payload.from; });
+</script></body></html>)JS");
+    REQUIRE(page_reads(*panel, "typeof window.fromNative", "\"string\""));
+    panel->post_message({.type = "host.hello", .payload_json = R"({"from":"vst3"})", .id = "h-1"});
+    CHECK(page_reads(*panel, "window.fromNative", "\"vst3\""));
+    panel->evaluate_js("window.pulp.postMessage('editor.ready', {}, 'p-1');");
+    CHECK(pump_until([&] { return !seen_type.empty(); }, std::chrono::seconds(5)));
+    CHECK(seen_type == "editor.ready");
+
+    // The pane's headless capture is the page as WebKit rendered it.
+    std::vector<std::uint8_t> png;
+    DecodedPng image;
+    std::size_t at = 0;
+    pump_until(
+        [&] {
+            png = pane->capture_native_overlay_png(400, 300);
+            image = decode_png_rgba(png);
+            // Lower left quarter, below the heading.
+            at = ((image.height * 3 / 4) * image.width + image.width / 4) * 4;
+            return image.width > 0 && image.rgba[at] == 0x1e && image.rgba[at + 1] == 0x90 &&
+                   image.rgba[at + 2] == 0xff;
+        },
+        std::chrono::seconds(5));
+    if (const char* out = std::getenv("PULP_VELLUM_WEBVIEW_CAPTURE_PNG"))
+        std::ofstream(out, std::ios::binary)
+            .write(reinterpret_cast<const char*>(png.data()),
+                   static_cast<std::streamsize>(png.size()));
+    REQUIRE(image.width >= 400);
+    REQUIRE(image.height >= 300);
+    INFO("rgba " << int(image.rgba[at]) << "," << int(image.rgba[at + 1]) << ","
+                 << int(image.rgba[at + 2]) << "," << int(image.rgba[at + 3]));
+    CHECK(image.rgba[at] == 0x1e);
+    CHECK(image.rgba[at + 1] == 0x90);
+    CHECK(image.rgba[at + 2] == 0xff);
+
+    // Closing the editor takes the WebView out of the host; the processor
+    // still owns it.
+    REQUIRE(view->removed() == Steinberg::kResultTrue);
+    view->release();
+    CHECK(g_vst3_webview.root == nullptr);
+    CHECK(panel->native_handle() != nullptr);
+}
+#endif
 
 TEST_CASE("A VST3 host's Space reaches a focused Vellum text field and nothing else",
           "[pulp-vellum][vst3][editor-host][keys]") {
