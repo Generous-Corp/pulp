@@ -820,6 +820,7 @@
       "pulp/runtime/node_abi.hpp",
       "pulp/runtime/primes.hpp",
       "pulp/runtime/range.hpp",
+      "pulp/runtime/reload_autocaps.hpp",
       "pulp/runtime/reload_capabilities.hpp",
       "pulp/runtime/result.hpp",
       "pulp/runtime/runtime.hpp",
