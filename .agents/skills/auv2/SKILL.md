@@ -346,6 +346,20 @@ per plug-in, and the factory class is exported. Things to keep straight:
   emoji) as a UTF-16 pair: the helper combines a valid pair into one scalar and
   drops a lone surrogate, so a key's `character` is always a scalar value
   (`[auv2]` "carry an astral character whole" case).
+- Keys reach the container from AppKit only after its key-equivalent pass has
+  already shown them to the editor's own view, so the container's session sets
+  `HostHooks::keys_after_native_pass` and answers
+  `editor_keys_after_native_pass_extension_id`. An editor that consults a
+  global shortcut hook in `offer_key()` must skip it when that id answers, or
+  one press fires the hook twice (measured with a Vellum editor:
+  `pulp-test-au-v2-vellum-view` `[global-hook]`). Model the press with
+  `[window sendEvent:]`, not hand-called `performKeyEquivalent:` +
+  `keyDown:`: the container's `[super keyDown:]` re-enters the window's
+  key-equivalent pass, so the hand-called pair over-counts.
+- `pulp-test-au-v2-vellum-view` builds `test_au_v2_contract_view.mm` a second
+  time against Pulp's Vellum bridge (`PULP_TEST_AU_VELLUM`, `[vellum]` cases
+  only), so the AU v2 container is proven with a real Vellum editor without a
+  new test translation unit.
 - `au::contract_view_session(ns_view)` (declared in `au_v2_common.hpp`) reaches
   an open contract view's session, and through it the editor's
   `EditorAutomation`, from an in-process host. A harness that opens contract
