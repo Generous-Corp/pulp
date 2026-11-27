@@ -344,6 +344,12 @@ modules:
     dependencies: [canvas, events, state]
     docs: reference/modules.md#view
 
+  - name: editor_bridge
+    summary: EditorBridge, the view-free dispatcher of JSON messages between a plug-in editor (WebView or scripted) and its processor, installed as pulp/view/editor_bridge.hpp
+    status: usable
+    dependencies: [runtime]
+    docs: reference/editor-bridge.md
+
   - name: dsl
     summary: DSL integration contract and FAUST offline codegen wrapper
     status: experimental
