@@ -21,6 +21,8 @@
 #   view-core     PULP_SDK_UI_FROM_VELLUM on while Pulp::view-core is exported
 #                 still defines nothing.
 #   missing       a name whose Vellum backing target is absent stays undefined.
+#   no-editor-bridge  an SDK that exports no Pulp::editor-bridge is refused with
+#                 the reason instead of leaving Pulp::view-tooling undefined.
 #   twice         a second find_package(Pulp) reports the same list.
 #   no-bridge     an SDK without the Vellum bridge defines nothing.
 #   no-vellum     Vellum cannot be found: the config warns and names the
@@ -340,6 +342,24 @@ elseif(SCENARIO STREQUAL "missing")
     _expect("${_out}" "COMPAT=\\[render;design-import;view;view-tooling\\]" "view-audio left out")
     _expect("${_out}" "T\\[view-audio\\]=\\[ABSENT\\]" "no empty view-audio target")
     _expect("${_out}" "T\\[view-tooling\\]=\\[Vellum::MirrorView_core;Pulp::vellum;Pulp::editor-bridge;Vellum::MirrorView_script\\]" "view-tooling unaffected")
+
+elseif(SCENARIO STREQUAL "no-editor-bridge")
+    # An SDK that serves its UI from Vellum but exports no Pulp::editor-bridge is
+    # refused with the reason, not left with an undefined Pulp::view-tooling.
+    list(REMOVE_ITEM _vellum_targets Pulp::editor-bridge)
+    _standins(_no_bridge ${_vellum_targets})
+    _write_prefix("${FIXTURE_DIR}/no-editor-bridge/prefix" ON ON "" "${_no_bridge}")
+    file(WRITE "${FIXTURE_DIR}/no-editor-bridge/src/CMakeLists.txt"
+        "cmake_minimum_required(VERSION 3.24)\nproject(NoEditorBridge NONE)\nfind_package(Pulp CONFIG REQUIRED)\n")
+    execute_process(COMMAND ${_clean_env} "${CMAKE_COMMAND}" -S "${FIXTURE_DIR}/no-editor-bridge/src"
+            -B "${FIXTURE_DIR}/no-editor-bridge/build"
+            -DPulp_DIR=${FIXTURE_DIR}/no-editor-bridge/prefix/lib/cmake/Pulp ${_isolation}
+        RESULT_VARIABLE _rc OUTPUT_VARIABLE _out ERROR_VARIABLE _err)
+    string(REGEX REPLACE "[ \n]+" " " _flat "${_out}${_err}")
+    if(_rc EQUAL 0)
+        message(FATAL_ERROR "no-editor-bridge: configured without Pulp::editor-bridge:\n${_out}${_err}")
+    endif()
+    _expect("${_flat}" "needs Pulp::editor-bridge" "the refusal naming the missing target")
 
 elseif(SCENARIO STREQUAL "twice")
     _inspect(twice ON ON "${_vellum_standins}" 2 _out)

@@ -1696,7 +1696,8 @@ the bypass trailer by reflex:
   targets over Vellum's mirror targets (`view-audio` over `Pulp::vellum-audio`,
   `view-tooling` over `Pulp::vellum`, the view-free `Pulp::editor-bridge`
   (EditorBridge's dispatch core) and the view layer's inspector and screenshot
-  surfaces), only in an SDK configured with
+  surfaces; a Vellum-mode SDK that exports no `Pulp::editor-bridge` is refused
+  at configure, because the target is still built beside `core/view`), only in an SDK configured with
   `PULP_SDK_UI_FROM_VELLUM` (off until Pulp's UI libraries are removed). Never
   key that off one name's absence: a GPU-off or design-import-off bridge SDK
   lacks `Pulp::render` or `Pulp::design-import` while still shipping Pulp's own

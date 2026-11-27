@@ -1712,7 +1712,7 @@ set_tests_properties(cmake-canvas-fontconfig-link PROPERTIES
 # consumer lane configures) they carry the pulp-vellum label that lane runs and
 # must not skip; elsewhere they report SKIP.
 foreach(_vellum_ui_compat_scenario
-        wiring shape pulp-ui partial-ui view-core missing twice no-bridge
+        wiring shape pulp-ui partial-ui view-core missing no-editor-bridge twice no-bridge
         no-vellum real wrong-version view-native gpu-guard gpu-owner-real)
     set(_vellum_ui_compat_test "cmake-vellum-ui-compat-${_vellum_ui_compat_scenario}")
     set(_vellum_ui_compat_args "")

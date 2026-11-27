@@ -276,6 +276,19 @@ function(pulp_define_vellum_ui_compat_targets)
             OPTIONAL Vellum::MirrorView_script Pulp::vellum)
         _pulp_vellum_ui_compat_define(view-audio
             REQUIRES Pulp::vellum-audio)
+        # Pulp::editor-bridge is defined with Pulp's own view libraries today, so
+        # an SDK without them does not export it yet. Leaving view-tooling
+        # undefined there would read as "this SDK has no tooling", so refuse
+        # with the reason instead.
+        if(TARGET Vellum::MirrorView_core AND TARGET Pulp::vellum
+                AND NOT TARGET Pulp::editor-bridge)
+            message(FATAL_ERROR
+                "Pulp: this SDK serves Pulp::view-tooling from Vellum, which needs "
+                "Pulp::editor-bridge (EditorBridge's dispatch core), but the SDK "
+                "does not export it. The target is built beside Pulp's view "
+                "libraries (core/view), so an SDK without them must build it "
+                "separately before PULP_SDK_UI_FROM_VELLUM can be turned on.")
+        endif()
         _pulp_vellum_ui_compat_define(view-tooling
             REQUIRES Vellum::MirrorView_core Pulp::vellum Pulp::editor-bridge
             OPTIONAL Vellum::MirrorView_script)
