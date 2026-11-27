@@ -52,6 +52,46 @@ int main() {
     return ok ? 0 : 1;
 }
 
+#elif defined(PULP_VELLUM_UI_COMPAT_PROBE_VIEW_AUDIO)
+// The audio widgets package keeps its keyboard controller in a header, so this
+// proves the include path and the Vellum input types it is built on; the
+// package's compiled library is not part of this probe's link.
+#include <pulp/vellum_audio/musical_typing.hpp>
+
+int main() {
+    pulp::vellum_audio::MusicalTypingController typing;
+    int sounded = -1;
+    typing.on_note_on = [&](int note, float) { sounded = note; };
+    pulp::vellum_audio::KeyEvent press;
+    press.key = pulp::vellum_audio::KeyCode::a;
+    const bool consumed = typing.handle_key(press);
+    std::printf("Pulp::view-audio -> MusicalTypingController 'a' sounds note %d\n", sounded);
+    return consumed && sounded == typing.base_note() ? 0 : 1;
+}
+
+#elif defined(PULP_VELLUM_UI_COMPAT_PROBE_VIEW_TOOLING)
+// The screenshot surface is defined in the provider library behind the name, so
+// calling it makes the link depend on that library. EditorBridge comes from the
+// view-free editor-bridge target the name links, and a WebView-editor plug-in
+// dispatches through it.
+#include <pulp/view/editor_bridge.hpp>
+#include <vellum/view/screenshot.hpp>
+
+#include <string>
+
+int main() {
+    const bool capable = vellum::view::has_screenshot_backend();
+    pulp::view::EditorBridge bridge;
+    bridge.add_handler("ping", [](const choc::value::ValueView&) {
+        return pulp::view::EditorBridge::ok_response();
+    });
+    const std::string reply = bridge.dispatch_json(R"({"type":"ping"})");
+    const bool dispatched = reply == pulp::view::EditorBridge::ok_response();
+    std::printf("Pulp::view-tooling -> vellum::view::has_screenshot_backend %s, EditorBridge %s\n",
+                capable ? "yes" : "no", dispatched ? "dispatched" : "failed");
+    return dispatched ? 0 : 1;
+}
+
 #else
 #error "define one PULP_VELLUM_UI_COMPAT_PROBE_<NAME>"
 #endif
