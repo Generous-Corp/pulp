@@ -144,7 +144,7 @@ class PresetProgramEditor : public View {
     /// Ask the host to rename or renumber the shown bank.
     bool request_bank_text(BankTextKind kind) {
         const auto* b = current_bank();
-        if (!b || !on_bank_text_request)
+        if (!b || !on_bank_text_request || pending_rename_bank_ || pending_renumber_bank_)
             return false;
         if (kind == BankTextKind::rename)
             pending_rename_bank_ = b->number;
@@ -319,7 +319,7 @@ class PresetProgramEditor : public View {
 
     bool request_assign() {
         const auto slot = selected_slot();
-        if (!slot || !on_assign_request)
+        if (!slot || !on_assign_request || pending_assign_slot_)
             return false;
         pending_assign_slot_ = slot;
         on_assign_request(*slot);

@@ -108,6 +108,9 @@ TEST_CASE("program editor edits slots through the library and the host's answers
     editor.on_assign_request = [&](BankProgram slot) { asked.push_back(slot); };
     editor.on_mouse_event(click(60, 32 + 4 + 24 * 10 + 12, 2)); // double-click row 10
     REQUIRE(asked == std::vector<BankProgram>{{0, 10}});
+    KeyEvent enter_while_picker_open;
+    enter_while_picker_open.key = KeyCode::enter;
+    REQUIRE_FALSE(editor.on_key_event(enter_while_picker_open));
 
     // The answer applies to the slot that opened the picker, even if the
     // selection moves while the host dialog is open.
@@ -161,6 +164,7 @@ TEST_CASE("program editor renames and renumbers a bank",
     editor.on_mouse_event(click(150, 10, 2)); // double-click the title
     REQUIRE(asked.size() == 1);
     REQUIRE(asked[0].second == "Factory");
+    REQUIRE_FALSE(editor.request_bank_text(PresetProgramEditor::BankTextKind::rename));
     editor.next_bank();
     REQUIRE(editor.complete_bank_text(PresetProgramEditor::BankTextKind::rename, "Stock"));
     REQUIRE(editor.current_bank()->number == 4);
