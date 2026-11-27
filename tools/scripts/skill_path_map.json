@@ -90,6 +90,12 @@
         "docs/guides/platforms/android.md"
       ]
     },
+    "api-design": {
+      "_doc": {
+        "empty-ok": "Process/guidance skill for shaping public headers and APIs. Mapping core/*/include/** to it would demand a SKILL.md edit on every header change, so it owns no source path; the header fan-out guard and review enforce the rules that can be checked mechanically (same pattern as code-comments)."
+      },
+      "paths": []
+    },
     "ara": {
       "_doc": {
         "empty-ok": "external/ara-sdk/** intentionally empty \u2014 ARA SDK is developer-supplied per the ara skill"

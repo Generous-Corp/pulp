@@ -10,7 +10,7 @@ source of truth — there is no separate per-agent copy.
 You rarely invoke a skill by name. Each one activates automatically when
 your request matches what it covers (its `description` lists the triggers),
 and many also have a matching `/slash-command`. The table below is the full
-catalog of the 72 skills Pulp ships; open a skill's `SKILL.md`
+catalog of the 73 skills Pulp ships; open a skill's `SKILL.md`
 for its complete, authoritative guidance.
 
 | Skill | What it does |
@@ -19,6 +19,7 @@ for its complete, authoritative guidance.
 | `ableton-link` | Configure, implement, and test Pulp's optional desktop Ableton Link tempo-sync adapter while preserving the developer-supplied SDK, licensing, realtime, latency-compensation, and no-install boundaries. |
 | `agent-capabilities` | Maintain Pulp's installed design-time agent capability manifest and public-surface ledger. |
 | `android` | Android platform development for Pulp — NDK cross-compilation, Oboe audio, Dawn/Skia GPU rendering, JNI bridge, touch interaction, emulator workflows, and end-to-end smoke validation. |
+| `api-design` | Design rules for new public headers and APIs in Pulp: layering of the audio core, strong types for quantities, small composable processors, separation of processing, model and presentation, lean includes, and docs order. |
 | `ara` | Optional ARA support for Pulp, including developer-supplied ARA SDK setup, CMake enablement, adapter companion APIs, validation, and ARA-aware plugin implementation guidance. |
 | `audio-harness` | The measurement surface for ALL Pulp DSP and audio-pipeline work — read it BEFORE writing or gating DSP, not only when something already sounds wrong. |
 | `audio-headless-debug` | Reproduce and debug "only happens in a DAW" audio plugin bugs (cutouts, glitches, parameter-change failures) entirely offline — headless Processor scenes for DSP bugs and a standalone AudioUnit host probe for adapter/host-interaction bugs. |

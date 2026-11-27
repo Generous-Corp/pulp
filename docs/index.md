@@ -54,6 +54,7 @@ MIT-licensed. No royalties. No copyleft.
 - [Real-world Inputs](guides/real-world-inputs.md) — map optional CV, sensor, controller, analysis, and network providers across Pulp surfaces
 - [Design from Figma](guides/figma-plugin.md) — the "Design for Pulp" plugin, export, and import ([model](reference/design-import-model.md))
 - [Docs Maintenance](guides/docs-maintenance.md) — how docs stay consistent with code
+- [API and Header Design](guides/api-design.md) — layering, strong types, small processors, lean headers
 
 ## Policies
 
