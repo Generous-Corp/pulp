@@ -301,6 +301,12 @@ add_test(NAME consumption-census-drift-description
     COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/scripts/test_consumption_census.py")
 
+# census_profiles.py walks every profile this host can configure; this drives
+# its selection, overlay, digest cache and gate wiring with a fake configure.
+add_test(NAME consumption-census-profiles-selftest
+    COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/scripts/test_census_profiles.py")
+
 add_test(NAME consumption-census-negative-contract
     COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/scripts/consumption_census_contract.py"

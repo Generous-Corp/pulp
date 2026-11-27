@@ -1399,9 +1399,10 @@ and only some of them run in `gates.sh`:
 - `docs/doxygen/Doxyfile` `INPUT` (`doxygen_installed_header_check.py`);
 - `codecov.yml` components and `ci/coverage-surfaces.yaml` component sets
   (`test_codecov_config.py`, `test_coverage_surface_contract.py`);
-- `docs/status/consumption-profiles.json`, regenerated per profile with
-  `consumption_census.py --write` from a configure of each feature set it
-  records;
+- `docs/status/consumption-profiles.json`, regenerated for every profile this
+  host can configure with `python3 tools/scripts/census_profiles.py --write`
+  (one configure-only tree per feature set; a single tree's
+  `consumption_census.py --write` refreshes only its own profile);
 - `docs/status/modules.yaml` and `docs/reference/modules.md`. A package
   outside `core/` (`integrations/pulp-native`) gives its entry a `path:`
   (`path: integrations/pulp-native`); without one, `tools/check-docs.sh`

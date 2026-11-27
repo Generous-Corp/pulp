@@ -66,6 +66,7 @@ import argparse
 import contextlib
 import io
 import os
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -86,6 +87,7 @@ FAMILIES_TEST = "changed-surface-script-families-drift"
 SKIP_EXIT = 77
 CENSUS_TEST = "consumption-census-drift"
 CENSUS_SCRIPT = Path("tools/scripts/consumption_census.py")
+CENSUS_PROFILES_SCRIPT = Path("tools/scripts/census_profiles.py")
 CENSUS_FILE = "docs/status/consumption-profiles.json"
 HEADER_SUFFIXES = (".h", ".hh", ".hpp", ".inc")
 FAMILIES = HERE / "changed_surface_script_families.py"
@@ -305,15 +307,48 @@ def check_census(root: Path, build: Path, shown: str) -> int:
     rc, out = run_tool([sys.executable, str(script), "--check", "--build-dir", str(build)], root)
     for line in out.splitlines()[-12:]:
         say(f"  {line}")
-    if rc == 0:
-        return 0
+    if rc in (0, SKIP_EXIT):
+        verified = re.search(r"consumption_census_verified=true .*profile=(\S+)", out)
+        return check_other_profiles(root, verified.group(1) if verified else None)
     if rc == 1:
         say("  consumption-census: DRIFT. Regenerate the census from this configured tree and commit it "
             "(stage a new public header first: the header list is read from git's index):")
         say("    " + regen("python3 tools/scripts/consumption_census.py --build-dir {build} --write", shown))
+        say("    or every profile this host can configure, in one command: "
+            "python3 tools/scripts/census_profiles.py --write")
         say(f"    git add {CENSUS_FILE}")
         return 1
     say(f"NOT CHECKED locally: {CENSUS_TEST} (consumption_census.py --check exited {rc} on {shown})")
+    return 0
+
+
+def check_other_profiles(root: Path, verified_key: str | None) -> int:
+    """The census holds one profile per feature set and a configured build verifies one.
+
+    census_profiles.py configures a throwaway tree for each of the others
+    (configure only, governed) and skips any it already verified for these inputs,
+    so a CMake change that left a sibling profile stale fails here and not on the
+    host that happens to configure to it.
+    """
+    script = root / CENSUS_PROFILES_SCRIPT
+    if not script.is_file():
+        return 0
+    if os.environ.get("PULP_GATES_CENSUS_LOCAL_ONLY") == "1":
+        say(f"NOT CHECKED locally: {CENSUS_TEST} (other profiles: PULP_GATES_CENSUS_LOCAL_ONLY=1)")
+        return 0
+    cmd = [sys.executable, str(script), "--check", "--cached"] + (["--skip", verified_key] if verified_key else [])
+    rc, out = run_tool(cmd, root)
+    for line in out.splitlines()[-16:]:
+        say(f"  {line}")
+    if rc == 0:
+        return 0
+    if rc == 1:
+        say("  consumption-census: DRIFT in a profile this build did not measure (above). Regenerate them all "
+            "and commit the file:")
+        say("    python3 tools/scripts/census_profiles.py --write")
+        say(f"    git add {CENSUS_FILE}")
+        return 1
+    say(f"NOT CHECKED locally: {CENSUS_TEST} (other profiles: census_profiles.py exited {rc}; the lines above name them)")
     return 0
 
 
