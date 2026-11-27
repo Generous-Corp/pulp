@@ -64,15 +64,15 @@ bool same_authenticated_binding(const ControlHostObservabilityBinding& supplied,
                expected.authentication_token.size());
 }
 
-std::string shape_id(view::ValueChannelShape shape) {
+std::string shape_id(dataplane::ValueChannelShape shape) {
     switch (shape) {
-    case view::ValueChannelShape::scalar:
+    case dataplane::ValueChannelShape::scalar:
         return "scalar";
-    case view::ValueChannelShape::meter:
+    case dataplane::ValueChannelShape::meter:
         return "meter";
-    case view::ValueChannelShape::vector:
+    case dataplane::ValueChannelShape::vector:
         return "vector";
-    case view::ValueChannelShape::events:
+    case dataplane::ValueChannelShape::events:
         return "events";
     }
     return "unknown";

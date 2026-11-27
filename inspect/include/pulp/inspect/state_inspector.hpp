@@ -2,10 +2,10 @@
 #pragma once
 
 #include <pulp/dataplane/fwd.hpp>
+#include <pulp/dataplane/value_channel_telemetry.hpp>
 #include <pulp/state/listener_token.hpp>
 #include <pulp/state/parameter.hpp>
 #include <pulp/state/store.hpp>
-#include <pulp/view/value_channel_telemetry.hpp>
 
 #include <chrono>
 #include <mutex>
@@ -34,11 +34,11 @@ public:
     /// Snapshot the hosting processor's declared value-channel metadata. The
     /// inspector owns its copy so a reloadable processor can retire the source
     /// set immediately after this call without leaving a dangling catalog.
-    void set_value_channels(view::ValueChannelSet* channels);
-    void set_value_channels(std::span<const view::ValueChannelInfo> channels) {
+    void set_value_channels(dataplane::ValueChannelSet* channels);
+    void set_value_channels(std::span<const dataplane::ValueChannelInfo> channels) {
         value_channels_.assign(channels.begin(), channels.end());
     }
-    std::span<const view::ValueChannelInfo> value_channels() const noexcept {
+    std::span<const dataplane::ValueChannelInfo> value_channels() const noexcept {
         return value_channels_;
     }
     ~StateInspector();
@@ -86,7 +86,7 @@ public:
 
 private:
     StateStore& store_;
-    std::vector<view::ValueChannelInfo> value_channels_;
+    std::vector<dataplane::ValueChannelInfo> value_channels_;
     mutable std::mutex changes_mutex_;
     std::vector<ParamChange> changes_;
     ListenerToken listener_token_;

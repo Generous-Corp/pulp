@@ -36,9 +36,14 @@ pulp_add_test_suite(pulp-test-host-frame-pump GROUP pulp-test-group-motion
 # Host->view value sources, subscription lifecycle, and transport-free telemetry
 # sidecars. Carries the allocation probe used to assert paint and producer paths.
 pulp_add_test_suite(pulp-test-meter-source
-    SOURCES test_meter_source.cpp test_value_channel_telemetry.cpp
-            harness/rt_allocation_probe.cpp
+    SOURCES test_meter_source.cpp harness/rt_allocation_probe.cpp
     LIBRARIES pulp::view)
+
+# The data plane's own telemetry sidecars need no view layer, so they build
+# against pulp::dataplane alone.
+pulp_add_test_suite(pulp-test-value-channel-telemetry
+    SOURCES test_value_channel_telemetry.cpp harness/rt_allocation_probe.cpp
+    LIBRARIES pulp::dataplane)
 
 # Motion bedrock tests.
 pulp_add_test_suite(pulp-test-motion GROUP pulp-test-group-motion

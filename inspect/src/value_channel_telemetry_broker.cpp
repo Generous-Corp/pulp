@@ -38,15 +38,15 @@ std::int64_t time_ns(TimePoint value) {
     return std::chrono::duration_cast<std::chrono::nanoseconds>(value.time_since_epoch()).count();
 }
 
-const char* shape_name(view::ValueChannelShape shape) noexcept {
+const char* shape_name(dataplane::ValueChannelShape shape) noexcept {
     switch (shape) {
-    case view::ValueChannelShape::scalar:
+    case dataplane::ValueChannelShape::scalar:
         return "scalar";
-    case view::ValueChannelShape::meter:
+    case dataplane::ValueChannelShape::meter:
         return "meter";
-    case view::ValueChannelShape::vector:
+    case dataplane::ValueChannelShape::vector:
         return "vector";
-    case view::ValueChannelShape::events:
+    case dataplane::ValueChannelShape::events:
         return "events";
     }
     return "scalar";
@@ -79,8 +79,8 @@ struct ValueChannelTelemetryBroker::Impl {
     };
 
     struct ChannelCache {
-        view::ValueChannelTelemetryDescriptor descriptor;
-        view::ValueChannelTelemetrySnapshot continuous;
+        dataplane::ValueChannelTelemetryDescriptor descriptor;
+        dataplane::ValueChannelTelemetrySnapshot continuous;
         std::vector<EventOccurrence> latest_events;
         std::uint64_t event_overflow = 0;
         std::uint64_t latest_event_coalesced = 0;
@@ -116,11 +116,12 @@ struct ValueChannelTelemetryBroker::Impl {
         config.max_rate_hz = std::clamp(config.max_rate_hz, 1.0, 60.0);
         config.default_rate_hz = std::clamp(config.default_rate_hz, 1.0, config.max_rate_hz);
         config.max_channels = std::clamp<std::size_t>(config.max_channels, 1, 32);
-        config.max_vector_values = std::clamp<std::size_t>(
-            config.max_vector_values, 1, static_cast<std::size_t>(view::VectorFrame::kMaxSamples));
+        config.max_vector_values =
+            std::clamp<std::size_t>(config.max_vector_values, 1,
+                                    static_cast<std::size_t>(dataplane::VectorFrame::kMaxSamples));
         config.max_events_per_channel =
             std::clamp<std::size_t>(config.max_events_per_channel, 1,
-                                    static_cast<std::size_t>(view::EventFrame::kMaxEvents));
+                                    static_cast<std::size_t>(dataplane::EventFrame::kMaxEvents));
         config.max_wire_bytes =
             std::clamp<std::size_t>(config.max_wire_bytes, 1024, kInspectorExtendedMessageBytes);
         config.stale_after = std::max(config.stale_after, std::chrono::milliseconds(1));
@@ -154,7 +155,7 @@ struct ValueChannelTelemetryBroker::Impl {
             ChannelCache cache;
             cache.descriptor = descriptors[i];
             cache.source_alive = attachment.source_alive(cache.descriptor.index);
-            if (cache.descriptor.info.shape == view::ValueChannelShape::events) {
+            if (cache.descriptor.info.shape == dataplane::ValueChannelShape::events) {
                 cache.event_overflow =
                     attachment.event_stats(cache.descriptor.index).overflow_count;
             }
@@ -192,7 +193,7 @@ struct ValueChannelTelemetryBroker::Impl {
         for (auto& channel : channels) {
             const auto index = channel.descriptor.index;
             channel.source_alive = attachment.source_alive(index);
-            if (channel.descriptor.info.shape != view::ValueChannelShape::events) {
+            if (channel.descriptor.info.shape != dataplane::ValueChannelShape::events) {
                 channel.continuous_read = attachment.read_continuous(index, channel.continuous);
                 continue;
             }
@@ -209,7 +210,7 @@ struct ValueChannelTelemetryBroker::Impl {
                         overflow_delta;
             }
 
-            view::ValueChannelTelemetryEventBatch batch;
+            dataplane::ValueChannelTelemetryEventBatch batch;
             bool received_batch = false;
             while (attachment.try_pop_events(index, batch)) {
                 if (!received_batch) {
@@ -218,7 +219,8 @@ struct ValueChannelTelemetryBroker::Impl {
                     received_batch = true;
                 }
                 channel.latest_event_publication = batch.source_publication;
-                const auto count = std::clamp(batch.frame.count, 0, view::EventFrame::kMaxEvents);
+                const auto count =
+                    std::clamp(batch.frame.count, 0, dataplane::EventFrame::kMaxEvents);
                 for (int i = 0; i < count; ++i) {
                     const auto& occurrence = batch.frame.events[static_cast<std::size_t>(i)];
                     EventOccurrence value{
@@ -370,7 +372,7 @@ struct ValueChannelTelemetryBroker::Impl {
         }
 
         const auto shape = channel->descriptor.info.shape;
-        const bool is_events = shape == view::ValueChannelShape::events;
+        const bool is_events = shape == dataplane::ValueChannelShape::events;
         bool available = is_events ? channel->source_alive
                                    : channel->continuous_read && channel->continuous.available;
         bool stale = false;
@@ -407,15 +409,16 @@ struct ValueChannelTelemetryBroker::Impl {
         // variants are safe to inspect only after a sidecar snapshot exists.
         if (is_events || channel->continuous.available) {
             switch (shape) {
-            case view::ValueChannelShape::scalar:
+            case dataplane::ValueChannelShape::scalar:
                 payload = wire_number(std::get<float>(channel->continuous.payload));
                 break;
-            case view::ValueChannelShape::meter: {
-                const auto& frame = std::get<view::MeterFrame>(channel->continuous.payload);
+            case dataplane::ValueChannelShape::meter: {
+                const auto& frame = std::get<dataplane::MeterFrame>(channel->continuous.payload);
                 auto meter = choc::value::createObject("");
                 auto rms = choc::value::createEmptyArray();
                 auto peak = choc::value::createEmptyArray();
-                const auto count = std::clamp(frame.channels, 0, view::MeterFrame::kMaxChannels);
+                const auto count =
+                    std::clamp(frame.channels, 0, dataplane::MeterFrame::kMaxChannels);
                 for (int i = 0; i < count; ++i) {
                     rms.addArrayElement(wire_number(frame.rms[static_cast<std::size_t>(i)]));
                     peak.addArrayElement(wire_number(frame.peak[static_cast<std::size_t>(i)]));
@@ -425,12 +428,12 @@ struct ValueChannelTelemetryBroker::Impl {
                 payload = std::move(meter);
                 break;
             }
-            case view::ValueChannelShape::vector: {
-                const auto& frame = std::get<view::VectorFrame>(channel->continuous.payload);
+            case dataplane::ValueChannelShape::vector: {
+                const auto& frame = std::get<dataplane::VectorFrame>(channel->continuous.payload);
                 auto vector = choc::value::createObject("");
                 auto values = choc::value::createEmptyArray();
                 const auto count = static_cast<std::size_t>(
-                    std::clamp(frame.count, 0, view::VectorFrame::kMaxSamples));
+                    std::clamp(frame.count, 0, dataplane::VectorFrame::kMaxSamples));
                 const auto retained =
                     std::min(count, payload_value_cap(selected_count, max_vector_values));
                 for (std::size_t i = 0; i < retained; ++i)
@@ -443,7 +446,7 @@ struct ValueChannelTelemetryBroker::Impl {
                 payload = std::move(vector);
                 break;
             }
-            case view::ValueChannelShape::events: {
+            case dataplane::ValueChannelShape::events: {
                 auto events = choc::value::createEmptyArray();
                 const auto& occurrences = for_snapshot ? channel->latest_events : pending.events;
                 const auto retained =
@@ -544,7 +547,7 @@ struct ValueChannelTelemetryBroker::Impl {
             auto& pending = subscription.pending[name];
             if (const auto* channel = find_channel(name)) {
                 pending.last_source_publication =
-                    channel->descriptor.info.shape == view::ValueChannelShape::events
+                    channel->descriptor.info.shape == dataplane::ValueChannelShape::events
                         ? channel->latest_event_publication
                         : channel->continuous.source_publication;
                 if (!channel->source_alive)
@@ -561,7 +564,7 @@ struct ValueChannelTelemetryBroker::Impl {
     Clock clock;
     EventSink sink;
     EventRetirementSink retirement_sink;
-    view::ValueChannelTelemetryAttachment attachment;
+    dataplane::ValueChannelTelemetryAttachment attachment;
     std::vector<ChannelCache> channels;
     std::unordered_map<std::string, std::size_t> channel_by_name;
     std::map<std::string, Subscription> subscriptions;
@@ -591,7 +594,7 @@ void ValueChannelTelemetryBroker::set_event_retirement_sink(
 }
 
 bool ValueChannelTelemetryBroker::replace_attachment(
-    view::ValueChannelTelemetryAttachment attachment) {
+    dataplane::ValueChannelTelemetryAttachment attachment) {
     impl_->clear_source();
     if (!attachment.valid())
         return false;

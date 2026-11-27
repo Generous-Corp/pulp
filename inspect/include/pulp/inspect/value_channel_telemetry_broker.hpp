@@ -1,7 +1,7 @@
 #pragma once
 
 #include <pulp/inspect/inspector_delivery.hpp>
-#include <pulp/view/value_channel_telemetry.hpp>
+#include <pulp/dataplane/value_channel_telemetry.hpp>
 
 #include <chrono>
 #include <cstddef>
@@ -45,7 +45,7 @@ class ValueChannelTelemetryBroker {
     /// Replace the sole-reader attachment. An invalid attachment explicitly
     /// clears the prior source and returns false. Subscriptions retain their
     /// channel names and are resolved again against each valid generation.
-    bool replace_attachment(view::ValueChannelTelemetryAttachment attachment);
+    bool replace_attachment(dataplane::ValueChannelTelemetryAttachment attachment);
     /// Record a source generation whose catalog is intentionally empty without
     /// retaining a reader attachment. Existing subscriptions observe the
     /// generation transition and resolve their names as unavailable.

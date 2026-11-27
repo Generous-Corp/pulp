@@ -8,7 +8,8 @@
 #include <pulp/format/processor.hpp>
 #include <pulp/format/reload/reload_abi.hpp>
 #include <pulp/state/store.hpp>
-#include <pulp/view/value_channel_set.hpp>
+#include <pulp/dataplane/fwd.hpp>
+#include <pulp/dataplane/value_channel_set.hpp>
 
 #include <algorithm>
 #include <cstddef>

@@ -1,0 +1,11 @@
+{
+ "name": "inspect-control-includes-rules",
+ "record": {
+  "entry": "tools/scripts/test_inspect_control_include_check.py",
+  "inputs": [
+   "tools/scripts/inspect_control_include_check.py",
+   "tools/scripts/test_inspect_control_include_check.py"
+  ],
+  "kind": "python"
+ }
+}

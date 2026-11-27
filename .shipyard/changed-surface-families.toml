@@ -941,6 +941,45 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
+name = "script-readers-c168829d6522"
+paths = ["tools/scripts/inspect_control_include_check.py"]
+tests = [
+  "build-parallelism-guard",
+  "changed-surface-policy-inventory",
+  "changed-surface-policy-selftest",
+  "changed-surface-script-families-drift",
+  "changed-surface-script-families-selftest",
+  "changed-surface-shadow-plans-selftest",
+  "clean-worktree-planning-selftest",
+  "configure-only-selftest",
+  "flake-exoneration-selftest",
+  "gate-common-selftest",
+  "gpu-audio-provider-identity-selftest",
+  "gpu-dpr-runner-selftest",
+  "gpu-first-visible-acceptance-selftest",
+  "gpu-first-visible-campaign-selftest",
+  "gpu-first-visible-external-adapter-selftest",
+  "gpu-first-visible-role-producers-selftest",
+  "gpu-handoff-provenance-selftest",
+  "inspect-control-includes",
+  "inspect-control-includes-rules",
+  "pr-head-affected-tests-selftest",
+  "pr-head-diff-scoped-registrations",
+  "prepush-receipt",
+  "prepush-refresh-push",
+  "reuse-policy-replay-selftest",
+  "sample-region-compat-baseline-selftest",
+  "vellum-watch-preflight-selftest",
+  "wide-non-native-selftest",
+]
+build_targets = ["pulp-cli"]
+supported_build_types = [
+  "debug",
+  "release",
+]
+risk_class = "low"
+
+[[families]]
 name = "script-readers-7a0db14e2e4f"
 paths = ["tools/scripts/integrations_boundary_check.py"]
 tests = [
@@ -5411,6 +5450,44 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
+name = "script-readers-c77bf08c4570"
+paths = ["tools/scripts/test_inspect_control_include_check.py"]
+tests = [
+  "build-parallelism-guard",
+  "changed-surface-policy-inventory",
+  "changed-surface-policy-selftest",
+  "changed-surface-script-families-drift",
+  "changed-surface-script-families-selftest",
+  "changed-surface-shadow-plans-selftest",
+  "clean-worktree-planning-selftest",
+  "configure-only-selftest",
+  "flake-exoneration-selftest",
+  "gate-common-selftest",
+  "gpu-audio-provider-identity-selftest",
+  "gpu-dpr-runner-selftest",
+  "gpu-first-visible-acceptance-selftest",
+  "gpu-first-visible-campaign-selftest",
+  "gpu-first-visible-external-adapter-selftest",
+  "gpu-first-visible-role-producers-selftest",
+  "gpu-handoff-provenance-selftest",
+  "inspect-control-includes-rules",
+  "pr-head-affected-tests-selftest",
+  "pr-head-diff-scoped-registrations",
+  "prepush-receipt",
+  "prepush-refresh-push",
+  "reuse-policy-replay-selftest",
+  "sample-region-compat-baseline-selftest",
+  "vellum-watch-preflight-selftest",
+  "wide-non-native-selftest",
+]
+build_targets = ["pulp-cli"]
+supported_build_types = [
+  "debug",
+  "release",
+]
+risk_class = "low"
+
+[[families]]
 name = "script-readers-fcabf29a1975"
 paths = ["tools/scripts/test_inspector_truth_check.py"]
 tests = [
@@ -9514,6 +9591,7 @@ paths = [
   "tools/scripts/gpu_dpr_test_support.py",
   "tools/scripts/gpu_fault_hooks_release_gate.py",
   "tools/scripts/host_quirks_staleness.py",
+  "tools/scripts/inspect_control_include_check.py",
   "tools/scripts/install_shipyard_token_check.py",
   "tools/scripts/integrations_boundary_check.py",
   "tools/scripts/iwyu_annotate.py",
@@ -9749,6 +9827,7 @@ paths = [
   "tools/scripts/test_hydrate_gpu_provenance_commits.py",
   "tools/scripts/test_hydrate_real_git.py",
   "tools/scripts/test_include_boundary.py",
+  "tools/scripts/test_inspect_control_include_check.py",
   "tools/scripts/test_inspector_truth_check.py",
   "tools/scripts/test_install_sha256sums.py",
   "tools/scripts/test_install_shipyard_queue_repair.py",
@@ -10151,6 +10230,7 @@ paths = [
   "tools/scripts/gpu_dpr_test_support.py",
   "tools/scripts/gpu_fault_hooks_release_gate.py",
   "tools/scripts/host_quirks_staleness.py",
+  "tools/scripts/inspect_control_include_check.py",
   "tools/scripts/install_shipyard_token_check.py",
   "tools/scripts/integrations_boundary_check.py",
   "tools/scripts/iwyu_annotate.py",
@@ -10386,6 +10466,7 @@ paths = [
   "tools/scripts/test_hydrate_gpu_provenance_commits.py",
   "tools/scripts/test_hydrate_real_git.py",
   "tools/scripts/test_include_boundary.py",
+  "tools/scripts/test_inspect_control_include_check.py",
   "tools/scripts/test_inspector_truth_check.py",
   "tools/scripts/test_install_sha256sums.py",
   "tools/scripts/test_install_shipyard_queue_repair.py",

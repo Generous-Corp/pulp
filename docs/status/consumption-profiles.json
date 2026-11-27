@@ -1850,10 +1850,6 @@
             "closure_node_count": 74
           },
           {
-            "exported_as": "Pulp::inspect-telemetry",
-            "closure_node_count": 74
-          },
-          {
             "exported_as": "Pulp::view-core",
             "closure_node_count": 72
           },
@@ -1936,6 +1932,10 @@
           {
             "exported_as": "Pulp::audio",
             "closure_node_count": 35
+          },
+          {
+            "exported_as": "Pulp::inspect-telemetry",
+            "closure_node_count": 27
           },
           {
             "exported_as": "Pulp::content",
@@ -4650,6 +4650,7 @@
           },
           "direct_dependencies": [
             "pulp-audio",
+            "pulp-dataplane",
             "pulp-events",
             "pulp-inspect-authoring",
             "pulp-inspect-runtime",
@@ -5906,34 +5907,19 @@
           "type": "STATIC_LIBRARY",
           "source_dir": "inspect",
           "closure": {
-            "node_count": 74,
+            "node_count": 27,
             "pulp_targets": [
-              "pulp-bundled-fonts",
-              "pulp-canvas",
               "pulp-dataplane",
-              "pulp-design-ir",
               "pulp-events",
               "pulp-foundation",
-              "pulp-gpu-compute",
-              "pulp-gpu-device",
-              "pulp-gpu-device-api",
               "pulp-platform",
-              "pulp-render",
               "pulp-runtime",
               "pulp-simd",
-              "pulp-state",
-              "pulp-view-core"
+              "pulp-state"
             ],
             "third_party_targets": [
-              "SDL3-static",
-              "SDL3_Headers",
-              "SheenBidi",
-              "VellumGpuRuntime::Dawn",
               "everest",
-              "gpu-runtime-bootstrap",
-              "gpu-runtime-device",
               "gpu-runtime-device-api",
-              "gpu-runtime-skia-log-bridge",
               "hwy",
               "mbedcrypto",
               "mbedtls",
@@ -5942,23 +5928,14 @@
               "pulp-cpp-httplib",
               "pulp-inspect-protocol",
               "pulp-inspect-telemetry",
-              "pulp-tracing",
-              "skia::skia",
-              "yogacore"
+              "pulp-tracing"
             ]
           },
           "external_dependencies": {
-            "count": 59,
+            "count": 20,
             "third_party_targets": [
-              "SDL3-static",
-              "SDL3_Headers",
-              "SheenBidi",
-              "VellumGpuRuntime::Dawn",
               "everest",
-              "gpu-runtime-bootstrap",
-              "gpu-runtime-device",
               "gpu-runtime-device-api",
-              "gpu-runtime-skia-log-bridge",
               "hwy",
               "mbedcrypto",
               "mbedtls",
@@ -5967,55 +5944,22 @@
               "pulp-cpp-httplib",
               "pulp-inspect-protocol",
               "pulp-inspect-telemetry",
-              "pulp-tracing",
-              "skia::skia",
-              "yogacore"
+              "pulp-tracing"
             ],
-            "prebuilt_archives": [
-              "libdawn_combined.a",
-              "libjsonreader.a",
-              "libskia.a",
-              "libskottie.a",
-              "libskparagraph.a",
-              "libskresources.a",
-              "libsksg.a",
-              "libskshaper.a",
-              "libskunicode_core.a",
-              "libskunicode_icu.a",
-              "libsvg.a"
-            ],
+            "prebuilt_archives": [],
             "imported_targets": [],
             "frameworks": [
-              "AVFoundation",
               "Accelerate",
-              "AudioToolbox",
-              "Carbon",
               "Cocoa",
-              "CoreAudio",
               "CoreFoundation",
-              "CoreGraphics",
-              "CoreHaptics",
-              "CoreMedia",
               "CoreServices",
-              "CoreText",
-              "CoreVideo",
-              "ForceFeedback",
               "Foundation",
-              "GameController",
-              "IOKit",
-              "IOSurface",
-              "ImageIO",
-              "Metal",
-              "MetalKit",
-              "QuartzCore",
               "Security",
               "UniformTypeIdentifiers",
               "UserNotifications"
             ],
             "system_libraries": [
-              "bsm",
-              "m",
-              "objc"
+              "bsm"
             ]
           },
           "public_headers": {
@@ -6025,8 +5969,8 @@
             "generated_include_roots": 0
           },
           "direct_dependencies": [
-            "pulp-inspect-protocol",
-            "pulp-view-core"
+            "pulp-dataplane",
+            "pulp-inspect-protocol"
           ]
         },
         "inspect-ui-runtime": {
