@@ -9,6 +9,13 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
      release's bullet block. See docs/guides/versioning.md § Release pipeline
      for the full end-to-end flow. -->
 
+<a id="v12280"></a>
+## [1.228.0] - 2026-11-27
+
+- release/version bump ([#13012](https://github.com/Generous-Corp/pulp/pull/13012))
+- fix/auv3 appex editor package ([#12985](https://github.com/Generous-Corp/pulp/pull/12985))
+- feature/g3 clap gui split ([#12887](https://github.com/Generous-Corp/pulp/pull/12887))
+
 <a id="v12270"></a>
 ## [1.227.0] - 2026-11-27
 
@@ -13895,6 +13902,7 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/Generous-Corp/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/Generous-Corp/pulp/pull/2))
 
+[1.228.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.228.0
 [1.227.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.227.0
 [1.226.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.226.0
 [1.225.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.225.0
