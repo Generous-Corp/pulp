@@ -780,11 +780,13 @@ class GatesWiringTests(unittest.TestCase):
             )
             log = root / "not-checked.log"
             self.not_checked = ""
-            # gates.sh sets gate_host_builds_skipped before this block (1 on a
-            # tartci gate host, which refuses these suites).
+            # gates.sh sets these before this block. `gate_host` here is the opt-out
+            # (PULP_GATES_GATE_HOST_PYTHON=0 on a tartci gate host), the one way the
+            # lanes are refused; a gate host runs them by default.
             script = (f'ROOT={str(root)!r}\nPYTHON={sys.executable!r}\nBASE=origin/main\nfail=0\nfailed_gates=()\n'
                       'gate_fail() { fail=1; failed_gates+=("$1"); }\n'
-                      f'gate_host_builds_skipped={gate_host}\n'
+                      f'gate_host_builds_skipped={gate_host}\ngate_host_python_lanes={1 - gate_host}\n'
+                      'gate_host_cap_s=600\ngate_python_runner=()\ngate_python_jobs=()\n'
                       f'not_checked_log={str(log)!r}\n: > "$not_checked_log"\n'
                       + self._block() + '\necho "fail=$fail"\n')
             env = {k: v for k, v in os.environ.items()
@@ -803,7 +805,7 @@ class GatesWiringTests(unittest.TestCase):
         calls = argv.splitlines()
         self.assertEqual(calls[0], "run --changed-from origin/main --label-base-failures")
 
-    def test_a_gate_host_runs_no_lane_and_records_nothing_here(self) -> None:
+    def test_a_gate_host_that_opted_out_runs_no_lane_and_records_nothing_here(self) -> None:
         # gates.sh records the refusal itself, once, before this block.
         out, argv = self._run_block(1, gate_host=1).split("|", 1)
         self.assertEqual(out, "fail=0")
@@ -1273,6 +1275,39 @@ class BuildDirChoiceTests(unittest.TestCase):
                     chosen, why = lane.choose_build_dir(root, {lane.GATES_BUILD_DIR_ENV: declared})
                     self.assertIsNone(chosen)
                     self.assertIn("temporary configure_only.py tree", why)
+
+    def _vellum(self, build: pathlib.Path, option: str = "PULP_ENABLE_PULP_VELLUM", value: str = "ON") -> None:
+        with (build / "CMakeCache.txt").open("a", encoding="utf-8") as cache:
+            cache.write(f"{option}:BOOL={value}\n")
+
+    def test_a_vellum_enabled_build_is_passed_over_for_the_default_profile(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp).resolve()
+            self._tree(root)
+            # The Vellum tree is the NEWER configure; only its options disqualify it.
+            self._vellum(self._build(root, "build-vellum", "Ninja", 4000), "PULP_ENABLE_PULP_VELLUM_GRAPH")
+            plain = self._build(root, "build", "Ninja", 3000)
+            chosen, why = lane.choose_build_dir(root, {})
+        self.assertEqual(chosen, plain)
+        self.assertIn("build-vellum: Vellum options on (PULP_ENABLE_PULP_VELLUM_GRAPH)", why)
+
+    def test_a_vellum_only_checkout_has_no_usable_build(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp).resolve()
+            self._tree(root)
+            self._vellum(self._build(root, "build", "Ninja", 3000), "PULP_ENABLE_RMLUI_ADAPTER")
+            chosen, why = lane.choose_build_dir(root, {})
+        self.assertIsNone(chosen)
+        self.assertIn("Vellum options on", why)
+
+    def test_control_vellum_switches_that_are_off_do_not_disqualify(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp).resolve()
+            self._tree(root)
+            build = self._build(root, "build", "Ninja", 3000)
+            self._vellum(build, "PULP_ENABLE_PULP_VELLUM", "OFF")
+            self._vellum(build, "VELLUM_ENABLE_MIRROR", "ON")  # the Vellum repo's own switch, not Pulp's
+            self.assertEqual(lane.choose_build_dir(root, {})[0], build)
 
     def test_no_build_says_so(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

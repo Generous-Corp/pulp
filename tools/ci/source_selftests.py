@@ -1220,6 +1220,22 @@ def set_aside_census_tests(entries: list[dict[str, Any]], build: pathlib.Path,
 
 CONFIGURE_ONLY_PREFIX = "build-configure-only."  # tools/scripts/configure_only.py TEMP_PREFIX
 
+# Pulp's own switches that pull a Vellum SDK or adapter into a configure. A tree
+# with one ON measures a different link graph than the gate profile (the default
+# feature set), so the census and the registrations it yields are not the gate's.
+VELLUM_CACHE_OPTION_RE = re.compile(
+    r"^(PULP_ENABLE_PULP_VELLUM\w*|PULP_ENABLE_RMLUI_ADAPTER):BOOL=(ON|TRUE|YES|Y|1)\s*$",
+    re.MULTILINE)
+
+
+def vellum_options_on(build: pathlib.Path) -> list[str]:
+    """The Vellum-enabling cache options that are ON in ``build`` (sorted)."""
+    try:
+        text = (build / "CMakeCache.txt").read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return []
+    return sorted({m.group(1) for m in VELLUM_CACHE_OPTION_RE.finditer(text)})
+
 
 def choose_build_dir(repo: pathlib.Path = REPO_ROOT,
                      env: dict[str, str] | os._Environ[str] = os.environ,
@@ -1255,6 +1271,10 @@ def choose_build_dir(repo: pathlib.Path = REPO_ROOT,
         if not (candidate / "CMakeCache.txt").is_file():
             continue
         why = unusable_build_reason(candidate, repo)
+        vellum = vellum_options_on(candidate)
+        if not why and vellum:
+            why = (f"Vellum options on ({', '.join(vellum)}); the gate profile is the default "
+                   "feature set, so this tree would read as census drift")
         if why:
             rejected.append(f"{candidate.name}: {why}")
         else:

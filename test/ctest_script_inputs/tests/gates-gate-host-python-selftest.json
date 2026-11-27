@@ -1,0 +1,15 @@
+{
+ "name": "gates-gate-host-python-selftest",
+ "record": {
+  "entry": "tools/scripts/test_gates_gate_host_python.py",
+  "inputs": [
+   ".github/workflows/workflow-lint.yml",
+   "tools/ci/source_selftests.py",
+   "tools/ci/sync_job_parity.json",
+   "tools/scripts/gate_host_policy.sh",
+   "tools/scripts/run_capped.py",
+   "tools/scripts/test_gates_gate_host_python.py"
+  ],
+  "kind": "python"
+ }
+}

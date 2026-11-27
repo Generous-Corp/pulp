@@ -38,8 +38,13 @@ on a real PR. Do them in order.
    VMs it refuses its heavy half.** `tools/scripts/gate_host_policy.sh` reads
    `tartci host-profile`, not the hostname: when `TARTCI_SERVES_GATE=1` and
    `TARTCI_ROLE` is anything but `light` (today m3 `dedicated-builder`, m5 and
-   m5s `dev-overflow`), `gates.sh` compiles nothing and skips every
-   source-selftest lane. The generated-manifest lane keeps the one allowance
+   m5s `dev-overflow`), `gates.sh` compiles nothing and runs no diff-coverage.
+   The build-free Python lanes (source-only selftests, workflow-lint, pr-fast,
+   ctest-registered Python, and the sync job's fixture tests) still run there, at
+   `nice -n 19`, two jobs at a time, each lane under a wall-time cap
+   (`PULP_GATES_GATE_HOST_CAP_S`, default 600 s, via `run_capped.py`). A lane that
+   hits the cap is listed NOT CHECKED, never passed; a failing suite fails the gate.
+   `PULP_GATES_GATE_HOST_PYTHON=0` restores the old refusal. The generated-manifest lane keeps the one allowance
    the policy names (`pulp_gate_host_configure_only_allowance`): a
    configure-only tree in a temporary `build-configure-only.*` directory under
    the worktree, governed as one background core (`governed-build.sh`,
@@ -47,8 +52,24 @@ on a real PR. Do them in order.
    leaves a `.ninja_log` or a target object, and removed when the lane ends
    (`tools/scripts/configure_only.py`). `PULP_GATES_NO_CONFIGURE=1` still keeps
    it build-free; its families prediction can still fail.
-   The skipped lanes are listed as NOT CHECKED, so the verdict reads "not a full
-   pass" rather than "safe to push". The cheap gates still run.
+   The refused heavy half is listed as NOT CHECKED, so the verdict reads "not a
+   full pass" rather than "safe to push". The cheap gates still run.
+   Before any gate runs, `gates_preflight.py` checks every prerequisite once and
+   prints one list with the exact fix command for each: a shallow clone
+   (`git fetch --unshallow`), the `pulp-gpu-ledger` merge driver and hooks path
+   (`tools/scripts/install-githooks.sh`), the VST3 and AU SDKs the committed census
+   records for this platform (`./setup.sh --deps-only`), the jsx-runtime packages
+   (`npm ci`), and a build dir with no CMake file-API reply. `gates.sh --bootstrap`
+   performs those, with an npm cache under the git dir (or `npm_config_cache`), and
+   continues. Each check applies only when its input exists, so a checkout that
+   does not need a prerequisite is not told to install it. A Vellum-enabled build
+   dir (`PULP_ENABLE_PULP_VELLUM*`, `PULP_ENABLE_RMLUI_ADAPTER` ON) is never chosen
+   as the gate build dir, so it stays where it is and the gates use `build/` or
+   configure `build-gate`; naming one in `PULP_GATES_BUILD_DIR` is a blocking
+   finding. `PULP_GATES_SKIP_PREFLIGHT=1` skips it and lists it NOT CHECKED. A
+   reused checkout hits the SDK, npm, file-API and Vellum items; a fresh clone
+   with no build dir hits the shallow and merge-driver items on every run, and
+   the configure path installs the SDKs and packages itself when a diff needs it.
    When a gate fails, the final summary names every failed gate in a comma-separated
    `gates: failed:` line before the remediation advice.
    Two lanes read their commands from the CI jobs themselves, so a step added
