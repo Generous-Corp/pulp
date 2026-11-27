@@ -1,13 +1,25 @@
 # PulpVellumUiCompat.cmake: Vellum-backed compatibility targets for the Pulp
 # UI names an installed SDK consumer links.
 #
-# Downstream plug-ins link Pulp::view, Pulp::canvas, Pulp::render and
-# Pulp::design-import. Vellum owns the implementations
-# behind those names and installs them as its mirror targets. In an SDK built
+# Downstream plug-ins link Pulp::view, Pulp::canvas, Pulp::render,
+# Pulp::design-import, Pulp::view-audio and Pulp::view-tooling. Vellum owns the
+# implementations behind the first four and installs them as its mirror
+# targets; the last two are served by Pulp's own Vellum integration packages.
+# In an SDK built
 # without Pulp's own UI libraries (PULP_SDK_UI_FROM_VELLUM, which PulpConfig
 # checks before including this file), pulp_define_vellum_ui_compat_targets()
 # defines each name as an INTERFACE IMPORTED target that links the matching
 # Vellum targets, plus the lower-case pulp:: alias the in-tree build provides.
+#
+# Pulp::view-audio is the audio widgets, and maps to Pulp::vellum-audio
+# (integrations/pulp-vellum-audio). Pulp::view-tooling is the editor bridge,
+# inspector and screenshot layer. EditorBridge's dispatch core (handlers, JSON
+# and WebView message dispatch) is Pulp::editor-bridge, a view-free Pulp target
+# that pulp/view/editor_bridge.hpp belongs to; the inspector and screenshot
+# surfaces are defined in the provider library behind Vellum::MirrorView_core
+# (vellum::view::InspectorFacts, capture_view, has_screenshot_backend), plus the
+# script inspector port when the scripted view is present. Pulp::vellum is the
+# parameter bridge. A name whose package the SDK does not export stays undefined.
 #
 # Two guards keep it from ever standing in for part of Pulp's own UI: nothing
 # is defined while Pulp::view-core is exported, and a name Pulp still exports
@@ -262,9 +274,14 @@ function(pulp_define_vellum_ui_compat_targets)
         _pulp_vellum_ui_compat_define(view
             REQUIRES Vellum::MirrorView_core Vellum::MirrorDesign_import
             OPTIONAL Vellum::MirrorView_script Pulp::vellum)
+        _pulp_vellum_ui_compat_define(view-audio
+            REQUIRES Pulp::vellum-audio)
+        _pulp_vellum_ui_compat_define(view-tooling
+            REQUIRES Vellum::MirrorView_core Pulp::vellum Pulp::editor-bridge
+            OPTIONAL Vellum::MirrorView_script)
     endif()
     set(_defined "")
-    foreach(_name IN ITEMS canvas render design-import view)
+    foreach(_name IN ITEMS canvas render design-import view view-audio view-tooling)
         if(TARGET "Pulp::${_name}")
             get_target_property(_provider "Pulp::${_name}" PULP_UI_PROVIDER)
             if(_provider STREQUAL "vellum")

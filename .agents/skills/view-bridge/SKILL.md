@@ -1974,6 +1974,16 @@ Key invariants:
   the framework explicitly does NOT carry `EditorBridgeState`-style
   per-session state. Capture it on `[this]` instead.
 
+EditorBridge's dispatch core (`core/view/src/editor_bridge.cpp`: handlers,
+`dispatch`, `dispatch_json`, `dispatch_webview_message`, the response and
+`get_*` helpers) is its own view-free target, `pulp-editor-bridge`, which needs
+only CHOC and the runtime. The `attach_native_runtime` / `detach_native_runtime`
+overloads name view-script types, so they stay in `pulp-view-tooling`
+(`editor_bridge_native_runtime.cpp`), which links the core. Keep any new
+dispatch code free of view-script includes; in an SDK that serves its UI names
+from Vellum, `Pulp::view-tooling` links the core and nothing else of Pulp's
+view, so a WebView editor's bridge comes from it.
+
 When you change `core/view/src/editor_bridge.cpp` or its header, the
 skill-sync gate requires updates to either *this* skill or the
 `import-design` skill (or both). The path map maps both to the file.
@@ -2496,10 +2506,6 @@ is `docs/guides/editor-host-contract.md`. Things that are easy to get wrong:
   touched, so a gesture the view opened directly stays for the host's own
   teardown. The root sizes the view in `layout_children()`, not `on_resized()`:
   Vellum's flex layout runs after `on_resized()` and would replace the bounds.
-  The header only declares; the root lives in `src/view_editor.cpp`. A view
-  anywhere in the hosted tree that implements `EditorIdleTarget` gets the
-  editor's idle tick while attached, and each editor shares its hooks with the
-  factory, so it keeps them if it outlives the factory.
 - **The header must stay view-free.** It names no `pulp::view`, canvas, render,
   Dawn or Vellum type, and `format_header_view_boundary.py` classifies it as a
   `pulp-format-core` header automatically, so an include that reaches the view
@@ -4270,3 +4276,5 @@ is not reachable from a host that dlopens it. The opt-in CLAP extension
 `pulp.editor-automation/1` (`PULP_EDITOR_AUTOMATION_EXTENSION`, default OFF)
 forwards `capture_png` to the open session's `EditorAutomation`; it is a test
 seam and absent from release plug-ins. See the `clap` skill.
+
+`inspect::ControlGpuHealthViewAdapter` takes its captured-PNG analysis as `Config::analyze_png` rather than calling the view layer, so a host on Vellum views supplies `pulp::vellum_components::analyze_png_content`. The field order matters for designated initializers: `analyze_png` follows `provider`.
