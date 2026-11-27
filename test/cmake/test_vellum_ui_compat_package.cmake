@@ -193,6 +193,45 @@ function(_pulp_own out)
 endfunction()
 
 if(SCENARIO STREQUAL "wiring")
+    # Execute the real registration block with a discovered SDK. Script-mode
+    # tests must receive the package explicitly; losing these arguments turns
+    # required consumer coverage into a successful SKIP.
+    file(READ "${PULP_SOURCE_DIR}/test/cmake/cmake_smoke_tests.cmake" _registrations)
+    string(FIND "${_registrations}" "foreach(_vellum_ui_compat_scenario\n" _registration_start)
+    string(FIND "${_registrations}" "unset(_vellum_ui_compat_scenario)" _registration_end)
+    if(_registration_start LESS 0 OR _registration_end LESS _registration_start)
+        message(FATAL_ERROR "wiring: compatibility test registration block missing")
+    endif()
+    math(EXPR _registration_length "${_registration_end} - ${_registration_start}")
+    string(SUBSTRING "${_registrations}" ${_registration_start} ${_registration_length} _registration)
+    function(add_test)
+        if(ARGV1 STREQUAL "cmake-vellum-ui-compat-real" OR
+                ARGV1 STREQUAL "cmake-vellum-ui-compat-wrong-version")
+            set(_args ${ARGV})
+            foreach(_required "-DVELLUM_DIR=${Vellum_DIR}" "-DREQUIRE_VELLUM=ON")
+                if(NOT "${_required}" IN_LIST _args)
+                    message(FATAL_ERROR "wiring: ${ARGV1} lacks ${_required}")
+                endif()
+            endforeach()
+            if(ARGV1 STREQUAL "cmake-vellum-ui-compat-real" AND
+                    NOT "-DCHOC_DIR=${choc_SOURCE_DIR}" IN_LIST _args)
+                message(FATAL_ERROR "wiring: real consumer lacks CHOC_DIR")
+            endif()
+            math(EXPR _count "${_required_registered} + 1")
+            set(_required_registered ${_count} PARENT_SCOPE)
+        endif()
+    endfunction()
+    function(set_tests_properties)
+    endfunction()
+    set(Vellum_DIR "${FIXTURE_DIR}/discovered-vellum")
+    set(choc_SOURCE_DIR "${FIXTURE_DIR}/discovered-choc")
+    set(_required_registered 0)
+    cmake_policy(SET CMP0057 NEW)
+    cmake_language(EVAL CODE "${_registration}")
+    if(NOT _required_registered EQUAL 2)
+        message(FATAL_ERROR "wiring: both installed-SDK consumer tests must be registered")
+    endif()
+
     # Template order: Skia attach < module include < derived facts.
     string(FIND "${_config}" "pulp_attach_fontconfig_to_canvas(Pulp::canvas)" _skia_at)
     string(FIND "${_config}" "include(\"\${CMAKE_CURRENT_LIST_DIR}/PulpTargets.cmake\")" _targets_at)
@@ -622,21 +661,23 @@ elseif(SCENARIO STREQUAL "no-vellum" OR SCENARIO STREQUAL "real" OR SCENARIO STR
     # prefix has no compiled Pulp archives, so what these prove is the include
     # path and link line each name hands a consumer, not the packages' own code.
     set(_pulp_pkgs "")
-    # Pulp::editor-bridge stands in as the real dispatch core's source, include
-    # path and CHOC, because the fabricated prefix has no compiled archive. The
-    # source is compiled into the consumer, so the include path and sources are
-    # what the name must hand over.
-    if(NOT CHOC_DIR OR NOT EXISTS "${CHOC_DIR}/choc/containers/choc_Value.h")
-        message(FATAL_ERROR "real: CHOC_DIR='${CHOC_DIR}' holds no CHOC headers")
+    if(SCENARIO STREQUAL "real")
+        # Pulp::editor-bridge stands in as the real dispatch core's source, include
+        # path and CHOC, because the fabricated prefix has no compiled archive. The
+        # source is compiled into the consumer, so the include path and sources are
+        # what the name must hand over.
+        if(NOT CHOC_DIR OR NOT EXISTS "${CHOC_DIR}/choc/containers/choc_Value.h")
+            message(FATAL_ERROR "real: CHOC_DIR='${CHOC_DIR}' holds no CHOC headers")
+        endif()
+        string(APPEND _pulp_pkgs
+            "if(NOT TARGET Pulp::editor-bridge)\n"
+            "  add_library(Pulp::editor-bridge INTERFACE IMPORTED)\n"
+            "  set_target_properties(Pulp::editor-bridge PROPERTIES\n"
+            "    INTERFACE_SOURCES \"${PULP_SOURCE_DIR}/core/view/src/editor_bridge.cpp\"\n"
+            "    INTERFACE_INCLUDE_DIRECTORIES \"${PULP_SOURCE_DIR}/core/view/include;${PULP_SOURCE_DIR}/core/runtime/include;${CHOC_DIR}\"\n"
+            "    INTERFACE_COMPILE_FEATURES cxx_std_20)\n"
+            "endif()\n")
     endif()
-    string(APPEND _pulp_pkgs
-        "if(NOT TARGET Pulp::editor-bridge)\n"
-        "  add_library(Pulp::editor-bridge INTERFACE IMPORTED)\n"
-        "  set_target_properties(Pulp::editor-bridge PROPERTIES\n"
-        "    INTERFACE_SOURCES \"${PULP_SOURCE_DIR}/core/view/src/editor_bridge.cpp\"\n"
-        "    INTERFACE_INCLUDE_DIRECTORIES \"${PULP_SOURCE_DIR}/core/view/include;${PULP_SOURCE_DIR}/core/runtime/include;${CHOC_DIR}\"\n"
-        "    INTERFACE_COMPILE_FEATURES cxx_std_20)\n"
-        "endif()\n")
     foreach(_pkg IN ITEMS vellum vellum-audio)
         string(REPLACE "-" "_" _dir "${_pkg}")
         string(APPEND _pulp_pkgs
