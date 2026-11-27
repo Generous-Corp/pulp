@@ -3,7 +3,7 @@
 # target outside core/view, and an SDK that serves its UI from Vellum still
 # builds and ships it. The header keeps its installed path,
 # pulp/view/editor_bridge.hpp. The attach_native_runtime overloads that name
-# view-script types live in pulp-view-tooling, which links this target.
+# view-script types live in core/view's tooling target, which links this one.
 add_library(pulp-editor-bridge)
 add_library(pulp::editor-bridge ALIAS pulp-editor-bridge)
 target_sources(pulp-editor-bridge PRIVATE src/editor_bridge.cpp)
