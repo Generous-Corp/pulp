@@ -135,7 +135,7 @@ set(PULP_LINK_FLOOR_TIER_sequencer-plugin-editor
 # presents, written down so the gate polices the artifact that exists instead
 # of passing green on a bound the binary never honoured.
 set(PULP_LINK_FLOOR_DEBT_StepSequencer_CLAP
-    canvas editor_bridge events graph native-components sample_bank_manifest signal state view)
+    events graph native-components sample_bank_manifest signal state)
 
 # The loadable editor proof plugin requires its document, editor, and piano-roll
 # modules as direct lower bounds. The tier includes the view and canvas rungs
@@ -173,6 +173,16 @@ set(PULP_LINK_FLOOR_DEBT_TimelinePluginProof_CLAP
 if(PULP_ENABLE_GPU)
     list(APPEND PULP_LINK_FLOOR_DEBT_StepSequencer_CLAP render)
     list(APPEND PULP_LINK_FLOOR_DEBT_TimelinePluginProof_CLAP render)
+endif()
+#
+#   canvas, view, editor_bridge — the view stack pulp-view-tooling brings. A tree
+#     configured with PULP_UI_FROM_VELLUM_IN_TREE builds neither core/canvas nor
+#     core/view, and pulp_add_plugin builds every plug-in there view-free, so no
+#     Pulp view target exists to carry the three. editor_bridge is still built
+#     there, which keeps the entry refutable from that side: a plug-in that
+#     reaches it in the mode lands outside the tier.
+if(NOT PULP_UI_FROM_VELLUM_IN_TREE)
+    list(APPEND PULP_LINK_FLOOR_DEBT_StepSequencer_CLAP canvas editor_bridge view)
 endif()
 
 # ── Walk ─────────────────────────────────────────────────────────────────────
