@@ -198,6 +198,7 @@ class NodeAbiSurfaceUnitTests(unittest.TestCase):
         )
         spelled = textwrap.dedent(
             """\
+            #define PULP_FORMAT_LEGACY_VIEW_NAME(name) name
             class Processor {
             public:
               virtual std::unique_ptr<view::View> PULP_FORMAT_LEGACY_VIEW_NAME(create_view)();
@@ -215,6 +216,42 @@ class NodeAbiSurfaceUnitTests(unittest.TestCase):
             with mock.patch.object(nag, "git_show", return_value=base):
                 self.assertIsNone(nag.check_surface(root, "origin/main", "Processor", "processor.hpp"))
 
+    def test_legacy_view_name_macro_default_expansion_is_pinned(self) -> None:
+        identity = textwrap.dedent(
+            """\
+            #if PULP_FORMAT_LEGACY_VIEW
+            #define PULP_FORMAT_LEGACY_VIEW_NAME(name) name
+            #else
+            #define PULP_FORMAT_LEGACY_VIEW_NAME(name) reserved_legacy_view_##name##_
+            #endif
+            class Processor {
+            public:
+              virtual std::unique_ptr<view::View> PULP_FORMAT_LEGACY_VIEW_NAME(create_view)();
+            };
+            """
+        )
+        self.assertEqual(len(nag.virtual_order(identity, "Processor")), 1)
+        # A default expansion other than the plain name renames every slot
+        # behind the macro in the default build: refused.
+        renamed = identity.replace(
+            "#define PULP_FORMAT_LEGACY_VIEW_NAME(name) name\n",
+            "#define PULP_FORMAT_LEGACY_VIEW_NAME(name) name##_v2\n",
+        )
+        with self.assertRaisesRegex(ValueError, "default expansion must be the plain name"):
+            nag.virtual_order(renamed, "Processor")
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            (root / "processor.hpp").write_text(renamed, encoding="utf-8")
+            with mock.patch.object(nag, "git_show", return_value=identity):
+                self.assertIn(
+                    "default expansion must be the plain name",
+                    nag.check_surface(root, "origin/main", "Processor", "processor.hpp") or "",
+                )
+        # Used but never defined is refused too.
+        undefined = identity.split("class Processor", 1)[1]
+        with self.assertRaisesRegex(ValueError, "not defined"):
+            nag.virtual_order("class Processor" + undefined, "Processor")
+
     def test_legacy_view_name_macro_still_flags_a_signature_change(self) -> None:
         base = textwrap.dedent(
             """\
@@ -227,6 +264,7 @@ class NodeAbiSurfaceUnitTests(unittest.TestCase):
         )
         changed = textwrap.dedent(
             """\
+            #define PULP_FORMAT_LEGACY_VIEW_NAME(name) name
             class Processor {
             public:
               virtual void PULP_FORMAT_LEGACY_VIEW_NAME(on_view_opened)(const view::View& /*view*/) {}
@@ -236,6 +274,7 @@ class NodeAbiSurfaceUnitTests(unittest.TestCase):
         )
         renamed = textwrap.dedent(
             """\
+            #define PULP_FORMAT_LEGACY_VIEW_NAME(name) name
             class Processor {
             public:
               virtual void PULP_FORMAT_LEGACY_VIEW_NAME(on_view_shown)(view::View& /*view*/) {}
