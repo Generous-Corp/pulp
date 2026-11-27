@@ -28,7 +28,8 @@ std::string read_file(const std::filesystem::path& path) {
 } // namespace
 
 TEST_CASE("every embedded JS prelude inflates to its source file", "[view][preludes]") {
-    const std::filesystem::path js_dir = std::filesystem::path(PULP_SOURCE_DIR) / "core/view/js";
+    // The directory the build embedded the preludes from (PULP_VIEW_JS_DIR).
+    const std::filesystem::path js_dir = std::filesystem::path(PULP_VIEW_JS_DIR);
     REQUIRE(preludes::kAllCount > 20);
 
     std::size_t source_total = 0;

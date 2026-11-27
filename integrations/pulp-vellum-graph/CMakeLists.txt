@@ -1,5 +1,5 @@
 # pulp-vellum-graph: the node-graph editor for Pulp's SignalGraph, as a Vellum
-# view. The graph model (pulp::host::SignalGraph) stays in Pulp core; this
+# view, plus the hosted plug-in editor attachment to a Vellum window host. The graph model (pulp::host::SignalGraph) stays in Pulp core; this
 # package is the one place the plug-in host stack and Vellum's view layer meet,
 # so an ordinary Vellum editor never pulls in plug-in hosting. Core never links
 # it. Not built on iOS, where pulp::host does not exist.
