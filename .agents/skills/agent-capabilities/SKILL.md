@@ -324,7 +324,7 @@ on the design-time public-header contract.
 The A3 GPU startup-health surface is a concrete example. The installed
 `ControlGpuHealthProvider`, `ControlGpuHealthViewAdapter`,
 `ControlGpuHealthReadExecutor`, and `pulp.gpu-health-read-result.v1` types are
-runtime control plumbing. Do not add `dev.pulp.gpu/health.read@1`, its grants,
+runtime control plumbing. `ControlGpuHealthViewAdapter` links no UI library: the host supplies PNG decoding and the content floor through `Config::analyze_png` (Standalone passes the view layer's analysis; `pulp-vellum-components` provides a Vellum-backed one). Do not add `dev.pulp.gpu/health.read@1`, its grants,
 instances, receipts, measurement campaigns, or B4 disposition to
 `agent-capabilities.json`. A public-header ledger classification, where one is
 required by the covered roots, records only that the header was reviewed; it
@@ -1696,8 +1696,10 @@ the bypass trailer by reflex:
 - **The Vellum-backed UI target names**: `PulpVellumUiCompat.cmake` (installed
   from `integrations/pulp-vellum/cmake/`, because `core_vellum_direction.py`
   rejects `Vellum::` target names under `tools/cmake`) defines
-  `Pulp::view|canvas|render|design-import` as INTERFACE IMPORTED
-  targets over Vellum's mirror targets, only in an SDK configured with
+  `Pulp::view|canvas|render|design-import|view-audio|view-tooling` as INTERFACE IMPORTED
+  targets over Vellum's mirror targets (`view-audio` over `Pulp::vellum-audio`,
+  `view-tooling` over `Pulp::vellum` plus the view layer's inspector and
+  screenshot surfaces), only in an SDK configured with
   `PULP_SDK_UI_FROM_VELLUM` (off until Pulp's UI libraries are removed). Never
   key that off one name's absence: a GPU-off or design-import-off bridge SDK
   lacks `Pulp::render` or `Pulp::design-import` while still shipping Pulp's own

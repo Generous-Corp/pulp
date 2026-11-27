@@ -110,7 +110,11 @@ on a real PR. Do them in order.
      covers `Processor`, `PluginSlot`, and the experimental `GpuAudioNode`
      surface. New GPU-audio virtual hooks belong at the end of that class;
      inserting one in the middle shifts existing slots even though the SDK
-     remains source-rebuild oriented. The editor-host interfaces (`Editor`,
+     remains source-rebuild oriented. The gate reads
+     `PULP_FORMAT_LEGACY_VIEW_NAME(x)` in `processor.hpp` as `x` (the reserved
+     names a UI-free SDK gives the view hooks) and expands no other macro, so
+     a renamed spelling of an existing slot passes and a changed signature
+     inside the macro still fails. The editor-host interfaces (`Editor`,
      `EditorContext`, `EditorFactory`, `NativeSurfaceHost`) are checked under a
      stricter FROZEN policy: an appended virtual fails too, because a UI
      package and a format adapter are separate prebuilt binaries. Don't "fix"
@@ -14014,6 +14018,11 @@ main's SDK. A new optional Vellum integration package needs its option, its
 `pulp-test-*` target and a `paths:` entry added there, or no lane compiles it
 against main. The tests' ctest label should start with `pulp-vellum` so the
 lane's `-L pulp-vellum` filter runs them.
+
+The lane's `-L pulp-vellum` run includes the GPU adapter probe and its
+empty-adapter negative control (`PASS_REGULAR_EXPRESSION` on the fail JSON, since
+the control must exit non-zero). The probe target is picked up by the
+`labelled-targets` derivation, so it needs no workflow edit.
 
 The same lane also runs the MCP UI tool cases (`pulp-test-mcp-server "[ui]"`)
 against the SDK's `bin/vellum-app-host` through `PULP_TEST_VELLUM_APP_HOST`. The
