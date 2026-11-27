@@ -68,6 +68,104 @@ class SelectRunTests(unittest.TestCase):
         with self.assertRaisesRegex(vsc.ResolveError, "none of the newest 2"):
             vsc.select_run(runs, self._fetch({1}), limit=2)
 
+    def test_artifact_after_first_ten_green_runs_is_selected(self):
+        runs = [_run(i, created=f"2026-11-11T{i:02d}:00:00Z") for i in range(1, 13)]
+        run, artifact = vsc.select_run(runs, self._fetch({1}), limit=vsc.RUN_SEARCH_LIMIT)
+        self.assertEqual((run["id"], artifact["id"]), (1, 1))
+
+    @staticmethod
+    def _reuse(runs, artifacts, sources, source_runs=None):
+        source_runs = source_runs or {}
+        return vsc.select_run(
+            runs,
+            lambda run: artifacts.get(run["id"], []),
+            fetch_reuse_source=lambda run: sources.get(run["id"]),
+            fetch_run=lambda run_id: source_runs.get(run_id) or _run(run_id))
+
+    LIVE = [{"id": 20, "name": vsc.EVIDENCE_ARTIFACT, "expired": False}]
+    EXPIRED = [{"id": 20, "name": vsc.EVIDENCE_ARTIFACT, "expired": True}]
+
+    def test_reuse_chain_ends_at_source_artifact(self):
+        run, artifact = self._reuse([_run(30)], {20: self.LIVE}, {30: 20})
+        self.assertEqual((run["id"], artifact["id"]), (20, 20))
+
+    def test_reuse_chain_follows_several_hops(self):
+        run, artifact = self._reuse([_run(40)], {10: self.LIVE}, {40: 30, 30: 10})
+        self.assertEqual(run["id"], 10)
+
+    def test_reuse_source_expiry_names_the_chain(self):
+        with self.assertRaisesRegex(vsc.ResolveError, r"reuse chain 30 -> 20.*expired"):
+            self._reuse([_run(30)], {20: self.EXPIRED}, {30: 20})
+
+    def test_expired_source_does_not_hide_an_older_usable_run(self):
+        runs = [_run(30, created="2026-11-11T12:00:00Z"), _run(5, created="2026-11-11T08:00:00Z")]
+        arts = {20: self.EXPIRED, 5: [{"id": 5, "name": vsc.EVIDENCE_ARTIFACT, "expired": False}]}
+        run, artifact = self._reuse(runs, arts, {30: 20})
+        self.assertEqual((run["id"], artifact["id"]), (5, 5))
+
+    def test_reuse_cycle_terminates(self):
+        with self.assertRaisesRegex(vsc.ResolveError, "loops"):
+            self._reuse([_run(30)], {}, {30: 20, 20: 30})
+
+    def test_self_reference_terminates(self):
+        with self.assertRaisesRegex(vsc.ResolveError, "loops"):
+            self._reuse([_run(30)], {}, {30: 30})
+
+    def test_endless_chain_hits_the_depth_cap(self):
+        sources = {i: i + 1 for i in range(1, 100)}
+        with self.assertRaisesRegex(vsc.ResolveError, "exceeds"):
+            self._reuse([_run(1)], {}, sources)
+
+    def test_source_that_is_not_a_green_gpu_run_is_refused(self):
+        with self.assertRaisesRegex(vsc.ResolveError, "not a successful"):
+            self._reuse([_run(30)], {20: self.LIVE}, {30: 20}, {20: _run(20, conclusion="failure")})
+
+    def test_zero_artifact_without_reuse_pointer_still_fails(self):
+        with self.assertRaisesRegex(vsc.ResolveError, "none of the newest 1"):
+            self._reuse([_run(30)], {}, {})
+
+
+class ReuseSourceTests(unittest.TestCase):
+    URL = f"https://github.com/{vsc.VELLUM_REPO}/actions/runs/45766542596"
+    NOTICE = f"Tree fce3f962210c689fa704061e734330dfd749faff was proven by {URL}"
+
+    def test_notice_text_names_source_run(self):
+        self.assertEqual(vsc.reuse_source_run(self.NOTICE), 45766542596)
+        self.assertEqual(vsc.reuse_source_run(("##[notice]" + self.NOTICE + "\n").encode()), 45766542596)
+
+    def test_unrelated_text_has_no_source(self):
+        self.assertIsNone(vsc.reuse_source_run("Running the full proof"))
+
+    def test_other_repository_is_not_followed(self):
+        text = "Tree abc was proven by https://github.com/someone/else/actions/runs/7"
+        self.assertIsNone(vsc.reuse_source_run(text))
+
+    def _jobs(self):
+        return [{"id": 1, "name": "decide"}, {"id": 2, "name": vsc.GPU_JOB_NAME}]
+
+    def test_annotation_is_preferred_and_logs_are_not_read(self):
+        def logs(_job):
+            raise AssertionError("log fetched although an annotation named the source")
+        found = vsc.run_reuse_source(self._jobs(), lambda job: [{"message": self.NOTICE}], logs)
+        self.assertEqual(found, 45766542596)
+
+    def test_log_fallback_when_job_has_no_annotations(self):
+        found = vsc.run_reuse_source(self._jobs(), lambda job: [], lambda job: self.NOTICE.encode())
+        self.assertEqual(found, 45766542596)
+
+    def test_log_fallback_when_annotations_cannot_be_fetched(self):
+        def broken(_job):
+            raise vsc.ResolveError("HTTP 500")
+        found = vsc.run_reuse_source(self._jobs(), broken, lambda job: self.NOTICE.encode())
+        self.assertEqual(found, 45766542596)
+
+    def test_annotations_without_a_pointer_do_not_read_logs(self):
+        def logs(_job):
+            raise AssertionError("log fetched for a job that has annotations")
+        found = vsc.run_reuse_source(
+            self._jobs(), lambda job: [{"message": "Running the full proof"}], logs)
+        self.assertIsNone(found)
+
 
 class MinimumCommitTests(unittest.TestCase):
     """A run older than the required Vellum commit is refused, not downloaded."""

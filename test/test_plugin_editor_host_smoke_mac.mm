@@ -27,6 +27,7 @@
 #import <Cocoa/Cocoa.h>
 
 #include <pulp/format/clap_entry.hpp>
+#include "../core/format/src/clap_legacy_gui_state.hpp"
 #include <pulp/format/gpu_host_select.hpp>
 #include <pulp/format/processor.hpp>
 #include <pulp/format/view_bridge.hpp>
@@ -378,9 +379,9 @@ TEST_CASE("CLAP gui resize negotiation snaps to design aspect (mac)",
         // that gui_set_size threaded through to host->set_size.
         auto* clap_inst = static_cast<pulp::format::clap_adapter::PulpClapPlugin*>(plugin->plugin_data);
         REQUIRE(clap_inst != nullptr);
-        REQUIRE(clap_inst->editor_host != nullptr);
+        REQUIRE(pulp::format::clap_adapter::legacy_gui(*clap_inst).editor_host != nullptr);
 
-        if (!clap_inst->editor_host->is_gpu_backed()) {
+        if (!pulp::format::clap_adapter::legacy_gui(*clap_inst).editor_host->is_gpu_backed()) {
             // GPU host fell back to CPU (no Dawn adapter) — capture path
             // is GPU-only; the structural assertions above still ran.
             SUCCEED("No GPU adapter — CLAP capture-resize smoke partial-skip.");
@@ -393,7 +394,8 @@ TEST_CASE("CLAP gui resize negotiation snaps to design aspect (mac)",
 
         // First capture at design size — proves the design viewport set
         // in gui_create is active and the capture path works.
-        auto png_design = clap_inst->editor_host->capture_back_buffer_png();
+        auto png_design = pulp::format::clap_adapter::legacy_gui(*clap_inst)
+                              .editor_host->capture_back_buffer_png();
         REQUIRE_FALSE(png_design.empty());
         REQUIRE(smoke::looks_like_png(png_design));
 
@@ -401,11 +403,13 @@ TEST_CASE("CLAP gui resize negotiation snaps to design aspect (mac)",
         // back buffer changes physical dimensions.
         REQUIRE(gui->set_size(plugin, smoke::kW * 2, smoke::kH * 2));
         smoke::pump_run_loop(3);
-        const auto host_size = clap_inst->editor_host->get_size();
+        const auto host_size =
+            pulp::format::clap_adapter::legacy_gui(*clap_inst).editor_host->get_size();
         REQUIRE(host_size.width == smoke::kW * 2);
         REQUIRE(host_size.height == smoke::kH * 2);
 
-        auto png_2x = clap_inst->editor_host->capture_back_buffer_png();
+        auto png_2x = pulp::format::clap_adapter::legacy_gui(*clap_inst)
+                          .editor_host->capture_back_buffer_png();
         REQUIRE_FALSE(png_2x.empty());
         REQUIRE(smoke::looks_like_png(png_2x));
         // PNGs at different surface sizes encode different byte streams
@@ -1062,8 +1066,8 @@ TEST_CASE("CLAP gui_hide returns the editor's GPU caches; gui_show repaints (mac
             SKIP("No Cocoa GUI or window server.");
         }
         auto* adapter = static_cast<format::clap_adapter::PulpClapPlugin*>(plugin->plugin_data);
-        REQUIRE(adapter->editor_host != nullptr);
-        if (!adapter->editor_host->is_gpu_backed()) {
+        REQUIRE(pulp::format::clap_adapter::legacy_gui(*adapter).editor_host != nullptr);
+        if (!pulp::format::clap_adapter::legacy_gui(*adapter).editor_host->is_gpu_backed()) {
             gui->destroy(plugin);
             finish();
             SKIP("No GPU adapter (CPU fallback).");
@@ -1082,28 +1086,32 @@ TEST_CASE("CLAP gui_hide returns the editor's GPU caches; gui_show repaints (mac
         REQUIRE(gui->show(plugin));
         smoke::pump_run_loop(6);
 
-        const auto shown = adapter->editor_host->capture_back_buffer_png();
+        const auto shown =
+            pulp::format::clap_adapter::legacy_gui(*adapter).editor_host->capture_back_buffer_png();
         REQUIRE(smoke::looks_like_png(shown));
-        const auto before = adapter->editor_host->gpu_cache_usage();
+        const auto before =
+            pulp::format::clap_adapter::legacy_gui(*adapter).editor_host->gpu_cache_usage();
         INFO("before gui_hide: budgeted " << before.budgeted << " purgeable " << before.purgeable);
         REQUIRE(before.purgeable > 0);
 
         REQUIRE(gui->hide(plugin));
-        const auto hidden = adapter->editor_host->gpu_cache_usage();
+        const auto hidden =
+            pulp::format::clap_adapter::legacy_gui(*adapter).editor_host->gpu_cache_usage();
         INFO("after gui_hide: budgeted " << hidden.budgeted << " purgeable " << hidden.purgeable);
         CHECK(hidden.purgeable == 0);
         CHECK(hidden.budgeted < before.budgeted);
 
         REQUIRE(gui->show(plugin));
-        adapter->editor_host->repaint();
+        pulp::format::clap_adapter::legacy_gui(*adapter).editor_host->repaint();
         smoke::pump_run_loop(6);
-        const auto reshown = adapter->editor_host->capture_back_buffer_png();
+        const auto reshown =
+            pulp::format::clap_adapter::legacy_gui(*adapter).editor_host->capture_back_buffer_png();
         REQUIRE(smoke::looks_like_png(reshown));
         CHECK(reshown == shown);
 
         // Closing destroys the host, and with it every GPU resource it held.
         gui->destroy(plugin);
-        CHECK(adapter->editor_host == nullptr);
+        CHECK(pulp::format::clap_adapter::legacy_gui(*adapter).editor_host == nullptr);
         finish();
         [window close];
     }

@@ -55,6 +55,7 @@ void InspectorOverlay::set_active(bool active) {
 }
 
 bool InspectorOverlay::select_parent() {
+    drop_stale_views();
     if (!selected_)
         return false;
     View* parent = selected_->parent();
@@ -65,6 +66,9 @@ bool InspectorOverlay::select_parent() {
 }
 
 overlay::CursorAffordance InspectorOverlay::cursor_affordance_at(Point pos) const {
+    // A cursor hook can fire after a tree removal and before the next paint:
+    // validate the selection against the live tree before touching it.
+    drop_stale_views();
     if (!selected_ || !dragging_enabled_)
         return overlay::CursorAffordance::none;
     return overlay::affordance_at(overlay::bounds_in_root(selected_, root_), pos);
@@ -156,7 +160,7 @@ bool InspectorOverlay::select_with_mouse(const ::vellum::view::MouseEvent& event
     return false;
 }
 
-void InspectorOverlay::drop_stale_views() {
+void InspectorOverlay::drop_stale_views() const {
     // Compare pointers against the live tree without dereferencing: a view
     // freed by a tree rebuild must not be touched.
     const auto items = overlay::flatten_tree(root_, {});

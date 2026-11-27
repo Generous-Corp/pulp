@@ -138,17 +138,19 @@ class InspectorOverlay {
     }
 
   private:
-    void drop_stale_views();
+    // Const so the cursor path can validate before it dereferences; the
+    // tracked pointers are mutable for that reason.
+    void drop_stale_views() const;
     void paint_highlight(canvas::Canvas& canvas);
     bool select_with_mouse(const ::vellum::view::MouseEvent& event, bool is_press,
                            bool is_drag_tick, bool is_release);
 
     View& root_;
     bool active_ = false;
-    View* selected_ = nullptr;
-    View* hovered_ = nullptr;
-    View* distance_anchor_ = nullptr;
-    View* alt_hover_target_ = nullptr;
+    mutable View* selected_ = nullptr;
+    mutable View* hovered_ = nullptr;
+    mutable View* distance_anchor_ = nullptr;
+    mutable View* alt_hover_target_ = nullptr;
     SelectionMode selection_mode_ = SelectionMode::follows_focus;
     bool dragging_enabled_ = false;
 

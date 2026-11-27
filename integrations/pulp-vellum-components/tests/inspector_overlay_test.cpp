@@ -337,6 +337,27 @@ TEST_CASE("a view removed from the tree is dropped at the next paint",
     REQUIRE(inspector.hovered_view() == nullptr);
 }
 
+TEST_CASE("cursor and select_parent on a removed selection never dereference it",
+          "[pulp-vellum-components][inspector-overlay]") {
+    Pair t;
+    InspectorOverlay inspector(t.root);
+    inspector.set_active(true);
+    inspector.set_dragging_enabled(true);
+    inspector.set_selected_view(t.a);
+    REQUIRE(inspector.cursor_affordance_at({20, 20}) == CA::move);
+
+    // The cursor hook fires before any paint has dropped the stale views.
+    t.root.remove_child(t.a);
+    REQUIRE(inspector.cursor_affordance_at({20, 20}) == CA::none);
+    REQUIRE(inspector.cursor_style_for({20, 20}) == -1);
+    REQUIRE(inspector.selected_view() == nullptr);
+
+    inspector.set_selected_view(t.b);
+    t.root.remove_child(t.b);
+    REQUIRE_FALSE(inspector.select_parent());
+    REQUIRE(inspector.selected_view() == nullptr);
+}
+
 TEST_CASE("cursor affordance is move on the body, resize on a handle, none outside",
           "[pulp-vellum-components][inspector-overlay]") {
     View root;
