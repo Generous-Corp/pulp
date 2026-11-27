@@ -57,6 +57,11 @@ function(_pulp_add_auv3 target name bundle_id version manufacturer category plug
     if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/au_v3_entry.cpp")
         set(auv3_entry "${CMAKE_CURRENT_SOURCE_DIR}/au_v3_entry.cpp")
     endif()
+    # A caller whose entry lives elsewhere sets PULP_AUV3_ENTRY_SOURCE to its
+    # absolute path before pulp_add_plugin().
+    if(PULP_AUV3_ENTRY_SOURCE)
+        set(auv3_entry "${PULP_AUV3_ENTRY_SOURCE}")
+    endif()
 
     if(PULP_IOS)
         _pulp_add_auv3_ios(${target}
@@ -256,17 +261,8 @@ function(_pulp_add_auv3_macos_appex target name bundle_id version manufacturer m
         BUILD_WITH_INSTALL_RPATH TRUE
         INSTALL_RPATH "@executable_path/../../../../Frameworks"
     )
-    # UI package libraries are staged inside the framework, but CMake also puts
-    # them on this stub's link line, so dyld resolves them against the stub's
-    # own rpaths as well.
-    set(_ui_package "${PULP_${target}_UI_PACKAGE}")
-    if(_ui_package AND TARGET "${_ui_package}")
-        get_target_property(_ui_runtime_libraries "${_ui_package}" PULP_EDITOR_RUNTIME_LIBRARIES)
-        if(_ui_runtime_libraries)
-            set_property(TARGET ${appex_target} APPEND PROPERTY INSTALL_RPATH
-                "@executable_path/../../../../Frameworks/${name}AUv3Framework.framework/Versions/A")
-        endif()
-    endif()
+    # UI package libraries are staged inside the framework. The stub does not
+    # link the UI package, so it needs no rpath to them.
     target_link_options(${appex_target} PRIVATE
         "-e" "_NSExtensionMain"
         "-fapplication-extension"
