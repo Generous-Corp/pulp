@@ -1739,6 +1739,7 @@
       "pulp/vellum_components/panic_button.hpp",
       "pulp/vellum_components/panic_target.hpp",
       "pulp/vellum_components/preferences_panel.hpp",
+      "pulp/vellum_components/preset_program_editor.hpp",
       "pulp/vellum_components/property_panel.hpp"
     ],
     "tools/audio/analysis/include": [
@@ -22756,55 +22757,55 @@
         "PULP_BUILD_EXAMPLES": "OFF"
       },
       "summary": {
-        "installed_target_count": 89,
+        "installed_target_count": 90,
         "ranked_by_closure": [
           {
             "exported_as": "Pulp::inspect-standalone-runtime",
-            "closure_node_count": 113
+            "closure_node_count": 114
           },
           {
             "exported_as": "Pulp::inspect-agent-toolkit",
-            "closure_node_count": 101
+            "closure_node_count": 102
           },
           {
             "exported_as": "Pulp::inspect",
-            "closure_node_count": 99
+            "closure_node_count": 100
           },
           {
             "exported_as": "Pulp::inspect-ui-runtime",
-            "closure_node_count": 97
+            "closure_node_count": 98
           },
           {
             "exported_as": "Pulp::standalone",
-            "closure_node_count": 97
+            "closure_node_count": 98
           },
           {
             "exported_as": "Pulp::standalone-native",
-            "closure_node_count": 97
+            "closure_node_count": 98
           },
           {
             "exported_as": "Pulp::inspect-offline-runtime",
-            "closure_node_count": 96
+            "closure_node_count": 97
           },
           {
             "exported_as": "Pulp::format",
-            "closure_node_count": 93
+            "closure_node_count": 94
           },
           {
             "exported_as": "Pulp::format-view",
-            "closure_node_count": 92
+            "closure_node_count": 93
+          },
+          {
+            "exported_as": "Pulp::inspect-runtime-eval",
+            "closure_node_count": 91
           },
           {
             "exported_as": "Pulp::view-graph-editor",
             "closure_node_count": 91
           },
           {
-            "exported_as": "Pulp::inspect-runtime-eval",
-            "closure_node_count": 90
-          },
-          {
             "exported_as": "Pulp::view",
-            "closure_node_count": 89
+            "closure_node_count": 90
           },
           {
             "exported_as": "Pulp::view-native",
@@ -22815,11 +22816,11 @@
             "closure_node_count": 84
           },
           {
-            "exported_as": "Pulp::view-platform",
-            "closure_node_count": 75
+            "exported_as": "Pulp::view-tooling",
+            "closure_node_count": 76
           },
           {
-            "exported_as": "Pulp::view-tooling",
+            "exported_as": "Pulp::view-platform",
             "closure_node_count": 75
           },
           {
@@ -22993,6 +22994,10 @@
           {
             "exported_as": "Pulp::timeline",
             "closure_node_count": 22
+          },
+          {
+            "exported_as": "Pulp::editor-bridge",
+            "closure_node_count": 20
           },
           {
             "exported_as": "Pulp::inspect-authoring",
@@ -24241,6 +24246,68 @@
             "pulp-format-core"
           ]
         },
+        "editor-bridge": {
+          "target": "pulp-editor-bridge",
+          "exported_as": "Pulp::editor-bridge",
+          "type": "STATIC_LIBRARY",
+          "source_dir": "core/view",
+          "closure": {
+            "node_count": 20,
+            "pulp_targets": [
+              "pulp-editor-bridge",
+              "pulp-foundation",
+              "pulp-platform",
+              "pulp-runtime",
+              "pulp-simd"
+            ],
+            "third_party_targets": [
+              "everest",
+              "gpu-runtime-device-api",
+              "hwy",
+              "mbedcrypto",
+              "mbedtls",
+              "mbedx509",
+              "p256m",
+              "pulp-cpp-httplib",
+              "pulp-tracing"
+            ]
+          },
+          "external_dependencies": {
+            "count": 15,
+            "third_party_targets": [
+              "everest",
+              "gpu-runtime-device-api",
+              "hwy",
+              "mbedcrypto",
+              "mbedtls",
+              "mbedx509",
+              "p256m",
+              "pulp-cpp-httplib",
+              "pulp-tracing"
+            ],
+            "prebuilt_archives": [],
+            "imported_targets": [],
+            "frameworks": [
+              "Accelerate",
+              "Cocoa",
+              "CoreFoundation",
+              "Security",
+              "UniformTypeIdentifiers"
+            ],
+            "system_libraries": [
+              "bsm"
+            ]
+          },
+          "public_headers": {
+            "roots": [
+              "core/view/include"
+            ],
+            "generated_include_roots": 1
+          },
+          "direct_dependencies": [
+            "pulp-runtime"
+          ]
+        },
         "events": {
           "target": "pulp-events",
           "exported_as": "Pulp::events",
@@ -24344,7 +24411,7 @@
           "type": "STATIC_LIBRARY",
           "source_dir": "core/format",
           "closure": {
-            "node_count": 93,
+            "node_count": 94,
             "pulp_targets": [
               "pulp-audio",
               "pulp-bundled-fonts",
@@ -24353,6 +24420,7 @@
               "pulp-dataplane-audio",
               "pulp-design-import",
               "pulp-design-ir",
+              "pulp-editor-bridge",
               "pulp-events",
               "pulp-format",
               "pulp-format-core",
@@ -24674,7 +24742,7 @@
           "type": "STATIC_LIBRARY",
           "source_dir": "core/format",
           "closure": {
-            "node_count": 92,
+            "node_count": 93,
             "pulp_targets": [
               "pulp-audio",
               "pulp-bundled-fonts",
@@ -24683,6 +24751,7 @@
               "pulp-dataplane-audio",
               "pulp-design-import",
               "pulp-design-ir",
+              "pulp-editor-bridge",
               "pulp-events",
               "pulp-format-core",
               "pulp-format-view",
@@ -25312,7 +25381,7 @@
           "type": "STATIC_LIBRARY",
           "source_dir": "inspect",
           "closure": {
-            "node_count": 99,
+            "node_count": 100,
             "pulp_targets": [
               "pulp-audio",
               "pulp-bundled-fonts",
@@ -25322,6 +25391,7 @@
               "pulp-design-import",
               "pulp-design-import-audio-pack",
               "pulp-design-ir",
+              "pulp-editor-bridge",
               "pulp-events",
               "pulp-foundation",
               "pulp-gpu-device",
@@ -25477,7 +25547,7 @@
           "type": "STATIC_LIBRARY",
           "source_dir": "inspect",
           "closure": {
-            "node_count": 101,
+            "node_count": 102,
             "pulp_targets": [
               "pulp-audio",
               "pulp-bundled-fonts",
@@ -25486,6 +25556,7 @@
               "pulp-dataplane-audio",
               "pulp-design-import",
               "pulp-design-ir",
+              "pulp-editor-bridge",
               "pulp-events",
               "pulp-format",
               "pulp-format-core",
@@ -25948,7 +26019,7 @@
           "type": "STATIC_LIBRARY",
           "source_dir": "inspect",
           "closure": {
-            "node_count": 96,
+            "node_count": 97,
             "pulp_targets": [
               "pulp-audio",
               "pulp-bundled-fonts",
@@ -25957,6 +26028,7 @@
               "pulp-dataplane-audio",
               "pulp-design-import",
               "pulp-design-ir",
+              "pulp-editor-bridge",
               "pulp-events",
               "pulp-format",
               "pulp-format-core",
@@ -26265,7 +26337,7 @@
           "type": "STATIC_LIBRARY",
           "source_dir": "inspect",
           "closure": {
-            "node_count": 90,
+            "node_count": 91,
             "pulp_targets": [
               "pulp-audio",
               "pulp-bundled-fonts",
@@ -26275,6 +26347,7 @@
               "pulp-design-import",
               "pulp-design-import-audio-pack",
               "pulp-design-ir",
+              "pulp-editor-bridge",
               "pulp-events",
               "pulp-foundation",
               "pulp-gpu-device",
@@ -26511,7 +26584,7 @@
           "type": "STATIC_LIBRARY",
           "source_dir": "inspect",
           "closure": {
-            "node_count": 113,
+            "node_count": 114,
             "pulp_targets": [
               "pulp-audio",
               "pulp-bundled-fonts",
@@ -26521,6 +26594,7 @@
               "pulp-design-import",
               "pulp-design-import-audio-pack",
               "pulp-design-ir",
+              "pulp-editor-bridge",
               "pulp-events",
               "pulp-format",
               "pulp-format-core",
@@ -26822,7 +26896,7 @@
           "type": "STATIC_LIBRARY",
           "source_dir": "inspect",
           "closure": {
-            "node_count": 97,
+            "node_count": 98,
             "pulp_targets": [
               "pulp-audio",
               "pulp-bundled-fonts",
@@ -26832,6 +26906,7 @@
               "pulp-design-import",
               "pulp-design-import-audio-pack",
               "pulp-design-ir",
+              "pulp-editor-bridge",
               "pulp-events",
               "pulp-foundation",
               "pulp-gpu-device",
@@ -28419,7 +28494,7 @@
           "type": "STATIC_LIBRARY",
           "source_dir": "",
           "closure": {
-            "node_count": 97,
+            "node_count": 98,
             "pulp_targets": [
               "pulp-audio",
               "pulp-bundled-fonts",
@@ -28429,6 +28504,7 @@
               "pulp-design-import",
               "pulp-design-import-audio-pack",
               "pulp-design-ir",
+              "pulp-editor-bridge",
               "pulp-events",
               "pulp-format",
               "pulp-format-core",
@@ -28662,7 +28738,7 @@
           "type": "STATIC_LIBRARY",
           "source_dir": "",
           "closure": {
-            "node_count": 97,
+            "node_count": 98,
             "pulp_targets": [
               "pulp-audio",
               "pulp-bundled-fonts",
@@ -28672,6 +28748,7 @@
               "pulp-design-import",
               "pulp-design-import-audio-pack",
               "pulp-design-ir",
+              "pulp-editor-bridge",
               "pulp-events",
               "pulp-format",
               "pulp-format-core",
@@ -29236,7 +29313,7 @@
           "type": "STATIC_LIBRARY",
           "source_dir": "core/view",
           "closure": {
-            "node_count": 89,
+            "node_count": 90,
             "pulp_targets": [
               "pulp-audio",
               "pulp-bundled-fonts",
@@ -29246,6 +29323,7 @@
               "pulp-design-import",
               "pulp-design-import-audio-pack",
               "pulp-design-ir",
+              "pulp-editor-bridge",
               "pulp-events",
               "pulp-foundation",
               "pulp-gpu-device",
@@ -30214,13 +30292,14 @@
           "type": "STATIC_LIBRARY",
           "source_dir": "core/view",
           "closure": {
-            "node_count": 75,
+            "node_count": 76,
             "pulp_targets": [
               "pulp-bundled-fonts",
               "pulp-canvas",
               "pulp-dataplane",
               "pulp-design-import",
               "pulp-design-ir",
+              "pulp-editor-bridge",
               "pulp-events",
               "pulp-foundation",
               "pulp-gpu-device",
@@ -30337,6 +30416,7 @@
             "framework:CoreVideo",
             "framework:Metal",
             "framework:QuartzCore",
+            "pulp-editor-bridge",
             "pulp-render",
             "pulp-view-core",
             "pulp-view-script"
