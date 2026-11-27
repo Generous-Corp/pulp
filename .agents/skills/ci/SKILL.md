@@ -14015,6 +14015,11 @@ main's SDK. A new optional Vellum integration package needs its option, its
 against main. The tests' ctest label should start with `pulp-vellum` so the
 lane's `-L pulp-vellum` filter runs them.
 
+The lane's `-L pulp-vellum` run includes the GPU adapter probe and its
+empty-adapter negative control (`PASS_REGULAR_EXPRESSION` on the fail JSON, since
+the control must exit non-zero). The probe target is picked up by the
+`labelled-targets` derivation, so it needs no workflow edit.
+
 The same lane also runs the MCP UI tool cases (`pulp-test-mcp-server "[ui]"`)
 against the SDK's `bin/vellum-app-host` through `PULP_TEST_VELLUM_APP_HOST`. The
 step greps the output for `SKIPPED`, because Catch2 reports a skipped live case
