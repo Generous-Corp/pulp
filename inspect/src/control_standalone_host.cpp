@@ -30,6 +30,7 @@
 #include <pulp/view/inspector.hpp>
 #include <pulp/view/motion.hpp>
 #include <pulp/view/screenshot.hpp>
+#include <pulp/view/screenshot_compare.hpp>
 #include <pulp/view/scripted_ui.hpp>
 #include <pulp/view/value_channel_set.hpp>
 #include <pulp/view/window_host.hpp>
@@ -608,6 +609,15 @@ class CanonicalStandaloneControlHost final : public format::StandaloneControlHos
             if (gpu_health_provider_) {
                 gpu_health_view_adapter_ = ControlGpuHealthViewAdapter::create({
                     .provider = gpu_health_provider_,
+                    .analyze_png = [](const std::vector<std::uint8_t>& png) {
+                            const auto stats = view::analyze_screenshot_content(png);
+                            return ControlGpuHealthViewAdapter::ContentStats{
+                                .valid = stats.valid,
+                                .passes_content_floor = stats.passes_content_floor(),
+                                .total_pixels = stats.total_pixels,
+                                .opaque_coverage = stats.opaque_coverage,
+                                .unique_colors = stats.unique_colors};
+                        },
                     .capture_back_buffer_png =
                         [this] {
                             return window_ ? window_->capture_back_buffer_png()
