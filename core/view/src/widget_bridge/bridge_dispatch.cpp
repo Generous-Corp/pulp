@@ -327,6 +327,19 @@ function __pulpRunDispatchBatch__(body, args) {
     }
     return result;
 }
+// A handler that dispatches an event its own handler answers re-enters without
+// end. QuickJS's stack check turns that into a catchable error where it is
+// compiled in, but CHOC omits it under MSVC, so the same script exhausts the C
+// stack and kills the host there. Real nesting (a key that clicks, a click that
+// focuses) is a handful of levels; past the cap the dispatch is refused and
+// reported like any other handler error, on every platform.
+var __pulpMaxDispatchDepth__ = 32;
+function __pulpDispatchTooDeep__(id, eventName) {
+    if (__pulpDispatchDepth__ < __pulpMaxDispatchDepth__) return false;
+    __pulpReportDispatchError__(id, eventName,
+        new Error('dispatch nested more than ' + __pulpMaxDispatchDepth__ + ' levels deep'));
+    return true;
+}
 // A dispatch made inside an open batch already joins it, so it runs the body
 // here instead of through __pulpRunDispatchBatch__: each nesting level (a key
 // that clicks, a click that focuses) then costs one frame instead of three,
@@ -334,6 +347,7 @@ function __pulpRunDispatchBatch__(body, args) {
 // the same as the batched path.
 function __dispatchCallbackOnly__(id, eventName) {
     if (__pulpDispatchDepth__ > 0) {
+        if (__pulpDispatchTooDeep__(id, eventName)) return 0;
         ++__pulpDispatchDepth__;
         try { return __pulpDispatchCallbackOnlyUnbatched__.apply(null, arguments) || 0; }
         catch (e) { __pulpReportDispatchError__(id, eventName, e); return 0; }
@@ -343,6 +357,7 @@ function __dispatchCallbackOnly__(id, eventName) {
 }
 function __dispatch__(id, eventName) {
     if (__pulpDispatchDepth__ > 0) {
+        if (__pulpDispatchTooDeep__(id, eventName)) return undefined;
         ++__pulpDispatchDepth__;
         try { return __pulpDispatchUnbatched__.apply(null, arguments); }
         catch (e) { __pulpReportDispatchError__(id, eventName, e); return undefined; }

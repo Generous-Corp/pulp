@@ -27,7 +27,8 @@
 #                 missing targets, and the consumer refuses to configure.
 #   real          a real installed Vellum SDK: the consumer under
 #                 tools/validation/sdk-smoke/vellum-ui-compat builds one
-#                 executable per name and runs each.
+#                 executable per name and runs each, plus one that links
+#                 only Pulp::view and uses an audio widget through it.
 #   wrong-version a real Vellum whose version is not the one recorded: it is
 #                 not found, the config warns, and the consumer refuses.
 #   view-native   stand-ins: Pulp::view-native is left undefined, and a target
@@ -292,7 +293,7 @@ elseif(SCENARIO STREQUAL "shape")
     _expect("${_out}" "T\\[render\\]=\\[Vellum::MirrorRender_2d\\] F\\[render\\]=\\[cxx_std_20\\] A\\[render\\]=\\[YES\\]" "render")
     _expect("${_out}" "T\\[design-import\\]=\\[Vellum::MirrorDesign_import\\] F\\[design-import\\]=\\[cxx_std_20\\] A\\[design-import\\]=\\[YES\\]" "design-import")
     _expect("${_out}" "T\\[view-native\\]=\\[ABSENT\\]" "no Vellum-backed view-native: it would carry a script engine")
-    _expect("${_out}" "T\\[view\\]=\\[Vellum::MirrorView_core;Vellum::MirrorDesign_import;Vellum::MirrorView_script;Pulp::vellum\\] F\\[view\\]=\\[cxx_std_20\\] A\\[view\\]=\\[YES\\]" "view")
+    _expect("${_out}" "T\\[view\\]=\\[Vellum::MirrorView_core;Vellum::MirrorDesign_import;Vellum::MirrorView_script;Pulp::vellum;Pulp::view-audio;Pulp::view-tooling\\] F\\[view\\]=\\[cxx_std_20\\] A\\[view\\]=\\[YES\\]" "view")
     _expect("${_out}" "T\\[view-audio\\]=\\[Pulp::vellum-audio\\] F\\[view-audio\\]=\\[cxx_std_20\\] A\\[view-audio\\]=\\[YES\\]" "view-audio on the audio package")
     _expect("${_out}" "T\\[view-tooling\\]=\\[Vellum::MirrorView_core;Pulp::vellum;Pulp::editor-bridge;Vellum::MirrorView_script\\] F\\[view-tooling\\]=\\[cxx_std_20\\] A\\[view-tooling\\]=\\[YES\\]" "view-tooling on the editor bridge and the view layer")
 
@@ -340,6 +341,7 @@ elseif(SCENARIO STREQUAL "missing")
     _expect("${_out}" "COMPAT=\\[render;design-import;view;view-tooling\\]" "view-audio left out")
     _expect("${_out}" "T\\[view-audio\\]=\\[ABSENT\\]" "no empty view-audio target")
     _expect("${_out}" "T\\[view-tooling\\]=\\[Vellum::MirrorView_core;Pulp::vellum;Pulp::editor-bridge;Vellum::MirrorView_script\\]" "view-tooling unaffected")
+    _expect("${_out}" "T\\[view\\]=\\[Vellum::MirrorView_core;Vellum::MirrorDesign_import;Vellum::MirrorView_script;Pulp::vellum;Pulp::view-tooling\\]" "the umbrella links only the layers the SDK has")
 
 elseif(SCENARIO STREQUAL "twice")
     _inspect(twice ON ON "${_vellum_standins}" 2 _out)
@@ -755,6 +757,7 @@ elseif(SCENARIO STREQUAL "no-vellum" OR SCENARIO STREQUAL "real" OR SCENARIO STR
     _expect("${_out}" "Pulp::view -> vellum::view::parse_designmd_yaml primary=#336699" "the umbrella ran")
     _expect("${_out}" "Pulp::view-audio -> MusicalTypingController 'a' sounds note 60" "the audio widgets probe ran")
     _expect("${_out}" "Pulp::view-tooling -> vellum::view::has_screenshot_backend (yes|no)" "the tooling probe ran")
+    _expect("${_out}" "Pulp::view alone -> MusicalTypingController 'a' sounds note 60" "an audio widget through the umbrella alone")
     _expect("${_out}" "EditorBridge dispatched" "EditorBridge dispatched through Pulp::view-tooling")
     message(STATUS "real: six Vellum-backed names built and ran against Vellum ${_version}")
 
