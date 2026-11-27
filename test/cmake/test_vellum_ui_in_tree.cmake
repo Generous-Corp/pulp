@@ -9,6 +9,9 @@
 #           alias's real target; a defined pulp-view-core, a lower-case
 #           pulp::render left on Pulp's own renderer, and a missing editor
 #           bridge are each refused.
+#   install-rules  A static read of PulpInstallRules.cmake: every install of a
+#           path under a skipped directory is gated on the mode, and the target
+#           and header drops are wired in.
 #   cli-force-load  pulp-cli's force-load of Pulp's UI archives (macOS): still
 #           applied with the mode off, refused with it on.
 #   real    The Pulp source tree configured twice against an installed Vellum
@@ -137,6 +140,58 @@ if(SCENARIO STREQUAL "guards")
     endif()
 
     message(STATUS "guards: ok")
+
+elseif(SCENARIO STREQUAL "install-rules")
+    # A static read of the install rules: every install of a path under a
+    # directory the mode leaves out must sit inside if(NOT
+    # PULP_UI_FROM_VELLUM_IN_TREE ...), and the target and header drops must be
+    # wired in. Without this the mode would still ship Pulp's own view headers
+    # and window-host sources, which every installed-SDK plug-in compiles.
+    include("${_module}")
+    set(_skipped "")
+    foreach(_entry IN LISTS PULP_VELLUM_IN_TREE_SKIPPED_UI_DIRS)
+        string(REGEX REPLACE "\\|.*" "" _dir "${_entry}")
+        list(APPEND _skipped "${_dir}")
+    endforeach()
+    set(_rules_file "${PULP_SOURCE_DIR}/tools/cmake/PulpInstallRules.cmake")
+    if(DEFINED INSTALL_RULES)
+        set(_rules_file "${INSTALL_RULES}")
+    endif()
+    file(READ "${_rules_file}" _rules)
+    string(REPLACE ";" "<semicolon>" _rules "${_rules}")
+    string(REPLACE "\n" ";" _lines "${_rules}")
+    set(_stack "")
+    set(_line_no 0)
+    set(_ungated "")
+    foreach(_line IN LISTS _lines)
+        math(EXPR _line_no "${_line_no} + 1")
+        string(REGEX REPLACE "#.*$" "" _code "${_line}")
+        string(STRIP "${_code}" _code)
+        if(_code MATCHES "^if\\((.*)$")
+            list(APPEND _stack "${CMAKE_MATCH_1}")
+        elseif(_code MATCHES "^endif\\(")
+            list(POP_BACK _stack)
+        endif()
+        foreach(_dir IN LISTS _skipped)
+            if(_code MATCHES "/${_dir}/")
+                if(NOT _stack MATCHES "NOT PULP_UI_FROM_VELLUM_IN_TREE")
+                    list(APPEND _ungated "${_line_no}: ${_code}")
+                endif()
+            endif()
+        endforeach()
+    endforeach()
+    if(_ungated)
+        string(REPLACE ";" "\n  " _report "${_ungated}")
+        message(FATAL_ERROR
+            "install-rules: installs from a directory PULP_UI_FROM_VELLUM_IN_TREE leaves out, "
+            "not gated on the mode:\n  ${_report}")
+    endif()
+    foreach(_call IN ITEMS pulp_vellum_in_tree_drop_ui_targets pulp_vellum_in_tree_drop_ui_headers)
+        if(NOT _rules MATCHES "if\\(PULP_UI_FROM_VELLUM_IN_TREE\\)[ \n]+${_call}\\(")
+            message(FATAL_ERROR "install-rules: ${_call}() is not called under if(PULP_UI_FROM_VELLUM_IN_TREE)")
+        endif()
+    endforeach()
+    message(STATUS "install-rules: ok")
 
 elseif(SCENARIO STREQUAL "cli-force-load")
     # pulp-cli force-loads Pulp's own UI archives on macOS. With the mode off it
