@@ -4207,14 +4207,29 @@ jobs:
         # on failure so `shipyard apply-derived` can commit them to a pull
         # request with no configure and no build (see .shipyard/config.toml
         # [derived_files]). Only this leg: artifact names are unique per run.
-        # The families check writes no expected file, so there is none to
-        # upload for it. Never blocks the gate.
+        # The families check writes its expected file to
+        # $RUNNER_TEMP/changed-surface-families-expected (next step). Never
+        # blocks the gate.
         if: failure() && matrix.key == 'macos'
         continue-on-error: true
         uses: actions/upload-artifact@v7.0.2
         with:
           name: script-inputs-expected
           path: ${{ runner.temp }}/script-inputs-expected
+          if-no-files-found: ignore
+          retention-days: 7
+
+      - name: Upload expected changed-surface families file (macos)
+        # changed_surface_script_families.py --check writes the file --write
+        # would produce to $RUNNER_TEMP/changed-surface-families-expected on
+        # blocking drift. Its own artifact because apply-derived roots each
+        # artifact at one directory (.shipyard/ here); see [derived_files].
+        if: failure() && matrix.key == 'macos'
+        continue-on-error: true
+        uses: actions/upload-artifact@v7.0.2
+        with:
+          name: changed-surface-families-expected
+          path: ${{ runner.temp }}/changed-surface-families-expected
           if-no-files-found: ignore
           retention-days: 7
 

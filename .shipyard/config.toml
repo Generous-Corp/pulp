@@ -946,3 +946,7 @@ commit_trailers = []
 [[derived_files.artifacts]]
 name = "script-inputs-expected"
 root = "test/ctest_script_inputs"
+
+[[derived_files.artifacts]]
+name = "changed-surface-families-expected"
+root = ".shipyard"

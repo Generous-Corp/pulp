@@ -485,7 +485,7 @@ class DriftCheckTest(FamilyFixture):
 
     def check(self, touched: list[str] | None, merge_group: bool = False,
               build: str = "/b", mode: str = "--check", extra_script: str | None = None,
-              extra_labels: list[str] | None = None) -> int:
+              extra_labels: list[str] | None = None, extra_args: list[str] | None = None) -> int:
         self.add_whole_tree()
         self.write("tools/scripts/test_a.py", "")
         self.script_test("a-selftest", "tools/scripts/test_a.py")
@@ -509,7 +509,8 @@ class DriftCheckTest(FamilyFixture):
         families.script_test_inputs.changed_files = lambda _root, _base: set(touched or [])
         families.script_test_inputs.advisory_here = lambda: merge_group
         try:
-            return families.main(["--repo-root", str(self.root), "--build-dir", build, mode])
+            return families.main(["--repo-root", str(self.root), "--build-dir", build, mode,
+                                  *(extra_args or [])])
         finally:
             inventory.codemodel_reply_available = saved_reply
             (inventory.load_ctest_json, inventory.load_codemodel_targets,
@@ -523,6 +524,23 @@ class DriftCheckTest(FamilyFixture):
                      "tools/scripts/changed_surface_script_families.py"]:
             with self.subTest(path=path):
                 self.assertEqual(self.check([path]), 1)
+
+    def test_blocking_drift_emits_exactly_what_write_produces(self) -> None:
+        out = self.root / "expected"
+        self.assertEqual(self.check(["tools/scripts/test_a.py"],
+                                    extra_args=["--emit-expected", str(out)]), 1)
+        emitted = sorted(p.relative_to(out).as_posix() for p in out.rglob("*") if p.is_file())
+        self.assertEqual(emitted, [families.FAMILIES_FILE.name])
+        # What --write would write for this same inventory (run_against writes render(generate)).
+        written = families.render(families.generate(self.root, self.tests, model()))
+        self.assertEqual((out / families.FAMILIES_FILE.name).read_text(encoding="utf-8"), written)
+        self.assertNotEqual(written, (self.root / families.FAMILIES_FILE).read_text(encoding="utf-8"))
+
+    def test_no_expected_file_without_blocking_drift(self) -> None:
+        out = self.root / "expected"
+        # Advisory drift (an untouched surface) leaves nothing to apply.
+        self.assertEqual(self.check(["README.md"], extra_args=["--emit-expected", str(out)]), 0)
+        self.assertFalse(out.exists())
 
     def build_with_cache(self, **cache: str) -> str:
         build = self.root / "build-profile"
