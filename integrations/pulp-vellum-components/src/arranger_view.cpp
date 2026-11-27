@@ -35,6 +35,29 @@ timebase::TickPosition clamp_tick(std::int64_t value) noexcept {
     return timebase::TickPosition{std::max<std::int64_t>(0, value)};
 }
 
+/// Signed tick arithmetic that saturates instead of overflowing. Pointer
+/// positions are untrusted input, so a far-off pointer against an origin
+/// near the end of the tick domain must clamp, not wrap.
+std::int64_t saturating_add(std::int64_t a, std::int64_t b) noexcept {
+    constexpr auto kMax = std::numeric_limits<std::int64_t>::max();
+    constexpr auto kMin = std::numeric_limits<std::int64_t>::min();
+    if (b > 0 && a > kMax - b)
+        return kMax;
+    if (b < 0 && a < kMin - b)
+        return kMin;
+    return a + b;
+}
+
+std::int64_t saturating_sub(std::int64_t a, std::int64_t b) noexcept {
+    constexpr auto kMax = std::numeric_limits<std::int64_t>::max();
+    constexpr auto kMin = std::numeric_limits<std::int64_t>::min();
+    if (b < 0 && a > kMax + b)
+        return kMax;
+    if (b > 0 && a < kMin + b)
+        return kMin;
+    return a - b;
+}
+
 bool is_nested_sequence(const Clip& clip) noexcept {
     return std::holds_alternative<SequenceRef>(clip.content());
 }
@@ -49,8 +72,16 @@ float ArrangerLayout::x_for_tick(timebase::TickPosition tick) const noexcept {
 timebase::TickPosition ArrangerLayout::tick_for_x(float x) const noexcept {
     if (px_per_tick == 0.0)
         return origin_tick;
-    const auto ticks = static_cast<double>(x - lane_left_px) / px_per_tick;
-    return clamp_tick(origin_tick.value + static_cast<std::int64_t>(std::llround(ticks)));
+    const auto ticks = std::round(static_cast<double>(x - lane_left_px) / px_per_tick);
+    if (std::isnan(ticks))
+        return origin_tick;
+    // Saturate before converting: llround and the addition are both undefined
+    // outside the int64 range, which a tiny scale or a far pointer reaches.
+    if (ticks >= kFirstOutOfRangeTickDuration)
+        return timebase::TickPosition{std::numeric_limits<std::int64_t>::max()};
+    if (ticks < -kFirstOutOfRangeTickDuration)
+        return clamp_tick(0);
+    return clamp_tick(saturating_add(origin_tick.value, static_cast<std::int64_t>(ticks)));
 }
 
 float ArrangerLayout::y_for_track_index(std::size_t index) const noexcept {
@@ -62,10 +93,9 @@ ArrangerView::ArrangerView() = default;
 void ArrangerView::set_project(const Project* project, ItemId sequence_id) {
     project_ = project;
     sequence_id_ = sequence_id;
-    // A project swap invalidates anything a live drag believed about the document.
-    drag_.reset();
-    header_drag_.reset();
-    track_create_press_.reset();
+    // Snapshot publication may happen synchronously inside submit_intent().
+    // Gesture cancellation is explicit; refreshing borrowed data must not
+    // discard the Begin/Update state before the matching End or Cancel.
 }
 
 void ArrangerView::set_layout(const ArrangerLayout& layout) {
@@ -251,7 +281,10 @@ void ArrangerView::paint(canvas::Canvas& canvas) {
 }
 
 void ArrangerView::on_mouse_down(view::Point position) {
-    drag_.reset();
+    // A declined terminal intent still owns the previous undo group.
+    on_mouse_cancel(position);
+    if (drag_)
+        return;
     header_drag_.reset();
     track_create_press_.reset();
     std::size_t row = 0;
@@ -294,7 +327,8 @@ void ArrangerView::on_mouse_down(view::Point position) {
         drag.clip_id = clip->id();
         drag.duration = clip->duration();
         drag.believed = MusicalTimeRange{clip->start(), clip->duration()};
-        drag.grab_offset_ticks = layout_.tick_for_x(position.x).value - clip->start().value;
+        drag.grab_offset_ticks =
+            saturating_sub(layout_.tick_for_x(position.x).value, clip->start().value);
         drag_ = drag;
         return;
     }
@@ -337,7 +371,8 @@ void ArrangerView::on_mouse_drag(view::Point position) {
     }
     if (!drag_)
         return;
-    const auto target = clamp_tick(layout_.tick_for_x(position.x).value - drag_->grab_offset_ticks);
+    const auto target =
+        clamp_tick(saturating_sub(layout_.tick_for_x(position.x).value, drag_->grab_offset_ticks));
     if (target.value == drag_->believed.start.value)
         return;
 
@@ -345,9 +380,10 @@ void ArrangerView::on_mouse_drag(view::Point position) {
     // The first step that actually moves opens the gesture; a press that never
     // moves leaves no undo group behind.
     const auto phase = drag_->opened ? GesturePhase::Update : GesturePhase::Begin;
-    emit_move(*drag_, phase, replacement);
-    drag_->believed = replacement;
-    drag_->opened = true;
+    if (emit_move(*drag_, phase, replacement).status == timeline_editor::IntentStatus::Accepted) {
+        drag_->believed = replacement;
+        drag_->opened = true;
+    }
 }
 
 void ArrangerView::on_mouse_up(view::Point position) {
@@ -397,7 +433,8 @@ void ArrangerView::on_mouse_up(view::Point position) {
     }
     if (!drag_)
         return;
-    const auto target = clamp_tick(layout_.tick_for_x(position.x).value - drag_->grab_offset_ticks);
+    const auto target =
+        clamp_tick(saturating_sub(layout_.tick_for_x(position.x).value, drag_->grab_offset_ticks));
     const MusicalTimeRange replacement{target, drag_->duration};
 
     if (!drag_->opened && target.value == drag_->believed.start.value) {
@@ -406,8 +443,13 @@ void ArrangerView::on_mouse_up(view::Point position) {
         drag_.reset();
         return;
     }
-    emit_move(*drag_, drag_->opened ? GesturePhase::End : GesturePhase::Single, replacement);
-    drag_.reset();
+    const bool opened = drag_->opened;
+    const auto result =
+        emit_move(*drag_, opened ? GesturePhase::End : GesturePhase::Single, replacement);
+    // A declined End must stay retryable; dropping it would strand the
+    // session group. A declined Single never opened a group.
+    if (!opened || result.status == timeline_editor::IntentStatus::Accepted)
+        drag_.reset();
 }
 
 void ArrangerView::on_mouse_cancel(view::Point) {
@@ -418,12 +460,15 @@ void ArrangerView::on_mouse_cancel(view::Point) {
     if (drag_->opened) {
         // Cancel closes the group over edits that were already applied; the
         // revert is the session's own undo, not a second reduction here.
-        emit_move(*drag_, GesturePhase::Cancel, drag_->believed);
+        if (emit_move(*drag_, GesturePhase::Cancel, drag_->believed).status !=
+            timeline_editor::IntentStatus::Accepted)
+            return;
     }
     drag_.reset();
 }
 
-void ArrangerView::emit_move(const Drag& drag, GesturePhase phase, MusicalTimeRange replacement) {
+timeline_editor::IntentResult ArrangerView::emit_move(const Drag& drag, GesturePhase phase,
+                                                      MusicalTimeRange replacement) {
     timeline_editor::EditIntent intent;
     intent.kind = timeline_editor::EditIntentKind::Move;
     intent.phase = phase;
@@ -432,12 +477,13 @@ void ArrangerView::emit_move(const Drag& drag, GesturePhase phase, MusicalTimeRa
     intent.clip_id = drag.clip_id;
     intent.expected_range = ClipTimeRange{drag.believed};
     intent.replacement_range = ClipTimeRange{replacement};
-    submit(intent);
+    return submit(intent);
 }
 
-void ArrangerView::submit(const timeline_editor::EditIntent& intent) {
+timeline_editor::IntentResult ArrangerView::submit(const timeline_editor::EditIntent& intent) {
     if (host_)
-        host_->submit_intent(intent);
+        return host_->submit_intent(intent);
+    return {};
 }
 
 void ArrangerView::submit(const timeline_editor::TrackEditIntent& intent) {

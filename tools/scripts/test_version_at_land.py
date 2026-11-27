@@ -521,7 +521,10 @@ class _FakeGh:
                  covers: bool = True, armed: bool = True,
                  in_queue: bool = False, graphql_rc: int = 0,
                  close_rc: int = 0, ejected: bool = False,
-                 checks: list[dict] | None = None, hold: bool = False) -> None:
+                 checks: list[dict] | None = None, hold: bool = False,
+                 body: str = "", body_get_rc: int = 0,
+                 body_get_stderr: str = "", body_patch_rc: int = 0,
+                 body_patch_stderr: str = "") -> None:
         # In-flight state of the open bump PR, read by the stale-PR liveness
         # check. The default (armed, never ejected, no check reported yet) is a
         # PR still on its way to landing. `checks` is the head commit's
@@ -545,6 +548,14 @@ class _FakeGh:
         self.create_stderr = create_stderr
         self.merge_rc = merge_rc
         self.draft_pr = draft_pr
+        # The open bump PR's description. `pr create --body` sets it and a
+        # REST PATCH replaces it; `pr edit` fails, as it does for the release
+        # bot's token in the workflow.
+        self.body = body
+        self.body_get_rc = body_get_rc
+        self.body_get_stderr = body_get_stderr
+        self.body_patch_rc = body_patch_rc
+        self.body_patch_stderr = body_patch_stderr
         self.calls: list[tuple[str, ...]] = []
 
     def __call__(self, repo, *args, check: bool = True):
@@ -561,8 +572,29 @@ class _FakeGh:
             payload = json.dumps([{"number": i + 1} for i in range(n)])
             return subprocess.CompletedProcess(args, 0, stdout=payload, stderr="")
         if head == ("pr", "create"):
+            if self.create_rc == 0 and "--body" in args:
+                self.body = args[args.index("--body") + 1]
             return subprocess.CompletedProcess(
                 args, self.create_rc, stdout="", stderr=self.create_stderr)
+        if head == ("pr", "edit"):
+            return subprocess.CompletedProcess(
+                args, 1, stdout="", stderr="GraphQL: edit refused")
+        if (args[:3] == ("api", "--method", "PATCH")
+                and "/pulls/" in args[3]):
+            if self.body_patch_rc:
+                return subprocess.CompletedProcess(
+                    args, self.body_patch_rc, stdout="",
+                    stderr=self.body_patch_stderr)
+            field = next(a for a in args if a.startswith("body="))
+            self.body = field[len("body="):]
+            return subprocess.CompletedProcess(args, 0, stdout="{}", stderr="")
+        if args[:1] == ("api",) and "/pulls/" in args[1] and ".body" in args:
+            if self.body_get_rc:
+                return subprocess.CompletedProcess(
+                    args, self.body_get_rc, stdout="",
+                    stderr=self.body_get_stderr)
+            return subprocess.CompletedProcess(
+                args, 0, stdout=self.body + "\n", stderr="")
         if head == ("pr", "view"):
             if "comments,headRefOid" in args:
                 tip = "c" * 40
@@ -618,6 +650,11 @@ class _FakeGh:
 
     def did(self, *prefix: str) -> bool:
         return any(c[:len(prefix)] == prefix for c in self.calls)
+
+    def body_writes(self) -> int:
+        """How many times the PR description was replaced."""
+        return len([c for c in self.calls
+                    if c[:3] == ("api", "--method", "PATCH")])
 
 
 class PrRouteTest(unittest.TestCase):
@@ -777,14 +814,21 @@ class PrRouteTest(unittest.TestCase):
             capture_output=True, text=True, encoding="utf-8",
             check=True).stdout.strip()
 
+    def _message(self, ref: str) -> str:
+        return subprocess.run(
+            ["git", "-C", str(self.origin), "log", "-1", "--format=%B", ref],
+            capture_output=True, text=True, encoding="utf-8",
+            check=True).stdout
+
     def _assert_repaired_in_place(self, fake, before: str) -> None:
         """The standing PR kept its number and got a new head: nothing was
         closed, nothing was opened, and the branch now carries the bump built
         on the latest main."""
         self.assertFalse(fake.did("pr", "close"))
         self.assertFalse(fake.did("pr", "create"))
-        self.assertTrue(fake.did("pr", "edit"))
         tip = self._tip()
+        self.assertEqual(val._marker_line(fake.body),
+                         val._marker_line(self._message(tip)))
         self.assertNotEqual(tip, before)
         self.assertEqual(self._branch_cmake_version(val.BUMP_BRANCH), "0.2.0")
         main_sha = subprocess.run(
@@ -1214,6 +1258,37 @@ class PrRouteTest(unittest.TestCase):
         self.assertEqual(status, "pending")
         self.assertFalse(fake.did("pr", "merge"))
 
+    def test_open_bump_pr_query_rejects_a_fork_head(self) -> None:
+        original_git, original_gh = val._git, val._gh
+        calls: list[tuple[str, ...]] = []
+
+        def fake_git(repo, *args, check=False):
+            if args == ("remote", "get-url", "origin"):
+                return subprocess.CompletedProcess(
+                    args, 0, stdout="git@github.com:Generous-Corp/pulp.git\n",
+                    stderr="")
+            return original_git(repo, *args, check=check)
+
+        def fake_gh(repo, *args, check=False):
+            calls.append(tuple(args))
+            return subprocess.CompletedProcess(
+                args, 0, stdout=json.dumps([
+                    {"number": 1, "headRepositoryOwner": {"login": "fork"}},
+                    {"number": 2, "headRepositoryOwner": {"login": "Generous-Corp"}},
+                ]), stderr="")
+
+        val._git, val._gh = fake_git, fake_gh
+        try:
+            ok, number = val._list_open_bump_pr(self.clone)
+        finally:
+            val._git, val._gh = original_git, original_gh
+        self.assertTrue(ok)
+        self.assertEqual(number, "2")
+        self.assertIn("--head", calls[0])
+        self.assertEqual(calls[0][calls[0].index("--head") + 1],
+                         val.BUMP_BRANCH)
+        self.assertIn("number,headRepositoryOwner", calls[0])
+
     def test_pr_route_preserves_draft_hold_and_fails_closed(self) -> None:
         _git(self.clone, "checkout", "-q", "-b", val.BUMP_BRANCH)
         (self.clone / "STALE_BUMP.txt").write_text("held draft head\n")
@@ -1223,12 +1298,16 @@ class PrRouteTest(unittest.TestCase):
         held_sha = _git(self.clone, "rev-parse", "HEAD").strip()
         _git(self.clone, "switch", "-q", "main")
 
-        fake = _FakeGh(open_prs=1, draft_pr=True)
+        held_body = "owner hold notes\n"
+        fake = _FakeGh(open_prs=1, draft_pr=True, body=held_body)
         val._gh = fake
         status, _ = val.apply_via_pr(self.clone, self._cfg())
         self.assertEqual(status, "arm-failed")
         self.assertFalse(fake.did("pr", "merge"))
         self.assertFalse(fake.did("pr", "create"))
+        self.assertEqual(fake.body, held_body)
+        self.assertFalse(any(c[:1] == ("api",) and ".body" in c
+                             for c in fake.calls))
         self.assertEqual(_git(self.clone, "ls-remote", "origin",
                               val.BUMP_BRANCH).split()[0], held_sha)
 
@@ -1244,6 +1323,25 @@ class PrRouteTest(unittest.TestCase):
         replacement_sha = _git(self.clone, "ls-remote", "origin",
                                val.BUMP_BRANCH).split()[0]
         self.assertNotEqual(replacement_sha, held_sha)
+
+    def test_pr_route_draft_stale_defer_does_not_reconcile_description(self) -> None:
+        """A draft is an owner's hold, so its hand-written body is preserved."""
+        _git(self.clone, "checkout", "-q", "-b", val.BUMP_BRANCH)
+        (self.clone / "STALE_BUMP.txt").write_text(
+            "held draft head\n", encoding="utf-8")
+        _git(self.clone, "add", "--", "STALE_BUMP.txt")
+        _git(self.clone, "commit", "--no-verify", "-q", "-m", "held draft")
+        _git(self.clone, "push", "-q", "origin", f"HEAD:{val.BUMP_BRANCH}")
+        _git(self.clone, "switch", "-q", "main")
+
+        held_body = "owner hold notes\n"
+        fake = _FakeGh(open_prs=1, draft_pr=True, covers=False, body=held_body)
+        val._gh = fake
+        status, _ = val.apply_via_pr(self.clone, self._cfg())
+        self.assertEqual(status, "stale-defer")
+        self.assertEqual(fake.body, held_body)
+        self.assertFalse(any(c[:1] == ("api",) and ".body" in c
+                             for c in fake.calls))
 
     def test_pr_route_noop_without_intent(self) -> None:
         # Drain an origin that already carries the marker → nothing to bump.
@@ -1304,6 +1402,7 @@ class StandingBumpPrTest(unittest.TestCase):
     _cfg = PrRouteTest._cfg
     _branch_cmake_version = PrRouteTest._branch_cmake_version
     _tip = PrRouteTest._tip
+    _message = PrRouteTest._message
 
     def _land(self, name: str, rel: str, subject: str, body: str = "") -> None:
         """Land one change on origin's main, as a merged PR would."""
@@ -1331,11 +1430,13 @@ class StandingBumpPrTest(unittest.TestCase):
 
     def test_one_pr_covers_several_landings_updated_in_place(self) -> None:
         calls: list[tuple[str, ...]] = []
+        pr = {"body": ""}
 
         def drain(**fake_kwargs):
-            fake = _FakeGh(**fake_kwargs)
+            fake = _FakeGh(body=pr["body"], **fake_kwargs)
             result = self._drain(fake)
             calls.extend(fake.calls)
+            pr["body"] = fake.body
             return result
 
         status, _ = drain(open_prs=0)
@@ -1377,7 +1478,10 @@ class StandingBumpPrTest(unittest.TestCase):
         self.assertEqual(len(creates), 1, "a second bump PR was opened")
         self.assertFalse([c for c in calls if c[:2] == ("pr", "close")],
                          "the standing bump PR was closed and recut")
-        self.assertEqual(len([c for c in calls if c[:2] == ("pr", "edit")]), 2)
+        self.assertEqual(len([c for c in calls
+                              if c[:3] == ("api", "--method", "PATCH")]), 2)
+        self.assertEqual(val._marker_line(pr["body"]),
+                         val._marker_line(self._message(val.BUMP_BRANCH)))
         self.assertFalse([c for c in calls if c[:2] == ("pr", "merge")])
 
     def test_update_is_spaced_by_the_window_unless_a_level_rises(self) -> None:
@@ -1387,12 +1491,12 @@ class StandingBumpPrTest(unittest.TestCase):
 
         # Repairing a dead head with identical content waits out the window.
         dead = dict(open_prs=1, covers=False, ejected=True, armed=False)
-        fake = _FakeGh(**dead)
+        fake = _FakeGh(body=self._message(built), **dead)
         status, _ = self._drain(fake, heal_stale=True, coalesce_window=120,
                                 now=stamp + 10 * 60)
         self.assertEqual(status, "standing-held")
         self.assertEqual(self._tip(), built)
-        self.assertFalse(fake.did("pr", "edit"))
+        self.assertEqual(fake.body_writes(), 0)
 
         # A level rise inside the window updates at once.
         self._land("major", "core/runtime/src/baz.cpp", "feat(core): breaking",
@@ -1450,7 +1554,8 @@ class StandingBumpPrTest(unittest.TestCase):
         status, _ = self._drain(fake, coalesce_window=120, now=stamp + 10 * 60)
         self.assertEqual(status, "pr-updated")
         self.assertNotEqual(self._tip(), carried)
-        self.assertTrue(fake.did("pr", "edit"))
+        self.assertEqual(val._marker_line(fake.body),
+                         val._marker_line(self._message(self._tip())))
 
     def test_a_doomed_ejected_head_is_repaired_without_the_heal_opt_in(self) -> None:
         """An ejected bump whose capability assignment main has outgrown can
@@ -1480,11 +1585,11 @@ class StandingBumpPrTest(unittest.TestCase):
         stamp = self._tip_time()
         self._land("header", "docs/status/agent-capability-surface/headers/pulp/a.hpp.json",
                    "docs: a header record")
-        fake = _FakeGh(open_prs=1, covers=False)
+        fake = _FakeGh(open_prs=1, covers=False, body=self._message(built))
         status, _ = self._drain(fake, coalesce_window=120, now=stamp + 10 * 60)
         self.assertEqual(status, "stale-wait")
         self.assertEqual(self._tip(), built)
-        self.assertFalse(fake.did("pr", "edit"))
+        self.assertEqual(fake.body_writes(), 0)
 
     def test_a_rebuild_identical_to_the_standing_head_is_not_an_update(self) -> None:
         """Nothing changed since the head was built (same tree, parent, message
@@ -1494,12 +1599,13 @@ class StandingBumpPrTest(unittest.TestCase):
         self.assertEqual(self._drain(_FakeGh(open_prs=0), now=moment)[0],
                          "pr-opened")
         built = self._tip()
-        fake = _FakeGh(open_prs=1, covers=False, ejected=True, armed=False)
+        fake = _FakeGh(open_prs=1, covers=False, ejected=True, armed=False,
+                       body=self._message(built))
         status, _ = self._drain(fake, heal_stale=True, coalesce_window=0,
                                 now=moment)
         self.assertEqual(status, "stale-wait")
         self.assertEqual(self._tip(), built)
-        self.assertFalse(fake.did("pr", "edit"))
+        self.assertEqual(fake.body_writes(), 0)
         # Control: a later clock reading is a different commit and does update.
         fake = _FakeGh(open_prs=1, covers=False, ejected=True, armed=False)
         status, _ = self._drain(fake, heal_stale=True, coalesce_window=0,
@@ -1538,6 +1644,91 @@ class StandingBumpPrTest(unittest.TestCase):
         status, plan = self._drain(fake)
         self.assertEqual(status, "noop", plan)
         self.assertFalse(fake.did("pr", "create"))
+
+    def test_an_in_place_update_describes_the_new_head(self) -> None:
+        """The description names the versions the head assigns. `pr edit`
+        fails for the bot's token, so an update that relied on it left the
+        description of the first cut while the head assigned a higher level,
+        and the reviewer held the correct head against the stale text."""
+        fake = _FakeGh(open_prs=0)
+        self.assertEqual(self._drain(fake)[0], "pr-opened")
+        first = fake.body
+        self._land("skill", ".claude-plugin/hooks.json", "fix(plugin): tweak",
+                   "Version-Bump: plugin=minor")
+        fake = _FakeGh(open_prs=1, covers=False, body=first)
+        status, _ = self._drain(fake)
+        self.assertEqual(status, "pr-updated")
+        head_message = self._message(self._tip())
+        self.assertIn("plugin 0.1.0->0.2.0 (minor)", head_message)
+        self.assertNotEqual(val._marker_line(first),
+                            val._marker_line(head_message))
+        self.assertEqual(val._marker_line(fake.body),
+                         val._marker_line(head_message))
+        self.assertIn("plugin 0.1.0->0.2.0 (minor)", fake.body)
+
+    def test_a_later_drain_repairs_a_stale_description(self) -> None:
+        """A description an earlier drain failed to refresh is rewritten by
+        the next drain that keeps the head, and left alone once it matches."""
+        self.assertEqual(self._drain(_FakeGh(open_prs=0))[0], "pr-opened")
+        built = self._tip()
+        marker = val._marker_line(self._message(built))
+        stale = f"manually edited release text\n\n{marker}\n"
+        fake = _FakeGh(open_prs=1, covers=True, body=stale)
+        status, _ = self._drain(fake, heal_stale=True)
+        self.assertEqual(status, "pending")
+        self.assertEqual(self._tip(), built)
+        self.assertEqual(val._marker_line(fake.body),
+                         val._marker_line(self._message(built)))
+        self.assertEqual(fake.body_writes(), 1)
+        again = _FakeGh(open_prs=1, covers=True, body=fake.body)
+        self.assertEqual(self._drain(again, heal_stale=True)[0], "pending")
+        self.assertEqual(again.body_writes(), 0)
+
+    def test_description_patch_failure_is_a_visible_failed_reconcile(self) -> None:
+        self.assertEqual(self._drain(_FakeGh(open_prs=0))[0], "pr-opened")
+        self._land("feature", "core/runtime/src/new.cpp", "feat(core): new")
+        fake = _FakeGh(open_prs=1, covers=False, body_patch_rc=1,
+                       body_patch_stderr="PATCH refused")
+        summary = self.root / "body-patch-summary.md"
+        previous = os.environ.get("GITHUB_STEP_SUMMARY")
+        os.environ["GITHUB_STEP_SUMMARY"] = str(summary)
+        try:
+            with contextlib.redirect_stdout(io.StringIO()) as out:
+                status, _ = self._drain(fake)
+        finally:
+            if previous is None:
+                os.environ.pop("GITHUB_STEP_SUMMARY", None)
+            else:
+                os.environ["GITHUB_STEP_SUMMARY"] = previous
+        self.assertEqual(status, "body-reconcile-failed")
+        self.assertIn("::error title=version-at-land::", out.getvalue())
+        self.assertIn("PATCH refused", summary.read_text(encoding="utf-8"))
+        patch = next(c for c in fake.calls
+                     if c[:3] == ("api", "--method", "PATCH"))
+        self.assertTrue(patch[3].endswith("/pulls/1"), patch)
+
+    def test_description_get_failure_is_a_visible_failed_reconcile(self) -> None:
+        self.assertEqual(self._drain(_FakeGh(open_prs=0))[0], "pr-opened")
+        self._land("feature", "core/runtime/src/new.cpp", "feat(core): new")
+        fake = _FakeGh(open_prs=1, covers=True, body_get_rc=1,
+                       body_get_stderr="GET refused")
+        summary = self.root / "body-get-summary.md"
+        previous = os.environ.get("GITHUB_STEP_SUMMARY")
+        os.environ["GITHUB_STEP_SUMMARY"] = str(summary)
+        try:
+            with contextlib.redirect_stdout(io.StringIO()) as out:
+                status, _ = self._drain(fake, heal_stale=True)
+        finally:
+            if previous is None:
+                os.environ.pop("GITHUB_STEP_SUMMARY", None)
+            else:
+                os.environ["GITHUB_STEP_SUMMARY"] = previous
+        self.assertEqual(status, "body-reconcile-failed")
+        self.assertIn("::error title=version-at-land::", out.getvalue())
+        self.assertIn("GET refused", summary.read_text(encoding="utf-8"))
+        get = next(c for c in fake.calls
+                   if c[:1] == ("api",) and ".body" in c)
+        self.assertTrue(get[1].endswith("/pulls/1"), get)
 
 
 class CoalesceDecisionTest(unittest.TestCase):

@@ -82,8 +82,13 @@ class ArrangerView : public view::View {
 
     ArrangerView();
 
-    /// Borrows the project to paint and hit-test. Neither pointer is retained
-    /// past the next call; the caller re-points the view after every commit.
+    /// Borrows the project to paint and hit-test until the next call. The
+    /// caller re-points the view after every commit, including synchronously
+    /// from submit_intent(). Refreshing a snapshot preserves active gestures.
+    /// Call on_mouse_cancel() before binding a different document, sequence,
+    /// or host; a snapshot refresh is not gesture cancellation. If the host
+    /// declines Cancel, keep it alive and retry cancellation before rebinding.
+    /// gesture_open() stays true until an accepted End or Cancel closes it.
     void set_project(const timeline::Project* project, timeline::ItemId sequence_id);
     void set_layout(const ArrangerLayout& layout);
     /// Where emitted intents go. Null leaves the view fully interactive and
@@ -182,9 +187,9 @@ class ArrangerView : public view::View {
     /// Clip under a lane-space point, resolved against the pointer tolerance.
     const timeline::Clip* clip_at(const timeline::Track& track, view::Point position) const;
 
-    void emit_move(const Drag& drag, timeline::GesturePhase phase,
-                   timeline::MusicalTimeRange replacement);
-    void submit(const timeline_editor::EditIntent& intent);
+    timeline_editor::IntentResult emit_move(const Drag& drag, timeline::GesturePhase phase,
+                                            timeline::MusicalTimeRange replacement);
+    timeline_editor::IntentResult submit(const timeline_editor::EditIntent& intent);
     void submit(const timeline_editor::TrackEditIntent& intent);
     void submit(const timeline_editor::TrackCreateIntent& intent);
 

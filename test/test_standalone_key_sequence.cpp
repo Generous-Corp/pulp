@@ -5,6 +5,7 @@
 #include <pulp/format/detail/standalone_key_sequence.hpp>
 #include <pulp/format/detail/standalone_environment.hpp>
 #include <pulp/format/standalone.hpp>
+#include <pulp/view/input_events.hpp>
 
 #include <cstdlib>
 #include <string>
@@ -12,7 +13,27 @@
 
 using namespace pulp;
 using namespace pulp::format::detail;
-using KC = pulp::view::KeyCode;
+using KC = pulp::format::detail::SequenceKey;
+
+// A step's key and modifiers keep view::KeyCode's and view::Modifier's values,
+// so a sequence names the same key on either side of the view boundary.
+namespace {
+template <typename A, typename B> constexpr bool same_value(A a, B b) {
+    return static_cast<int>(a) == static_cast<int>(b);
+}
+using VK = pulp::view::KeyCode;
+static_assert(same_value(KC::a, VK::a) && same_value(KC::z, VK::z));
+static_assert(same_value(KC::num0, VK::num0) && same_value(KC::num9, VK::num9));
+static_assert(same_value(KC::semicolon, VK::semicolon) &&
+              same_value(KC::apostrophe, VK::apostrophe));
+static_assert(same_value(KC::left, VK::left) && same_value(KC::page_down, VK::page_down));
+static_assert(same_value(KC::backspace, VK::backspace) && same_value(KC::escape, VK::escape));
+static_assert(same_value(KC::space, VK::space));
+static_assert(same_value(KC::f1, VK::f1) && same_value(KC::f12, VK::f12));
+static_assert(kSequenceModShift == pulp::view::kModShift &&
+              kSequenceModCtrl == pulp::view::kModCtrl && kSequenceModAlt == pulp::view::kModAlt &&
+              kSequenceModMeta == pulp::view::kModMeta && kSequenceModCmd == pulp::view::kModCmd);
+} // namespace
 
 TEST_CASE("key sequence parses arrow and named keys", "[standalone][keyboard]") {
     std::vector<KeySequenceStep> steps;
@@ -25,7 +46,7 @@ TEST_CASE("key sequence parses arrow and named keys", "[standalone][keyboard]") 
     CHECK(steps[2].key == KC::up);
     CHECK(steps[3].key == KC::enter);
     for (const auto& s : steps)
-        CHECK(s.modifiers == view::kModNone);
+        CHECK(s.modifiers == pulp::format::detail::kSequenceModNone);
 }
 
 TEST_CASE("key sequence parses modifier chords", "[standalone][keyboard]") {
@@ -35,14 +56,15 @@ TEST_CASE("key sequence parses modifier chords", "[standalone][keyboard]") {
     REQUIRE(steps.size() == 3);
 
     CHECK(steps[0].key == KC::a);
-    CHECK(steps[0].modifiers == view::kModCmd);
+    CHECK(steps[0].modifiers == pulp::format::detail::kSequenceModCmd);
     CHECK(steps[0].label == "cmd+a");
 
     CHECK(steps[1].key == KC::tab);
-    CHECK(steps[1].modifiers == view::kModShift);
+    CHECK(steps[1].modifiers == pulp::format::detail::kSequenceModShift);
 
     CHECK(steps[2].key == KC::f7);
-    CHECK(steps[2].modifiers == (view::kModCtrl | view::kModAlt));
+    CHECK(steps[2].modifiers ==
+          (pulp::format::detail::kSequenceModCtrl | pulp::format::detail::kSequenceModAlt));
 }
 
 TEST_CASE("key sequence normalizes case and whitespace", "[standalone][keyboard]") {
@@ -53,7 +75,7 @@ TEST_CASE("key sequence normalizes case and whitespace", "[standalone][keyboard]
     CHECK(steps[0].key == KC::down);
     CHECK(steps[0].label == "down");
     CHECK(steps[1].key == KC::a);
-    CHECK(steps[1].modifiers == view::kModCmd);
+    CHECK(steps[1].modifiers == pulp::format::detail::kSequenceModCmd);
     // Inner whitespace is stripped so "Cmd + A" and "cmd+a" name one artifact.
     CHECK(steps[1].label == "cmd+a");
 }

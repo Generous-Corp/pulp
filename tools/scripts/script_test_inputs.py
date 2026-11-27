@@ -96,7 +96,8 @@ SKIP_EXIT = 77
 GATE_SYSTEM_NAME = "Darwin"
 # Prefixes a literal string must start with to count as a repository path.
 REPO_PREFIXES = ("tools/", "test/", "hooks/", ".githooks/", ".github/", "docs/", "ship/",
-                 "core/", "examples/", "templates/", "inspect/", "experimental/", "cmake/", "external/")
+                 "core/", "examples/", "templates/", "inspect/", "experimental/", "cmake/", "external/",
+                 ".claude/", ".claude-plugin/")
 LITERAL_RE = re.compile(r"""["'](?P<p>(?:%s)[A-Za-z0-9_./@+-]+)["']""" % "|".join(re.escape(p) for p in REPO_PREFIXES))
 NODE_IMPORT_RE = re.compile(r"""(?:from\s+|import\s*\(?\s*|require\s*\(\s*)["'](?P<s>\.{1,2}/[^"']+)["']""")
 # Node test files `node --test` may list after the first one.

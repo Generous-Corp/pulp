@@ -1193,7 +1193,7 @@ fi
 # resolves the protected tip rather than picking an integer by hand.
 capability_paths_touched() {
     git diff --name-only "$1"...HEAD 2>/dev/null | grep -qE \
-        '^(core/[^/]+/include/|tools/scripts/agent_capability_|tools/agent-capabilities/|docs/status/agent-capabilit)'
+        '^(core/[^/]+/include/|tools/scripts/agent_capability_|tools/scripts/(json_schema_lite|gate_common)\.py$|tools/agent-capabilities/|docs/status/agent-capabilit|tools/dsp_vocabulary\.py$|docs/status/forge-catalog\.json$|test/test_agent_capability_compile\.cpp$)'
 }
 
 if [ -f "$CAPABILITY_CONTRACT" ]; then
