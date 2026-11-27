@@ -377,7 +377,10 @@ elseif(SCENARIO STREQUAL "real")
         message(FATAL_ERROR "real: the inspector-off configure failed:\n${_out}${_err}")
     endif()
     _reject("${_out}${_err}" "unported " "an unported consumer with the inspector off")
-    execute_process(COMMAND "${CMAKE_COMMAND}" --build "${FIXTURE_DIR}/real-build"
+    # Through the build governor, so the build takes a share of a shared host
+    # rather than every core.
+    execute_process(COMMAND "${PULP_SOURCE_DIR}/tools/ci/governed-build.sh"
+            "${CMAKE_COMMAND}" --build "${FIXTURE_DIR}/real-build"
             --target pulp-format-core pulp-format-view pulp-vellum
         RESULT_VARIABLE _rc OUTPUT_VARIABLE _out ERROR_VARIABLE _err)
     if(NOT _rc EQUAL 0)

@@ -1781,10 +1781,8 @@ set_tests_properties(cmake-vellum-ui-in-tree-cli-force-load PROPERTIES
     LABELS "cmake;sdk" TIMEOUT 120
     SKIP_REGULAR_EXPRESSION "SKIP: the CLI force-load is macOS only")
 set(_vellum_ui_in_tree_args "")
-set(_vellum_ui_in_tree_labels "cmake;sdk")
 if(Vellum_DIR)
     set(_vellum_ui_in_tree_args -DVELLUM_DIR=${Vellum_DIR} -DREQUIRE_VELLUM=ON)
-    set(_vellum_ui_in_tree_labels "cmake;sdk;pulp-vellum")
 endif()
 add_test(NAME cmake-vellum-ui-in-tree-real
     COMMAND ${CMAKE_COMMAND}
@@ -1793,13 +1791,18 @@ add_test(NAME cmake-vellum-ui-in-tree-real
         -DSCENARIO=real
         ${_vellum_ui_in_tree_args}
         -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/test_vellum_ui_in_tree.cmake)
-# TIMEOUT covers three configures and a build of format-core, format-view and
-# pulp-vellum with their dependencies in the in-tree mode.
 set_tests_properties(cmake-vellum-ui-in-tree-real PROPERTIES
-    LABELS "${_vellum_ui_in_tree_labels}" TIMEOUT 1800
+    LABELS "cmake;sdk" TIMEOUT 120
     SKIP_REGULAR_EXPRESSION "SKIP: no installed Vellum SDK")
+if(Vellum_DIR)
+    # With a Vellum SDK it configures the tree three times and builds
+    # format-core, format-view and pulp-vellum in the in-tree mode, so it runs
+    # in the Vellum SDK consumer lane (pulp-vellum) and not on the required
+    # gate (slow).
+    set_tests_properties(cmake-vellum-ui-in-tree-real PROPERTIES
+        LABELS "cmake;sdk;pulp-vellum;slow" TIMEOUT 1800)
+endif()
 unset(_vellum_ui_in_tree_args)
-unset(_vellum_ui_in_tree_labels)
 
 # The consumer modules read PULP_UI_PROVIDER, so a Vellum-backed Pulp::view
 # never has Pulp's view, render or editor-adapter sources compiled against it.
