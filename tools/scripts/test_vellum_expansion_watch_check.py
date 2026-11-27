@@ -413,7 +413,7 @@ class Tests(unittest.TestCase):
         """One commit that changes a watched path and adds its own event."""
         target = repo / path
         target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_text(text or f"{event_id}\n")
+        target.write_text(text or f"{event_id}\n", encoding="utf-8")
         if value is None:
             value = event("render-assets-and-backends", event_id=event_id)
             value["rationale"] = f"Record the {event_id} render change; no authority moves."
@@ -501,7 +501,7 @@ class Tests(unittest.TestCase):
         self.claim(repo, "core/render/parent_backend.cpp", "20261127-parent-render-watch")
         self.claim(repo, "core/render/child_backend.cpp", "20261127-child-render-watch")
         path = repo / watch.EVENT_ROOT / "20261127-child-render-watch.json"
-        value = json.loads(path.read_text())
+        value = json.loads(path.read_text(encoding="utf-8"))
         value["rationale"] += " Edited."
         write_json(path, value)
         head = self.commit(repo, "edit an event inside the range")
@@ -514,7 +514,7 @@ class Tests(unittest.TestCase):
         del temporary
         seed = run(repo, "git", "rev-parse", "HEAD").stdout.strip()
         run(repo, "git", "checkout", "-q", "-b", "side")
-        (repo / "side.txt").write_text("side\n")
+        (repo / "side.txt").write_text("side\n", encoding="utf-8")
         side = self.commit(repo, "side")
         run(repo, "git", "checkout", "-q", "-b", "work", seed)
         self.claim(repo, "core/render/parent_backend.cpp", "20261127-parent-render-watch")
