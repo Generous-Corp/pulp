@@ -949,8 +949,7 @@ private:
 } // namespace
 
 TEST_CASE("attach_webview routes WebViewPanel messages through dispatch",
-          "[editor_bridge][issue-709]")
-{
+          "[editor_bridge][issue-709]") {
     EditorBridge bridge;
     int called_with = 0;
     bridge.add_handler("set_value", [&](const auto& payload) {
@@ -977,9 +976,7 @@ TEST_CASE("attach_webview routes WebViewPanel messages through dispatch",
     CHECK(response_has_error(resp2, "unknown message type"));
 }
 
-TEST_CASE("detach_webview clears the WebViewPanel message handler",
-          "[editor_bridge][issue-726]")
-{
+TEST_CASE("detach_webview clears the WebViewPanel message handler", "[editor_bridge][issue-726]") {
     EditorBridge bridge;
     int calls = 0;
     bridge.add_handler("set_value", [&](const auto&) {
@@ -1009,8 +1006,7 @@ TEST_CASE("detach_webview clears the WebViewPanel message handler",
 #endif
 
 TEST_CASE("attach_native_runtime on a JsRuntime is a no-op stub for #468",
-          "[editor_bridge][issue-709][issue-468]")
-{
+          "[editor_bridge][issue-709][issue-468]") {
     // The native-JS-runtime attach path is a declared seam for pulp
     // #468; the body is intentionally empty until JsRuntime exposes a
     // concrete postMessage primitive. This test locks in the stub's
@@ -1039,8 +1035,7 @@ TEST_CASE("EditorBridge native ScriptEngine attachment dispatches JSON envelopes
     });
 
     pulp::view::ScriptEngine engine;
-    CHECK_THROWS_AS(attach_native_runtime(bridge, engine, ""),
-                    std::invalid_argument);
+    CHECK_THROWS_AS(attach_native_runtime(bridge, engine, ""), std::invalid_argument);
     attach_native_runtime(bridge, engine, "__testEditorDispatch");
 
     const auto result = engine.evaluate(
@@ -1084,8 +1079,7 @@ TEST_CASE("EditorBridge ScriptedUiSession attachment survives realm replacement"
                       .enable_hot_reload = false,
                       .enable_theme_reload = false});
 
-    CHECK_THROWS_AS(attach_native_runtime(bridge, session, ""),
-                    std::invalid_argument);
+    CHECK_THROWS_AS(attach_native_runtime(bridge, session, ""), std::invalid_argument);
     attach_native_runtime(bridge, session, "__testEditorDispatch");
     std::string error;
     REQUIRE(session.load(&error));
