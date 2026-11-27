@@ -110,7 +110,11 @@ on a real PR. Do them in order.
      covers `Processor`, `PluginSlot`, and the experimental `GpuAudioNode`
      surface. New GPU-audio virtual hooks belong at the end of that class;
      inserting one in the middle shifts existing slots even though the SDK
-     remains source-rebuild oriented. The editor-host interfaces (`Editor`,
+     remains source-rebuild oriented. The gate reads
+     `PULP_FORMAT_LEGACY_VIEW_NAME(x)` in `processor.hpp` as `x` (the reserved
+     names a UI-free SDK gives the view hooks) and expands no other macro, so
+     a renamed spelling of an existing slot passes and a changed signature
+     inside the macro still fails. The editor-host interfaces (`Editor`,
      `EditorContext`, `EditorFactory`, `NativeSurfaceHost`) are checked under a
      stricter FROZEN policy: an appended virtual fails too, because a UI
      package and a format adapter are separate prebuilt binaries. Don't "fix"
