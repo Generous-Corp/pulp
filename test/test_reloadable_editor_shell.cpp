@@ -294,12 +294,20 @@ namespace {
 // role, which the gen1 logic does not, and records the processor it was given.
 class PackageEditor final : public format::Editor {
   public:
-    bool supports_parent(format::NativeParentKind) const override { return true; }
-    bool attach(const format::NativeParent&) override { return true; }
+    bool supports_parent(format::NativeParentKind) const override {
+        return true;
+    }
+    bool attach(const format::NativeParent&) override {
+        return true;
+    }
     void detach() override {}
     void invalidate() override {}
-    format::EditorSize size() const override { return {320, 200, 1.0}; }
-    bool set_size(const format::EditorSize&) override { return true; }
+    format::EditorSize size() const override {
+        return {320, 200, 1.0};
+    }
+    bool set_size(const format::EditorSize&) override {
+        return true;
+    }
 };
 
 class PackageFactory final : public format::EditorFactory {

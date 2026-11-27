@@ -15,10 +15,18 @@ namespace {
 class Context final : public pulp::format::EditorContext {
   public:
     explicit Context(pulp::state::StateStore& store) : port_(store) {}
-    pulp::format::ParamPort& params() override { return port_; }
-    pulp::format::VisualPort* visuals() override { return nullptr; }
-    bool request_resize(const pulp::format::EditorSize&) override { return true; }
-    bool host_action(const pulp::format::HostActionRequest&) override { return true; }
+    pulp::format::ParamPort& params() override {
+        return port_;
+    }
+    pulp::format::VisualPort* visuals() override {
+        return nullptr;
+    }
+    bool request_resize(const pulp::format::EditorSize&) override {
+        return true;
+    }
+    bool host_action(const pulp::format::HostActionRequest&) override {
+        return true;
+    }
     pulp::format::EditorHostKind host_kind() const override {
         return pulp::format::EditorHostKind::plugin;
     }
@@ -43,8 +51,8 @@ int main() {
     auto* factory = shell->editor_factory();
     const bool supports = factory != nullptr && factory->supports(pulp::format::EditorRole::editor);
     Context context(store);
-    auto editor = supports ? factory->create(*shell, context, pulp::format::EditorRole::editor)
-                           : nullptr;
+    auto editor =
+        supports ? factory->create(*shell, context, pulp::format::EditorRole::editor) : nullptr;
     std::printf("reload-editor-probe %s: shell=%d logic=%d supports=%d created=%d\n", PROBE_NAME,
                 control != nullptr, active, supports, editor != nullptr);
     return control != nullptr && active && supports && editor != nullptr ? 0 : 1;
