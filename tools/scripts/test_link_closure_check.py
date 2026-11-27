@@ -186,6 +186,21 @@ class ClosureWalk(unittest.TestCase):
         code, _, _ = self.run_check(records, ["pulp-root"], ["pulp-view*"])
         self.assertEqual(code, 2)
 
+    def test_missing_target_objects_record_is_inconclusive(self) -> None:
+        for expr in ("$<TARGET_OBJECTS:canvas_objs>", "$<TARGET_FILE:canvas_objs>",
+                     "$<TARGET_PROPERTY:canvas_objs,INTERFACE_SOURCES>"):
+            code, _, err = self.run_check({"pulp-root": ("", "", expr)}, ["pulp-root"],
+                                          ["pulp-view*"])
+            self.assertEqual(code, 2, expr)
+            self.assertIn("canvas_objs", err)
+
+    def test_present_target_objects_record_is_walked(self) -> None:
+        records = {"pulp-root": ("", "", "$<TARGET_OBJECTS:objs>"),
+                   "objs": ("pulp::view-core", "")}
+        code, _, err = self.run_check(records, ["pulp-root"], ["pulp-view*"])
+        self.assertEqual(code, 1)
+        self.assertIn("reaches pulp-view-core", err)
+
     def test_truncated_record_is_inconclusive_not_a_pass(self) -> None:
         text = graph_text({"pulp-root": ("pulp::mid", "")})
         text += "pulp-mid\tSTATIC_LIBRARY\n"

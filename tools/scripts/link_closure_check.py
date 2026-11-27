@@ -22,7 +22,8 @@ still owes; every allowed edge is printed, so an exemption never goes unseen.
 
 A graph that cannot be trusted is never a PASS: a record with fewer than four
 fields (a truncated dump) and a reachable target-shaped name (`pulp-*` or a
-`ns::name` target) that has no record are both INCONCLUSIVE. Paths, flags and
+`ns::name` target, or any name a `$<TARGET_OBJECTS:x>`-style expression names) that
+has no record are both INCONCLUSIVE. Paths, flags and
 generator-expression tokens are not target-shaped, so they are not held against
 the graph.
 
@@ -44,6 +45,9 @@ from pathlib import Path
 MIN_GRAPH_TARGETS = 20
 WORD_RE = re.compile(r"[A-Za-z0-9_+.@/-]+")
 TARGET_SHAPED_RE = re.compile(r"^(?:pulp-[a-z0-9_+-]+|[a-z0-9_+-]+::[a-z0-9_+:-]+)$")
+EXPLICIT_TARGET_RE = re.compile(
+    r"\$<TARGET_(?:OBJECTS|FILE|FILE_DIR|FILE_NAME|LINKER_FILE|SONAME_FILE|PROPERTY|"
+    r"NAME_IF_EXISTS|BUNDLE_DIR):([A-Za-z0-9_+.@:-]+)", re.IGNORECASE)
 ARCHIVE_RE = re.compile(r"^(?:lib)?(.+?)\.(?:a|so|dylib|lib|dll)(?:\.[0-9.]+)?$")
 
 
@@ -82,6 +86,8 @@ class Graph:
         self.edges: dict[str, list[str]] = {}
         self.types: dict[str, str] = {}
         self.malformed: list[str] = []
+        # Names a generator expression names as a CMake target, whatever their spelling.
+        self.explicit: set[str] = set()
 
     @classmethod
     def parse(cls, text: str) -> "Graph":
@@ -99,6 +105,7 @@ class Graph:
             for value in fields[2:]:
                 if value.endswith("-NOTFOUND"):
                     continue
+                graph.explicit.update(canonical(m) for m in EXPLICIT_TARGET_RE.findall(value))
                 for target in referenced_targets(value):
                     if target != name and target not in targets:
                         targets.append(target)
@@ -137,7 +144,7 @@ def find_paths(graph: Graph, root: str, forbidden: list[str],
                 found.append(list(reversed(path)))
                 continue
             if (target not in graph.edges and unresolved is not None
-                    and TARGET_SHAPED_RE.match(target)):
+                    and (TARGET_SHAPED_RE.match(target) or target in graph.explicit)):
                 unresolved.append(target)
             queue.append(target)
     return found
