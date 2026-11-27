@@ -41,7 +41,7 @@ in a second window through its own `ContractEditorSession`
 it and closes it before the main editor detaches. This is where a plug-in's
 settings sections show once its editor comes from a factory: the
 `settings_sections()` tabs exist only in the create_view() window. Tests open it
-with `StandaloneConfig::test_open_plugin_settings_frame`.
+with `StandaloneApp::set_test_hooks({.open_plugin_settings_frame = N})`; the contract window's test controls live in `detail/standalone_test_hooks.hpp`, never in the public `StandaloneConfig`.
 
 Fixed user sizing does not forbid an editor-origin resize: preserve the
 `EditorContext::request_resize` acknowledgment even when `can_resize` is false.
