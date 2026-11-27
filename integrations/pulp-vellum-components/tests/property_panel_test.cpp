@@ -361,3 +361,28 @@ TEST_CASE("PropertyPanel: observer that registers properties does not dangle",
     });
     CHECK(panel.click("b"));
 }
+
+TEST_CASE("PropertyPanel: observer re-registering its own key keeps the pending change",
+          "[property-panel][lifetime]") {
+    pulp::state::PropertiesFile props;
+    props.set_string("a", "old");
+    PropertyPanel panel;
+    panel.bind_persistence(&props);
+    panel.add_text("a", "A", "x", [&](const std::string& v) { panel.add_text("a", "A", v); });
+    REQUIRE(panel.set_text("a", "new"));
+    CHECK(panel.get_text("a").value_or("") == "new");
+    CHECK(props.get_string("a").value_or("") == "new");
+}
+
+TEST_CASE("PropertyPanel: stored Choice index beyond int range clamps, not wraps",
+          "[property-panel][persistence]") {
+    pulp::state::PropertiesFile props;
+    props.set_int("c", int64_t{4294967296});
+    props.set_int("n", int64_t{-4294967296});
+    PropertyPanel panel;
+    panel.bind_persistence(&props);
+    panel.add_choice("c", "C", {"a", "b", "c"}, 0);
+    panel.add_choice("n", "N", {"a", "b", "c"}, 2);
+    CHECK(panel.get_choice("c").value_or(-1) == 2);
+    CHECK(panel.get_choice("n").value_or(-1) == 0);
+}

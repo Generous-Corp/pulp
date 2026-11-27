@@ -376,7 +376,9 @@ class PropertyPanel : public View {
         for (auto& existing : properties_) {
             if (existing.key == p.key) {
                 existing = std::move(p);
-                if (props_)
+                // A re-registration from inside this key's own observer must
+                // not reload the stale persisted value over the pending change.
+                if (props_ && !(firing_ && *firing_ == existing.key))
                     load_from_props(existing);
                 return;
             }
@@ -402,6 +404,12 @@ class PropertyPanel : public View {
         if (p.on_change) {
             const auto callback = p.on_change;
             const Value arg = p.value;
+            struct Guard {
+                const std::string*& slot;
+                const std::string* outer;
+                ~Guard() { slot = outer; }
+            } guard{firing_, firing_};
+            firing_ = &key;
             callback(arg);
         }
         if (const Property* current = find(key))
@@ -447,16 +455,14 @@ class PropertyPanel : public View {
             break;
         case Kind::Choice:
             if (auto v = props_->get_int(p.key)) {
-                int i = static_cast<int>(*v);
-                if (!p.options.empty()) {
-                    if (i < 0)
-                        i = 0;
-                    if (i >= static_cast<int>(p.options.size())) {
-                        i = static_cast<int>(p.options.size()) - 1;
-                    }
-                } else {
-                    i = 0;
-                }
+                // Clamp in 64 bits first: narrowing an out-of-range stored
+                // value to int would wrap it into a valid-looking index.
+                int64_t wide = *v;
+                if (p.options.empty() || wide < 0)
+                    wide = 0;
+                else if (wide >= static_cast<int64_t>(p.options.size()))
+                    wide = static_cast<int64_t>(p.options.size()) - 1;
+                const int i = static_cast<int>(wide);
                 p.value = i;
             }
             break;
@@ -539,6 +545,7 @@ class PropertyPanel : public View {
     }
 
     std::vector<Property> properties_;
+    const std::string* firing_ = nullptr; ///< key whose observer is running
     pulp::state::PropertiesFile* props_ = nullptr;
 };
 
