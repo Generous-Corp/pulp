@@ -586,7 +586,10 @@ add_subdirectory(core/editor_bridge)
 _pulp_add_ui_subdirectory(core/view)
 # The lite editor stack's replacement objects (see PulpLiteEditorObjects.cmake).
 # Apple only: the lite TextShaper measures through CoreText.
-if(APPLE AND NOT IOS AND PULP_HAS_SKIA AND TARGET pulp-canvas AND TARGET pulp-view-core)
+# Off in PULP_UI_FROM_VELLUM_IN_TREE by design: the objects replace members of
+# Pulp's own canvas and view archives, which that mode does not build.
+if(APPLE AND NOT IOS AND PULP_HAS_SKIA AND NOT PULP_UI_FROM_VELLUM_IN_TREE
+        AND TARGET pulp-canvas AND TARGET pulp-view-core)
     include("${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpLiteEditorObjects.cmake")
     _pulp_add_lite_editor_objects(pulp-canvas-lite-objects HOME pulp-canvas
         SOURCES core/canvas/src/text_shaper.cpp core/canvas/src/font_resolver.cpp)

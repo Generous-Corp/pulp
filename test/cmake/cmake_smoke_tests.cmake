@@ -1763,6 +1763,15 @@ add_test(NAME cmake-vellum-ui-in-tree-guards
         -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/test_vellum_ui_in_tree.cmake)
 set_tests_properties(cmake-vellum-ui-in-tree-guards PROPERTIES
     LABELS "cmake;sdk" TIMEOUT 120)
+add_test(NAME cmake-vellum-ui-in-tree-cli-force-load
+    COMMAND ${CMAKE_COMMAND}
+        -DPULP_SOURCE_DIR=${CMAKE_SOURCE_DIR}
+        -DFIXTURE_DIR=${CMAKE_CURRENT_BINARY_DIR}/vellum-ui-in-tree
+        -DSCENARIO=cli-force-load
+        -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/test_vellum_ui_in_tree.cmake)
+set_tests_properties(cmake-vellum-ui-in-tree-cli-force-load PROPERTIES
+    LABELS "cmake;sdk" TIMEOUT 120
+    SKIP_REGULAR_EXPRESSION "SKIP: the CLI force-load is macOS only")
 set(_vellum_ui_in_tree_args "")
 set(_vellum_ui_in_tree_labels "cmake;sdk")
 if(Vellum_DIR)

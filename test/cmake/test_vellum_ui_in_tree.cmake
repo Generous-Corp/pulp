@@ -9,6 +9,8 @@
 #           alias's real target; a defined pulp-view-core, a lower-case
 #           pulp::render left on Pulp's own renderer, and a missing editor
 #           bridge are each refused.
+#   cli-force-load  pulp-cli's force-load of Pulp's UI archives (macOS): still
+#           applied with the mode off, refused with it on.
 #   real    The Pulp source tree configured twice against an installed Vellum
 #           SDK (-DVELLUM_DIR=<dir with VellumConfig.cmake>), tests and
 #           examples off. With the option off it configures and generates with
@@ -135,6 +137,52 @@ if(SCENARIO STREQUAL "guards")
     endif()
 
     message(STATUS "guards: ok")
+
+elseif(SCENARIO STREQUAL "cli-force-load")
+    # pulp-cli force-loads Pulp's own UI archives on macOS. With the mode off it
+    # still does; with it on it must refuse rather than silently drop them.
+    if(NOT CMAKE_HOST_APPLE)
+        message(STATUS "SKIP: the CLI force-load is macOS only")
+        return()
+    endif()
+    function(_cli_fixture name mode out_rc out_text)
+        set(_dir "${FIXTURE_DIR}/${name}")
+        file(REMOVE_RECURSE "${_dir}")
+        file(WRITE "${_dir}/main.c" "int main(void) { return 0; }\n")
+        set(_body "cmake_minimum_required(VERSION 3.25)\nproject(cli_force_load LANGUAGES C)\n")
+        string(APPEND _body "set(PULP_UI_FROM_VELLUM_IN_TREE ${mode})\n")
+        foreach(_archive IN ITEMS pulp-view-core pulp-design-import pulp-view-script pulp-canvas pulp-runtime pulp-inspect-protocol)
+            string(APPEND _body
+                "add_library(${_archive} STATIC IMPORTED)\n"
+                "set_target_properties(${_archive} PROPERTIES IMPORTED_LOCATION \"\${CMAKE_CURRENT_SOURCE_DIR}/lib${_archive}.a\")\n")
+        endforeach()
+        string(APPEND _body
+            "add_executable(pulp-cli main.c)\n"
+            "include(\"${PULP_SOURCE_DIR}/tools/cli/cmake/PulpCliForceLoad.cmake\")\n"
+            "pulp_cli_force_load_archives(pulp-cli)\n"
+            "get_target_property(_options pulp-cli LINK_OPTIONS)\n"
+            "message(STATUS \"cli options=\${_options}\")\n")
+        file(WRITE "${_dir}/CMakeLists.txt" "${_body}")
+        execute_process(COMMAND "${CMAKE_COMMAND}" -S "${_dir}" -B "${_dir}/build"
+            RESULT_VARIABLE _rc OUTPUT_VARIABLE _out ERROR_VARIABLE _err)
+        set(${out_rc} "${_rc}" PARENT_SCOPE)
+        set(${out_text} "${_out}${_err}" PARENT_SCOPE)
+    endfunction()
+
+    _cli_fixture(cli-off OFF _rc _text)
+    if(NOT _rc EQUAL 0)
+        message(FATAL_ERROR "cli-force-load: the mode-off control did not configure:\n${_text}")
+    endif()
+    foreach(_archive IN ITEMS pulp-view-core pulp-design-import pulp-view-script pulp-canvas)
+        _expect("${_text}" "-Wl,-force_load,\\$<TARGET_FILE:${_archive}>" "${_archive} force-loaded with the mode off")
+    endforeach()
+
+    _cli_fixture(cli-on ON _rc _text)
+    if(_rc EQUAL 0)
+        message(FATAL_ERROR "cli-force-load: configured with the mode on, dropping the UI archives:\n${_text}")
+    endif()
+    _expect("${_text}" "force-loads Pulp's own UI archives" "the CLI refusal")
+    message(STATUS "cli-force-load: ok")
 
 elseif(SCENARIO STREQUAL "real")
     if(NOT VELLUM_DIR OR NOT EXISTS "${VELLUM_DIR}/VellumConfig.cmake")

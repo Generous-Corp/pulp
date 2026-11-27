@@ -10,6 +10,21 @@
 # link what an installed-SDK consumer links. It is off by default and changes
 # nothing while off.
 #
+# A consumer that names a skipped target outright is reported by the scan
+# below. A consumer behind a configure-time if(TARGET <UI name>) guard would
+# instead switch itself off, so those guards outside the skipped directories
+# are listed here with what each does in this mode:
+#   tools/cli (pulp_cli_force_load_archives)  refuses: dropping the force-load
+#       would link the CLI with undefined symbols.
+#   CMakeLists.txt, the lite editor objects   off by design: they replace members
+#       of Pulp's own canvas and view archives, which this mode does not build.
+#   tools/cmake/PulpJsBytecode.cmake          takes Pulp::view first, which is the
+#       Vellum-backed name here.
+#   integrations/pulp-native/examples/metal-probe and
+#   integrations/pulp-vellum-components/tests  test-only checks of Pulp's own
+#       view archive; nothing to check when it is not built.
+# Guards in test/ and examples/ belong to the plan rows that port those trees.
+#
 # The directories it leaves out are listed once, in
 # PULP_VELLUM_IN_TREE_SKIPPED_UI_DIRS, each with the reason, so the list can
 # only shrink or grow through a reviewed edit.
