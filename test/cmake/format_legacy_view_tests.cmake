@@ -387,6 +387,9 @@ if(NOT WIN32 AND TARGET pulp-format-core)
 
     add_executable(pulp-test-reloadable-editor-shell
         "${CMAKE_SOURCE_DIR}/test/test_reloadable_editor_shell.cpp"
+        # Built here at mode 0, like format.cpp, rather than taken from
+        # format-core's archive.
+        "${CMAKE_SOURCE_DIR}/core/format/src/reloadable_editor_shell.cpp"
         "${CMAKE_SOURCE_DIR}/core/format/src/format.cpp")
     target_link_libraries(pulp-test-reloadable-editor-shell PRIVATE
         pulp::format-core Catch2::Catch2WithMain ${CMAKE_DL_LIBS})
@@ -404,4 +407,13 @@ if(NOT WIN32 AND TARGET pulp-format-core)
     add_dependencies(pulp-test-reloadable-editor-shell
         pulp-reload-logic-editor-gen1 pulp-reload-logic-editor-gen2 pulp-reload-logic-editor-legacy)
     catch_discover_tests(pulp-test-reloadable-editor-shell PROPERTIES LABELS "format;reload")
+
+    # The shell's public header is an interface: the reload stack it is built
+    # on stays in its .cpp, out of every TU that names the shell.
+    include("${PULP_ROOT_DIR}/test/support/PulpHeaderWeight.cmake")
+    pulp_add_header_weight_test(format-header-weight-reloadable-editor-shell
+        HEADER pulp/format/reload/reloadable_editor_shell.hpp USAGE pulp-format-core
+        DEFINITIONS PULP_FORMAT_LEGACY_VIEW=0
+        FORBID "reload/(reloadable_shell_core|processor_hotswap_slot|reload_controller|reload_library|reload_transaction)\\.hpp"
+        MAX_LINES 85000 LABELS "format;reload;header-weight")
 endif()

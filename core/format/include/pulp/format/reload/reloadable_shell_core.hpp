@@ -137,7 +137,9 @@ class ReloadableShellCore : public Processor {
     }
 
     // The legacy scripted-session slots (reserved names without Pulp's view
-    // layer, see processor.hpp) forward to the live logic like the rest.
+    // layer, see processor.hpp). active_scripted_ui() returns null: a raw
+    // pointer cannot carry the hot-swap lease. The visitors reach the live
+    // logic under that lease.
     view::ScriptedUiSession* PULP_FORMAT_LEGACY_VIEW_NAME(active_scripted_ui)() override {
         return nullptr;
     }
