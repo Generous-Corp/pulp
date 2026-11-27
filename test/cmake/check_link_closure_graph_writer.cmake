@@ -4,6 +4,8 @@
 # route, or a checker that rejects everything, fails here.
 # Inputs: -DSOURCE_DIR -DBINARY_DIR -DCHECKER -DPYTHON -DTEST_DIR
 file(REMOVE_RECURSE "${BINARY_DIR}")
+file(MAKE_DIRECTORY "${BINARY_DIR}/.cmake/api/v1/query")
+file(WRITE "${BINARY_DIR}/.cmake/api/v1/query/codemodel-v2" "")
 execute_process(
     COMMAND "${CMAKE_COMMAND}" -S "${SOURCE_DIR}" -B "${BINARY_DIR}"
             -DPULP_TEST_DIR=${TEST_DIR}
@@ -36,8 +38,8 @@ execute_process(
     COMMAND "${PYTHON}" "${CHECKER}" --graph "${_graph}" --root route_scoped
             --forbid "pulp::canvas"
     RESULT_VARIABLE _rc OUTPUT_VARIABLE _out ERROR_VARIABLE _err)
-if(NOT _rc EQUAL 2 OR NOT _err MATCHES "helper_alias")
-    message(FATAL_ERROR "a directory-scoped imported target must be inconclusive "
+if(NOT _rc EQUAL 1 OR NOT _err MATCHES "helper_import -> pulp-canvas")
+    message(FATAL_ERROR "a directory-scoped imported target must be traversed "
                         "(rc=${_rc})\n${_out}\n${_err}")
 endif()
 execute_process(
@@ -64,4 +66,4 @@ if(NOT _rc EQUAL 2 OR NOT _err MATCHES "gpu_helper")
     message(FATAL_ERROR "a missing intermediate record must be INCONCLUSIVE "
                         "(rc=${_rc})\n${_out}\n${_err}")
 endif()
-message(STATUS "link-closure-graph-writer: 4 routes reported, scoped import inconclusive, control passes, gutted graph inconclusive")
+message(STATUS "link-closure-graph-writer: 4 routes reported, scoped import traversed, control passes, gutted graph inconclusive")

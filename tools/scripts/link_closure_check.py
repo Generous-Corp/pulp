@@ -38,6 +38,7 @@ from __future__ import annotations
 
 import argparse
 import fnmatch
+import json
 import re
 import sys
 from collections import deque
@@ -147,6 +148,50 @@ class Graph:
                     graph.edges[name].append(target)
         return graph
 
+    @classmethod
+    def from_codemodel(cls, build_dir: Path, padding_text: str = "") -> "Graph":
+        """Read CMake's generated target model, including local imports."""
+        reply_dir = build_dir / ".cmake" / "api" / "v1" / "reply"
+        codemodels = sorted(reply_dir.glob("codemodel-v2-*.json"),
+                            key=lambda path: path.stat().st_mtime_ns)
+        if not codemodels:
+            raise ValueError(f"CMake codemodel is not available in {reply_dir}")
+        model = json.loads(codemodels[-1].read_text(encoding="utf-8"))
+        configuration = model["configurations"][0]
+        entries = configuration.get("targets", []) + configuration.get("abstractTargets", [])
+        names = {entry["id"]: canonical(entry["name"]) for entry in entries}
+        graph = cls()
+        for entry in entries:
+            target_path = reply_dir / entry["jsonFile"]
+            target = json.loads(target_path.read_text(encoding="utf-8"))
+            name = canonical(target["name"])
+            graph.types[name] = target.get("type", "")
+            graph.edges.setdefault(name, [])
+            for property_name in ("linkLibraries", "interfaceLinkLibraries",
+                                  "compileDependencies", "interfaceCompileDependencies"):
+                for dependency in target.get(property_name, []):
+                    dependency_name = (names.get(dependency.get("id"))
+                                       if dependency.get("id") else dependency.get("fragment"))
+                    if not dependency_name:
+                        continue
+                    dependency_name = canonical(dependency_name)
+                    for target_name in referenced_targets(dependency_name):
+                        if target_name != name and target_name not in graph.edges[name]:
+                            graph.edges[name].append(target_name)
+            for source in target.get("sources", []):
+                source_name = source.get("path")
+                if source_name:
+                    graph.edges[name].append(canonical(source_name))
+        # Preserve the fixture's padding records and any older writer-only
+        # records while preferring codemodel edges for targets it describes.
+        if padding_text:
+            padding = cls.parse(padding_text)
+            for name, edges in padding.edges.items():
+                if name not in graph.edges or not graph.edges[name]:
+                    graph.edges[name] = edges
+                    graph.types[name] = padding.types.get(name, "")
+        return graph
+
 
 def matches(name: str, patterns: list[str]) -> bool:
     return any(fnmatch.fnmatchcase(name, pattern) for pattern in patterns)
@@ -246,9 +291,26 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     try:
-        graph = Graph.parse(args.graph.read_text(encoding="utf-8"))
+        raw_graph = args.graph.read_text(encoding="utf-8")
+        marker = args.graph.with_suffix(".codemodel")
+        if marker.is_file():
+            build_dir = Path(marker.read_text(encoding="utf-8").strip())
+            try:
+                graph = Graph.from_codemodel(build_dir, raw_graph)
+            except ValueError as error:
+                if "codemodel is not available" not in str(error):
+                    raise
+                # File API replies are produced after the first configure. The
+                # native writer remains the safe fallback until the next one.
+                graph = Graph.parse(raw_graph)
+        else:
+            graph = Graph.parse(raw_graph)
     except OSError as error:
         print(f"link-closure: INCONCLUSIVE: {error}", file=sys.stderr)
+        return 2
+    except (KeyError, TypeError, ValueError, json.JSONDecodeError) as error:
+        print(f"link-closure: INCONCLUSIVE: malformed CMake codemodel: {error}",
+              file=sys.stderr)
         return 2
     if graph.malformed:
         print(f"link-closure: INCONCLUSIVE: {len(graph.malformed)} malformed graph "

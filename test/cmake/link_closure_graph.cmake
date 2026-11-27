@@ -9,6 +9,13 @@
 # The graph lands in ${CMAKE_BINARY_DIR}/link-closure-graph.tsv. Each closure
 # check registered from a test manifest reads it, so the walk covers the real
 # configured graph rather than a hand-listed approximation.
+# A CMake File API codemodel query is also requested. The checker refreshes the
+# graph from that generated model at test time, when directory-scoped imported
+# target records and aliases are available with their resolved properties.
+
+file(MAKE_DIRECTORY "${CMAKE_BINARY_DIR}/.cmake/api/v1/query")
+file(WRITE "${CMAKE_BINARY_DIR}/.cmake/api/v1/query/codemodel-v2" "")
+file(WRITE "${CMAKE_BINARY_DIR}/link-closure-graph.codemodel" "${CMAKE_BINARY_DIR}")
 
 function(_pulp_link_closure_collect dir out_var)
     get_property(_targets DIRECTORY "${dir}" PROPERTY BUILDSYSTEM_TARGETS)
