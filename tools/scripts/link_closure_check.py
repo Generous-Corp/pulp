@@ -37,6 +37,7 @@ from pathlib import Path
 
 MIN_GRAPH_TARGETS = 20
 WORD_RE = re.compile(r"[A-Za-z0-9_+.@/-]+")
+SCOPE_MARKER_RE = re.compile(r"::@(?:\([^)]*\))?")
 ARCHIVE_RE = re.compile(r"^(?:lib)?(.+?)\.(?:a|so|dylib|lib|dll)(?:\.[0-9.]+)?$")
 
 
@@ -57,6 +58,8 @@ def referenced_targets(value: str) -> list[str]:
         if name and name not in seen:
             seen.append(name)
 
+    # CMake wraps a cross-directory link entry in `::@(dir-id);...;::@` markers.
+    value = SCOPE_MARKER_RE.sub(" ", value)
     for word in WORD_RE.findall(value.replace("::", "@NS@")):
         word = word.replace("@NS@", "::")
         add(word)

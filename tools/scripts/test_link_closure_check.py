@@ -184,6 +184,15 @@ class ClosureWalk(unittest.TestCase):
             self.assertEqual(code, 2)
             self.assertIn("malformed", err.getvalue())
 
+    def test_cross_directory_scope_markers_are_not_targets(self) -> None:
+        link = "pulp::b;::@(0x5581c0);pulp::platform;::@"
+        records = {"pulp-a": (link, link), "pulp-b": ("", ""), "pulp-platform": ("", "")}
+        code, _, err = self.run_check(records, ["pulp-a"], ["pulp-view*"])
+        self.assertEqual((code, err), (0, ""))
+        records["pulp-platform"] = ("pulp::view-core", "")
+        records["pulp-view-core"] = ("", "")
+        self.assertEqual(self.run_check(records, ["pulp-a"], ["pulp-view*"])[0], 1)
+
     def test_a_tiny_graph_is_inconclusive(self) -> None:
         code, _, err = self.run_check({"pulp-a": ("", "")}, ["pulp-a"], ["pulp-view*"], padding=0)
         self.assertEqual(code, 2)
