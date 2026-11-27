@@ -1,10 +1,8 @@
 // `pulp ui` — deterministic owned-source UI build/check/lint seam.
 //
-// The source emitter is intentionally kept in a dependency-free Python tool
-// while the UI compiler/runtime contract is still being defined. Keeping the
-// command in the primary CLI makes the future emitter a stable replacement
-// behind one user-facing surface, without coupling this command to Skia or a
-// JavaScript package manager.
+// The source emitter is a dependency-free Python tool. Inside a checkout that
+// carries tools/ui-build it runs from there; everywhere else `pulp ui`
+// forwards its arguments unchanged to `vellum ui`, which owns the tool.
 
 #include "cli_common.hpp"
 
@@ -26,5 +24,12 @@ int cmd_ui(const std::vector<std::string>& args) {
                "  --json          emit a machine-readable receipt\n";
         return 0;
     }
-    return delegate_to_python_script("tools/ui-build/ui_build.py", args);
+    // A Pulp checkout that still carries the tool runs it; otherwise the
+    // command belongs to the Vellum CLI, which accepts the same arguments.
+    const fs::path script = "tools/ui-build/ui_build.py";
+    const auto root = find_project_root();
+    if (!root.empty() && fs::exists(root / script)) {
+        return delegate_to_python_script(script, args);
+    }
+    return forward_to_vellum("ui", "ui", args);
 }
