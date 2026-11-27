@@ -346,6 +346,14 @@ TEST_CASE("cursor and select_parent on a removed selection never dereference it"
     inspector.set_selected_view(t.a);
     REQUIRE(inspector.cursor_affordance_at({20, 20}) == CA::move);
 
+    // An inactive overlay leaves the widget's own cursor alone even when a
+    // host restored a selection.
+    inspector.set_active(false);
+    inspector.set_selected_view(t.a);
+    REQUIRE(inspector.cursor_affordance_at({20, 20}) == CA::none);
+    inspector.set_active(true);
+    inspector.set_selected_view(t.a);
+
     // The cursor hook fires before any paint has dropped the stale views.
     t.root.remove_child(t.a);
     REQUIRE(inspector.cursor_affordance_at({20, 20}) == CA::none);

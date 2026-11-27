@@ -69,7 +69,7 @@ overlay::CursorAffordance InspectorOverlay::cursor_affordance_at(Point pos) cons
     // A cursor hook can fire after a tree removal and before the next paint:
     // validate the selection against the live tree before touching it.
     drop_stale_views();
-    if (!selected_ || !dragging_enabled_)
+    if (!active_ || !selected_ || !dragging_enabled_)
         return overlay::CursorAffordance::none;
     return overlay::affordance_at(overlay::bounds_in_root(selected_, root_), pos);
 }
