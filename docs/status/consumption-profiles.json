@@ -316,6 +316,7 @@
       "pulp/format/detail/standalone_musical_typing.hpp",
       "pulp/format/detail/standalone_persistence.hpp",
       "pulp/format/detail/standalone_settings_window.hpp",
+      "pulp/format/detail/standalone_test_hooks.hpp",
       "pulp/format/detail/standalone_updater.hpp",
       "pulp/format/detail/standalone_updater_menu.hpp",
       "pulp/format/detail/standalone_window_factory.hpp",
