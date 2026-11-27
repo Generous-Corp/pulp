@@ -136,27 +136,31 @@ class ReloadableShellCore : public Processor {
             visitor(nullptr);
     }
 
-    view::ScriptedUiSession* active_scripted_ui() override {
+    // The legacy scripted-session slots (reserved names without Pulp's view
+    // layer, see processor.hpp) forward to the live logic like the rest.
+    view::ScriptedUiSession* PULP_FORMAT_LEGACY_VIEW_NAME(active_scripted_ui)() override {
         return nullptr;
     }
-    const view::ScriptedUiSession* active_scripted_ui() const override {
+    const view::ScriptedUiSession* PULP_FORMAT_LEGACY_VIEW_NAME(active_scripted_ui)()
+        const override {
         return nullptr;
     }
 
-    void visit_active_scripted_ui(
+    void PULP_FORMAT_LEGACY_VIEW_NAME(visit_active_scripted_ui)(
         const std::function<void(view::ScriptedUiSession*)>& visitor) override {
         const bool visited = slot_.with_active([&](Processor& p) {
-            p.visit_active_scripted_ui(visitor);
+            p.PULP_FORMAT_LEGACY_VIEW_NAME(visit_active_scripted_ui)(visitor);
             return true;
         });
         if (!visited && visitor)
             visitor(nullptr);
     }
 
-    void visit_active_scripted_ui(
+    void PULP_FORMAT_LEGACY_VIEW_NAME(visit_active_scripted_ui)(
         const std::function<void(const view::ScriptedUiSession*)>& visitor) const override {
         const bool visited = slot_.with_active([&](Processor& p) {
-            static_cast<const Processor&>(p).visit_active_scripted_ui(visitor);
+            static_cast<const Processor&>(p).PULP_FORMAT_LEGACY_VIEW_NAME(
+                visit_active_scripted_ui)(visitor);
             return true;
         });
         if (!visited && visitor)

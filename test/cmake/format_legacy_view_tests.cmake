@@ -272,3 +272,77 @@ endforeach()
 target_compile_definitions(pulp-test-format-core-ui-free-all PRIVATE
     PULP_FORMAT_LEGACY_VIEW=0 PULP_TEST_REQUIRE_NO_VIEW_INCLUDE_PATH=1)
 target_compile_options(pulp-test-format-core-ui-free-all PRIVATE -include "${_legacy_view_poison}")
+
+# Every public pulp-format-core header on its own at PULP_FORMAT_LEGACY_VIEW=0,
+# under the view poison: one generated translation unit per header, so a
+# header-only file no source includes is still compiled. The list is what the
+# SDK installs from core/format/include (PulpInstallRules.cmake installs every
+# *.hpp and *.h there) minus the headers format_header_view_boundary.py
+# declares view-coupled, which belong to pulp-format-view. A new header joins
+# at the next configure. The generated sources live in the build tree, which
+# the header fan-out guard does not count.
+file(GLOB_RECURSE _format_public_headers CONFIGURE_DEPENDS
+    RELATIVE "${CMAKE_SOURCE_DIR}/core/format/include"
+    "${CMAKE_SOURCE_DIR}/core/format/include/pulp/*.hpp"
+    "${CMAKE_SOURCE_DIR}/core/format/include/pulp/*.h")
+execute_process(
+    COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/scripts/format_header_view_boundary.py"
+        --repo "${CMAKE_SOURCE_DIR}" --print-view-headers
+    OUTPUT_VARIABLE _format_view_headers
+    RESULT_VARIABLE _format_view_headers_rc)
+if(NOT _format_view_headers_rc EQUAL 0)
+    message(FATAL_ERROR "format_legacy_view_tests: could not read the view-coupled header list")
+endif()
+string(STRIP "${_format_view_headers}" _format_view_headers)
+string(REPLACE "\n" ";" _format_view_headers "${_format_view_headers}")
+set(_header_tu_dir "${CMAKE_CURRENT_BINARY_DIR}/format_core_ui_free_headers")
+set(_header_tus "")
+foreach(_header IN LISTS _format_public_headers)
+    if(_header IN_LIST _format_view_headers)
+        continue()
+    endif()
+    # The AAX headers need the developer-supplied Avid SDK, which is off by
+    # default; they compile here only when it is configured.
+    if(_header MATCHES "^pulp/format/aax_" AND NOT TARGET pulp-aax-sdk-interface)
+        list(APPEND _format_view_headers "${_header}")
+        continue()
+    endif()
+    string(MAKE_C_IDENTIFIER "${_header}" _id)
+    set(_tu "${_header_tu_dir}/${_id}.cpp")
+    file(CONFIGURE OUTPUT "${_tu}" CONTENT "#include <${_header}>\n")
+    list(APPEND _header_tus "${_tu}")
+endforeach()
+list(LENGTH _header_tus _header_tu_count)
+list(LENGTH _format_view_headers _format_view_header_count)
+list(LENGTH _format_public_headers _format_public_header_count)
+math(EXPR _expected "${_format_public_header_count} - ${_format_view_header_count}")
+if(NOT _header_tu_count EQUAL _expected OR _header_tu_count LESS 50)
+    message(FATAL_ERROR "format_legacy_view_tests: ${_header_tu_count} format-core header TUs from "
+        "${_format_public_header_count} headers less ${_format_view_header_count} view-coupled; "
+        "the header list is wrong")
+endif()
+add_library(pulp-test-format-core-ui-free-headers OBJECT ${_header_tus})
+target_include_directories(pulp-test-format-core-ui-free-headers PRIVATE ${_core_includes})
+if(_core_definitions)
+    target_compile_definitions(pulp-test-format-core-ui-free-headers PRIVATE ${_core_definitions})
+endif()
+if(_core_links)
+    target_link_libraries(pulp-test-format-core-ui-free-headers PRIVATE ${_core_links})
+endif()
+# Headers that format-core installs for its sibling targets name those
+# targets' third-party and Pulp dependencies: the CLAP adapter's clap headers,
+# the transport projection's pulp::playback, the AAX SDK.
+foreach(_header_dep IN ITEMS clap pulp::playback pulp-aax-sdk-interface)
+    if(TARGET ${_header_dep})
+        target_link_libraries(pulp-test-format-core-ui-free-headers PRIVATE ${_header_dep})
+    endif()
+endforeach()
+target_compile_features(pulp-test-format-core-ui-free-headers PRIVATE cxx_std_20)
+target_compile_definitions(pulp-test-format-core-ui-free-headers PRIVATE
+    PULP_FORMAT_LEGACY_VIEW=0 PULP_TEST_REQUIRE_NO_VIEW_INCLUDE_PATH=1)
+target_compile_options(pulp-test-format-core-ui-free-headers PRIVATE
+    -include "${_legacy_view_poison}")
+if(APPLE)
+    # Some format headers declare Objective-C classes for the AU adapters.
+    set_source_files_properties(${_header_tus} PROPERTIES COMPILE_OPTIONS "-xobjective-c++")
+endif()

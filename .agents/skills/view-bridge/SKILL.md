@@ -2476,8 +2476,14 @@ construct, so the slot can only return null or do nothing. Gotchas:
   `settings_sections()` cheap. A `TabPanel` wraps two or more sections; one is
   shown alone.
 - **All of pulp-format-core builds at macro 0 under the poison**
-  (`pulp-test-format-core-ui-free-all`, built with the tests). A core source or
-  header that names `pulp::view` fails that build before any SDK sees it.
+  (`pulp-test-format-core-ui-free-all`, built with the tests), and so does every
+  public format-core header on its own (`pulp-test-format-core-ui-free-headers`,
+  one generated TU per installed header less the declared view-coupled ones).
+  The per-header build exists because a header-only file that no source
+  includes (`reloadable_shell_core.hpp`, `reload_swap_units.hpp`) is invisible
+  to the source build; `reloadable_shell_core.hpp` still overrode the legacy
+  slots by their plain names until it caught it. AAX headers join only when the
+  Avid SDK is configured.
 - **The in-app updater runs in every standalone.** `install_standalone_updater()`
   (standalone_updater.hpp, now view-free) installs the plan's service in both
   the view and the contract standalone; only the WindowHost menu command lives

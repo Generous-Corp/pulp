@@ -156,7 +156,16 @@ def build_walker(dirs: list[str], repo: str):
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--repo", required=True, help="repository root")
+    parser.add_argument(
+        "--print-view-headers", action="store_true",
+        help="print the declared view-coupled headers (one per line, relative "
+             "to core/format/include) and exit; the build reads this list to "
+             "compile every other format header at PULP_FORMAT_LEGACY_VIEW=0")
     args = parser.parse_args()
+    if args.print_view_headers:
+        for rel in sorted(VIEW_HEADERS):
+            print(rel)
+        return 0
 
     repo = os.path.abspath(args.repo)
     fmt_include = os.path.join(repo, "core", "format", "include")
