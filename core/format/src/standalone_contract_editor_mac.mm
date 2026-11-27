@@ -232,8 +232,7 @@ build_app_menu_model(const StandaloneContractEditorOptions& options,
                          [open = std::move(open_plugin_settings)] { open(); }});
     for (auto* panel : options.panels)
         items.push_back({StandaloneContractMenuItem::Role::panel, panel->menu_title(),
-                         std::string(1, panel->shortcut()), false,
-                         [panel] { panel->toggle(); }});
+                         std::string(1, panel->shortcut()), false, [panel] { panel->toggle(); }});
     items.push_back({StandaloneContractMenuItem::Role::quit, "Quit " + name, "q", false,
                      [window] { [window performClose:nil]; }});
     return items;

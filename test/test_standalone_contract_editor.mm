@@ -40,9 +40,9 @@ using pulp::test_support::reset_contract_recording;
 // The contract window's test controls live in detail::StandaloneTestHooks,
 // not in the public StandaloneConfig an app fills in.
 template <class C>
-concept ConfigCarriesWindowTestHooks = requires(C c) { c.test_open_plugin_settings_frame; } ||
-                                       requires(C c) { c.test_update_service; } ||
-                                       requires(C c) { c.test_on_app_menu; };
+concept ConfigCarriesWindowTestHooks = requires(C c) {
+    c.test_open_plugin_settings_frame;
+} || requires(C c) { c.test_update_service; } || requires(C c) { c.test_on_app_menu; };
 static_assert(!ConfigCarriesWindowTestHooks<pulp::format::StandaloneConfig>,
               "StandaloneConfig must not carry the contract window's test hooks");
 
