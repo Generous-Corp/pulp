@@ -1,0 +1,150 @@
+// Unit tests for the A/B compare component.
+
+#include <catch2/catch_test_macros.hpp>
+#include <pulp/state/store.hpp>
+#include <pulp/vellum_components/ab_compare.hpp>
+
+using namespace pulp;
+using namespace pulp::vellum_components;
+
+namespace {
+void populate(state::StateStore& s) {
+    s.add_parameter({.id = 1, .name = "Gain", .unit = "dB", .range = {-60.0f, 24.0f, 0.0f, 0.1f}});
+    s.add_parameter({.id = 2, .name = "Mix", .unit = "", .range = {0.0f, 1.0f, 0.5f, 0.01f}});
+}
+} // namespace
+
+TEST_CASE("ABCompare: save + load restores parameters", "[ui][ab-compare]") {
+    state::StateStore store;
+    populate(store);
+    ABCompare ab(&store);
+
+    store.set_value(1, 6.0f);
+    store.set_value(2, 0.25f);
+    ab.save_to(ABCompare::Slot::A);
+    REQUIRE(ab.has(ABCompare::Slot::A));
+    REQUIRE_FALSE(ab.has(ABCompare::Slot::B));
+
+    store.set_value(1, -12.0f);
+    store.set_value(2, 0.75f);
+    ab.save_to(ABCompare::Slot::B);
+    REQUIRE(ab.has(ABCompare::Slot::B));
+
+    REQUIRE(ab.load_from(ABCompare::Slot::A));
+    REQUIRE(store.get_value(1) == 6.0f);
+    REQUIRE(store.get_value(2) == 0.25f);
+    REQUIRE(ab.current() == ABCompare::Slot::A);
+}
+
+TEST_CASE("ABCompare: toggle flips between A and B", "[ui][ab-compare]") {
+    state::StateStore store;
+    populate(store);
+    ABCompare ab(&store);
+
+    store.set_value(1, 3.0f);
+    ab.save_to(ABCompare::Slot::A);
+    store.set_value(1, -3.0f);
+    ab.save_to(ABCompare::Slot::B);
+
+    REQUIRE(ab.load_from(ABCompare::Slot::A));
+    REQUIRE(ab.toggle());
+    REQUIRE(ab.current() == ABCompare::Slot::B);
+    REQUIRE(store.get_value(1) == -3.0f);
+    REQUIRE(ab.toggle());
+    REQUIRE(ab.current() == ABCompare::Slot::A);
+    REQUIRE(store.get_value(1) == 3.0f);
+}
+
+TEST_CASE("ABCompare: load from empty slot fails cleanly", "[ui][ab-compare]") {
+    state::StateStore store;
+    populate(store);
+    ABCompare ab(&store);
+    REQUIRE_FALSE(ab.load_from(ABCompare::Slot::A));
+    REQUIRE_FALSE(ab.load_from(ABCompare::Slot::B));
+}
+
+TEST_CASE("ABCompare: copy + swap", "[ui][ab-compare]") {
+    state::StateStore store;
+    populate(store);
+    ABCompare ab(&store);
+
+    store.set_value(1, 10.0f);
+    ab.save_to(ABCompare::Slot::A);
+    ab.copy(ABCompare::Slot::A, ABCompare::Slot::B);
+    REQUIRE(ab.has(ABCompare::Slot::B));
+    REQUIRE(ab.load_from(ABCompare::Slot::B));
+    REQUIRE(store.get_value(1) == 10.0f);
+
+    store.set_value(1, -5.0f);
+    ab.save_to(ABCompare::Slot::B); // B is now -5
+    ab.swap();                      // A ↔ B
+    REQUIRE(ab.load_from(ABCompare::Slot::A));
+    REQUIRE(store.get_value(1) == -5.0f);
+}
+
+TEST_CASE("ABCompare: clear + snapshot access", "[ui][ab-compare]") {
+    state::StateStore store;
+    populate(store);
+    ABCompare ab(&store);
+    store.set_value(1, 1.0f);
+    ab.save_to(ABCompare::Slot::A);
+    REQUIRE(ab.snapshot(ABCompare::Slot::A).size() > 0);
+    ab.clear(ABCompare::Slot::A);
+    REQUIRE_FALSE(ab.has(ABCompare::Slot::A));
+    REQUIRE(ab.snapshot(ABCompare::Slot::A).size() == 0);
+}
+
+TEST_CASE("ABCompare: null store operations fail closed", "[ui][ab-compare]") {
+    ABCompare ab(nullptr);
+
+    REQUIRE(ab.current() == ABCompare::Slot::A);
+    REQUIRE_FALSE(ab.has(ABCompare::Slot::A));
+    REQUIRE_FALSE(ab.has(ABCompare::Slot::B));
+
+    ab.save_to(ABCompare::Slot::A);
+    REQUIRE_FALSE(ab.has(ABCompare::Slot::A));
+    REQUIRE_FALSE(ab.load_from(ABCompare::Slot::A));
+    REQUIRE_FALSE(ab.toggle());
+
+    ab.copy(ABCompare::Slot::A, ABCompare::Slot::B);
+    ab.swap();
+    ab.clear(ABCompare::Slot::B);
+    REQUIRE(ab.snapshot(ABCompare::Slot::B).empty());
+}
+
+TEST_CASE("ABCompare: copy to same slot leaves snapshot unchanged", "[ui][ab-compare]") {
+    state::StateStore store;
+    populate(store);
+    ABCompare ab(&store);
+
+    store.set_value(1, 2.0f);
+    ab.save_to(ABCompare::Slot::A);
+    auto before = std::vector<uint8_t>(ab.snapshot(ABCompare::Slot::A).begin(),
+                                       ab.snapshot(ABCompare::Slot::A).end());
+
+    store.set_value(1, 9.0f);
+    ab.copy(ABCompare::Slot::A, ABCompare::Slot::A);
+
+    REQUIRE(ab.has(ABCompare::Slot::A));
+    REQUIRE(std::vector<uint8_t>(ab.snapshot(ABCompare::Slot::A).begin(),
+                                 ab.snapshot(ABCompare::Slot::A).end()) == before);
+    REQUIRE(ab.load_from(ABCompare::Slot::A));
+    REQUIRE(store.get_value(1) == 2.0f);
+}
+
+TEST_CASE("ABCompare: swapping empty and populated slots moves availability", "[ui][ab-compare]") {
+    state::StateStore store;
+    populate(store);
+    ABCompare ab(&store);
+
+    store.set_value(2, 0.9f);
+    ab.save_to(ABCompare::Slot::A);
+    REQUIRE(ab.has(ABCompare::Slot::A));
+    REQUIRE_FALSE(ab.has(ABCompare::Slot::B));
+
+    ab.swap();
+    REQUIRE_FALSE(ab.has(ABCompare::Slot::A));
+    REQUIRE(ab.has(ABCompare::Slot::B));
+    REQUIRE(ab.load_from(ABCompare::Slot::B));
+    REQUIRE(store.get_value(2) == 0.9f);
+}
