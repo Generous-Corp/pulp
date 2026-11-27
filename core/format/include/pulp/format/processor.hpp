@@ -78,6 +78,21 @@ class ScriptedUiSession;
 class View;
 using ::pulp::dataplane::ValueChannelSet;
 } // namespace pulp::format::view
+
+// A pulp-format-core built with Pulp's view layer has the view hooks under
+// their plain names, so code compiled with the macro 0 cannot link against it.
+// format.cpp built with the macro 0 defines this symbol, and every translation
+// unit that includes this header with the macro 0 refers to it, so linking such
+// code against the wrong pulp-format-core fails on this name, which says why,
+// rather than on a reserved slot.
+extern "C" const char pulp_format_core_was_built_with_PULP_FORMAT_LEGACY_VIEW_0;
+#if defined(__has_attribute)
+#if __has_attribute(used)
+[[gnu::used]]
+#endif
+#endif
+static const char* const pulp_format_legacy_view_link_check =
+    &pulp_format_core_was_built_with_PULP_FORMAT_LEGACY_VIEW_0;
 #endif
 
 namespace pulp::format {
@@ -686,6 +701,12 @@ public:
     /// consumer of pulp::format-core alone (the inline `settings_sections()`
     /// below destroys a vector of them) never needs the view layer. Only the
     /// constructor that adopts a view, and take_view(), live on the view side.
+    ///
+    /// Without Pulp's view layer (PULP_FORMAT_LEGACY_VIEW=0) there is no view
+    /// to adopt: the type is private there and only fills the reserved slot.
+#if !PULP_FORMAT_LEGACY_VIEW
+  private:
+#endif
     struct SettingsSection {
         using ViewDeleter = void (*)(view::View*);
 
@@ -708,6 +729,9 @@ public:
     private:
         static void no_view(view::View*) noexcept {}
     };
+#if !PULP_FORMAT_LEGACY_VIEW
+  public:
+#endif
 
     /// Called after a view has been constructed and attached. Runs on the
     /// host/UI thread. Safe to read state and register UI listeners.
@@ -819,9 +843,15 @@ public:
     /// device — while letting a plugin surface its own settings (e.g. a model picker) in
     /// one unified Settings panel. Called when the settings UI is built; may be called
     /// again if it is rebuilt. (Appended last to preserve additive-only vtable ordering.)
+#if !PULP_FORMAT_LEGACY_VIEW
+  private:
+#endif
     virtual std::vector<SettingsSection> PULP_FORMAT_LEGACY_VIEW_NAME(settings_sections)() {
         return {};
     }
+#if !PULP_FORMAT_LEGACY_VIEW
+  public:
+#endif
 
     /// Estimate storage the next prepare() will allocate or reserve.
     ///

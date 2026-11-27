@@ -2429,7 +2429,18 @@ construct, so the slot can only return null or do nothing. Gotchas:
   `format-legacy-view-slot-layout` compares the slot positions of both modes
   and of a header with one slot removed; it fails if they drift.
 - **A new view-named virtual goes through the macro too.** `node_abi_gate.py`
-  reads `PULP_FORMAT_LEGACY_VIEW_NAME(x)` as `x` and expands no other macro.
+  reads `PULP_FORMAT_LEGACY_VIEW_NAME(x)` as `x`, expands no other macro, and
+  fails when the macro's default definition is anything but the plain name.
+- **The layout probe covers the whole vtable.** It also reports the first
+  virtual a subclass adds, whose slot is Processor's vtable length, so a
+  virtual one mode adds at the end moves it too.
+- **A macro-0 caller linked against a mode-1 pulp-format-core fails on a named
+  marker.** processor.hpp makes every macro-0 TU refer to
+  `pulp_format_core_was_built_with_PULP_FORMAT_LEGACY_VIEW_0`, which only a
+  macro-0 format.cpp defines; `format-core-mode-mismatch-link` checks the link
+  error names it. A mode-0 test that builds no format.cpp defines it itself.
+- **`Processor::SettingsSection` is private at macro 0**: it only fills the
+  reserved slot there, and has no view to adopt.
 - **The hot-reload fingerprint carries the mode** (`legacyview=` in
   `abi_flags`), so a logic library from the other mode is refused rather than
   dispatched through renamed slots.
