@@ -9,6 +9,16 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
      release's bullet block. See docs/guides/versioning.md § Release pipeline
      for the full end-to-end flow. -->
 
+<a id="v12290"></a>
+## [1.229.0] - 2026-11-27
+
+- release/version bump ([#13013](https://github.com/Generous-Corp/pulp/pull/13013))
+- lane/yoga vellum engine ([#12926](https://github.com/Generous-Corp/pulp/pull/12926))
+- spectr/intel sdk renderer transition ([#13014](https://github.com/Generous-Corp/pulp/pull/13014))
+- feature/vellum view editor cpp ([#13011](https://github.com/Generous-Corp/pulp/pull/13011))
+- fix/widget bridge dispatch depth ([#12911](https://github.com/Generous-Corp/pulp/pull/12911))
+- feature/h7 view umbrella parity ([#12956](https://github.com/Generous-Corp/pulp/pull/12956))
+
 <a id="v12280"></a>
 ## [1.228.0] - 2026-11-27
 
@@ -13902,6 +13912,7 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/Generous-Corp/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/Generous-Corp/pulp/pull/2))
 
+[1.229.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.229.0
 [1.228.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.228.0
 [1.227.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.227.0
 [1.226.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.226.0
