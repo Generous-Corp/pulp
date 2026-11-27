@@ -248,6 +248,24 @@ Project make_authored_track_project() {
     return std::move(project).value();
 }
 
+struct PublishingHost final : EditIntentHost {
+    ScriptedUiHost<EditIntent> recorded;
+    std::function<IntentResult(const EditIntent&)> publish;
+    UiPlayhead playhead() const noexcept override {
+        return recorded.playhead();
+    }
+    AuditionResult begin_audition(const AuditionRequest& request) noexcept override {
+        return recorded.begin_audition(request);
+    }
+    void end_audition(AuditionHandle handle) noexcept override {
+        recorded.end_audition(handle);
+    }
+    IntentResult submit_intent(const EditIntent& intent) noexcept override {
+        recorded.submit_intent(intent);
+        return publish(intent);
+    }
+};
+
 } // namespace
 
 TEST_CASE("Arranger track-header drags reorder authored tracks for mouse and touch",
@@ -444,6 +462,147 @@ TEST_CASE("Arranger clip drag survives a serialize round trip with its authored 
     REQUIRE(clip(applier.project).start().value == 200);
     REQUIRE(clip(applier.project).duration().value == kTicksPerQuarter);
     REQUIRE(start_after_round_trip(applier.project) == 200);
+}
+
+TEST_CASE("Arranger synchronous snapshot refresh preserves the session gesture",
+          "[timeline][arranger][snapshot-refresh]") {
+    auto owned = DocumentSession::create(make_project());
+    REQUIRE(owned);
+    auto session = std::move(owned).value();
+    auto registered = session->register_writer();
+    REQUIRE(registered);
+    auto writer = std::move(registered).value();
+    const auto group = writer.allocate_undo_group_id();
+    const auto baseline = canonical_project(*session->snapshot());
+    ArrangerView view;
+
+    // Commit and publish inside the callback, before on_mouse_drag resumes.
+    // The old snapshot is released by the session, just as in a real host.
+    PublishingHost host;
+    bool applied = true;
+    host.publish = [&](const EditIntent& intent) -> IntentResult {
+        EditIntentIdentity identity;
+        identity.transaction_id = writer.allocate_transaction_id();
+        identity.command_id = writer.allocate_command_id();
+        identity.expected_revision = session->revision();
+        identity.undo_group = group;
+        auto lowered = lower_edit_intent(intent, identity);
+        if (!lowered || !session->submit(writer, std::move(lowered).value())) {
+            applied = false;
+            return {IntentStatus::Rejected, 0};
+        }
+        view.set_project(session->snapshot().get(), {3});
+        return {IntentStatus::Accepted, 1};
+    };
+    configure(view, *session->snapshot(), host);
+    const float grab_x = unit_layout().lane_left_px + 10.0f;
+    view.on_mouse_down({grab_x, 20.0f});
+    view.on_mouse_drag({grab_x + 50.0f, 20.0f});
+    REQUIRE(applied);
+    REQUIRE(view.gesture_open());
+    view.on_mouse_drag({grab_x + 100.0f, 20.0f});
+    REQUIRE(applied);
+    REQUIRE(view.gesture_open());
+    SECTION("release closes the preserved gesture") {
+        view.on_mouse_up({grab_x + 150.0f, 20.0f});
+        REQUIRE(host.recorded.intents().size() == 3);
+        CHECK(host.recorded.intents().back().phase == GesturePhase::End);
+        CHECK(start_after_round_trip(*session->snapshot()) == 150);
+    }
+    SECTION("explicit cancellation closes the preserved gesture") {
+        view.on_mouse_cancel({grab_x + 100.0f, 20.0f});
+        REQUIRE(host.recorded.intents().size() == 3);
+        CHECK(host.recorded.intents().back().phase == GesturePhase::Cancel);
+        CHECK(start_after_round_trip(*session->snapshot()) == 100);
+    }
+    REQUIRE(applied);
+    CHECK_FALSE(view.gesture_open());
+    CHECK(host.recorded.intents()[0].phase == GesturePhase::Begin);
+    CHECK(host.recorded.intents()[1].phase == GesturePhase::Update);
+    const auto edited = canonical_project(*session->snapshot());
+    REQUIRE(session->undo(writer));
+    CHECK(canonical_project(*session->snapshot()) == baseline);
+    REQUIRE(session->redo(writer));
+    CHECK(canonical_project(*session->snapshot()) == edited);
+}
+
+TEST_CASE("Arranger declined intents keep the session range and closure retryable",
+          "[timeline][arranger][intent-result]") {
+    auto owned = DocumentSession::create(make_project());
+    REQUIRE(owned);
+    auto session = std::move(owned).value();
+    auto registered = session->register_writer();
+    REQUIRE(registered);
+    auto writer = std::move(registered).value();
+    const auto group = writer.allocate_undo_group_id();
+    ArrangerView view;
+    PublishingHost host;
+    IntentStatus status = IntentStatus::Deferred;
+    bool applied = true;
+    host.publish = [&](const EditIntent& intent) -> IntentResult {
+        if (status != IntentStatus::Accepted)
+            return {status, 0};
+        EditIntentIdentity identity;
+        identity.transaction_id = writer.allocate_transaction_id();
+        identity.command_id = writer.allocate_command_id();
+        identity.expected_revision = session->revision();
+        identity.undo_group = group;
+        auto lowered = lower_edit_intent(intent, identity);
+        if (!lowered || !session->submit(writer, std::move(lowered).value())) {
+            applied = false;
+            return {IntentStatus::Rejected, 0};
+        }
+        view.set_project(session->snapshot().get(), {3});
+        return {IntentStatus::Accepted, 1};
+    };
+    configure(view, *session->snapshot(), host);
+    view.on_mouse_down({130, 20});
+    view.on_mouse_drag({180, 20}); // Deferred Begin does not open a session group.
+    status = IntentStatus::Rejected;
+    view.on_mouse_drag({180, 20});
+    status = IntentStatus::Accepted;
+    view.on_mouse_drag({180, 20});
+    REQUIRE(applied);
+    REQUIRE(host.recorded.intents().size() == 3);
+    for (const auto& intent : host.recorded.intents())
+        CHECK(intent.phase == GesturePhase::Begin);
+    CHECK(clip(*session->snapshot()).start().value == 50);
+
+    status = IntentStatus::Rejected;
+    view.on_mouse_drag({230, 20}); // Rejected Update must not advance the range.
+    status = IntentStatus::Deferred;
+    view.on_mouse_drag({230, 20});
+    CHECK(clip(*session->snapshot()).start().value == 50);
+    status = IntentStatus::Accepted;
+    view.on_mouse_drag({230, 20});
+    REQUIRE(applied);
+    CHECK(clip(*session->snapshot()).start().value == 100);
+
+    status = IntentStatus::Rejected;
+    view.on_mouse_up({280, 20});
+    REQUIRE(view.gesture_open());
+    status = IntentStatus::Deferred;
+    view.on_mouse_cancel({280, 20});
+    REQUIRE(view.gesture_open());
+    view.on_mouse_down({130, 20}); // Cannot replace an unclosed gesture.
+    REQUIRE(view.gesture_open());
+    CHECK(host.recorded.intents().back().phase == GesturePhase::Cancel);
+    status = IntentStatus::Accepted;
+    SECTION("release can retry the rejected End") {
+        view.on_mouse_up({280, 20});
+        CHECK(host.recorded.intents().back().phase == GesturePhase::End);
+        CHECK(start_after_round_trip(*session->snapshot()) == 150);
+    }
+    SECTION("cancellation can retry the deferred Cancel") {
+        view.on_mouse_cancel({280, 20});
+        CHECK(host.recorded.intents().back().phase == GesturePhase::Cancel);
+        CHECK(start_after_round_trip(*session->snapshot()) == 100);
+    }
+    REQUIRE(applied);
+    CHECK_FALSE(view.gesture_open());
+    REQUIRE(session->undo(writer));
+    CHECK(clip(*session->snapshot()).start().value == 0);
+    REQUIRE(session->redo(writer));
 }
 
 TEST_CASE("Arranger drag steps chain their optimistic gate so the stream applies in order",
