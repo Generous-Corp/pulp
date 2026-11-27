@@ -13,11 +13,13 @@
 #
 # Pulp::view-audio is the audio widgets, and maps to Pulp::vellum-audio
 # (integrations/pulp-vellum-audio). Pulp::view-tooling is the editor bridge,
-# inspector and screenshot layer: the editor bridge is Pulp::vellum, and the
-# inspector and screenshot surfaces are defined in the provider library behind
-# Vellum::MirrorView_core (vellum::view::InspectorFacts, capture_view,
-# has_screenshot_backend), plus the script inspector port when the scripted view
-# is present. A name whose package the SDK does not export stays undefined.
+# inspector and screenshot layer. EditorBridge's dispatch core (handlers, JSON
+# and WebView message dispatch) is Pulp::editor-bridge, a view-free Pulp target
+# that pulp/view/editor_bridge.hpp belongs to; the inspector and screenshot
+# surfaces are defined in the provider library behind Vellum::MirrorView_core
+# (vellum::view::InspectorFacts, capture_view, has_screenshot_backend), plus the
+# script inspector port when the scripted view is present. Pulp::vellum is the
+# parameter bridge. A name whose package the SDK does not export stays undefined.
 #
 # Two guards keep it from ever standing in for part of Pulp's own UI: nothing
 # is defined while Pulp::view-core is exported, and a name Pulp still exports
@@ -270,7 +272,7 @@ function(pulp_define_vellum_ui_compat_targets)
         _pulp_vellum_ui_compat_define(view-audio
             REQUIRES Pulp::vellum-audio)
         _pulp_vellum_ui_compat_define(view-tooling
-            REQUIRES Vellum::MirrorView_core Pulp::vellum
+            REQUIRES Vellum::MirrorView_core Pulp::vellum Pulp::editor-bridge
             OPTIONAL Vellum::MirrorView_script)
         # The umbrella keeps the importer, the scripted view and the audio and
         # tooling layers, as Pulp::view does in an SDK built with them. It is
