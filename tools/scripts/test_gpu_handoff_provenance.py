@@ -275,6 +275,52 @@ class FixtureRepository(unittest.TestCase):
         self.assertEqual({drift.field for drift in drifts}, {"revision", "object_id"})
         self.assertEqual(drifts[0].derived, self.first_commit)
 
+    def test_inventory_resolution_asks_git_for_head_once(self) -> None:
+        """A hundred rows must not cost a hundred ``rev-parse HEAD`` queries.
+
+        The pre-push step runs this suite under a wall-clock cap, and the
+        per-row Git subprocesses are nearly all of its time.
+        """
+
+        document = self.document([build_row("leaf.txt"), build_row("nested")])
+        inventory = provenance.canonical_inventory(document)
+        provenance._IDENTITY_CACHE.clear()
+        asked = []
+        real = provenance.git_output
+
+        def counting(root: pathlib.Path, arguments: list[str]) -> str:
+            asked.append(list(arguments))
+            return real(root, arguments)
+
+        provenance.git_output = counting
+        self.addCleanup(setattr, provenance, "git_output", real)
+        provenance.resolve_inventory_identities(self.root, "HEAD", inventory)
+        self.assertEqual(asked.count(["rev-parse", "HEAD"]), 1, asked)
+
+    def test_inventory_resolution_matches_resolving_each_path_alone(self) -> None:
+        document = self.document([build_row("leaf.txt"), build_row("nested")])
+        inventory = provenance.canonical_inventory(document)
+        provenance._IDENTITY_CACHE.clear()
+        together = provenance.resolve_inventory_identities(
+            self.root, "HEAD", inventory
+        )
+        provenance._IDENTITY_CACHE.clear()
+        alone = {
+            row.path: provenance.resolve_identity(self.root, "HEAD", row.path)
+            for row in inventory
+        }
+        self.assertEqual(together, alone)
+
+    def test_inventory_resolution_reports_the_first_failing_row_in_order(self) -> None:
+        document = self.document(
+            [build_row("leaf.txt"), build_row("absent-b.txt"), build_row("absent-a.txt")]
+        )
+        inventory = provenance.canonical_inventory(document)
+        provenance._IDENTITY_CACHE.clear()
+        with self.assertRaises(provenance.ProvenanceError) as caught:
+            provenance.resolve_inventory_identities(self.root, "HEAD", inventory)
+        self.assertIn("absent-b.txt", str(caught.exception))
+
     def test_regeneration_repairs_every_planted_field(self) -> None:
         document = self.document([build_row("leaf.txt"), build_row("nested")])
         inventory = provenance.canonical_inventory(document)
