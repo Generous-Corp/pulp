@@ -1923,10 +1923,10 @@ class MyEditor : public pulp::view::View {
             // ... apply to processor ...
             return pulp::view::EditorBridge::ok_response();
         });
-        bridge_.attach_webview(panel);          // routes WebView postMessage → handlers
+        attach_webview(bridge_, panel);         // routes WebView postMessage → handlers
     }
     void unwire(pulp::view::WebViewPanel& panel) {
-        bridge_.detach_webview(panel);          // clears the installed callback before teardown
+        detach_webview(bridge_, panel);         // clears the installed callback before teardown
     }
 private:
     pulp::view::EditorBridge bridge_;
@@ -1935,12 +1935,13 @@ private:
 
 Key invariants:
 
-- **Renderer-agnostic.** `attach_webview(WebViewPanel&)` today;
-  `attach_native_runtime(JsRuntime&, "<handler_name>")` for the low-level
-  native runtime, or `attach_native_runtime(ScriptEngine&, "<handler_name>")`
+- **Renderer-agnostic.** The attachments are free functions in
+  `pulp/view/editor_bridge_attach.hpp`: `attach_webview(bridge, WebViewPanel&)`
+  today; `attach_native_runtime(bridge, JsRuntime&, "<handler_name>")` for the low-level
+  native runtime, or `attach_native_runtime(bridge, ScriptEngine&, "<handler_name>")`
   when a product owns Pulp's public engine wrapper. A product built on
   `ScriptedUiSession` must use
-  `attach_native_runtime(session, "<handler_name>")`: the session owns the
+  `attach_native_runtime(bridge, session, "<handler_name>")`: the session owns the
   attachment, installs it before the live script runs, and reinstalls it after
   every realm replacement without exposing or borrowing the replaceable
   `ScriptEngine`. Native overloads register one global function that accepts a
@@ -1948,14 +1949,14 @@ Key invariants:
   same handler registrations and error vocabulary.
 - **Session attachment has explicit teardown.** An `EditorBridge` attached to
   a `ScriptedUiSession` must outlive the attachment. Call
-  `detach_native_runtime(session, "<handler_name>")` before either the bridge
+  `detach_native_runtime(bridge, session, "<handler_name>")` before either the bridge
   or a handler capture expires. The live realm's symbol then fails closed, and
   future realm replacements omit it.
 - **Reload validation does not replay product effects.** A scripted reload
   first executes code in a probe realm. That realm receives fail-closed native
   message stubs so script validation can resolve the globals without calling
   processor handlers twice; only the committed live realm dispatches messages.
-- **Explicit WebView teardown.** `detach_webview(WebViewPanel&)`
+- **Explicit WebView teardown.** `detach_webview(bridge, WebViewPanel&)`
   clears the callback installed by `attach_webview`. Use it when the
   bridge and `WebViewPanel` are side-by-side members and you want to
   sever queued WebView messages before native detach or panel destruction.
@@ -1977,9 +1978,15 @@ Key invariants:
 EditorBridge's dispatch core (`core/editor_bridge/src/editor_bridge.cpp`: handlers,
 `dispatch`, `dispatch_json`, `dispatch_webview_message`, the response and
 `get_*` helpers) is its own view-free target, `pulp-editor-bridge`, which needs
-only CHOC and the runtime. The `attach_native_runtime` / `detach_native_runtime`
-overloads name view-script types, so they stay in `pulp-view-tooling`
-(`editor_bridge_native_runtime.cpp`), which links the core. Keep any new
+only CHOC and the runtime. Its header, `pulp/view/editor_bridge.hpp`, declares
+only what that library defines. The attachments (`attach_webview`,
+`detach_webview`, `attach_native_runtime`, `detach_native_runtime`) name view
+and view-script types, so they are free functions declared in
+`pulp/view/editor_bridge_attach.hpp` and defined in `pulp-view-tooling`, which
+links the core; `render_claude_bridge_scaffold` is in
+`pulp/view/editor_bridge_scaffold.hpp`. A member declared in the core header
+but defined in view-tooling compiles for a core-only consumer and fails only at
+link time; `pulp-test-editor-bridge-core` refuses that shape at compile time. Keep any new
 dispatch code free of view-script includes; in an SDK that serves its UI names
 from Vellum, `Pulp::view-tooling` links the core and nothing else of Pulp's
 view, so a WebView editor's bridge comes from it.

@@ -1483,6 +1483,8 @@
       "pulp/view/design_update.hpp",
       "pulp/view/designed_control_painter.hpp",
       "pulp/view/drag_drop.hpp",
+      "pulp/view/editor_bridge_attach.hpp",
+      "pulp/view/editor_bridge_scaffold.hpp",
       "pulp/view/file_browser.hpp",
       "pulp/view/file_chooser.hpp",
       "pulp/view/file_drop_zone.hpp",
@@ -1770,7 +1772,7 @@
       },
       "build_scope": {
         "PULP_BUILD_TESTS": "ON",
-        "PULP_BUILD_EXAMPLES": "OFF"
+        "PULP_BUILD_EXAMPLES": "ON"
       },
       "summary": {
         "installed_target_count": 91,

@@ -369,7 +369,7 @@ vocabulary (`malformed_json`, `unknown_type`, `missing_field`,
 `wrong_type`, `internal_error`):
 
 ```cpp
-#include <pulp/view/editor_bridge.hpp>
+#include <pulp/view/editor_bridge_attach.hpp>
 
 class MyEditor {
     void wire(pulp::view::WebViewPanel& panel) {
@@ -378,10 +378,10 @@ class MyEditor {
             // ... apply to processor ...
             return pulp::view::EditorBridge::ok_response();
         });
-        bridge_.attach_webview(panel);
+        pulp::view::attach_webview(bridge_, panel);
     }
     void unwire(pulp::view::WebViewPanel& panel) {
-        bridge_.detach_webview(panel);
+        pulp::view::detach_webview(bridge_, panel);
     }
     pulp::view::EditorBridge bridge_;
 };
