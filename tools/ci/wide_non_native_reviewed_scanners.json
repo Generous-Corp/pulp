@@ -9,6 +9,7 @@
     "tools/scripts/test_check_vellum_sdk_staging.py": "walks the temporary SDK staging trees it builds",
     "tools/ci/test_drift_fast.py": "walks test/ for registration names; tools/ci routes to the native build",
     "tools/scripts/gate_python_imports_check.py": "reads the configured ctest inventory; runs in the pr-fast tier on the native gate",
+    "tools/scripts/gpu_device_link_closure_check.py": "walks only the pulp-gpu-audio source directory under core/ and reads core/render/include; its one tools/ input, tools/scripts/cutover_trial_inputs.json, is named in its registration argv, so the reference search sees it",
     "tools/scripts/gpu_audio_p2_campaign.py": "authenticates the canonical tracked campaign driver with git ls-files; it does not walk tools/ payloads or scan non-native source trees",
     "tools/scripts/script_test_inputs.py": "reads the configured ctest inventory and follows each script test's imports from there; script-test-inputs-drift runs in the pr-fast tier on the native gate",
     "tools/scripts/changed_surface_script_families.py": "reads the configured ctest inventory, test/ctest_script_inputs/ and the tracked tree; changed-surface-script-families-drift runs in the native gate's full suite",
