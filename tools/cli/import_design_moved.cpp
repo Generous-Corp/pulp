@@ -28,7 +28,7 @@ std::string shell_word(const std::string& value) {
 struct ParsedImport {
     std::string from;
     std::vector<std::string> files;
-    std::string frame;
+    std::vector<std::string> frames;
     std::string page;
     std::string output;
     std::string emit;
@@ -49,9 +49,13 @@ ParsedImport parse(const std::vector<std::string>& args) {
         std::string* slot = nullptr;
         if (arg == "--from")
             slot = &p.from;
-        else if (arg == "--frame")
-            slot = &p.frame;
-        else if (arg == "--page")
+        else if (arg == "--frame") {
+            if (!has_value)
+                p.unsupported = arg;
+            else
+                p.frames.push_back(args[++i]);
+            continue;
+        } else if (arg == "--page")
             slot = &p.page;
         else if (arg == "--output")
             slot = &p.output;
@@ -88,7 +92,11 @@ ParsedImport parse(const std::vector<std::string>& args) {
 std::string untranslatable(const ParsedImport& p) {
     if (!p.unsupported.empty())
         return p.unsupported;
-    static const std::set<std::string> baked_sources = {"figma", "figma-plugin", "pencil",
+    if (p.files.size() > 1 && p.from != "figma-plugin")
+        return "--file (more than one)";
+    if (p.frames.size() > 1 && p.from != "fig")
+        return "--frame (more than one)";
+    static const std::set<std::string> baked_sources = {"figma", "figma-plugin", "pencil",   "jsx",
                                                         "v0",    "designmd",     "design-ir"};
     const bool jsx = p.from == "jsx";
     const bool illustrator = p.from == "illustrator" || p.from == "ai" || p.from == "pdf";
@@ -101,7 +109,7 @@ std::string untranslatable(const ParsedImport& p) {
             return "--file (more than one)";
         if (p.outline)
             return "--outline";
-        if (!p.frame.empty())
+        if (!p.frames.empty())
             return "--frame";
         if (!p.page.empty())
             return "--page";
@@ -173,8 +181,8 @@ std::string vellum_import_spelling(const std::vector<std::string>& args) {
         spelling += " --outline";
     if (!p.page.empty())
         spelling += " --page " + shell_word(p.page);
-    if (!p.frame.empty())
-        spelling += " --frame " + shell_word(p.frame);
+    for (const auto& frame : p.frames)
+        spelling += " --frame " + shell_word(frame);
     if (p.validate_only)
         spelling += " --validate-only";
     if (!p.mode.empty())

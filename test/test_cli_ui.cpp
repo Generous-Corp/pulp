@@ -2,6 +2,8 @@
 
 #include "tools/cli/cli_common.hpp"
 
+#include <atomic>
+#include <chrono>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
@@ -23,10 +25,15 @@ std::string forwarded_vellum_command;
 std::vector<std::string> forwarded_args;
 int forwarded_result = 0;
 bool forwarded = false;
+std::atomic<unsigned> scratch_counter{0};
 
 struct ScratchRoot {
-    fs::path path = fs::temp_directory_path() / "pulp-test-cli-ui-root";
+    fs::path path;
     explicit ScratchRoot(bool with_tool) {
+        const auto stamp = std::chrono::steady_clock::now().time_since_epoch().count();
+        const auto serial = scratch_counter.fetch_add(1, std::memory_order_relaxed);
+        path = fs::temp_directory_path() /
+               ("pulp-test-cli-ui-root-" + std::to_string(stamp) + "-" + std::to_string(serial));
         fs::remove_all(path);
         fs::create_directories(path / "tools" / "ui-build");
         if (with_tool)

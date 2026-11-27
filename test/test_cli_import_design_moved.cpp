@@ -21,6 +21,9 @@ TEST_CASE("import-design maps each source lane to its vellum import spelling", "
     CHECK(vellum_import_spelling(
               Args{"--from", "fig", "--file", "a b.fig", "--page", "Main", "--frame", "Panel"}) ==
           "vellum import --source-type fig 'a b.fig' --page Main --frame Panel");
+    CHECK(vellum_import_spelling(Args{"--from", "fig", "--file", "states.fig", "--frame", "Idle",
+                                      "--frame", "Active"}) ==
+          "vellum import --source-type fig states.fig --frame Idle --frame Active");
     CHECK(vellum_import_spelling(Args{"--from", "fig", "--file", "x.fig", "--outline"}) ==
           "vellum import --source-type fig x.fig --outline");
     CHECK(vellum_import_spelling(
@@ -55,6 +58,9 @@ TEST_CASE("import-design translates a baked emit in full", "[cli][import]") {
     CHECK(vellum_import_spelling(Args{"--from", "jsx", "--file", "b.js", "--mode", "baked",
                                       "--emit", "ir-json", "--output", "ui.json"}) ==
           "vellum import jsx b.js --mode baked --emit ir-json --out ui.json");
+    CHECK(vellum_import_spelling(
+              Args{"--from", "jsx", "--file", "b.js", "--mode", "baked", "--emit", "cpp"}) ==
+          "vellum import jsx b.js --mode baked --emit cpp");
 }
 
 TEST_CASE("import-design names an argument vellum import cannot express", "[cli][import]") {
@@ -67,8 +73,18 @@ TEST_CASE("import-design names an argument vellum import cannot express", "[cli]
     CHECK(pulp::cli::unsupported_import_design_option(Args{"--url", "https://example.invalid"}) ==
           "--url");
     CHECK(pulp::cli::unsupported_import_design_option(
-              Args{"--from", "jsx", "--file", "b.js", "--mode", "baked", "--emit", "cpp"}) ==
-          "--emit cpp --from jsx");
+              Args{"--from", "jsx", "--file", "b.js", "--mode", "baked", "--emit", "cpp"})
+              .empty());
+    const Args repeated_project_files{"--from",    "pencil", "--file",
+                                      "first.pen", "--file", "second.pen"};
+    CHECK(vellum_import_spelling(repeated_project_files).empty());
+    CHECK(pulp::cli::unsupported_import_design_option(repeated_project_files) ==
+          "--file (more than one)");
+    const Args repeated_project_frames{"--from",  "pencil", "--file",  "p.pen",
+                                       "--frame", "Idle",   "--frame", "Active"};
+    CHECK(vellum_import_spelling(repeated_project_frames).empty());
+    CHECK(pulp::cli::unsupported_import_design_option(repeated_project_frames) ==
+          "--frame (more than one)");
     CHECK(pulp::cli::unsupported_import_design_option(Args{"--from", "pencil", "--file", "p.pen"})
               .empty());
 
