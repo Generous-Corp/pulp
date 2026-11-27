@@ -3083,7 +3083,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-2d8f4458dcf3"
+name = "script-readers-2d27b381f422"
 paths = ["tools/scripts/test_claude_plugin_command_discovery.py"]
 tests = [
   "build-parallelism-guard",
