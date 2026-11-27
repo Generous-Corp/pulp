@@ -286,16 +286,17 @@ function(pulp_define_vellum_ui_compat_targets)
             REQUIRES Vellum::MirrorRender_2d)
         _pulp_vellum_ui_compat_define(design-import
             REQUIRES Vellum::MirrorDesign_import)
-        # The umbrella keeps the importer and the scripted view, as Pulp::view
-        # does in an SDK built with them.
-        _pulp_vellum_ui_compat_define(view
-            REQUIRES Vellum::MirrorView_core Vellum::MirrorDesign_import
-            OPTIONAL Vellum::MirrorView_script Pulp::vellum)
         _pulp_vellum_ui_compat_define(view-audio
             REQUIRES Pulp::vellum-audio)
         _pulp_vellum_ui_compat_define(view-tooling
             REQUIRES Vellum::MirrorView_core Pulp::vellum Pulp::editor-bridge
             OPTIONAL Vellum::MirrorView_script)
+        # The umbrella keeps the importer, the scripted view and the audio and
+        # tooling layers, as Pulp::view does in an SDK built with them. It is
+        # defined after the two names it links so their presence is known.
+        _pulp_vellum_ui_compat_define(view
+            REQUIRES Vellum::MirrorView_core Vellum::MirrorDesign_import
+            OPTIONAL Vellum::MirrorView_script Pulp::vellum Pulp::view-audio Pulp::view-tooling)
     endif()
     set(_defined "")
     foreach(_name IN ITEMS canvas render design-import view view-audio view-tooling)
