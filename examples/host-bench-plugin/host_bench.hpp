@@ -175,6 +175,9 @@ public:
         return ok || data.empty();
     }
 
+#if PULP_FORMAT_LEGACY_VIEW
+    // The editor lifecycle hooks exist only while Processor names Pulp's
+    // view layer; in an SDK whose UI is Vellum the bench logs no view events.
     void on_view_opened(view::View&) override {
         view_open_count_.fetch_add(1, std::memory_order_relaxed);
         logger_->write_event("view_opened",
@@ -188,6 +191,7 @@ public:
                              {{"width", bench::BenchLogger::to_str(w)},
                               {"height", bench::BenchLogger::to_str(h)}});
     }
+#endif
 
     void process(
         audio::BufferView<float>& output,
