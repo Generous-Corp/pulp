@@ -218,7 +218,7 @@ public:
                 }
             }
         }
-        unheld.clear(); // ~Processor() here — control thread
+        unheld.clear(); // ~Processor() here, on the control thread
     }
 
     /// Control-thread re-prepare of the live processor (e.g. a host sample-rate
