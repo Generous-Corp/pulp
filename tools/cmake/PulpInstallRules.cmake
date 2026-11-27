@@ -258,6 +258,12 @@ if(TARGET pulp-arm64ec-stl-thunks)
         RENAME pulp-arm64ec-stl-thunks.lib)
 endif()
 
+# The in-tree Vellum mode leaves Pulp's UI directories out, so their targets
+# are not in this tree to export (PulpVellumUiInTree.cmake).
+if(PULP_UI_FROM_VELLUM_IN_TREE)
+    pulp_vellum_in_tree_drop_ui_targets(PULP_SDK_TARGETS)
+endif()
+
 foreach(_sdk_target IN LISTS PULP_SDK_TARGETS)
     string(REPLACE "pulp-" "" _sdk_export_name "${_sdk_target}")
     set_target_properties(${_sdk_target} PROPERTIES EXPORT_NAME "${_sdk_export_name}")
@@ -410,6 +416,10 @@ list(APPEND _pulp_sdk_header_subsystems
 )
 if(TARGET pulp-host)
     list(APPEND _pulp_sdk_header_subsystems host)
+endif()
+# Nor are the headers of the UI directories that mode leaves out.
+if(PULP_UI_FROM_VELLUM_IN_TREE)
+    pulp_vellum_in_tree_drop_ui_headers(_pulp_sdk_header_subsystems)
 endif()
 foreach(subsystem IN LISTS _pulp_sdk_header_subsystems)
     set(_inc_dir "${CMAKE_CURRENT_SOURCE_DIR}/core/${subsystem}/include")

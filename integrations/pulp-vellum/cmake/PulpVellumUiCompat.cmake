@@ -78,19 +78,30 @@ function(_pulp_vellum_link_tokens item out)
     set(${out} "${_tokens}" PARENT_SCOPE)
 endfunction()
 
+# Marks `target` as an owner of one GPU device layer. In a source tree the
+# package names are aliases (PulpVellumUiInTree.cmake), and a property can only
+# be set on the target an alias names.
+function(_pulp_vellum_mark_gpu_runtime_owner target owner)
+    get_target_property(_real "${target}" ALIASED_TARGET)
+    if(NOT _real)
+        set(_real "${target}")
+    endif()
+    set_property(TARGET "${_real}" PROPERTY PULP_GPU_RUNTIME_OWNER ${owner})
+endfunction()
+
 function(_pulp_vellum_mark_gpu_runtime_owners)
     foreach(_target IN ITEMS Pulp::gpu-device Pulp::gpu-audio VellumGpuRuntime::Device
             VellumGpuRuntime::Bootstrap VellumGpuRuntime::SkiaLogBridge)
         if(TARGET "${_target}")
-            set_property(TARGET "${_target}" PROPERTY PULP_GPU_RUNTIME_OWNER static)
+            _pulp_vellum_mark_gpu_runtime_owner("${_target}" static)
         endif()
     endforeach()
     foreach(_name IN LISTS ARGN)
-        set_property(TARGET "Pulp::${_name}" PROPERTY PULP_GPU_RUNTIME_OWNER provider)
+        _pulp_vellum_mark_gpu_runtime_owner("Pulp::${_name}" provider)
         get_target_property(_backing "Pulp::${_name}" INTERFACE_LINK_LIBRARIES)
         foreach(_target IN LISTS _backing)
             if(_target MATCHES "^Vellum::" AND TARGET "${_target}")
-                set_property(TARGET "${_target}" PROPERTY PULP_GPU_RUNTIME_OWNER provider)
+                _pulp_vellum_mark_gpu_runtime_owner("${_target}" provider)
             endif()
         endforeach()
     endforeach()

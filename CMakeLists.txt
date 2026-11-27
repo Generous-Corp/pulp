@@ -147,6 +147,39 @@ option(PULP_CHANGED_SURFACE_INVENTORY_TARGET
        "Validate the exact filtered CTest inventory for Shipyard's declared shadow-selection target"
        OFF)
 option(PULP_ENABLE_GPU "Enable GPU rendering (Dawn/Skia)" ON)
+# Serve pulp::view, canvas, render, design-import, view-audio and view-tooling
+# from an installed Vellum SDK instead of building Pulp's own UI directories
+# (integrations/pulp-vellum/cmake/PulpVellumUiInTree.cmake). Off by default;
+# while off it changes nothing. It needs the Vellum integration packages.
+option(PULP_UI_FROM_VELLUM_IN_TREE
+    "Serve Pulp's UI target names from an installed Vellum SDK and leave Pulp's own UI directories out"
+    OFF)
+if(PULP_UI_FROM_VELLUM_IN_TREE)
+    if(NOT PULP_ENABLE_PULP_VELLUM OR NOT PULP_ENABLE_PULP_VELLUM_AUDIO)
+        message(FATAL_ERROR
+            "PULP_UI_FROM_VELLUM_IN_TREE needs PULP_ENABLE_PULP_VELLUM=ON and "
+            "PULP_ENABLE_PULP_VELLUM_AUDIO=ON, the packages behind pulp::view-tooling "
+            "and pulp::view-audio")
+    endif()
+    if(PULP_ENABLE_GPU)
+        message(FATAL_ERROR
+            "PULP_UI_FROM_VELLUM_IN_TREE needs PULP_ENABLE_GPU=OFF for now: "
+            "core/render defines Pulp's own 2D renderer (pulp::render) beside the GPU "
+            "device layer the audio code keeps, so it cannot be left out whole")
+    endif()
+    include("${CMAKE_CURRENT_SOURCE_DIR}/integrations/pulp-vellum/cmake/PulpVellumUiInTree.cmake")
+endif()
+# Pulp's own UI directories are added through this, so the option above can leave
+# them out. A macro, so each directory's parent scope stays the top level.
+macro(_pulp_add_ui_subdirectory _pulp_ui_dir)
+    set(_pulp_skip_ui_dir FALSE)
+    if(PULP_UI_FROM_VELLUM_IN_TREE)
+        pulp_vellum_in_tree_skips(${_pulp_ui_dir} _pulp_skip_ui_dir)
+    endif()
+    if(NOT _pulp_skip_ui_dir)
+        add_subdirectory(${_pulp_ui_dir})
+    endif()
+endmacro()
 option(PULP_GPU_AUDIO_WGPU_NATIVE_DIAGNOSTIC
        "Build the private staged wgpu-native architecture diagnostic" OFF)
 if(PULP_GPU_AUDIO_WGPU_NATIVE_DIAGNOSTIC AND
@@ -534,7 +567,7 @@ add_subdirectory(core/dataplane)
 add_subdirectory(core/graph)
 add_subdirectory(core/format)
 add_subdirectory(core/sequence)
-add_subdirectory(core/canvas)
+_pulp_add_ui_subdirectory(core/canvas)
 if(PULP_ENABLE_SCENE3D)
     add_subdirectory(core/scene)
 endif()
@@ -550,7 +583,7 @@ endif()
 add_subdirectory(core/gpu_audio)
 # The view-free editor bridge comes before core/view, whose tooling layer links it.
 add_subdirectory(core/editor_bridge)
-add_subdirectory(core/view)
+_pulp_add_ui_subdirectory(core/view)
 # The lite editor stack's replacement objects (see PulpLiteEditorObjects.cmake).
 # Apple only: the lite TextShaper measures through CoreText.
 if(APPLE AND NOT IOS AND PULP_HAS_SKIA AND TARGET pulp-canvas AND TARGET pulp-view-core)
@@ -562,7 +595,7 @@ if(APPLE AND NOT IOS AND PULP_HAS_SKIA AND TARGET pulp-canvas AND TARGET pulp-vi
 endif()
 # The arranger rung sits above both the editor kernel and the view stack, so it
 # is added after core/view rather than beside core/timeline_editor.
-add_subdirectory(core/timeline_view)
+_pulp_add_ui_subdirectory(core/timeline_view)
 add_subdirectory(core/osc)
 add_subdirectory(core/native-components)
 # pulp-host is a plugin HOST library — iOS App Store policy disallows dlopen
@@ -580,6 +613,9 @@ add_subdirectory(core/dsl)
 # Optional integration packages (integrations/CMakeLists.txt). Core never links
 # them.
 add_subdirectory(integrations)
+if(PULP_UI_FROM_VELLUM_IN_TREE)
+    pulp_vellum_in_tree_define_ui_targets()
+endif()
 
 # Wire Android-specific sources into subsystem targets (must come after add_subdirectory)
 if(ANDROID)
@@ -621,8 +657,12 @@ endif()
 set(_pulp_standalone_sources ${_pulp_standalone_core_sources} ${_pulp_standalone_view_sources})
 add_library(pulp-standalone STATIC ${_pulp_standalone_sources})
 add_library(pulp::standalone ALIAS pulp-standalone)
-add_library(pulp-standalone-native STATIC ${_pulp_standalone_sources})
-add_library(pulp::standalone-native ALIAS pulp-standalone-native)
+# The native standalone links pulp::view-native, which a Vellum-backed tree does
+# not define (PulpVellumUiInTree.cmake).
+if(NOT PULP_UI_FROM_VELLUM_IN_TREE)
+    add_library(pulp-standalone-native STATIC ${_pulp_standalone_sources})
+    add_library(pulp::standalone-native ALIAS pulp-standalone-native)
+endif()
 # The standalone of a UI package plug-in (pulp_add_plugin(... UI <package>)):
 # the core alone, with no Pulp view, canvas or render code, so Dawn reaches the
 # app only through its UI package. Its sources read no view, canvas or render
@@ -654,7 +694,9 @@ function(_pulp_configure_standalone_target target view_target)
     endif()
 endfunction()
 _pulp_configure_standalone_target(pulp-standalone pulp::view)
-_pulp_configure_standalone_target(pulp-standalone-native pulp::view-native)
+if(NOT PULP_UI_FROM_VELLUM_IN_TREE)
+    _pulp_configure_standalone_target(pulp-standalone-native pulp::view-native)
+endif()
 
 # Native standalone consumers select the deliberately narrow view-native
 # umbrella. On Skia desktop targets that umbrella contains the renderer and
@@ -665,7 +707,8 @@ _pulp_configure_standalone_target(pulp-standalone-native pulp::view-native)
 # Keep this closure on the native standalone target so native plugin targets
 # retain their existing link floor while every future native standalone gets
 # the platform host it needs.
-if((WIN32 OR (UNIX AND NOT APPLE AND NOT ANDROID)) AND PULP_HAS_SKIA)
+if((WIN32 OR (UNIX AND NOT APPLE AND NOT ANDROID)) AND PULP_HAS_SKIA
+        AND NOT PULP_UI_FROM_VELLUM_IN_TREE)
     target_link_libraries(pulp-standalone-native PUBLIC pulp::view-tooling)
     get_target_property(_native_standalone_links
         pulp-standalone-native INTERFACE_LINK_LIBRARIES)
