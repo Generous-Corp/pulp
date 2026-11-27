@@ -1732,6 +1732,7 @@
       "pulp/vellum_components/aliases.hpp",
       "pulp/vellum_components/arranger_view.hpp",
       "pulp/vellum_components/catalogue.hpp",
+      "pulp/vellum_components/gpu_health_content.hpp",
       "pulp/vellum_components/inspector_window.hpp",
       "pulp/vellum_components/lasso.hpp",
       "pulp/vellum_components/model_manager_view.hpp",
