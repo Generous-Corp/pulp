@@ -51,6 +51,15 @@ TraceAnalyzeProcessLimits trace_analyze_process_limits();
 /// controllable through inherited environment variables.
 void configure_trace_analyze_process_limits_for_testing(
     std::optional<TraceAnalyzeProcessLimits> limits);
+/// True when a UI tool call names a bundle and so runs on the Vellum app host.
+bool ui_request_uses_vellum_host(const std::string& params_json);
+/// Render a bundle through `vellum-app-host`; returns an MCP image block.
+std::string handle_ui_screenshot(const std::string& params_json);
+/// Tree dump (node ids and boxes) of a bundle through `vellum-app-host`.
+std::string handle_ui_view_tree(const std::string& params_json);
+/// Press a node (by id, or the deepest pressable node at x,y) and return the
+/// resulting tree and frame.
+std::string handle_ui_simulate_click(const std::string& params_json);
 std::string handle_minos(const std::string& params_json);
 std::string handle_kit(const std::string& params_json);
 std::string handle_kit_search(const std::string& params_json);

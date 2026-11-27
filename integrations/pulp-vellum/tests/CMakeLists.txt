@@ -5,12 +5,32 @@
 find_package(Threads REQUIRED)
 
 if(PULP_BUILD_TESTS AND TARGET Catch2::Catch2WithMain)
+    # test_reload_capabilities_vellum.cpp checks Pulp's reload capability names
+    # against Vellum's and runs the remote UX update gate with no Pulp view.
     add_executable(pulp-test-pulp-vellum
-        ${PULP_ROOT_DIR}/test/test_pulp_vellum_param_bridge.cpp)
+        ${PULP_ROOT_DIR}/test/test_pulp_vellum_param_bridge.cpp
+        test_reload_capabilities_vellum.cpp)
     target_link_libraries(pulp-test-pulp-vellum PRIVATE
         pulp::vellum Catch2::Catch2WithMain Threads::Threads)
     include(Catch)
     catch_discover_tests(pulp-test-pulp-vellum PROPERTIES LABELS pulp-vellum)
+
+    # The adapter probe against the real GPU runtime: it must pass, and with the
+    # adapter name dropped it must fail for that reason.
+    if(TARGET pulp-vellum-gpu-adapter-probe)
+        add_test(NAME pulp-vellum-gpu-adapter-probe
+            COMMAND pulp-vellum-gpu-adapter-probe)
+        set_tests_properties(pulp-vellum-gpu-adapter-probe PROPERTIES
+            LABELS pulp-vellum TIMEOUT 60
+            ENVIRONMENT "MTL_DEBUG_LAYER=0"
+            PASS_REGULAR_EXPRESSION "\"verdict\":\"pass\".*\"swatches_mismatched\":0")
+        add_test(NAME pulp-vellum-gpu-adapter-probe-empty-adapter
+            COMMAND pulp-vellum-gpu-adapter-probe --simulate-empty-adapter)
+        set_tests_properties(pulp-vellum-gpu-adapter-probe-empty-adapter PROPERTIES
+            LABELS pulp-vellum TIMEOUT 60
+            ENVIRONMENT "MTL_DEBUG_LAYER=0"
+            PASS_REGULAR_EXPRESSION "\"verdict\":\"fail\",\"reason\":\"empty-adapter\"")
+    endif()
 
     # The SDK's imported targets can be scoped to the integration directory.
     get_property(_has_swift_motion TARGET pulp-vellum PROPERTY PULP_VELLUM_HAS_SWIFT_MOTION)
@@ -38,6 +58,8 @@ if(PULP_BUILD_TESTS AND TARGET Catch2::Catch2WithMain)
             target_link_libraries(pulp-test-pulp-vellum-editor PRIVATE Vellum::MirrorView_script)
             target_compile_definitions(pulp-test-pulp-vellum-editor PRIVATE
                 PULP_TEST_VELLUM_SCRIPTED_UI=1)
+            # The live-swap UI stage over a real Vellum scripted session.
+            target_sources(pulp-test-pulp-vellum-editor PRIVATE test_scripted_ui_swap_unit.cpp)
         endif()
         if(TARGET pulp-vellum-scripted)
             add_executable(pulp-test-vellum-scripted-wiring test_scripted_editor_wiring.cpp)
@@ -51,6 +73,35 @@ if(PULP_BUILD_TESTS AND TARGET Catch2::Catch2WithMain)
                     $<TARGET_FILE:pulp-test-vellum-scripted-wiring>)
             set_tests_properties(pulp-vellum-scripted-wiring PROPERTIES
                 LABELS pulp-vellum-editor TIMEOUT 30)
+            # The view-free reload shell under the Vellum scripted editor. It
+            # links format-core and Vellum only, so a Pulp view include in the
+            # shell fails this build, and it hot-swaps the logic fixtures that
+            # test/cmake/format_reload_tests.cmake builds.
+            if(TARGET pulp-reload-logic-unity AND NOT WIN32)
+                add_executable(pulp-test-vellum-reload-shell test_reloadable_shell_editor.cpp)
+                target_link_libraries(pulp-test-vellum-reload-shell PRIVATE
+                    pulp-vellum-scripted Vellum::MirrorView_script Catch2::Catch2WithMain
+                    Threads::Threads ${CMAKE_DL_LIBS})
+                add_dependencies(pulp-test-vellum-reload-shell
+                    pulp-reload-logic-unity pulp-reload-logic-compat pulp-reload-logic-incompat)
+                target_compile_definitions(pulp-test-vellum-reload-shell PRIVATE
+                    RELOAD_LOGIC_UNITY="$<TARGET_FILE:pulp-reload-logic-unity>"
+                    RELOAD_LOGIC_COMPATIBLE="$<TARGET_FILE:pulp-reload-logic-compat>"
+                    RELOAD_LOGIC_INCOMPATIBLE="$<TARGET_FILE:pulp-reload-logic-incompat>"
+                    # In the build tree: macOS dyld refuses an unsigned image
+                    # from a world-writable temp directory.
+                    RELOAD_WATCH_DIR="${CMAKE_CURRENT_BINARY_DIR}")
+                # The real scripted editor, opened through a host-driven editor
+                # session, reads the knob-and-label fixture script.
+                _pulp_vellum_scripted_package("reload shell editor fixture" _reload_package)
+                target_link_libraries(pulp-test-vellum-reload-shell PRIVATE "${_reload_package}")
+                _pulp_apply_ui_script_definition(pulp-test-vellum-reload-shell
+                    "${PULP_ROOT_DIR}/test/fixtures/scripted-editor/main-core.js")
+                set_property(TARGET pulp-test-vellum-reload-shell
+                    PROPERTY PULP_VELLUM_SCRIPTED_EDITOR TRUE)
+                catch_discover_tests(pulp-test-vellum-reload-shell PROPERTIES
+                    LABELS pulp-vellum-editor TIMEOUT 60)
+            endif()
             target_compile_definitions(pulp-test-pulp-vellum-editor PRIVATE
                 PULP_TEST_VELLUM_SCRIPTED_EDITOR=1)
             if(TARGET pulp-vellum-audio)
@@ -84,6 +135,11 @@ if(PULP_BUILD_TESTS AND TARGET Catch2::Catch2WithMain)
         if(PULP_HAS_VST3)
             target_compile_definitions(pulp-test-pulp-vellum-editor PRIVATE
                 PULP_TEST_VELLUM_VST3=1)
+            # The capture case decodes the host's back buffer with ImageIO.
+            if(APPLE)
+                target_link_libraries(pulp-test-pulp-vellum-editor PRIVATE
+                    "-framework CoreGraphics" "-framework ImageIO")
+            endif()
         endif()
 
         add_executable(pulp-test-pulp-vellum-about-notices
@@ -92,28 +148,9 @@ if(PULP_BUILD_TESTS AND TARGET Catch2::Catch2WithMain)
             pulp::vellum Vellum::MirrorView_core Catch2::Catch2WithMain Threads::Threads)
         catch_discover_tests(pulp-test-pulp-vellum-about-notices PROPERTIES LABELS pulp-vellum-editor)
 
-        # An AU v2 host opening a Vellum editor: the AU v2 contract view test
-        # source built a second time against Pulp's Vellum bridge, with its own
-        # class names, running only its Vellum cases.
-        if(APPLE AND NOT PULP_IOS AND PULP_HAS_AUSDK)
-            add_executable(pulp-test-au-v2-vellum-view
-                ${PULP_ROOT_DIR}/test/test_au_v2_contract_view.mm
-                ${PULP_ROOT_DIR}/core/format/src/au_v2_contract_view.mm)
-            target_include_directories(pulp-test-au-v2-vellum-view PRIVATE ${PULP_ROOT_DIR}/test)
-            target_link_libraries(pulp-test-au-v2-vellum-view PRIVATE
-                pulp::vellum Vellum::MirrorView_core ausdk Catch2::Catch2WithMain
-                "-framework AppKit" "-framework AudioToolbox" "-framework AudioUnit")
-            target_compile_definitions(pulp-test-au-v2-vellum-view PRIVATE
-                PULP_AU_CONTRACT_VIEW_FACTORY_CLASS=PulpAUContractViewFactory_Test
-                PULP_AU_CONTRACT_HOST_VIEW_CLASS=PulpAUContractHostView_Test
-                PULP_AU_V2_TEST_HOOKS=1 PULP_TEST_AU_VELLUM=1)
-            set_target_properties(pulp-test-au-v2-vellum-view PROPERTIES CXX_STANDARD 23)
-            target_compile_options(pulp-test-au-v2-vellum-view PRIVATE
-                $<$<COMPILE_LANGUAGE:OBJCXX>:-std=gnu++23>)
-            target_link_options(pulp-test-au-v2-vellum-view PRIVATE -Wl,-export_dynamic)
-            catch_discover_tests(pulp-test-au-v2-vellum-view TEST_SPEC "[vellum]"
-                PROPERTIES LABELS pulp-vellum-editor)
-        endif()
+        # An AU v2 host opening a Vellum editor. The target defines a test-only
+        # macro, so its definition lives under test/ with the other test targets.
+        include(${PULP_ROOT_DIR}/test/cmake/au_v2_vellum_view_tests.cmake)
 
         # An AU v3 host opening a Vellum editor: the AU v3 contract view test
         # source built a second time against Pulp's Vellum bridge, running only

@@ -54,7 +54,8 @@
 
 namespace pulp::state {
 class StateStore;
-}
+struct ParamGroup;
+} // namespace pulp::state
 
 namespace pulp::format {
 
@@ -126,6 +127,11 @@ class ParamPort {
     virtual std::span<const state::ParamInfo> params() const = 0;
     /// One parameter's description, or null for an unknown id. Any thread.
     virtual const state::ParamInfo* info(state::ParamID id) const = 0;
+    /// The named parameter groups `ParamInfo::group_id` refers to, in
+    /// registration order. Empty by default, which a generated editor reads
+    /// as one ungrouped grid. `state::ParamGroup` is declared in
+    /// pulp/state/store.hpp, which a caller reading the groups includes.
+    virtual std::span<const state::ParamGroup> groups() const;
     /// The current plain value (the host's automation included). Any thread.
     virtual float get(state::ParamID id) const = 0;
 
@@ -180,8 +186,8 @@ class ParamPort {
 /// `add_listener()` are then refused, and the port's subscriptions are
 /// already removed.
 ///
-/// `params()` and `info()` describe the parameters as they were when the port
-/// was made. The span and pointers they return stay valid for the port's
+/// `params()`, `info()` and `groups()` describe the parameters as they were
+/// when the port was made. The span and pointers they return stay valid for the port's
 /// lifetime, connected or not, so an editor may keep them.
 class StateStoreParamPort final : public ParamPort {
   public:
@@ -193,6 +199,7 @@ class StateStoreParamPort final : public ParamPort {
 
     std::span<const state::ParamInfo> params() const override;
     const state::ParamInfo* info(state::ParamID id) const override;
+    std::span<const state::ParamGroup> groups() const override;
     float get(state::ParamID id) const override;
     void begin(state::ParamID id) override;
     void set(state::ParamID id, float plain_value) override;

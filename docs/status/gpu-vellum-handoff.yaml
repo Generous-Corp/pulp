@@ -108,8 +108,8 @@
           "repo": "Generous-Corp/pulp",
           "path": "tools/cli/gpu_probe",
           "state": "pulp-owned-retained",
-          "revision": "6a955ff812750aee7d7a5eb821017111b85d516d",
-          "object_id": "c395021b85c393b030b43101647dc2f46b9a3401",
+          "revision": "332fa233630210d705f883035c8d2b58bfac8b30",
+          "object_id": "449a991fa0a7b02de699d38a2299226625cce567",
           "object_type": "tree"
         },
         {
@@ -686,8 +686,8 @@
           "repo": "Generous-Corp/pulp",
           "path": "inspect/include/pulp/inspect/control_gpu_health_view_adapter.hpp",
           "state": "pulp-owned-retained",
-          "revision": "4855d523dcdb8e73c07486a0f8e0893fabe79c9f",
-          "object_id": "af9d1af2307ba60c66d08fad94acc812777f910e",
+          "revision": "0b5b358d98196032d8d1d5117a17655174baaf2a",
+          "object_id": "ed3c1a8ef4f8ba31207b76aaf4c6c6f4e4164cda",
           "object_type": "blob"
         },
         {
@@ -710,8 +710,8 @@
           "repo": "Generous-Corp/pulp",
           "path": "inspect/src/control_gpu_health_view_adapter.cpp",
           "state": "pulp-owned-retained",
-          "revision": "bc2d0400732cd6a9f9b4e8f5fe0de49a70dc9c51",
-          "object_id": "1154c1367d50bf86c93a75ef7b77580afed554a3",
+          "revision": "0b5b358d98196032d8d1d5117a17655174baaf2a",
+          "object_id": "979c955968cb7a87d3149203c2f434bf1a997143",
           "object_type": "blob"
         },
         {
@@ -734,8 +734,8 @@
           "repo": "Generous-Corp/pulp",
           "path": "test/test_control_gpu_health_provider.cpp",
           "state": "pulp-owned-retained",
-          "revision": "f88c905ec19ba1715c72d00a90b8205bf57fd69c",
-          "object_id": "ea0a32a2d3b0d149de8370d9769a6fa814fe0621",
+          "revision": "0b5b358d98196032d8d1d5117a17655174baaf2a",
+          "object_id": "e22b1eebc31b94c17cd2fb1b2acb6e7e5b42e710",
           "object_type": "blob"
         },
         {
@@ -1658,8 +1658,8 @@
           "repo": "Generous-Corp/pulp",
           "path": "tools/cli/gpu_probe",
           "state": "pulp-owned-retained",
-          "revision": "6a955ff812750aee7d7a5eb821017111b85d516d",
-          "object_id": "c395021b85c393b030b43101647dc2f46b9a3401",
+          "revision": "332fa233630210d705f883035c8d2b58bfac8b30",
+          "object_id": "449a991fa0a7b02de699d38a2299226625cce567",
           "object_type": "tree"
         },
         {
@@ -2711,8 +2711,8 @@
           "repo": "Generous-Corp/pulp",
           "path": ".agents/skills/daw-smoke/SKILL.md",
           "state": "pulp-owned-retained",
-          "revision": "5b69617161aaa7b26849ff388ad7a00386f6b357",
-          "object_id": "c1543c04188e1fab6f6ec284e750b1f18625943d",
+          "revision": "1e5db1fd8490fbf0421fbb46f3920061555c6b58",
+          "object_id": "714f3e671131b588a05e7c0a9bbf86b124b2484e",
           "object_type": "blob"
         },
         {
@@ -2743,8 +2743,8 @@
           "repo": "Generous-Corp/pulp",
           "path": ".agents/skills/screenshot/SKILL.md",
           "state": "pulp-owned-retained",
-          "revision": "12423ff4dc0fcbe6d97aed148ae47841dc654d70",
-          "object_id": "41fde1a4136333609e541e70bb0a658fb0c8da10",
+          "revision": "f1288ef43d81844a72674a2bc832c6e13ea1ac5f",
+          "object_id": "bd93017e7e15c35dd18c1b352fdb4b08e50bb21d",
           "object_type": "blob"
         },
         {
@@ -2775,8 +2775,8 @@
           "repo": "Generous-Corp/pulp",
           "path": ".agents/skills/view-bridge/SKILL.md",
           "state": "pulp-owned-retained",
-          "revision": "520ad17e33c9ba16001c108152d9f78dfe64212c",
-          "object_id": "1a587ca533e9a4fcc5ef8de803f62ae6f4ac6007",
+          "revision": "be525f16b39ff9123bed893048a3bf25382fb5f4",
+          "object_id": "5c9d5a4c35c9292f62f2da64e7e6f08cd90938c5",
           "object_type": "blob"
         },
         {
@@ -3010,8 +3010,8 @@
           "repo": "Generous-Corp/pulp",
           "path": ".github/workflows/release-cli.yml",
           "state": "pulp-owned-retained",
-          "revision": "fc0f0f4268b44535dfc1da5b3c36bbc7eb383d38",
-          "object_id": "5c892a8af4401caa453d48b90943812ff376ae69",
+          "revision": "358fcc34fe80a22142ebd9d452713a73eb16fc70",
+          "object_id": "4335e5ff33f21af27981bb4f3e39751109ff0697",
           "object_type": "blob"
         },
         {
@@ -3058,8 +3058,8 @@
           "repo": "Generous-Corp/pulp",
           "path": "tools/scripts/release_product_matrix.json",
           "state": "pulp-owned-retained",
-          "revision": "2b4abbeb910cecf9da873054ba7901310a7ae131",
-          "object_id": "6e612014a97fbd340af893d5b9160b9baeef9c97",
+          "revision": "358fcc34fe80a22142ebd9d452713a73eb16fc70",
+          "object_id": "c16b4500cf85269024c783754dd3c15afa62eeb2",
           "object_type": "blob"
         },
         {
@@ -3074,8 +3074,8 @@
           "repo": "Generous-Corp/pulp",
           "path": "tools/scripts/test_release_artifact_contents.py",
           "state": "pulp-owned-retained",
-          "revision": "2b4abbeb910cecf9da873054ba7901310a7ae131",
-          "object_id": "71fb5b0110538decfde811d60104da1a0e0e05f1",
+          "revision": "358fcc34fe80a22142ebd9d452713a73eb16fc70",
+          "object_id": "91b6641cefd75b3e33bcbc66efd4983f84a30755",
           "object_type": "blob"
         }
       ],

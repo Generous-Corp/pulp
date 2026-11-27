@@ -14,6 +14,7 @@
 #include <pulp/format/detail/editor_size_constraint.hpp>
 #include <pulp/format/detail/standalone_key_driver.hpp>
 #include <pulp/format/processor.hpp>
+#include <pulp/format/standalone_panel.hpp>
 #include <pulp/runtime/log.hpp>
 #include <pulp/state/store.hpp>
 
@@ -28,14 +29,17 @@
 #include <vector>
 
 // The window's content view: the editor's parent. It forwards host resizes to
-// the session and offers keys before the host acts on them.
+// the session, offers keys before the host acts on them, and toggles the
+// standalone's panels on their shortcuts.
 @interface PulpStandaloneContractView : NSView {
     pulp::format::ContractEditorSession* _session;
     std::function<void()> _onTransportKey;
+    std::vector<pulp::format::StandalonePanel*> _panels;
     bool _applyingEditorSize;
 }
 - (void)setSession:(pulp::format::ContractEditorSession*)session
     onTransportKey:(std::function<void()>)onTransportKey;
+- (void)setPanels:(std::vector<pulp::format::StandalonePanel*>)panels;
 - (bool)applyEditorSize:(NSSize)size;
 @end
 
@@ -45,6 +49,33 @@
     onTransportKey:(std::function<void()>)onTransportKey {
     _session = session;
     _onTransportKey = std::move(onTransportKey);
+}
+
+- (void)setPanels:(std::vector<pulp::format::StandalonePanel*>)panels {
+    _panels = std::move(panels);
+}
+
+// A panel's shortcut is Command plus its letter, with no other modifier.
+// AppKit offers a Command chord here before keyDown:, and a window without a
+// menu (headless) has nothing else that would see it.
+- (BOOL)performKeyEquivalent:(NSEvent*)event {
+    if (event.type == NSEventTypeKeyDown && !event.isARepeat && !_panels.empty()) {
+        const auto flags = event.modifierFlags & NSEventModifierFlagDeviceIndependentFlagsMask &
+                           (NSEventModifierFlagCommand | NSEventModifierFlagShift |
+                            NSEventModifierFlagControl | NSEventModifierFlagOption);
+        NSString* chars = event.charactersIgnoringModifiers.lowercaseString;
+        if (flags == NSEventModifierFlagCommand && chars.length == 1) {
+            const unichar typed = [chars characterAtIndex:0];
+            for (auto* panel : _panels) {
+                if (panel != nullptr && panel->shortcut() != 0 &&
+                    typed == static_cast<unichar>(panel->shortcut())) {
+                    panel->toggle();
+                    return YES;
+                }
+            }
+        }
+    }
+    return [super performKeyEquivalent:event];
 }
 
 - (BOOL)isFlipped {
@@ -160,9 +191,11 @@
 @interface PulpStandaloneContractMenuTarget : NSObject {
   @public
     std::function<bool()> openSettings;
+    std::vector<pulp::format::StandalonePanel*> panels;
     NSWindow* editorWindow;
 }
 - (void)openSettings:(id)sender;
+- (void)togglePanel:(id)sender;
 - (void)closeEditor:(id)sender;
 @end
 
@@ -176,15 +209,21 @@
     (void)sender;
     [editorWindow performClose:nil];
 }
+- (void)togglePanel:(NSMenuItem*)sender {
+    const auto index = static_cast<std::size_t>(sender.tag);
+    if (index < panels.size() && panels[index] != nullptr)
+        panels[index]->toggle();
+}
 @end
 
 namespace pulp::format::detail {
 
 namespace {
 
-// The app menu a standalone with Audio/MIDI settings shows: "Audio/MIDI
-// Settings…" (Cmd+,) and a Quit that closes the editor window, so the editor
-// detaches in order. Skipped when the process already has a main menu.
+// The app menu a standalone with Audio/MIDI settings or panels shows:
+// "Audio/MIDI Settings…" (Cmd+,), one item per panel on its shortcut, and a
+// Quit that closes the editor window, so the editor detaches in order. Skipped
+// when the process already has a main menu.
 bool install_app_menu(PulpStandaloneContractMenuTarget* target, NSString* title) {
     if ([NSApp mainMenu] != nil)
         return false;
@@ -192,11 +231,24 @@ bool install_app_menu(PulpStandaloneContractMenuTarget* target, NSString* title)
     NSMenuItem* appItem = [[[NSMenuItem alloc] init] autorelease];
     [bar addItem:appItem];
     NSMenu* appMenu = [[[NSMenu alloc] initWithTitle:title] autorelease];
-    NSMenuItem* settings = [[[NSMenuItem alloc] initWithTitle:@"Audio/MIDI Settings\u2026"
-                                                       action:@selector(openSettings:)
-                                                keyEquivalent:@","] autorelease];
-    settings.target = target;
-    [appMenu addItem:settings];
+    if (target->openSettings) {
+        NSMenuItem* settings = [[[NSMenuItem alloc] initWithTitle:@"Audio/MIDI Settings\u2026"
+                                                           action:@selector(openSettings:)
+                                                    keyEquivalent:@","] autorelease];
+        settings.target = target;
+        [appMenu addItem:settings];
+    }
+    for (std::size_t i = 0; i < target->panels.size(); ++i) {
+        auto* panel = target->panels[i];
+        const char key[2] = {panel->shortcut(), '\0'};
+        NSMenuItem* item = [[[NSMenuItem alloc]
+            initWithTitle:[NSString stringWithUTF8String:panel->menu_title().c_str()]
+                   action:@selector(togglePanel:)
+            keyEquivalent:[NSString stringWithUTF8String:key]] autorelease];
+        item.tag = static_cast<NSInteger>(i);
+        item.target = target;
+        [appMenu addItem:item];
+    }
     [appMenu addItem:[NSMenuItem separatorItem]];
     NSMenuItem* quit = [[[NSMenuItem alloc] initWithTitle:[@"Quit " stringByAppendingString:title]
                                                    action:@selector(closeEditor:)
@@ -341,15 +393,19 @@ bool run_standalone_contract_editor(Processor& processor, state::StateStore& sto
         return false;
     }
     [content setSession:session.get() onTransportKey:options.on_transport_key];
+    [content setPanels:options.panels];
+    for (auto* panel : options.panels)
+        panel->set_primary_window((__bridge void*)window);
     session->set_scale(window.backingScaleFactor);
     [window makeFirstResponder:content];
     if (options.on_window_ready)
         options.on_window_ready((__bridge void*)window);
     PulpStandaloneContractMenuTarget* menu_target = nil;
     bool installed_menu = false;
-    if (!options.headless && options.on_open_settings) {
+    if (!options.headless && (options.on_open_settings || !options.panels.empty())) {
         menu_target = [[PulpStandaloneContractMenuTarget alloc] init];
         menu_target->openSettings = options.on_open_settings;
+        menu_target->panels = options.panels;
         menu_target->editorWindow = window;
         installed_menu = install_app_menu(
             menu_target, [NSString stringWithUTF8String:processor.descriptor().name.c_str()]);
@@ -412,6 +468,9 @@ bool run_standalone_contract_editor(Processor& processor, state::StateStore& sto
         session->visibility_changed(false);
     session->detach();
     [content setSession:nullptr onTransportKey:{}];
+    [content setPanels:{}];
+    for (auto* panel : options.panels)
+        panel->set_primary_window(nullptr);
     delegate->session = nullptr;
     session.reset();
     window.delegate = nil;
@@ -420,6 +479,7 @@ bool run_standalone_contract_editor(Processor& processor, state::StateStore& sto
         if (installed_menu)
             [NSApp setMainMenu:nil];
         menu_target->editorWindow = nil;
+        menu_target->panels.clear();
         [menu_target release];
     }
     [window orderOut:nil];

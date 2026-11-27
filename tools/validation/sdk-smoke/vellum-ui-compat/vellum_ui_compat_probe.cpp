@@ -28,20 +28,6 @@ int main() {
     return ok ? 0 : 1;
 }
 
-#elif defined(PULP_VELLUM_UI_COMPAT_PROBE_VIEW_NATIVE)
-#include <vellum/view/native_view_host.hpp>
-#include <vellum/view/plugin_view_host.hpp>
-
-int main() {
-    // Taking the factory's address makes the link resolve the platform host.
-    auto* create = static_cast<std::unique_ptr<vellum::view::PluginViewHost> (*)(
-        vellum::view::View&, vellum::view::PluginViewHost::Size)>(
-        &vellum::view::PluginViewHost::create);
-    std::printf("Pulp::view-native -> vellum::view::PluginViewHost::create %s\n",
-                create != nullptr ? "linked" : "missing");
-    return create != nullptr ? 0 : 1;
-}
-
 #elif defined(PULP_VELLUM_UI_COMPAT_PROBE_VIEW) ||                                                 \
     defined(PULP_VELLUM_UI_COMPAT_PROBE_DESIGN_IMPORT)
 #include <vellum/view/design_import.hpp>
@@ -64,6 +50,35 @@ int main() {
     std::printf("%s -> vellum::view::parse_designmd_yaml primary=%s\n", PULP_VELLUM_UI_COMPAT_NAME,
                 ok ? primary->second.c_str() : "missing");
     return ok ? 0 : 1;
+}
+
+#elif defined(PULP_VELLUM_UI_COMPAT_PROBE_VIEW_AUDIO)
+// The audio widgets package keeps its keyboard controller in a header, so this
+// proves the include path and the Vellum input types it is built on; the
+// package's compiled library is not part of this probe's link.
+#include <pulp/vellum_audio/musical_typing.hpp>
+
+int main() {
+    pulp::vellum_audio::MusicalTypingController typing;
+    int sounded = -1;
+    typing.on_note_on = [&](int note, float) { sounded = note; };
+    pulp::vellum_audio::KeyEvent press;
+    press.key = pulp::vellum_audio::KeyCode::a;
+    const bool consumed = typing.handle_key(press);
+    std::printf("Pulp::view-audio -> MusicalTypingController 'a' sounds note %d\n", sounded);
+    return consumed && sounded == typing.base_note() ? 0 : 1;
+}
+
+#elif defined(PULP_VELLUM_UI_COMPAT_PROBE_VIEW_TOOLING)
+// The screenshot surface is defined in the provider library behind the name, so
+// calling it makes the link depend on that library.
+#include <vellum/view/screenshot.hpp>
+
+int main() {
+    const bool capable = vellum::view::has_screenshot_backend();
+    std::printf("Pulp::view-tooling -> vellum::view::has_screenshot_backend %s\n",
+                capable ? "yes" : "no");
+    return 0;
 }
 
 #else

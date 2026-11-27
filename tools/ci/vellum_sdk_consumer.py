@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Build Pulp's Vellum SDK consumers against Vellum main's published SDK.
 
-Two subcommands back the `vellum-sdk-consumer` workflow:
+Three subcommands back the `vellum-sdk-consumer` workflow:
 
 resolve
     Find the newest successful "Locked macOS GPU proof" push run on Vellum
@@ -20,6 +20,13 @@ negative-control
     headers with one header renamed, where it must fail naming that header.
     A failure for any other reason is INCONCLUSIVE, never a pass.
 
+labelled-targets
+    Name every executable the lane must build so `ctest -L pulp-vellum` has
+    something to run: the executables defined under integrations/pulp-vellum*/
+    plus those a labelled ctest entry runs, read from the CMake file API
+    (`--prepare` before configuring). `--verify` runs after the build and fails
+    when any of them, or any labelled test's program, is absent.
+
 Exit codes: 0 success (resolve) or CONFIRMED (negative-control); 1 the lane
 did not detect the planted break (NOT CONFIRMED); 2 inconclusive or an error.
 """
@@ -31,6 +38,7 @@ import hashlib
 import io
 import json
 import os
+import re
 import shlex
 import shutil
 import subprocess
@@ -42,7 +50,7 @@ import urllib.parse
 import urllib.request
 import zipfile
 from dataclasses import dataclass
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 
 VELLUM_REPO = "Generous-Corp/vellum"
 GPU_WORKFLOW_NAME = "Locked macOS GPU proof"
@@ -119,6 +127,106 @@ def pick_run(runs: list[dict]) -> dict:
     if not candidates:
         raise ResolveError(f"no successful '{GPU_WORKFLOW_NAME}' push run on {VELLUM_REPO} main")
     return max(candidates, key=lambda run: (run.get("created_at") or "", run.get("id") or 0))
+
+
+# The workflow requests one full API page. Green Vellum pushes may reuse an
+# earlier proof and therefore have no evidence artifact, so inspect the whole
+# page before declaring that no usable SDK exists.
+RUN_SEARCH_LIMIT = 50
+# The reuse step annotates the gpu job with "Tree <sha> was proven by <run URL>"
+# (a ::notice::, readable as a check-run annotation) when it skips the build.
+REUSE_SOURCE_RE = re.compile(
+    r"Tree [0-9a-f]+ was proven by "
+    + re.escape(f"https://github.com/{VELLUM_REPO}/actions/runs/") + r"([1-9][0-9]*)")
+GPU_JOB_NAME = "gpu-macos-arm64"
+REUSE_CHAIN_MAX_DEPTH = 20
+
+
+def reuse_source_run(text: bytes | str) -> int | None:
+    """The source run id named by a reuse notice in annotation or log text.
+    Only a run of this repository counts."""
+    payload = text.decode("utf-8", "replace") if isinstance(text, bytes) else text
+    match = REUSE_SOURCE_RE.search(payload)
+    return int(match.group(1)) if match else None
+
+
+def _reuse_chain(run: dict, fetch_artifacts, fetch_run, fetch_reuse_source,
+                 *, max_depth: int = REUSE_CHAIN_MAX_DEPTH) -> tuple[dict, dict]:
+    """Follow recorded reuse pointers from `run` to a run with a live evidence artifact."""
+    chain = [run["id"]]
+    current = run
+    for _ in range(max_depth):
+        matches = [a for a in fetch_artifacts(current) if a.get("name") == EVIDENCE_ARTIFACT]
+        live = [a for a in matches if not a.get("expired")]
+        if len(live) == 1:
+            return current, live[0]
+        trail = " -> ".join(map(str, chain))
+        source_id = fetch_reuse_source(current)
+        if source_id is None:
+            state = "has expired" if matches else "is absent"
+            raise ResolveError(f"reuse chain {trail} ends at run {current['id']}, "
+                               f"whose '{EVIDENCE_ARTIFACT}' artifact {state}")
+        if source_id in chain:
+            raise ResolveError(f"reuse chain {trail} -> {source_id} loops")
+        chain.append(source_id)
+        current = fetch_run(source_id)
+        if current.get("name") != GPU_WORKFLOW_NAME or current.get("conclusion") != "success":
+            raise ResolveError(f"reuse chain {' -> '.join(map(str, chain))}: run {source_id} "
+                               f"is not a successful '{GPU_WORKFLOW_NAME}' run")
+    raise ResolveError(f"reuse chain {' -> '.join(map(str, chain))} exceeds {max_depth} runs")
+
+
+def run_reuse_source(jobs: list[dict], fetch_annotations, fetch_logs) -> int | None:
+    """The source run a reused proof names. The check-run annotations are the
+    structured record; the job log is read only when a job has no annotations
+    (or they cannot be fetched)."""
+    for job in jobs:
+        if job.get("name") != GPU_JOB_NAME:
+            continue
+        try:
+            annotations = fetch_annotations(job)
+        except ResolveError:
+            annotations = []
+        for annotation in annotations:
+            source_id = reuse_source_run(annotation.get("message") or "")
+            if source_id is not None:
+                return source_id
+        if not annotations:
+            source_id = reuse_source_run(fetch_logs(job))
+            if source_id is not None:
+                return source_id
+    return None
+
+
+def select_run(runs: list[dict], fetch_artifacts, limit: int = RUN_SEARCH_LIMIT,
+               fetch_reuse_source=None, fetch_run=None) -> tuple[dict, dict]:
+    """The newest successful push run on main that still carries the evidence
+    artifact, looking at no more than `limit` runs. A run whose change the
+    classifier skipped (for example an observatory-only push) is green but
+    builds and uploads nothing, so it is passed over rather than treated as
+    the SDK source. `fetch_artifacts(run)` returns that run's artifact list."""
+    candidates = sorted(
+        (run for run in runs
+         if run.get("name") == GPU_WORKFLOW_NAME and run.get("event") == "push"
+         and run.get("head_branch") == "main" and run.get("conclusion") == "success"),
+        key=lambda run: (run.get("created_at") or "", run.get("id") or 0), reverse=True)
+    if not candidates:
+        raise ResolveError(f"no successful '{GPU_WORKFLOW_NAME}' push run on {VELLUM_REPO} main")
+    chain_errors = []
+    for run in candidates[:limit]:
+        live = [a for a in fetch_artifacts(run)
+                if a.get("name") == EVIDENCE_ARTIFACT and not a.get("expired")]
+        if len(live) == 1:
+            return run, live[0]
+        if fetch_reuse_source is not None and fetch_run is not None:
+            try:
+                if fetch_reuse_source(run) is not None:
+                    return _reuse_chain(run, fetch_artifacts, fetch_run, fetch_reuse_source)
+            except ResolveError as error:
+                chain_errors.append(str(error))
+    detail = f"; first reuse failure: {chain_errors[0]}" if chain_errors else ""
+    raise ResolveError(f"none of the newest {min(limit, len(candidates))} successful '{GPU_WORKFLOW_NAME}' "
+                       f"runs on {VELLUM_REPO} main has an unexpired '{EVIDENCE_ARTIFACT}' artifact{detail}")
 
 
 def run_contains_commit(token: str, minimum: str, head: str) -> bool:
@@ -206,7 +314,26 @@ def resolve(args: argparse.Namespace) -> int:
         else:
             listing = _api(f"repos/{VELLUM_REPO}/actions/runs?branch=main&event=push&status=success&per_page=50",
                            token)
-            run = pick_run(listing.get("workflow_runs", []))
+            def fetch_artifacts(candidate):
+                return _api(f"repos/{VELLUM_REPO}/actions/runs/{candidate['id']}/artifacts", token).get("artifacts", [])
+
+            def fetch_run(run_id):
+                return _api(f"repos/{VELLUM_REPO}/actions/runs/{run_id}", token)
+
+            def fetch_reuse_source(candidate):
+                jobs = _api(f"repos/{VELLUM_REPO}/actions/runs/{candidate['id']}/jobs?per_page=100",
+                            token).get("jobs", [])
+                return run_reuse_source(
+                    jobs,
+                    lambda job: _api(f"repos/{VELLUM_REPO}/check-runs/{job['id']}/annotations?per_page=100", token),
+                    lambda job: _api(f"repos/{VELLUM_REPO}/actions/jobs/{job['id']}/logs", token, raw=True))
+
+            run, artifact = select_run(
+                listing.get("workflow_runs", []),
+                fetch_artifacts,
+                fetch_reuse_source=fetch_reuse_source,
+                fetch_run=fetch_run,
+            )
         head = run["head_sha"]
         minimum = getattr(args, "min_vellum_sha", None)
         if minimum and not run_contains_commit(token, minimum, head):
@@ -221,8 +348,9 @@ def resolve(args: argparse.Namespace) -> int:
             print(f"vellum-sdk-consumer: unchanged; Vellum main {head} was already checked")
             _write_outputs(args.github_output, {"unchanged": "true", "vellum_head_sha": head})
             return 0
-        artifact = pick_artifact(_api(f"repos/{VELLUM_REPO}/actions/runs/{run['id']}/artifacts", token)
-                                 .get("artifacts", []))
+        if args.run_id:
+            artifact = pick_artifact(_api(f"repos/{VELLUM_REPO}/actions/runs/{run['id']}/artifacts", token)
+                                     .get("artifacts", []))
         payload = _api(f"repos/{VELLUM_REPO}/actions/artifacts/{artifact['id']}/zip", token, raw=True)
         evidence = out / "evidence"
         if evidence.exists():
@@ -385,6 +513,164 @@ def negative_control(args: argparse.Namespace) -> int:
     return verdict
 
 
+# --------------------------------------------------------------------------
+# labelled test targets
+#
+# `ctest -L pulp-vellum` runs only what was built, and a Catch2 executable that
+# was never built registers no tests at all (discovery runs after the build),
+# so a missing target hides from ctest while a plain add_test() entry fails
+# with "no such file". The set to build therefore comes from the CMake target
+# graph: every executable defined under integrations/pulp-vellum*/ plus every
+# executable a labelled ctest entry runs.
+
+LABEL_REGEX = "pulp-vellum"
+INTEGRATION_SOURCE_PREFIX = "integrations/pulp-vellum"
+MINIMUM_TARGETS = ("pulp-test-pulp-vellum",)
+
+
+class LabelError(RuntimeError):
+    pass
+
+
+def prepare_codemodel_query(build_dir: Path) -> Path:
+    """Ask CMake to write its codemodel on the next configure."""
+    query = build_dir / ".cmake" / "api" / "v1" / "query" / "codemodel-v2"
+    query.parent.mkdir(parents=True, exist_ok=True)
+    query.touch()
+    return query
+
+
+def checkout_relative(source: str, source_root: str = "") -> str:
+    """A target's source directory as a forward-slash path relative to the checkout.
+
+    The file API reports `paths.source` relative to the top source directory in
+    some CMake versions and absolute in others, and the separators are native on
+    Windows. Absolute values are resolved against the codemodel's source root
+    (symlinks resolved on both sides) and fall back to the lexical form when the
+    path cannot be made relative.
+    """
+    text = source.replace("\\", "/")
+    if not (text.startswith("/") or PureWindowsPath(source).is_absolute()):
+        return text.removeprefix("./")
+    if not source_root:
+        return text
+    for make in (Path, PureWindowsPath):
+        try:
+            candidates = [(make(source), make(source_root))]
+            if make is Path:
+                candidates.append((Path(source).resolve(), Path(source_root).resolve()))
+            for path, root in candidates:
+                try:
+                    return path.relative_to(root).as_posix()
+                except ValueError:
+                    continue
+        except OSError:
+            continue
+    return text
+
+
+def codemodel_executables(build_dir: Path) -> dict[str, dict]:
+    """Executable targets from the CMake file API reply: name -> {source, artifact}."""
+    reply = build_dir / ".cmake" / "api" / "v1" / "reply"
+    indexes = sorted(reply.glob("index-*.json"))
+    if not indexes:
+        raise LabelError(f"no CMake file API reply in {reply}; run `--prepare` before configuring")
+    index = json.loads(indexes[-1].read_text(encoding="utf-8"))
+    model_files = [o["jsonFile"] for o in index.get("objects", []) if o.get("kind") == "codemodel"]
+    if not model_files:
+        raise LabelError("the CMake file API reply has no codemodel object")
+    model = json.loads((reply / model_files[0]).read_text(encoding="utf-8"))
+    source_root = (model.get("paths") or {}).get("source", "")
+    found: dict[str, dict] = {}
+    for configuration in model.get("configurations", []):
+        for entry in configuration.get("targets", []):
+            target = json.loads((reply / entry["jsonFile"]).read_text(encoding="utf-8"))
+            if target.get("type") != "EXECUTABLE":
+                continue
+            artifacts = target.get("artifacts") or []
+            found[target["name"]] = {
+                "source": (target.get("paths") or {}).get("source", ""),
+                "artifact": artifacts[0]["path"] if artifacts else None,
+                "source_root": source_root,
+            }
+    return found
+
+
+def _test_program(command: list[str]) -> str | None:
+    """The program a ctest entry runs, looking through a `cmake -E env` wrapper."""
+    if not command:
+        return None
+    if Path(command[0]).name in ("cmake", "cmake.exe") and command[1:3] == ["-E", "env"]:
+        for token in command[3:]:
+            if "=" not in token and not token.startswith("-"):
+                return token
+        return None
+    return command[0]
+
+
+def labelled_test_programs(build_dir: Path, label: str = LABEL_REGEX) -> list[tuple[str, Path]]:
+    """(test name, executable) for each labelled ctest entry that runs a file under build_dir."""
+    out = subprocess.run(["ctest", "--test-dir", str(build_dir), "-L", label, "--show-only=json-v1"],
+                         capture_output=True, text=True, encoding="utf-8", check=False)
+    if out.returncode != 0:
+        raise LabelError(f"ctest could not list '{label}' tests: {out.stderr.strip() or out.stdout.strip()}")
+    root = build_dir.resolve()
+    programs = []
+    for test in json.loads(out.stdout).get("tests", []):
+        program = _test_program(test.get("command") or [])
+        if program and Path(program).is_absolute() and root in Path(program).resolve().parents:
+            programs.append((test["name"], Path(program)))
+    return programs
+
+
+def vellum_test_targets(executables: dict[str, dict], programs: list[tuple[str, Path]]) -> list[str]:
+    """Every executable the lane must build, by target name."""
+    names = {name for name, info in executables.items()
+             if checkout_relative(info["source"], info.get("source_root", "")).startswith(INTEGRATION_SOURCE_PREFIX)}
+    names.update(path.name for _, path in programs if path.name in executables)
+    return sorted(names)
+
+
+def missing_programs(build_dir: Path, targets: list[str], executables: dict[str, dict],
+                     programs: list[tuple[str, Path]]) -> list[str]:
+    """Selected targets and labelled-test programs that were not built."""
+    problems = []
+    for name in targets:
+        artifact = executables[name]["artifact"]
+        if not artifact or not (build_dir / artifact).is_file():
+            problems.append(f"target {name}: {artifact or 'no artifact'} was not built")
+    for test, program in programs:
+        if not program.is_file():
+            problems.append(f"test {test}: {program} does not exist")
+    return problems
+
+
+def labelled_targets(args: argparse.Namespace) -> int:
+    build_dir = Path(args.build_dir)
+    try:
+        if args.prepare:
+            prepare_codemodel_query(build_dir)
+            return 0
+        executables = codemodel_executables(build_dir)
+        programs = labelled_test_programs(build_dir)
+        targets = vellum_test_targets(executables, programs)
+        absent = [t for t in MINIMUM_TARGETS if t not in targets]
+        if absent:
+            raise LabelError(f"the selection is blind: {', '.join(absent)} is missing from {targets}")
+        if args.verify:
+            problems = missing_programs(build_dir, targets, executables, programs)
+            if problems:
+                raise LabelError("labelled tests whose program was not built:\n  " + "\n  ".join(problems))
+            print(f"vellum-sdk-consumer: all {len(targets)} Vellum test executables and "
+                  f"{len(programs)} labelled test programs are built")
+        else:
+            print("\n".join(targets))
+    except LabelError as err:
+        print(f"vellum-sdk-consumer: {err}", file=sys.stderr)
+        return 2
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     sub = parser.add_subparsers(dest="command", required=True)
@@ -402,8 +688,20 @@ def main(argv: list[str] | None = None) -> int:
     n.add_argument("--target", default="pulp-slice-vellum-ui")
     n.add_argument("--source", default="test/editor_host_slice/vellum_ui/knob_panel.cpp")
     n.add_argument("--header", default="vellum/canvas/canvas.hpp")
+    t = sub.add_parser("labelled-targets",
+                       help="list (or verify built) every Vellum test executable, from the CMake target graph")
+    t.add_argument("--build-dir", required=True)
+    mode = t.add_mutually_exclusive_group()
+    mode.add_argument("--prepare", action="store_true",
+                      help="before configuring, request the CMake codemodel this command reads")
+    mode.add_argument("--verify", action="store_true",
+                      help="after building, fail if any selected target or labelled test program is absent")
     args = parser.parse_args(argv)
-    return resolve(args) if args.command == "resolve" else negative_control(args)
+    if args.command == "resolve":
+        return resolve(args)
+    if args.command == "labelled-targets":
+        return labelled_targets(args)
+    return negative_control(args)
 
 
 if __name__ == "__main__":

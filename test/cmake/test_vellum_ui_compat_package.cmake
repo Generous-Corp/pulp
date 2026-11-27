@@ -1,5 +1,6 @@
 # The installed package config defines Vellum-backed Pulp::view, Pulp::canvas,
-# Pulp::render, Pulp::view-native and Pulp::design-import in an SDK built with
+# Pulp::render, Pulp::design-import, Pulp::view-audio and Pulp::view-tooling
+# (never Pulp::view-native) in an SDK built with
 # PULP_SDK_UI_FROM_VELLUM, and defines nothing in an SDK that builds Pulp's own
 # UI, fully or partly.
 #
@@ -12,7 +13,7 @@
 #   wiring        the template includes the module after the Skia attach and
 #                 before the PULP_HAS_* facts, and the module is installed by
 #                 the unconditional install(FILES) that ships PulpConfig.cmake.
-#   shape         stand-in Vellum targets: all five names are defined with the
+#   shape         stand-in Vellum targets: the six names are defined with the
 #                 expected link sets, C++20 and lower-case aliases.
 #   pulp-ui       an SDK that exports its own UI defines nothing.
 #   partial-ui    a bridge SDK built with GPU and design import off (no
@@ -29,6 +30,12 @@
 #                 executable per name and runs each.
 #   wrong-version a real Vellum whose version is not the one recorded: it is
 #                 not found, the config warns, and the consumer refuses.
+#   view-native   stand-ins: Pulp::view-native is left undefined, and a target
+#                 linking it (directly, through the lower-case alias in a
+#                 library's interface, or from a subdirectory) is refused at
+#                 configure with the reason and the alternative; a consumer
+#                 that falls back to Pulp::view when the name is absent, and an
+#                 SDK that builds Pulp's own UI, configure.
 #   gpu-guard     stand-ins: a binary that links a Vellum-backed name and
 #                 Pulp's static gpu_runtime (Pulp::gpu-device, Pulp::gpu-audio,
 #                 Pulp::host, VellumGpuRuntime::Device), directly, through a
@@ -79,7 +86,7 @@ set(_compat_head "set(PULP_SDK_UI_FROM_VELLUM \"@PULP_SDK_UI_FROM_VELLUM@\")")
 _template_block("${_find_head}" _find_block)
 _template_block("${_compat_head}" _compat_block)
 
-set(_names "view;canvas;render;view-native;design-import")
+set(_names "view;canvas;render;view-native;design-import;view-audio;view-tooling")
 
 # Writes <prefix>/lib/cmake/Pulp/{PulpConfig,PulpVellumUiCompat}.cmake.
 # `bridge`, `ui` and `version` substitute @PULP_SDK_HAS_VELLUM_BRIDGE@,
@@ -172,7 +179,7 @@ function(_standins out)
     set(${out} "${_text}" PARENT_SCOPE)
 endfunction()
 set(_vellum_targets Vellum::MirrorCanvas Vellum::MirrorRender_2d Vellum::MirrorView_core
-    Vellum::MirrorDesign_import Vellum::MirrorView_script Pulp::vellum)
+    Vellum::MirrorDesign_import Vellum::MirrorView_script Pulp::vellum Pulp::vellum-audio)
 _standins(_vellum_standins ${_vellum_targets})
 # Pulp's own UI targets, each linking a marker so the scenario can tell them apart.
 function(_pulp_own out)
@@ -240,19 +247,21 @@ if(SCENARIO STREQUAL "wiring")
 
 elseif(SCENARIO STREQUAL "shape")
     _inspect(shape ON ON "${_vellum_standins}" 1 _out)
-    _expect("${_out}" "COMPAT=\\[canvas;render;design-import;view-native;view\\]" "all five names")
+    _expect("${_out}" "COMPAT=\\[canvas;render;design-import;view;view-audio;view-tooling\\]" "the six Vellum-backed names")
     _expect("${_out}" "T\\[canvas\\]=\\[Vellum::MirrorCanvas\\] F\\[canvas\\]=\\[cxx_std_20\\] A\\[canvas\\]=\\[YES\\]" "canvas")
     _expect("${_out}" "T\\[render\\]=\\[Vellum::MirrorRender_2d\\] F\\[render\\]=\\[cxx_std_20\\] A\\[render\\]=\\[YES\\]" "render")
     _expect("${_out}" "T\\[design-import\\]=\\[Vellum::MirrorDesign_import\\] F\\[design-import\\]=\\[cxx_std_20\\] A\\[design-import\\]=\\[YES\\]" "design-import")
-    _expect("${_out}" "T\\[view-native\\]=\\[Vellum::MirrorView_core;Pulp::vellum\\] F\\[view-native\\]=\\[cxx_std_20\\] A\\[view-native\\]=\\[YES\\]" "view-native")
+    _expect("${_out}" "T\\[view-native\\]=\\[ABSENT\\]" "no Vellum-backed view-native: it would carry a script engine")
     _expect("${_out}" "T\\[view\\]=\\[Vellum::MirrorView_core;Vellum::MirrorDesign_import;Vellum::MirrorView_script;Pulp::vellum\\] F\\[view\\]=\\[cxx_std_20\\] A\\[view\\]=\\[YES\\]" "view")
+    _expect("${_out}" "T\\[view-audio\\]=\\[Pulp::vellum-audio\\] F\\[view-audio\\]=\\[cxx_std_20\\] A\\[view-audio\\]=\\[YES\\]" "view-audio on the audio package")
+    _expect("${_out}" "T\\[view-tooling\\]=\\[Vellum::MirrorView_core;Pulp::vellum;Vellum::MirrorView_script\\] F\\[view-tooling\\]=\\[cxx_std_20\\] A\\[view-tooling\\]=\\[YES\\]" "view-tooling on the editor bridge and the view layer")
 
 elseif(SCENARIO STREQUAL "pulp-ui")
     # Today's SDK: the flag is off and Pulp exports its own UI.
-    _pulp_own(_own view-core view canvas render view-native design-import)
+    _pulp_own(_own view-core view canvas render view-native design-import view-audio view-tooling)
     _inspect(pulp-ui ON OFF "${_vellum_standins}${_own}" 1 _out)
     _expect("${_out}" "COMPAT=\\[\\]" "no Vellum-backed names")
-    foreach(_n view canvas render view-native design-import)
+    foreach(_n view canvas render view-native design-import view-audio view-tooling)
         _expect("${_out}" "T\\[${_n}\\]=\\[pulp_own_${_n}\\]" "Pulp's own ${_n} untouched")
     endforeach()
 
@@ -264,6 +273,8 @@ elseif(SCENARIO STREQUAL "partial-ui")
     _expect("${_out}" "COMPAT=\\[\\]" "no Vellum-backed names")
     _expect("${_out}" "T\\[render\\]=\\[ABSENT\\]" "no Vellum renderer standing in")
     _expect("${_out}" "T\\[design-import\\]=\\[ABSENT\\]" "no Vellum importer standing in")
+    _expect("${_out}" "T\\[view-audio\\]=\\[ABSENT\\]" "no Vellum audio widgets standing in")
+    _expect("${_out}" "T\\[view-tooling\\]=\\[ABSENT\\]" "no Vellum tooling standing in")
 
 elseif(SCENARIO STREQUAL "view-core")
     # Even with the flag on, an exported Pulp view core means Pulp's UI is
@@ -272,24 +283,88 @@ elseif(SCENARIO STREQUAL "view-core")
     _inspect(view-core ON ON "${_vellum_standins}${_own}" 1 _out)
     _expect("${_out}" "COMPAT=\\[\\]" "no Vellum-backed names")
     _expect("${_out}" "T\\[render\\]=\\[ABSENT\\]" "no Vellum renderer beside Pulp's view core")
+    _expect("${_out}" "T\\[view-audio\\]=\\[ABSENT\\]" "no Vellum audio widgets beside Pulp's view core")
+    _expect("${_out}" "T\\[view-tooling\\]=\\[ABSENT\\]" "no Vellum tooling beside Pulp's view core")
 
 elseif(SCENARIO STREQUAL "missing")
     list(REMOVE_ITEM _vellum_targets Vellum::MirrorCanvas)
     _standins(_partial ${_vellum_targets})
     _inspect(missing ON ON "${_partial}" 1 _out)
-    _expect("${_out}" "COMPAT=\\[render;design-import;view-native;view\\]" "canvas left out")
+    _expect("${_out}" "COMPAT=\\[render;design-import;view;view-audio;view-tooling\\]" "canvas left out")
     _expect("${_out}" "T\\[canvas\\]=\\[ABSENT\\]" "no empty canvas target")
+    # An SDK that does not export the audio package serves no view-audio, and
+    # the rest still resolve.
+    list(REMOVE_ITEM _vellum_targets Pulp::vellum-audio)
+    _standins(_no_audio ${_vellum_targets})
+    _inspect(missing-audio ON ON "${_no_audio}" 1 _out)
+    _expect("${_out}" "COMPAT=\\[render;design-import;view;view-tooling\\]" "view-audio left out")
+    _expect("${_out}" "T\\[view-audio\\]=\\[ABSENT\\]" "no empty view-audio target")
+    _expect("${_out}" "T\\[view-tooling\\]=\\[Vellum::MirrorView_core;Pulp::vellum;Vellum::MirrorView_script\\]" "view-tooling unaffected")
 
 elseif(SCENARIO STREQUAL "twice")
     _inspect(twice ON ON "${_vellum_standins}" 2 _out)
-    _expect("${_out}" "FIND1 COMPAT=\\[canvas;render;design-import;view-native;view\\]" "the first find's list")
-    _expect("${_out}" "FIND2 COMPAT=\\[canvas;render;design-import;view-native;view\\]" "the same list from the second find")
+    _expect("${_out}" "FIND1 COMPAT=\\[canvas;render;design-import;view;view-audio;view-tooling\\]" "the first find's list")
+    _expect("${_out}" "FIND2 COMPAT=\\[canvas;render;design-import;view;view-audio;view-tooling\\]" "the same list from the second find")
 
 elseif(SCENARIO STREQUAL "no-bridge")
     _inspect(no-bridge OFF ON "" 1 _out)
     _expect("${_out}" "COMPAT=\\[\\]" "no names")
     _expect("${_out}" "VELLUM_FOUND=\\[\\]" "Vellum never searched")
     _expect("${_out}" "T\\[view\\]=\\[ABSENT\\]" "no view target")
+
+elseif(SCENARIO STREQUAL "view-native")
+    _pulp_own(_own view-core view canvas render view-native design-import)
+    set(_refusal "which this SDK does not define. Pulp::view-native is the view with no JavaScript engine linked")
+    # name|ui flag|consumer body|expected (pass, or the refused target and name)
+    foreach(_case
+            "direct|ON|add_executable(app main.cpp)\ntarget_link_libraries(app PRIVATE Pulp::view-native)|Pulp: app links Pulp::view-native,"
+            "alias-interface|ON|add_library(ui INTERFACE)\ntarget_link_libraries(ui INTERFACE pulp::view-native)\nadd_executable(app main.cpp)\ntarget_link_libraries(app PRIVATE ui)|Pulp: ui links pulp::view-native,"
+            "subdirectory|ON|add_subdirectory(sub)|Pulp: nested links Pulp::view-native,"
+            "fallback|ON|add_executable(app main.cpp)\nif(TARGET Pulp::view-native)\n  target_link_libraries(app PRIVATE Pulp::view-native)\nelse()\n  target_link_libraries(app PRIVATE Pulp::view)\nendif()|pass"
+            "pulp-ui|OFF|add_executable(app main.cpp)\ntarget_link_libraries(app PRIVATE Pulp::view-native)|pass")
+        string(REPLACE "|" ";" _parts "${_case}")
+        list(GET _parts 0 _name)
+        list(GET _parts 1 _ui)
+        list(GET _parts 2 _body)
+        list(GET _parts 3 _want)
+        set(_root "${FIXTURE_DIR}/view-native/${_name}")
+        set(_prelude "${_vellum_standins}")
+        if(_ui STREQUAL "OFF")
+            set(_prelude "${_vellum_standins}${_own}")
+        endif()
+        _write_prefix("${_root}/prefix" ON ${_ui} "" "${_prelude}")
+        file(MAKE_DIRECTORY "${_root}/src/sub")
+        file(WRITE "${_root}/src/main.cpp" "int main() { return 0; }\n")
+        file(WRITE "${_root}/src/sub/CMakeLists.txt"
+            "add_executable(nested ../main.cpp)\ntarget_link_libraries(nested PRIVATE Pulp::view-native)\n")
+        file(WRITE "${_root}/src/CMakeLists.txt"
+            "cmake_minimum_required(VERSION 3.24)\n"
+            "project(VellumViewNative CXX)\n"
+            "find_package(Pulp CONFIG REQUIRED)\n"
+            "${_body}\n")
+        execute_process(COMMAND ${_clean_env} "${CMAKE_COMMAND}" -S "${_root}/src" -B "${_root}/build"
+                -DPulp_DIR=${_root}/prefix/lib/cmake/Pulp ${_isolation}
+            RESULT_VARIABLE _rc OUTPUT_VARIABLE _out ERROR_VARIABLE _err)
+        string(REGEX REPLACE "[ \n]+" " " _flat "${_out}${_err}")
+        if(_want STREQUAL "pass")
+            if(NOT _rc EQUAL 0)
+                message(FATAL_ERROR "view-native ${_name}: configure failed:\n${_out}${_err}")
+            endif()
+        else()
+            if(_rc EQUAL 0)
+                message(FATAL_ERROR "view-native ${_name}: configured while linking Pulp::view-native:\n${_out}${_err}")
+            endif()
+            string(FIND "${_flat}" "${_want} ${_refusal}" _at)
+            if(_at LESS 0)
+                message(FATAL_ERROR "view-native ${_name}: refused without '${_want} ${_refusal}':\n${_flat}")
+            endif()
+            string(FIND "${_flat}" "Link Pulp::view (the Vellum-backed view, script engine included)" _alt)
+            if(_alt LESS 0)
+                message(FATAL_ERROR "view-native ${_name}: the refusal does not name the alternative:\n${_flat}")
+            endif()
+        endif()
+        message(STATUS "view-native ${_name}: ${_want}")
+    endforeach()
 
 elseif(SCENARIO STREQUAL "gpu-guard")
     # Shaped like the installed SDK: Pulp::gpu-audio reaches the device through
@@ -322,7 +397,10 @@ elseif(SCENARIO STREQUAL "gpu-guard")
             "nested-single-owner|ON|add_executable(app main.cpp)\ntarget_link_libraries(app PRIVATE \"$<$<CONFIG:Debug>:Pulp::view>\" \"$<$<BOOL:1>:$<BUILD_INTERFACE:Pulp::render>>\")|pass"
             "device|ON|add_library(lib SHARED main.cpp)\ntarget_link_libraries(lib PRIVATE VellumGpuRuntime::Device Vellum::MirrorView_core)|from VellumGpuRuntime::Device, and .* from Vellum::MirrorView_core\\."
             "alias|ON|add_executable(app main.cpp)\ntarget_link_libraries(app PRIVATE pulp::design-import Pulp::gpu-audio)|from Pulp::gpu-audio, and .* from pulp::design-import\\."
-            "subdirectory|ON|add_subdirectory(sub)|from Pulp::gpu-device, and .* from Pulp::view-native\\."
+            "subdirectory|ON|add_subdirectory(sub)|from Pulp::gpu-device, and .* from Pulp::view\\."
+            "view-audio|ON|add_executable(app main.cpp)\ntarget_link_libraries(app PRIVATE Pulp::view-audio Pulp::gpu-device)|from Pulp::gpu-device, and .* from Pulp::view-audio\\."
+            "view-tooling|ON|add_library(plug MODULE main.cpp)\ntarget_link_libraries(plug PRIVATE Pulp::host Pulp::view-tooling)|from Pulp::gpu-audio \\(through Pulp::host\\), and .* from Pulp::view-tooling\\."
+            "view-audio-tooling-only|ON|add_executable(app main.cpp)\ntarget_link_libraries(app PRIVATE Pulp::view-audio Pulp::view-tooling Pulp::view)|pass"
             "view-only|ON|add_executable(app main.cpp)\ntarget_link_libraries(app PRIVATE Pulp::view Pulp::render)|pass"
             "gpu-only|ON|add_executable(app main.cpp)\ntarget_link_libraries(app PRIVATE Pulp::gpu-device Pulp::host)|pass"
             "static-library|ON|add_library(engine STATIC main.cpp)\ntarget_link_libraries(engine PUBLIC Pulp::view Pulp::gpu-device)|pass"
@@ -341,7 +419,7 @@ elseif(SCENARIO STREQUAL "gpu-guard")
         file(MAKE_DIRECTORY "${_root}/src/sub")
         file(WRITE "${_root}/src/main.cpp" "int main() { return 0; }\n")
         file(WRITE "${_root}/src/sub/CMakeLists.txt"
-            "add_executable(nested ../main.cpp)\ntarget_link_libraries(nested PRIVATE Pulp::view-native Pulp::gpu-device)\n")
+            "add_executable(nested ../main.cpp)\ntarget_link_libraries(nested PRIVATE Pulp::view Pulp::gpu-device)\n")
         file(WRITE "${_root}/src/CMakeLists.txt"
             "cmake_minimum_required(VERSION 3.24)\n"
             "project(VellumGpuGuard CXX)\n"
@@ -353,7 +431,7 @@ elseif(SCENARIO STREQUAL "gpu-guard")
             RESULT_VARIABLE _rc OUTPUT_VARIABLE _out ERROR_VARIABLE _err)
         string(REGEX REPLACE "[ \n]+" " " _flat "${_out}${_err}")
         if(_ui STREQUAL "ON")
-            _expect("${_flat}" "COMPAT=\\[canvas;render;design-import;view-native;view\\]" "${_name}: Vellum-backed names")
+            _expect("${_flat}" "COMPAT=\\[canvas;render;design-import;view;view-audio;view-tooling\\]" "${_name}: Vellum-backed names")
         else()
             _expect("${_flat}" "COMPAT=\\[\\]" "${_name}: Pulp's own UI")
         endif()
@@ -538,7 +616,23 @@ elseif(SCENARIO STREQUAL "no-vellum" OR SCENARIO STREQUAL "real" OR SCENARIO STR
             set(_version "0.0.1")
         endif()
     endif()
-    _write_prefix("${_root}/prefix" ON ON "${_version}" "")
+    # Pulp's two exported integration packages stand in as INTERFACE targets over
+    # the source tree's headers and the real Vellum link set. The fabricated
+    # prefix has no compiled Pulp archives, so what these prove is the include
+    # path and link line each name hands a consumer, not the packages' own code.
+    set(_pulp_pkgs "")
+    foreach(_pkg IN ITEMS vellum vellum-audio)
+        string(REPLACE "-" "_" _dir "${_pkg}")
+        string(APPEND _pulp_pkgs
+            "if(NOT TARGET Pulp::${_pkg})\n"
+            "  add_library(Pulp::${_pkg} INTERFACE IMPORTED)\n"
+            "  set_target_properties(Pulp::${_pkg} PROPERTIES\n"
+            "    INTERFACE_INCLUDE_DIRECTORIES \"${PULP_SOURCE_DIR}/integrations/pulp-${_pkg}/include\"\n"
+            "    INTERFACE_LINK_LIBRARIES \"Vellum::Value;Vellum::MirrorView_core\")\n"
+            "endif()\n")
+    endforeach()
+    unset(_dir)
+    _write_prefix("${_root}/prefix" ON ON "${_version}" "${_pulp_pkgs}")
     if(NOT SCENARIO STREQUAL "no-vellum")
         # Stage Vellum where a release stages it, so the spliced find block's
         # own hint resolves it.
@@ -569,7 +663,7 @@ elseif(SCENARIO STREQUAL "no-vellum" OR SCENARIO STREQUAL "real" OR SCENARIO STR
         # the refusal is the gate's and not an accident of missing targets.
         # CMake wraps warning text, so match it with whitespace collapsed.
         string(REGEX REPLACE "[ \n]+" " " _flat "${_out}${_err}")
-        _expect("${_flat}" "CMake Warning at [^ ]*/PulpConfig.cmake:[0-9]+ \\(message\\): Pulp: this SDK serves Pulp::view;Pulp::canvas;Pulp::render;Pulp::view-native;Pulp::design-import from Vellum, but the Vellum package was not found" "the config's warning naming the cause")
+        _expect("${_flat}" "CMake Warning at [^ ]*/PulpConfig.cmake:[0-9]+ \\(message\\): Pulp: this SDK serves Pulp::view;Pulp::canvas;Pulp::render;Pulp::design-import;Pulp::view-audio;Pulp::view-tooling from Vellum, but the Vellum package was not found" "the config's warning naming the cause")
         _expect("${_out}${_err}" "Pulp::view is not Vellum-backed in this SDK" "a configure error naming the first name")
         message(STATUS "${SCENARIO}: warned and refused as expected")
         return()
@@ -600,10 +694,11 @@ elseif(SCENARIO STREQUAL "no-vellum" OR SCENARIO STREQUAL "real" OR SCENARIO STR
     endforeach()
     _expect("${_out}" "Pulp::canvas -> vellum::canvas::Color r=1.00" "the canvas probe ran")
     _expect("${_out}" "Pulp::render -> vellum::render::AtlasPacker::allocate ok" "the render probe ran")
-    _expect("${_out}" "Pulp::view-native -> vellum::view::PluginViewHost::create linked" "the native probe ran")
     _expect("${_out}" "Pulp::design-import -> vellum::view::parse_designmd_yaml primary=#336699" "the importer ran")
     _expect("${_out}" "Pulp::view -> vellum::view::parse_designmd_yaml primary=#336699" "the umbrella ran")
-    message(STATUS "real: five Vellum-backed names built and ran against Vellum ${_version}")
+    _expect("${_out}" "Pulp::view-audio -> MusicalTypingController 'a' sounds note 60" "the audio widgets probe ran")
+    _expect("${_out}" "Pulp::view-tooling -> vellum::view::has_screenshot_backend (yes|no)" "the tooling probe ran")
+    message(STATUS "real: six Vellum-backed names built and ran against Vellum ${_version}")
 
 else()
     message(FATAL_ERROR "unknown SCENARIO '${SCENARIO}'")

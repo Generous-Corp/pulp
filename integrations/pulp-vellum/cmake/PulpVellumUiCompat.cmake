@@ -2,16 +2,32 @@
 # UI names an installed SDK consumer links.
 #
 # Downstream plug-ins link Pulp::view, Pulp::canvas, Pulp::render,
-# Pulp::view-native and Pulp::design-import. Vellum owns the implementations
-# behind those names and installs them as its mirror targets. In an SDK built
+# Pulp::design-import, Pulp::view-audio and Pulp::view-tooling. Vellum owns the
+# implementations behind the first four and installs them as its mirror
+# targets; the last two are served by Pulp's own Vellum integration packages.
+# In an SDK built
 # without Pulp's own UI libraries (PULP_SDK_UI_FROM_VELLUM, which PulpConfig
 # checks before including this file), pulp_define_vellum_ui_compat_targets()
 # defines each name as an INTERFACE IMPORTED target that links the matching
 # Vellum targets, plus the lower-case pulp:: alias the in-tree build provides.
 #
+# Pulp::view-audio is the audio widgets, and maps to Pulp::vellum-audio
+# (integrations/pulp-vellum-audio). Pulp::view-tooling is the editor bridge,
+# inspector and screenshot layer: the editor bridge is Pulp::vellum, and the
+# inspector and screenshot surfaces are defined in the provider library behind
+# Vellum::MirrorView_core (vellum::view::InspectorFacts, capture_view,
+# has_screenshot_backend), plus the script inspector port when the scripted view
+# is present. A name whose package the SDK does not export stays undefined.
+#
 # Two guards keep it from ever standing in for part of Pulp's own UI: nothing
 # is defined while Pulp::view-core is exported, and a name Pulp still exports
 # is left alone.
+#
+# Pulp::view-native is not defined. It promises a view with no JavaScript
+# engine linked, and every Vellum view target carries the provider library,
+# which contains one. A consumer that links Pulp::view-native in this SDK is
+# refused at configure with that reason (see
+# _pulp_vellum_check_view_native_unused) rather than given a script engine.
 #
 # The caller loads the Vellum package first. A name whose Vellum backing target
 # is missing stays undefined, so a consumer fails at generate time on that name
@@ -179,6 +195,40 @@ function(_pulp_vellum_check_gpu_runtime_owners dir)
     endforeach()
 endfunction()
 
+# Refuses every target in `dir` or below that links Pulp::view-native (or its
+# lower-case alias) directly, before generation reports the missing target
+# without saying why it is missing.
+function(_pulp_vellum_check_view_native_unused dir)
+    _pulp_vellum_directories("${dir}" _dirs)
+    foreach(_dir IN LISTS _dirs)
+        get_property(_targets DIRECTORY "${_dir}" PROPERTY BUILDSYSTEM_TARGETS)
+        foreach(_target IN LISTS _targets)
+            set(_links "")
+            foreach(_property IN ITEMS LINK_LIBRARIES INTERFACE_LINK_LIBRARIES)
+                get_target_property(_value "${_target}" ${_property})
+                if(_value)
+                    list(APPEND _links ${_value})
+                endif()
+            endforeach()
+            foreach(_item IN LISTS _links)
+                _pulp_vellum_link_tokens("${_item}" _tokens)
+                foreach(_name IN ITEMS Pulp::view-native pulp::view-native)
+                    if(_name IN_LIST _tokens AND NOT TARGET "${_name}")
+                        message(FATAL_ERROR
+                            "Pulp: ${_target} links ${_name}, which this SDK does not "
+                            "define. Pulp::view-native is the view with no JavaScript "
+                            "engine linked; this SDK serves its UI targets from Vellum, "
+                            "whose view library carries a script engine, so it cannot "
+                            "keep that promise. Link Pulp::view (the Vellum-backed view, "
+                            "script engine included), or build against a Pulp SDK that "
+                            "ships Pulp's own UI for a JS-free native view.")
+                    endif()
+                endforeach()
+            endforeach()
+        endforeach()
+    endforeach()
+endfunction()
+
 function(_pulp_vellum_ui_compat_define name)
     cmake_parse_arguments(PARSE_ARGV 1 _compat "" "" "REQUIRES;OPTIONAL")
     set(_target "Pulp::${name}")
@@ -217,17 +267,19 @@ function(pulp_define_vellum_ui_compat_targets)
             REQUIRES Vellum::MirrorRender_2d)
         _pulp_vellum_ui_compat_define(design-import
             REQUIRES Vellum::MirrorDesign_import)
-        _pulp_vellum_ui_compat_define(view-native
-            REQUIRES Vellum::MirrorView_core
-            OPTIONAL Pulp::vellum)
         # The umbrella keeps the importer and the scripted view, as Pulp::view
         # does in an SDK built with them.
         _pulp_vellum_ui_compat_define(view
             REQUIRES Vellum::MirrorView_core Vellum::MirrorDesign_import
             OPTIONAL Vellum::MirrorView_script Pulp::vellum)
+        _pulp_vellum_ui_compat_define(view-audio
+            REQUIRES Pulp::vellum-audio)
+        _pulp_vellum_ui_compat_define(view-tooling
+            REQUIRES Vellum::MirrorView_core Pulp::vellum
+            OPTIONAL Vellum::MirrorView_script)
     endif()
     set(_defined "")
-    foreach(_name IN ITEMS canvas render design-import view-native view)
+    foreach(_name IN ITEMS canvas render design-import view view-audio view-tooling)
         if(TARGET "Pulp::${_name}")
             get_target_property(_provider "Pulp::${_name}" PULP_UI_PROVIDER)
             if(_provider STREQUAL "vellum")
@@ -242,6 +294,8 @@ function(pulp_define_vellum_ui_compat_targets)
             set_property(DIRECTORY PROPERTY _PULP_VELLUM_GPU_OWNER_CHECK ON)
             cmake_language(DEFER DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
                 CALL _pulp_vellum_check_gpu_runtime_owners "${CMAKE_CURRENT_SOURCE_DIR}")
+            cmake_language(DEFER DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
+                CALL _pulp_vellum_check_view_native_unused "${CMAKE_CURRENT_SOURCE_DIR}")
         endif()
     endif()
     set(PULP_SDK_VELLUM_UI_COMPAT_TARGETS "${_defined}" PARENT_SCOPE)
