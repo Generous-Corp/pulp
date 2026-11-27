@@ -607,18 +607,29 @@ function(_pulp_add_aax target name bundle_id version manufacturer category manuf
             "Configure with -DPULP_ENABLE_AAX=ON and an out-of-tree PULP_AAX_SDK_DIR.")
     endif()
 
-    pulp_ensure_aax_sdk_targets()
-
     # The AAX GUI glue (aax_effect_gui.cpp and the native view) hosts Pulp's own
     # view editor and has no editor_factory() path. In an SDK whose UI is Vellum
-    # a plug-in that builds view-free therefore gets a processor-only AAX, so
-    # that glue is not compiled there.
+    # a NO_EDITOR plug-in therefore gets a processor-only AAX, so that glue is
+    # not compiled there. A plug-in whose editor comes from a UI package or from
+    # Processor::editor_factory() is refused instead: its AAX would silently
+    # ship without that editor. Checked before the SDK is read, so the decision
+    # does not depend on the SDK being present.
     if(NOT headless AND PULP_${target}_NO_EDITOR)
         _pulp_ui_provider(_pulp_aax_ui_provider)
         if(_pulp_aax_ui_provider STREQUAL "vellum")
+            if(PULP_${target}_UI_PACKAGE OR PULP_${target}_EDITOR_FROM_FACTORY)
+                message(FATAL_ERROR
+                    "pulp_add_plugin(${target}) AAX: this Pulp SDK serves its UI from Vellum, "
+                    "and the AAX GUI glue cannot yet open the editor this plug-in gets from "
+                    "its UI package or Processor::editor_factory(), so its AAX would ship "
+                    "without an editor. Remove AAX from FORMATS, add AAX_HEADLESS for a "
+                    "processor-only AAX, or build the plug-in with NO_EDITOR.")
+            endif()
             set(headless TRUE)
         endif()
     endif()
+
+    pulp_ensure_aax_sdk_targets()
 
     _pulp_plugin_entry_path(aax_entry aax_entry.cpp)
     if(NOT aax_entry)
