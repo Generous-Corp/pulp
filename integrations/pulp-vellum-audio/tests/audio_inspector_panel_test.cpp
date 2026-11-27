@@ -101,7 +101,6 @@ TEST_CASE("AudioWaveformView paints grid and rounded thicker trace",
 
     RecordingCanvas grid_canvas;
     waveform.paint(grid_canvas);
-    REQUIRE(grid_canvas.count(DrawCommand::Type::stroke_line) >= 9);
     REQUIRE(grid_canvas.count(DrawCommand::Type::set_line_cap) >= 2);
     REQUIRE(grid_canvas.count(DrawCommand::Type::set_line_join) >= 2);
 
@@ -118,6 +117,37 @@ TEST_CASE("AudioWaveformView paints grid and rounded thicker trace",
     waveform.paint(no_grid_canvas);
     REQUIRE(no_grid_canvas.count(DrawCommand::Type::stroke_line) <
             grid_canvas.count(DrawCommand::Type::stroke_line));
+}
+
+TEST_CASE("AudioWaveformView grid contributes exactly two horizontal and three vertical lines",
+          "[vellum-audio][audio-inspector]") {
+    AudioWaveformView waveform;
+    waveform.set_bounds({0, 0, 160, 80});
+    const float samples[] = {-0.6f, -0.2f, 0.2f, 0.6f};
+    waveform.set_samples(samples, 4);
+
+    RecordingCanvas with_grid;
+    waveform.paint(with_grid);
+    waveform.set_show_grid(false);
+    RecordingCanvas without_grid;
+    waveform.paint(without_grid);
+
+    const auto grid_lines = with_grid.count(DrawCommand::Type::stroke_line) -
+                            without_grid.count(DrawCommand::Type::stroke_line);
+    REQUIRE(grid_lines == 5);
+
+    int horizontal = 0;
+    int vertical = 0;
+    for (const auto& cmd : with_grid.commands()) {
+        if (cmd.type != DrawCommand::Type::stroke_line)
+            continue;
+        if (cmd.f[1] == Catch::Approx(cmd.f[3]) && cmd.f[1] != Catch::Approx(40.0f))
+            ++horizontal;
+        if (cmd.f[0] == Catch::Approx(cmd.f[2]))
+            ++vertical;
+    }
+    REQUIRE(horizontal == 2);
+    REQUIRE(vertical == 3);
 }
 
 TEST_CASE("AudioInspectorPanel distinguishes Scope measurements from Signal readout",
