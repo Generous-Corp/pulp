@@ -19,6 +19,7 @@
 
 #include <pulp/format/detail/standalone_key_sequence.hpp>
 
+#include <cstdint>
 #include <functional>
 #include <string>
 #include <vector>
@@ -37,6 +38,9 @@ namespace pulp::format::detail {
 
 /// One item of the contract window's app menu, in order.
 struct StandaloneContractMenuItem {
+    /// What the item is; the window groups items by role, never by title.
+    enum class Role : std::uint8_t { updates, audio_settings, plugin_settings, panel, quit };
+    Role role = Role::panel;
     std::string title;
     std::string key;              ///< key equivalent with Command, "" for none
     bool option_modifier = false; ///< Command+Option instead of Command alone

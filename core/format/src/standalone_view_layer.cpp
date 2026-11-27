@@ -103,7 +103,7 @@ bool StandaloneApp::run_view_editor(bool use_gpu, const StandaloneConfig& effect
     // before the chrome is built, so the Settings panel offers its Updates tab.
     const auto updater_plan = detail::plan_standalone_updater(
         detail::probe_standalone_updater_environment(effective_config.headless));
-    set_app_update_service(detail::make_standalone_update_service(updater_plan));
+    detail::install_standalone_updater(updater_plan);
 
     std::string editor_error;
     auto bridge = std::make_unique<ViewBridge>(
@@ -167,8 +167,6 @@ bool StandaloneApp::run_view_editor(bool use_gpu, const StandaloneConfig& effect
         size_hints, chrome, desc.name + " — Standalone", use_gpu, bridge->editor_background_rgb());
     detail::add_standalone_settings_menu_command(opts, chrome);
     detail::add_standalone_updater_menu_command(opts, updater_plan);
-    if (updater_plan.start_at_launch)
-        detail::start_standalone_updater();
     opts.initially_hidden = effective_config.headless;
     if (musical_typing_)
         musical_typing_->add_menu_command(opts);

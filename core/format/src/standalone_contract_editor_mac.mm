@@ -219,18 +219,23 @@ build_app_menu_model(const StandaloneContractEditorOptions& options,
                      NSWindow* window) {
     std::vector<StandaloneContractMenuItem> items;
     if (options.on_check_for_updates)
-        items.push_back({"Check for Updates\u2026", "", false, options.on_check_for_updates});
+        items.push_back({StandaloneContractMenuItem::Role::updates, "Check for Updates\u2026", "",
+                         false, options.on_check_for_updates});
     if (options.on_open_settings) {
         auto open = options.on_open_settings;
-        items.push_back({"Audio/MIDI Settings\u2026", ",", false, [open] { open(); }});
+        items.push_back({StandaloneContractMenuItem::Role::audio_settings,
+                         "Audio/MIDI Settings\u2026", ",", false, [open] { open(); }});
     }
     if (open_plugin_settings)
-        items.push_back({name + " Settings\u2026", ",", true,
+        items.push_back({StandaloneContractMenuItem::Role::plugin_settings,
+                         name + " Settings\u2026", ",", true,
                          [open = std::move(open_plugin_settings)] { open(); }});
     for (auto* panel : options.panels)
-        items.push_back({panel->menu_title(), std::string(1, panel->shortcut()), false,
+        items.push_back({StandaloneContractMenuItem::Role::panel, panel->menu_title(),
+                         std::string(1, panel->shortcut()), false,
                          [panel] { panel->toggle(); }});
-    items.push_back({"Quit " + name, "q", false, [window] { [window performClose:nil]; }});
+    items.push_back({StandaloneContractMenuItem::Role::quit, "Quit " + name, "q", false,
+                     [window] { [window performClose:nil]; }});
     return items;
 }
 
@@ -245,8 +250,9 @@ bool install_app_menu(PulpStandaloneContractMenuTarget* target, NSString* title)
     NSMenu* appMenu = [[[NSMenu alloc] initWithTitle:title] autorelease];
     for (std::size_t i = 0; i < target->items.size(); ++i) {
         const auto& model = target->items[i];
-        // Quit, always last, sits below a separator.
-        if (i + 1 == target->items.size())
+        using Role = StandaloneContractMenuItem::Role;
+        // Quit sits below a separator.
+        if (model.role == Role::quit && i > 0)
             [appMenu addItem:[NSMenuItem separatorItem]];
         NSMenuItem* item = [[[NSMenuItem alloc]
             initWithTitle:[NSString stringWithUTF8String:model.title.c_str()]
@@ -257,8 +263,9 @@ bool install_app_menu(PulpStandaloneContractMenuTarget* target, NSString* title)
         item.tag = static_cast<NSInteger>(i);
         item.target = target;
         [appMenu addItem:item];
-        // So does the updater's item from what follows it.
-        if (i == 0 && model.title.rfind("Check for Updates", 0) == 0 && target->items.size() > 2)
+        // So does the updater's item from the settings and panels after it.
+        if (model.role == Role::updates && i + 1 < target->items.size() &&
+            target->items[i + 1].role != Role::quit)
             [appMenu addItem:[NSMenuItem separatorItem]];
     }
     appItem.submenu = appMenu;
