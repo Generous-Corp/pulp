@@ -11,7 +11,8 @@ namespace {
 
 class EditorShell;
 
-// One editor of the shell: wraps the active logic's editor for one window.
+// One editor of the shell: wraps the active logic's editor for one window, or
+// the shell image's own UI package editor when the logic offers none.
 class ForwardingEditor final : public Editor {
   public:
     ForwardingEditor(EditorShell& shell, EditorContext& context, EditorRole role);
@@ -19,7 +20,7 @@ class ForwardingEditor final : public Editor {
         drop();
     }
 
-    bool has_logic_editor() const {
+    bool has_editor() const {
         return inner_ != nullptr;
     }
 
@@ -106,6 +107,14 @@ class EditorShell final : public ReloadableShellCore, public ReloadableEditorShe
         return &factory_;
     }
 
+    // The editor of the plug-in image the shell is linked into (its UI
+    // package), over the shell's own parameters. The logic library is a
+    // separate image whose editor_factory() sees only its own package, so a
+    // logic built without one leaves this as the plug-in's editor.
+    EditorFactory* image_editor_factory() {
+        return Processor::editor_factory();
+    }
+
     bool reload_now(std::string* error) override {
         const auto outcome = ReloadableShellCore::reload_now();
         if (!outcome.ok() && error != nullptr)
@@ -145,19 +154,23 @@ class EditorShell final : public ReloadableShellCore, public ReloadableEditorShe
         explicit Factory(EditorShell& shell) : shell_(shell) {}
 
         bool supports(EditorRole role) const override {
-            auto* logic = shell_.hold_active_logic();
-            if (logic == nullptr)
-                return false;
-            auto* factory = logic->editor_factory();
-            const bool supported = factory != nullptr && factory->supports(role);
-            shell_.release_held_logic(logic);
+            bool supported = false;
+            if (auto* logic = shell_.hold_active_logic(); logic != nullptr) {
+                auto* factory = logic->editor_factory();
+                supported = factory != nullptr && factory->supports(role);
+                shell_.release_held_logic(logic);
+            }
+            if (!supported) {
+                auto* own = shell_.image_editor_factory();
+                supported = own != nullptr && own->supports(role);
+            }
             return supported;
         }
 
         std::unique_ptr<Editor> create(Processor&, EditorContext& context,
                                        EditorRole role) override {
             auto editor = std::make_unique<ForwardingEditor>(shell_, context, role);
-            if (!editor->has_logic_editor())
+            if (!editor->has_editor())
                 return nullptr;
             return editor;
         }
@@ -174,24 +187,29 @@ ForwardingEditor::ForwardingEditor(EditorShell& shell, EditorContext& context, E
     build();
 }
 
-// Build the active logic's editor. The generation is read first, so a swap
-// landing during the build is picked up on the next tick.
+// Build the active logic's editor, or, when the logic offers none for this
+// role, the shell image's own. The generation is read first, so a swap landing
+// during the build is picked up on the next tick.
 void ForwardingEditor::build() {
     generation_ = shell_.editor_reload_generation();
-    auto* logic = shell_.hold_active_logic();
-    if (logic == nullptr)
-        return;
-    auto* factory = logic->editor_factory();
-    std::unique_ptr<Editor> editor;
-    if (factory != nullptr && factory->supports(role_))
-        editor = factory->create(*logic, context_, role_);
-    if (editor == nullptr) {
-        shell_.release_held_logic(logic);
-        return;
+    if (auto* logic = shell_.hold_active_logic(); logic != nullptr) {
+        auto* factory = logic->editor_factory();
+        std::unique_ptr<Editor> editor;
+        if (factory != nullptr && factory->supports(role_))
+            editor = factory->create(*logic, context_, role_);
+        if (editor != nullptr) {
+            held_ = logic;
+            inner_ = std::move(editor);
+        } else {
+            shell_.release_held_logic(logic);
+        }
     }
-    held_ = logic;
-    inner_ = std::move(editor);
-    if (size_.width == 0 || size_.height == 0)
+    if (inner_ == nullptr) {
+        auto* own = shell_.image_editor_factory();
+        if (own != nullptr && own->supports(role_))
+            inner_ = own->create(shell_, context_, role_);
+    }
+    if (inner_ != nullptr && (size_.width == 0 || size_.height == 0))
         size_ = inner_->size();
 }
 

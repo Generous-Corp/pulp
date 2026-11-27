@@ -29,8 +29,12 @@
 ///   tick; after `invalidate()` it never builds again;
 /// - forwards every other editor-host call to the logic's editor.
 ///
-/// A role the active logic's factory does not offer has no editor. Editor calls
-/// are on the main thread, like every editor-host call.
+/// A role the active logic's factory does not offer gets the editor of the
+/// plug-in image the shell is linked into (its UI package's, over the shell's
+/// parameters), and none when that image has no package either. The logic is a
+/// separate image, so its `editor_factory()` sees only a package linked into
+/// the logic library itself. Editor calls are on the main thread, like every
+/// editor-host call.
 
 #include <pulp/format/processor.hpp>
 
