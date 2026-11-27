@@ -234,7 +234,7 @@ modules:
       in the UI layer. With PULP_UI_FROM_VELLUM_IN_TREE, format-core builds
       with PULP_FORMAT_LEGACY_VIEW=0 and pulp::format-view links the Vellum
       editor adapter (pulp::vellum) and pulp::format-clap-core instead of
-      ViewBridge.
+      ViewBridge, and every plug-in, bundle and standalone builds view-free.
     status: usable
     dependencies: [state, audio, midi, timebase]
     docs: reference/modules.md#format

@@ -270,7 +270,10 @@ stopped compiling and no Pulp check noticed.
   `PULP_UI_FROM_VELLUM_IN_TREE` module and its test also trigger it, because
   `cmake-vellum-ui-in-tree-real` (label `pulp-vellum`) pins the in-tree
   consumers that still name a UI target the mode leaves out, and a change that
-  ports or adds one must be judged by it before it lands. A nightly run stops after the
+  ports or adds one must be judged by it before it lands. The plug-in helpers
+  (`PulpPlugin.cmake`, `PulpPluginFormats.cmake`, `PulpLinkFloor.cmake`), the
+  examples lists and the NO_EDITOR link floor fixture trigger it too, because
+  the same test builds the retained examples and that fixture in the mode. A nightly run stops after the
   resolve step when Vellum main's head equals the head the last green run
   checked, so it costs a few API calls when Vellum has not moved.
 - **Inputs.** `tools/ci/vellum_sdk_consumer.py resolve` downloads the

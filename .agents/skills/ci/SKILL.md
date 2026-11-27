@@ -8034,6 +8034,13 @@ advisory Vellum SDK consumer lane (it needs a Vellum SDK), so that lane's
 `pull_request.paths` include `core/**/CMakeLists.txt` and
 `inspect/CMakeLists.txt`, where its pinned consumers live. Widen the paths when
 the pin list gains a consumer elsewhere.
+The same test also builds the retained examples and the NO_EDITOR link floor
+fixture in the mode, so the paths include the plug-in helpers, the examples
+lists and the fixture. The test tree does not configure in the mode, so the
+root adds that fixture there only on `PULP_VELLUM_IN_TREE_LINK_FLOOR_FIXTURE`.
+A link-floor debt entry whose edge exists only where Pulp's view is built is
+appended under `NOT PULP_UI_FROM_VELLUM_IN_TREE`, as `render` is under
+`PULP_ENABLE_GPU`, so the floor stays refutable in both configurations.
 Run `tools/scripts/gates.sh <integration-branch>` locally first — the fast gates
 are sub-second and catch all of this before a multi-minute ship cycle. Reconciling
 config you didn't author trips skill-sync/version-bump (config maps to the `ci`

@@ -2686,6 +2686,15 @@ it links the Vellum editor adapter (`pulp::vellum`: `ViewProcessor<>`,
 its ViewBridge GUI extension (`pulp::format-clap-core`), so `pulp::format`
 still names both halves.
 
+Plug-ins in that tree build view-free. `pulp_add_plugin` with no editor
+keyword gives each one the generated parameter editor on Vellum, or the editor
+its `Processor::editor_factory()` returns, and refuses the keywords that select
+Pulp's own view editor. `pulp_add_plugin_bundle` builds each format binary the
+same way. A view-free plug-in's AAX is processor-only, because the AAX GUI glue
+has no `editor_factory()` path yet. `pulp::standalone` is the core alone, like
+`pulp::standalone-contract`. With examples on, only the retained audio-only
+examples are configured (`examples/vellum_in_tree.cmake`).
+
 ### Writing a plugin
 
 ```cpp
