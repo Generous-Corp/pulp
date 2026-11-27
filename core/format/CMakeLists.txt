@@ -98,8 +98,8 @@ target_sources(pulp-format-core PRIVATE
 
 # The view-free hot-reload editor shell. Its header is a small interface; the
 # reload stack it is built on (slot, controller, watcher, dlopen) stays in this
-# TU. Built where the reload shells are tested.
-if(NOT WIN32 AND NOT EMSCRIPTEN)
+# TU. Built on the desktop hosts where the reload shells run and are tested.
+if(NOT WIN32 AND NOT EMSCRIPTEN AND NOT IOS AND NOT ANDROID)
     target_sources(pulp-format-core PRIVATE src/reloadable_editor_shell.cpp)
 endif()
 

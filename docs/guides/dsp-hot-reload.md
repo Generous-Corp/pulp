@@ -199,8 +199,8 @@ in an SDK built without Pulp's view layer (`PULP_FORMAT_LEGACY_VIEW=0`).
 `reloadable_editor_shell_control()` reaches its reload controls (`reload_now()`,
 the held and contention counters, `reclaim_retired_logic()`). The header is that
 small interface only; the reload stack the shell is built on stays in
-`core/format/src/reloadable_editor_shell.cpp`, which format-core builds on every
-platform except Windows and the web. The shell is view-free, like
+`core/format/src/reloadable_editor_shell.cpp`, which format-core builds on macOS
+and Linux. The shell is view-free, like
 `ReloadableShellCore`:
 
 - the shell's `editor_factory()` hands each `create()` to the active logic's
