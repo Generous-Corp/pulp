@@ -27,7 +27,10 @@
 #           VELLUM_DIR it prints SKIP, unless REQUIRE_VELLUM is on. A third
 #           configure, with the inspector off, has no unported consumer and
 #           builds pulp-format-core, pulp-format-view and pulp-vellum; nm
-#           confirms format-core is the PULP_FORMAT_LEGACY_VIEW=0 build.
+#           confirms format-core is the PULP_FORMAT_LEGACY_VIEW=0 build. A
+#           probe plug-in added to that tree builds its CLAP module without
+#           PULP_CLAP_GUI, each Pulp view editor keyword is refused, and a
+#           program linking pulp::format-view alone reaches both adapters.
 #
 # Inputs: PULP_SOURCE_DIR, FIXTURE_DIR, SCENARIO, and for `real` VELLUM_DIR.
 
@@ -406,6 +409,82 @@ elseif(SCENARIO STREQUAL "real")
         "the reserved create_view slot defined in pulp-format-core")
     _reject("${_symbols}" "9Processor11create_viewE" "Processor::create_view under its plain name")
     message(STATUS "real: format-core, format-view and pulp-vellum build in the mode; format-core is UI-free")
+
+    # Plug-ins in the mode, through the real pulp_add_plugin. The probe runs
+    # at the end of the top-level directory, after every Pulp target exists,
+    # from a deferred include that a project include registers, so no file
+    # in the source tree changes.
+    #   - With no editor keyword, the CLAP module builds view-free: no
+    #     PULP_CLAP_GUI, so its PulpClapPlugin layout matches the adapter
+    #     pulp-format-view serves in the mode, which has no GUI extension.
+    #     The same configure builds a program that links pulp::format-view
+    #     alone and calls the CLAP adapter and the Vellum editor adapter, so
+    #     each of those links of pulp-format-view is proved.
+    #   - Every keyword that selects Pulp's own view editor, the only routes
+    #     that compile a CLAP entry with PULP_CLAP_GUI, is refused at
+    #     configure time.
+    set(_probe_src "${FIXTURE_DIR}/real-probe-src")
+    file(REMOVE_RECURSE "${_probe_src}" "${FIXTURE_DIR}/real-probe")
+    file(WRITE "${_probe_src}/ui.js" "// stand-in scripted UI\n")
+    file(WRITE "${_probe_src}/format_view_links.cpp"
+        "#include <pulp/format/clap_contract_gui.hpp>\n"
+        "#include <pulp/state/parameter.hpp>\n"
+        "#include <pulp/vellum/mapping.hpp>\n"
+        "int main(int argc, char**) {\n"
+        "    if (argc < 1000) return 0;\n"
+        "    const pulp::state::ParamInfo info{};\n"
+        "    return pulp::format::clap_adapter::contract_gui_extension(nullptr) != nullptr\n"
+        "        && pulp::vellum::to_normalized(info, 0.0f) > 0.0;\n"
+        "}\n")
+    file(WRITE "${_probe_src}/probe.cmake"
+        "string(REPLACE \"=\" \";\" _keyword \"\${PULP_IN_TREE_PROBE_KEYWORD}\")\n"
+        "pulp_add_plugin(InTreeProbe BUNDLE_ID dev.pulp.in-tree-probe FORMATS CLAP \${_keyword})\n"
+        "get_target_property(_definitions InTreeProbe_CLAP COMPILE_DEFINITIONS)\n"
+        "message(STATUS \"in-tree probe: CLAP definitions=[\${_definitions}]\")\n"
+        "add_executable(pulp-in-tree-format-view-links \"${_probe_src}/format_view_links.cpp\")\n"
+        "target_link_libraries(pulp-in-tree-format-view-links PRIVATE pulp::format-view)\n")
+    set(_probe_include "${FIXTURE_DIR}/real-probe-include.cmake")
+    file(WRITE "${_probe_include}"
+        "if(CMAKE_CURRENT_SOURCE_DIR STREQUAL CMAKE_SOURCE_DIR)\n"
+        "    cmake_language(DEFER DIRECTORY \"\${CMAKE_SOURCE_DIR}\" CALL include\n"
+        "        \"${_probe_src}/probe.cmake\")\n"
+        "endif()\n")
+    set(_probe_common ${_common} -DPULP_UI_FROM_VELLUM_IN_TREE=ON -DPULP_ENABLE_INSPECTOR=OFF
+        -DCMAKE_PROJECT_Pulp_INCLUDE=${_probe_include})
+
+    execute_process(COMMAND "${CMAKE_COMMAND}" -S "${PULP_SOURCE_DIR}"
+            -B "${FIXTURE_DIR}/real-probe" ${_probe_common} "-DPULP_IN_TREE_PROBE_KEYWORD="
+        RESULT_VARIABLE _rc OUTPUT_VARIABLE _out ERROR_VARIABLE _err)
+    if(NOT _rc EQUAL 0)
+        message(FATAL_ERROR "real: a CLAP plug-in with no editor keyword did not configure in the mode:\n${_out}${_err}")
+    endif()
+    if(NOT "${_out}" MATCHES "in-tree probe: CLAP definitions=\\[([^\n]*)\\]")
+        message(FATAL_ERROR "real: the plug-in probe did not run:\n${_out}${_err}")
+    endif()
+    if(CMAKE_MATCH_1 MATCHES "PULP_CLAP_GUI")
+        message(FATAL_ERROR "real: the default CLAP module compiles PULP_CLAP_GUI in the mode: ${CMAKE_MATCH_1}")
+    endif()
+    execute_process(COMMAND "${PULP_SOURCE_DIR}/tools/ci/governed-build.sh"
+            "${CMAKE_COMMAND}" --build "${FIXTURE_DIR}/real-probe"
+            --target pulp-in-tree-format-view-links
+        RESULT_VARIABLE _rc OUTPUT_VARIABLE _out ERROR_VARIABLE _err)
+    if(NOT _rc EQUAL 0)
+        message(FATAL_ERROR "real: a program linking pulp::format-view alone cannot reach the CLAP "
+            "adapter and the Vellum editor adapter in the mode:\n${_out}${_err}")
+    endif()
+    foreach(_keyword IN ITEMS NATIVE_UI GPU_UI FULL_EDITOR LITE_EDITOR "UI_SCRIPT=${_probe_src}/ui.js")
+        execute_process(COMMAND "${CMAKE_COMMAND}" -S "${PULP_SOURCE_DIR}"
+                -B "${FIXTURE_DIR}/real-probe" ${_probe_common}
+                "-DPULP_IN_TREE_PROBE_KEYWORD=${_keyword}"
+            RESULT_VARIABLE _rc OUTPUT_VARIABLE _out ERROR_VARIABLE _err)
+        string(REGEX REPLACE "[ \t\r\n]+" " " _text "${_out}${_err}")
+        if(_rc EQUAL 0)
+            message(FATAL_ERROR "real: a CLAP plug-in with ${_keyword} configured in the mode:\n${_text}")
+        endif()
+        _expect("${_text}" "pulp_add_plugin\\(InTreeProbe\\): this Pulp SDK serves Pulp::view from Vellum"
+            "${_keyword} refused as Pulp's own view editor")
+    endforeach()
+    message(STATUS "real: CLAP plug-ins build view-free in the mode, every Pulp view editor keyword is refused, and pulp::format-view reaches both adapters")
     message(STATUS "real: ok")
 
 else()

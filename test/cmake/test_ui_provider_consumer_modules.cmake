@@ -31,9 +31,6 @@
 #              pulp mode and is refused in vellum mode.
 #   standalone a UI <package> plug-in's Standalone configures as an app on the
 #              view-free Pulp::standalone-contract in both modes.
-#   clap-ui-free  a CLAP plug-in with the ViewBridge GUI extension is refused
-#              when format-core is built with PULP_FORMAT_LEGACY_VIEW=0; the same
-#              call with the view layer, and NO_EDITOR without it, configure.
 if(NOT DEFINED PULP_SOURCE_DIR OR NOT DEFINED FIXTURE_DIR OR NOT DEFINED SCENARIO)
     message(FATAL_ERROR "PULP_SOURCE_DIR, FIXTURE_DIR and SCENARIO are required")
 endif()
@@ -157,22 +154,6 @@ elseif(SCENARIO STREQUAL "editor")
     # The format helper refuses on its own too, past its SDK check.
     _expect_refused(vellum vst3 "set(_PULP_VST3_SDK_DIR \"\${CMAKE_SOURCE_DIR}\")\nset(_PULP_VST3_SDK_TARGET stand-in)\n_pulp_add_vst3(Pfmt Pfmt dev.pulp.fmt 1.0.0 Pulp Effect)"
         "pulp_add_plugin(Pfmt) VST3: ${_vellum_refusal}")
-
-elseif(SCENARIO STREQUAL "clap-ui-free")
-    # A plug-in's CLAP entry built with the ViewBridge GUI extension against a
-    # format-core with no view layer would disagree with the adapter on
-    # PulpClapPlugin's layout, so it is refused at configure. The control is the
-    # same call against format-core with the view layer, and NO_EDITOR, which
-    # is view-free on both sides, still configures in the UI-free build.
-    set(_clap "set(PULP_HAS_CLAP ON)\nadd_library(clap INTERFACE)\ninclude(\"${PULP_SOURCE_DIR}/tools/cmake/PulpRuntimeStaging.cmake\")\n_pulp_resolve_consumer_targets()\n")
-    set(_ui_free "set_property(TARGET pulp-format-core APPEND PROPERTY INTERFACE_COMPILE_DEFINITIONS PULP_FORMAT_LEGACY_VIEW=0)\n")
-    set(_call "pulp_add_plugin(Pclap BUNDLE_ID dev.pulp.clap FORMATS CLAP)\nmessage(STATUS \"clap-target=[\${_PULP_CLAP_TARGET}]\")")
-    _expect_pass(pulp default "${_clap}${_call}")
-    _expect_text("clap-target=[clap]" "the CLAP editor plug-in configuring on a format-core with its view layer")
-    _expect_refused(pulp ui-free "${_ui_free}${_clap}${_call}"
-        "pulp_add_plugin(Pclap) CLAP: this Pulp build's format-core has no view layer")
-    _expect_pass(pulp ui-free-no-editor
-        "${_ui_free}${_clap}add_library(pulp-format-clap-core INTERFACE)\nadd_library(pulp::format-clap-core ALIAS pulp-format-clap-core)\n_pulp_resolve_consumer_targets()\npulp_add_plugin(Pquiet BUNDLE_ID dev.pulp.quiet FORMATS CLAP NO_EDITOR)")
 
 elseif(SCENARIO STREQUAL "no-editor")
     # NO_EDITOR and UI <package> (which implies it) are the editors the

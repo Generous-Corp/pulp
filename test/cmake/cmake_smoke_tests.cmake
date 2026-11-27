@@ -1806,7 +1806,7 @@ unset(_vellum_ui_in_tree_args)
 
 # The consumer modules read PULP_UI_PROVIDER, so a Vellum-backed Pulp::view
 # never has Pulp's view, render or editor-adapter sources compiled against it.
-foreach(_ui_provider_scenario provider editor no-editor bundle reload objc bytecode standalone clap-ui-free)
+foreach(_ui_provider_scenario provider editor no-editor bundle reload objc bytecode standalone)
     add_test(NAME cmake-ui-provider-${_ui_provider_scenario}
         COMMAND ${CMAKE_COMMAND}
             -DPULP_SOURCE_DIR=${CMAKE_SOURCE_DIR}
