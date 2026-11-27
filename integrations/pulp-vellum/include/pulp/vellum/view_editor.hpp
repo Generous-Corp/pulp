@@ -29,6 +29,8 @@
 ///
 /// Size hints come from `Processor::view_size()`, as ViewBridge reads them.
 ///
+/// Each editor copies the hooks, so it may outlive the factory that made it.
+///
 /// The factory holds no per-plug-in state: everything reaches the plug-in
 /// through the `Processor&` that `create()` receives, so one function-local
 /// factory serves every processor in an image.
@@ -70,7 +72,7 @@ namespace detail {
 // thread-local slot set around that construction reaches exactly that root.
 struct ViewEditorRequest {
     std::unique_ptr<::vellum::view::View> view;
-    const ViewEditorHooks* hooks = nullptr;
+    ViewEditorHooks hooks;
 };
 
 inline ViewEditorRequest*& pending_view_editor_request() noexcept {
@@ -87,6 +89,7 @@ class ViewEditorRoot final : public ::vellum::view::View {
         auto* request = pending_view_editor_request();
         if (request == nullptr)
             return;
+        // Each root owns its callbacks, so the factory may be destroyed first.
         hooks_ = request->hooks;
         auto* view = request->view.get();
         // add_child() returns null once it has adopted the child.
@@ -103,8 +106,8 @@ class ViewEditorRoot final : public ::vellum::view::View {
         // The size at open is the starting point; `resized` reports changes.
         last_width_ = static_cast<std::uint32_t>(bounds().width);
         last_height_ = static_cast<std::uint32_t>(bounds().height);
-        if (child_ != nullptr && hooks_ != nullptr && hooks_->opened && processor_reachable())
-            hooks_->opened(processor_, *child_);
+        if (child_ != nullptr && hooks_.opened && processor_reachable())
+            hooks_.opened(processor_, *child_);
     }
 
     void editor_closing() {
@@ -113,8 +116,8 @@ class ViewEditorRoot final : public ::vellum::view::View {
         if (!processor_reachable())
             return;
         processor_.state().release_open_gestures();
-        if (child_ != nullptr && hooks_ != nullptr && hooks_->closing)
-            hooks_->closing(processor_, *child_);
+        if (child_ != nullptr && hooks_.closing)
+            hooks_.closing(processor_, *child_);
     }
 
     void on_resized() override {
@@ -144,8 +147,7 @@ class ViewEditorRoot final : public ::vellum::view::View {
     }
 
     void notify_resized() {
-        if (!open_ || child_ == nullptr || hooks_ == nullptr || !hooks_->resized ||
-            !processor_reachable())
+        if (!open_ || child_ == nullptr || !hooks_.resized || !processor_reachable())
             return;
         const auto b = bounds();
         const auto w = static_cast<std::uint32_t>(b.width);
@@ -154,12 +156,12 @@ class ViewEditorRoot final : public ::vellum::view::View {
             return;
         last_width_ = w;
         last_height_ = h;
-        hooks_->resized(processor_, *child_, w, h);
+        hooks_.resized(processor_, *child_, w, h);
     }
 
     EditorEnv& env_;
     format::Processor& processor_;
-    const ViewEditorHooks* hooks_ = nullptr;
+    ViewEditorHooks hooks_;
     ::vellum::view::View* child_ = nullptr;
     bool open_ = false;
     std::uint32_t last_width_ = 0;
@@ -188,7 +190,7 @@ class ViewEditorFactory final : public format::EditorFactory {
                                            format::EditorRole role) override {
         if (!supports(role) || !make_)
             return nullptr;
-        detail::ViewEditorRequest request{make_(processor, role), &hooks_};
+        detail::ViewEditorRequest request{make_(processor, role), hooks_};
         if (request.view == nullptr)
             return nullptr;
         auto*& slot = detail::pending_view_editor_request();

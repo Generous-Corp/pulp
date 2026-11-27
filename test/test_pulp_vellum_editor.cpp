@@ -2442,4 +2442,29 @@ TEST_CASE("One view editor factory serves several editors at once",
     CHECK(f.events.closing == 2);
 }
 
+TEST_CASE("A view editor keeps its hooks after the factory that made it is destroyed",
+          "[pulp-vellum][view-editor][lifetime]") {
+    Fixture f;
+    auto token = std::make_shared<int>(0);
+    std::weak_ptr<int> alive = token;
+    auto factory = std::make_unique<pulp::vellum::ViewEditorFactory>(
+        [](pulp::format::Processor&, EditorRole) -> std::unique_ptr<::vellum::view::View> {
+            return std::make_unique<PluginView>();
+        },
+        pulp::vellum::ViewEditorHooks{
+            .opened = [token](pulp::format::Processor&, ::vellum::view::View&) { ++*token; },
+            .closing = [token](pulp::format::Processor&, ::vellum::view::View&) { ++*token; }});
+    auto editor = factory->create(f.processor, *f.context, EditorRole::editor);
+    REQUIRE(editor != nullptr);
+    factory.reset();
+    token.reset();
+    // The editor, not the factory, now owns the callbacks' captures.
+    REQUIRE_FALSE(alive.expired());
+    REQUIRE(editor->attach(f.parent()));
+    editor->detach();
+    CHECK(*alive.lock() == 2);
+    editor.reset();
+    CHECK(alive.expired());
+}
+
 } // namespace view_editor_test
