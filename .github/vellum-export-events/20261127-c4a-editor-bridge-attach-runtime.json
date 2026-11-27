@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "event_id": "20261127-c4a-editor-bridge-attach-runtime",
+  "kind": "exported-path-change",
+  "created_at": "2026-11-27T15:32:45Z",
+  "receipt_export_id": "20261107-f0ac0a4ff392",
+  "paths": [
+    "core/view/src/editor_bridge_native_runtime.cpp"
+  ],
+  "vellum_inherits": false,
+  "rationale": "editor_bridge_native_runtime.cpp now defines the attach_native_runtime and detach_native_runtime free functions declared in editor_bridge_attach.hpp, with the same bodies. It is a Pulp-kept pulp-view-tooling source that Vellum does not export, so a re-export has nothing to carry."
+}
