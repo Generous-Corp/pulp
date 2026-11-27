@@ -48,6 +48,7 @@ WORD_RE = re.compile(r"[A-Za-z0-9_+.@/-]+")
 # Only Pulp's own names are inferred to be targets; a third-party `ns::name` may be an
 # imported target that CMake keeps in a directory scope the writer cannot see, so the
 # writer's REFS field is what names the rest.
+EXTERNAL_NS_RE = re.compile(r"^[a-z0-9_+-]+::[a-z0-9_+:-]+$")
 TARGET_SHAPED_RE = re.compile(r"^pulp-[a-z0-9_+-]+$")
 EXPLICIT_TARGET_RE = re.compile(
     r"\$<TARGET_(?:OBJECTS|FILE|FILE_DIR|FILE_NAME|LINKER_FILE|SONAME_FILE|PROPERTY|"
@@ -129,7 +130,8 @@ def matches(name: str, patterns: list[str]) -> bool:
 
 def find_paths(graph: Graph, root: str, forbidden: list[str],
                allowed_edges: set[tuple[str, str]],
-               unresolved: list[str] | None = None) -> list[list[str]]:
+               unresolved: list[str] | None = None,
+               external: list[str] | None = None) -> list[list[str]]:
     """Shortest path from root to each forbidden target it reaches.
 
     A reachable, target-shaped name with no record is appended to `unresolved`:
@@ -153,6 +155,9 @@ def find_paths(graph: Graph, root: str, forbidden: list[str],
             if (target not in graph.edges and unresolved is not None
                     and (TARGET_SHAPED_RE.match(target) or target in graph.explicit)):
                 unresolved.append(target)
+            elif (target not in graph.edges and external is not None
+                    and EXTERNAL_NS_RE.match(target)):
+                external.append(target)
             queue.append(target)
     return found
 
@@ -166,7 +171,11 @@ def check(graph: Graph, roots: list[str], forbidden: list[str],
             errors.append(f"INCONCLUSIVE root {root} is not in the link graph")
             continue
         unresolved: list[str] = []
-        paths = find_paths(graph, root, forbidden, allowed_edges, unresolved)
+        external: list[str] = []
+        paths = find_paths(graph, root, forbidden, allowed_edges, unresolved, external)
+        if external:
+            notes.append(f"{root}: NOT INSPECTED (third-party imported targets with no "
+                         f"record, not visible to the writer): {sorted(set(external))}")
         for target in unresolved:
             errors.append(f"INCONCLUSIVE root {root} reaches {target}, which has no "
                           "record in the link graph, so its closure was not inspected")
