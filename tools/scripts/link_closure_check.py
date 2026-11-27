@@ -160,6 +160,11 @@ class Graph:
         if not codemodels:
             raise ValueError(f"CMake codemodel is not available in {reply_dir}")
         model = json.loads(codemodels[-1].read_text(encoding="utf-8"))
+        version = model.get("version", {})
+        if (version.get("major"), version.get("minor", 0)) < (2, 9):
+            raise ValueError("unsupported CMake codemodel version "
+                             f"{version.get('major')}.{version.get('minor')}; "
+                             "dependency records are incomplete")
         configuration = model["configurations"][0]
         entries = configuration.get("targets", []) + configuration.get("abstractTargets", [])
         names = {entry["id"]: canonical(entry["name"]) for entry in entries}
@@ -171,7 +176,8 @@ class Graph:
             graph.types[name] = target.get("type", "")
             graph.edges.setdefault(name, [])
             for property_name in ("linkLibraries", "interfaceLinkLibraries",
-                                  "compileDependencies", "interfaceCompileDependencies"):
+                                  "compileDependencies", "interfaceCompileDependencies",
+                                  "objectDependencies"):
                 for dependency in target.get(property_name, []):
                     dependency_name = (names.get(dependency.get("id"))
                                        if dependency.get("id") else dependency.get("fragment"))
