@@ -1376,10 +1376,10 @@
       "link_targets": ["skia::skia"],
       "notes": "Prebuilt via skia-builder (danielraffel fork: https://github.com/danielraffel/skia-builder) for Pulp rendering. The fork tracks olilarkin/skia-builder's tag pattern and adds iOS device/simulator, visionOS, mac-x86_64, Windows ARM64, and Skia.xcframework slices the upstream does not ship. The chrome/m158 release ships all required platform slices including linux-arm64 and the native jsonreader/skresources archives. Its two Linux archives were re-cut from the same Skia revision with skia_use_partition_alloc = false (skia-builder run 41466672481); the release notes' replacement ledger records both digests. Visual harness determinism locks Skia plus its bundled HarfBuzz and ICU DEPS revisions; regenerate raster goldens only when any pinned Skia asset, bundled text dependency, font file, or sampler/render configuration changes.",
       "vellum_mirror_renderer": {
-        "url": "https://github.com/danielraffel/skia-builder/releases/download/chrome/m158-attested.1/skia-build-mac-universal-gpu-release.zip",
-        "sha256": "1779c7d1ba5c73a0d6a1f33b77fbf30774bbd9f7542c1c42cc5129f57e99fbd4",
-        "libdawn_combined_sha256": "337d3beff192f51c0905ac0cc25fc268f9be94cfce58f868a2ede0ad4683c168",
-        "skia_builder_ref": "1b97010d2f025b4331a9c0db9481c440d1f33042",
+        "url": "https://github.com/danielraffel/skia-builder/releases/download/chrome/m158-attested.2/skia-build-mac-universal-gpu-release.zip",
+        "sha256": "598c45fe77d926925c7bc37c1e5e2e3dddfe08fad26f89fb0c3e3be6788f8cba",
+        "libdawn_combined_sha256": "9012e32207a540c5eaa8f60afb3377381a3d5de66d3fa57e5ae029ec57b494bc",
+        "skia_builder_ref": "a9c9f37255121d4b3d0fe8931fdd81c9eca97da2",
         "built_dawn": "1716e88cc9e58398fab5d4473f7f2e858667b677"
       },
       "vellum_renderer_drift_check": {
