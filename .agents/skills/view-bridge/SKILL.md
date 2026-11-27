@@ -4343,3 +4343,18 @@ forwards `capture_png` to the open session's `EditorAutomation`; it is a test
 seam and absent from release plug-ins. See the `clap` skill.
 
 `inspect::ControlGpuHealthViewAdapter` takes its captured-PNG analysis as `Config::analyze_png` rather than calling the view layer, so a host on Vellum views supplies `pulp::vellum_components::analyze_png_content`. The field order matters for designated initializers: `analyze_png` follows `provider`.
+
+## A reload logic library cannot see the plug-in's UI package
+
+`Processor::editor_factory()` returns the UI package hook of the image it is
+compiled into, and the hook slot is image-local. A hot-reload logic library is a
+separate image, so asking the logic for its editor reaches only a package linked
+into the logic itself. The plug-in's package (in the in-tree Vellum mode, the
+generated parameter editor every plug-in without an editor keyword gets) lives
+in the shell's image. `make_reloadable_editor_shell()` therefore falls back to
+`Processor::editor_factory()` on the shell for any role the logic does not
+offer, building that editor over the shell's parameters. Without the fallback
+the hot-reload examples had no editor in the mode. Check it headlessly with
+`test/fixtures/vellum_in_tree/reload_editor_probe.cpp`, which
+`cmake-vellum-ui-in-tree-real` builds: it asks the shell for an editor and never
+attaches it.
