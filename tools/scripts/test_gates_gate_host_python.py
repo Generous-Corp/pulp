@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import os
 import re
+import signal
 import stat
 import subprocess
 import sys
@@ -47,6 +48,10 @@ lane = "sync-job" if "--sync-job" in sys.argv else next(
 if lane in os.environ.get("FAIL_LANES", "").split(","):
     print("FAIL: deliberately failing selftest in lane " + lane)
     sys.exit(1)
+if lane in os.environ.get("FAIL_THEN_HANG_LANES", "").split(","):
+    print("   1/2 broken ... ***Failed 0.01 sec", flush=True)
+    import time
+    time.sleep(60)
 if lane in os.environ.get("HANG_LANES", "").split(","):
     import time
     time.sleep(60)
@@ -78,7 +83,7 @@ class GateHostPythonLanes(unittest.TestCase):
             subprocess.run(cmd, cwd=self.root, check=True, capture_output=True)
         self.record = self.root.parent / "record.txt"
 
-    def run_blocks(self, role: str, *, fail: str = "", hang: str = "", **env: str) -> tuple[subprocess.CompletedProcess, list[str]]:
+    def run_blocks(self, role: str, *, fail: str = "", hang: str = "", fail_then_hang: str = "", **env: str) -> tuple[subprocess.CompletedProcess, list[str]]:
         fake = self.root.parent / "tartci"
         fake.write_text(tartci(role), encoding="utf-8")
         fake.chmod(fake.stat().st_mode | stat.S_IXUSR)
@@ -96,7 +101,8 @@ class GateHostPythonLanes(unittest.TestCase):
         """)
         proc = subprocess.run(["bash", "-c", script], capture_output=True, text=True, encoding="utf-8", check=False,
                               env={**os.environ, "PULP_TARTCI_BIN": str(fake), "RECORD": str(self.record),
-                                   "FAIL_LANES": fail, "HANG_LANES": hang, **env})
+                                   "FAIL_LANES": fail, "HANG_LANES": hang,
+                                   "FAIL_THEN_HANG_LANES": fail_then_hang, **env})
         calls = self.record.read_text(encoding="utf-8").splitlines() if self.record.exists() else []
         return proc, calls
 
@@ -133,6 +139,29 @@ class GateHostPythonLanes(unittest.TestCase):
         proc, _ = self.run_blocks("dev-overflow", hang="pr-fast", PULP_GATES_GATE_HOST_CAP_S="1")
         self.assertIn("RESULT fail=0", proc.stdout, proc.stderr)
         self.assertIn("[pr-fast] NOT CHECKED: exceeded the 1s gate-host wall-time cap", proc.stdout)
+
+    def test_a_capped_sync_job_is_listed_not_checked_not_silently_passed(self) -> None:
+        proc, _ = self.run_blocks("dev-overflow", hang="sync-job", PULP_GATES_GATE_HOST_CAP_S="1")
+        self.assertIn("RESULT fail=0", proc.stdout, proc.stderr)
+        self.assertIn("[sync-job] NOT CHECKED: exceeded the 1s gate-host wall-time cap", proc.stdout)
+
+    def test_a_capped_lane_that_already_failed_fails_the_gate(self) -> None:
+        for lane in ("manifest", "sync-job"):
+            with self.subTest(lane=lane):
+                self.record.unlink(missing_ok=True)
+                proc, _ = self.run_blocks("dev-overflow", fail_then_hang=lane, PULP_GATES_GATE_HOST_CAP_S="1")
+                self.assertIn("RESULT fail=1", proc.stdout, proc.stderr)
+                self.assertNotIn(f"[{lane}] NOT CHECKED", proc.stdout)
+
+    def test_a_gate_host_never_runs_a_compiling_suite_and_honours_a_lower_job_count(self) -> None:
+        _, calls = self.run_blocks("dev-overflow")
+        self.assertTrue(all(call.endswith("--jobs 2 --no-compile") for call in calls), calls)
+        self.record.unlink(missing_ok=True)
+        _, calls = self.run_blocks("dev-overflow", PULP_BUILD_JOBS="1")
+        self.assertTrue(all(call.endswith("--jobs 1 --no-compile") for call in calls), calls)
+        self.record.unlink(missing_ok=True)
+        _, calls = self.run_blocks("light")
+        self.assertTrue(all("--no-compile" not in call for call in calls), "a light host may run them")
 
     def test_the_old_refusal_remains_available_and_is_listed(self) -> None:
         proc, calls = self.run_blocks("dev-overflow", PULP_GATES_GATE_HOST_PYTHON="0")
@@ -179,6 +208,63 @@ class RunCappedTests(unittest.TestCase):
                     break
                 time.sleep(0.1)
             self.assertFalse(process_liveness.pid_alive(pid), "the grandchild survived the cap")
+
+
+STUBBORN = ("import os,subprocess,sys,time\n"
+            "c=subprocess.Popen(['/bin/sh','-c','trap \"\" TERM; echo $$ > '+sys.argv[1]+'; while :; do sleep 1; done'])\n"
+            "while not os.path.exists(sys.argv[1]): time.sleep(0.05)\n"
+            "time.sleep(60)\n")
+
+
+class RunCappedSurvivalTests(unittest.TestCase):
+    """The cap must hold when the wrapper itself is signalled and when a descendant ignores TERM."""
+
+    def start(self, tmp: str, seconds: float) -> tuple[subprocess.Popen, Path]:
+        pidfile = Path(tmp) / "stubborn.pid"
+        proc = subprocess.Popen(
+            [sys.executable, str(HERE / "run_capped.py"), "--seconds", str(seconds), "--", sys.executable, "-c", STUBBORN,
+             str(pidfile)], env={**os.environ, "PULP_RUN_CAPPED_GRACE": "1"})
+        for _ in range(100):
+            if pidfile.exists() and pidfile.read_text(encoding="utf-8").strip():
+                break
+            time.sleep(0.1)
+        return proc, pidfile
+
+    def assert_dies(self, pidfile: Path, why: str) -> None:
+        pid = int(pidfile.read_text(encoding="utf-8"))
+        for _ in range(80):
+            if not process_liveness.pid_alive(pid):
+                return
+            time.sleep(0.1)
+        os.kill(pid, signal.SIGKILL)  # do not leak it from the test
+        self.fail(why)
+
+    def test_a_descendant_that_ignores_term_is_killed_when_the_cap_expires(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            proc, pidfile = self.start(tmp, 1)
+            self.assertEqual(proc.wait(timeout=20), 124)
+            self.assert_dies(pidfile, "SIGKILL never reached a descendant that ignores TERM")
+
+    def test_term_to_the_wrapper_stops_the_whole_group(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            proc, pidfile = self.start(tmp, 300)
+            proc.send_signal(signal.SIGTERM)
+            self.assertEqual(proc.wait(timeout=20), 128 + signal.SIGTERM)
+            self.assert_dies(pidfile, "the suite outlived a TERM sent to run_capped")
+
+    def test_hup_to_the_wrapper_stops_the_whole_group(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            proc, pidfile = self.start(tmp, 300)
+            proc.send_signal(signal.SIGHUP)
+            proc.wait(timeout=20)
+            self.assert_dies(pidfile, "the suite outlived a HUP sent to run_capped")
+
+    def test_ctrl_c_to_the_wrapper_stops_the_whole_group(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            proc, pidfile = self.start(tmp, 300)
+            proc.send_signal(signal.SIGINT)
+            self.assertEqual(proc.wait(timeout=20), 128 + signal.SIGINT)
+            self.assert_dies(pidfile, "the suite outlived Ctrl-C")
 
 
 if __name__ == "__main__":

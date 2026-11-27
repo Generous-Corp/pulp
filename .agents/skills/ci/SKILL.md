@@ -41,9 +41,18 @@ on a real PR. Do them in order.
    m5s `dev-overflow`), `gates.sh` compiles nothing and runs no diff-coverage.
    The build-free Python lanes (source-only selftests, workflow-lint, pr-fast,
    ctest-registered Python, and the sync job's fixture tests) still run there, at
-   `nice -n 19`, two jobs at a time, each lane under a wall-time cap
-   (`PULP_GATES_GATE_HOST_CAP_S`, default 600 s, via `run_capped.py`). A lane that
-   hits the cap is listed NOT CHECKED, never passed; a failing suite fails the gate.
+   `nice -n 19` and background QoS (`taskpolicy -b`), at most two suites at a time
+   (one when `PULP_BUILD_JOBS=1`), each lane under a wall-time cap
+   (`PULP_GATES_GATE_HOST_CAP_S`, default 600 s, via `run_capped.py`; the cap holds
+   if the wrapper is killed, and a descendant that ignores TERM is SIGKILLed).
+   Suites that configure or compile something (`--no-compile`: `test_object_deps`,
+   `test_ccache_pch_isolation`, `test_check_installed_rpaths`,
+   `test_vellum_sdk_consumer`) are listed NOT CHECKED there. This is a priority
+   bound, not a tartci lease: unlike the configure-only lane these lanes take no
+   share, and a suite may still fan out its own processes. A lane that hits the
+   cap is NOT CHECKED unless its log already shows a failure, in which case the
+   gate fails. A cap during the base re-run leaves no `.source-selftests-base-*`
+   worktree behind.
    `PULP_GATES_GATE_HOST_PYTHON=0` restores the old refusal. The generated-manifest lane keeps the one allowance
    the policy names (`pulp_gate_host_configure_only_allowance`): a
    configure-only tree in a temporary `build-configure-only.*` directory under
@@ -57,19 +66,21 @@ on a real PR. Do them in order.
    Before any gate runs, `gates_preflight.py` checks every prerequisite once and
    prints one list with the exact fix command for each: a shallow clone
    (`git fetch --unshallow`), the `pulp-gpu-ledger` merge driver and hooks path
-   (`tools/scripts/install-githooks.sh`), the VST3 and AU SDKs the committed census
-   records for this platform (`./setup.sh --deps-only`), the jsx-runtime packages
-   (`npm ci`), and a build dir with no CMake file-API reply. `gates.sh --bootstrap`
-   performs those, with an npm cache under the git dir (or `npm_config_cache`), and
-   continues. Each check applies only when its input exists, so a checkout that
-   does not need a prerequisite is not told to install it. A Vellum-enabled build
-   dir (`PULP_ENABLE_PULP_VELLUM*`, `PULP_ENABLE_RMLUI_ADAPTER` ON) is never chosen
-   as the gate build dir, so it stays where it is and the gates use `build/` or
-   configure `build-gate`; naming one in `PULP_GATES_BUILD_DIR` is a blocking
-   finding. `PULP_GATES_SKIP_PREFLIGHT=1` skips it and lists it NOT CHECKED. A
-   reused checkout hits the SDK, npm, file-API and Vellum items; a fresh clone
-   with no build dir hits the shallow and merge-driver items on every run, and
-   the configure path installs the SDKs and packages itself when a diff needs it.
+   (set for this worktree only: `git config extensions.worktreeConfig true`, then
+   `git config --worktree ...`; `install-githooks.sh` sets them for every worktree
+   of the clone), the VST3 and AU SDKs the committed census records for this
+   platform (`./setup.sh --deps-only`), the jsx-runtime packages (`npm ci`), and a
+   build dir with no CMake file-API reply. Only the first two always apply; the
+   SDK, package and file-API checks block only when the diff reaches a lane that
+   configures a build (generated manifests, families, census) and are otherwise
+   printed as notes, so a docs-only diff in a fresh worktree is not stopped.
+   `gates.sh --bootstrap` performs the blocking ones (setup.sh and `npm ci` at
+   nice 10, npm cache under the git dir or `npm_config_cache`, a configure-only
+   rerun of your existing build dir for the file-API reply, announced first) and
+   continues. A Vellum-enabled build dir (`PULP_ENABLE_PULP_VELLUM*`,
+   `PULP_ENABLE_RMLUI_ADAPTER` ON) is never chosen as the gate build dir, so it
+   stays where it is and the gates use `build/` or configure `build-gate`; naming
+   one in `PULP_GATES_BUILD_DIR` is a blocking finding. `PULP_GATES_SKIP_PREFLIGHT=1` skips it and lists it NOT CHECKED.
    When a gate fails, the final summary names every failed gate in a comma-separated
    `gates: failed:` line before the remediation advice.
    Two lanes read their commands from the CI jobs themselves, so a step added
@@ -78,8 +89,8 @@ on a real PR. Do them in order.
    (docs-sync, screenshot-sync, release-tag report, CLI/MCP parity, source
    contracts, the gate-script fixture tests) run from
    `source_selftests.py run --sync-job`, and the `drift-fast` job's selection
-   (`tools/ci/drift_fast.json`) runs from `--drift-fast`. On a gate host the
-   sync job's checks still run and its fixture tests are listed NOT CHECKED.
+   (`tools/ci/drift_fast.json`) runs from `--drift-fast`. On a gate host both run
+   under the cap described above.
    `tools/ci/sync_job_parity.json` names what `gates.sh` runs itself, and
    `tools/scripts/test_gates_sync_parity.py` fails when the workflow and
    `gates.sh` disagree.

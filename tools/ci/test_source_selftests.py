@@ -1208,6 +1208,70 @@ class ImportClosureSelectionTests(unittest.TestCase):
         self.assertEqual(picked, [])
 
 
+class GateHostSafetyTests(unittest.TestCase):
+    """A gate host leaves out suites that compile, and a capped base re-run leaves nothing behind."""
+
+    def test_compiling_suites_are_dropped_and_named_not_the_rest(self) -> None:
+        entries = [{"name": "tools/ci/test_object_deps.py", "argv": ["python3", "tools/ci/test_object_deps.py"]},
+                   {"name": "ccache-pch", "argv": ["python3", "tools/scripts/test_ccache_pch_isolation.py"]},
+                   {"name": "tools/scripts/test_check_installed_rpaths.py", "argv": []},
+                   {"name": "tools/scripts/test_plain.py", "argv": ["python3", "tools/scripts/test_plain.py"]}]
+        dropped = lane.drop_compiling(entries)
+        self.assertEqual(sorted(dropped), ["ccache-pch", "tools/ci/test_object_deps.py",
+                                           "tools/scripts/test_check_installed_rpaths.py"])
+        self.assertEqual([e["name"] for e in entries], ["tools/scripts/test_plain.py"])
+
+    def test_every_compiling_suite_named_in_the_review_is_listed(self) -> None:
+        self.assertEqual(sorted(lane.COMPILING_SUITES), [
+            "test_ccache_pch_isolation.py", "test_check_installed_rpaths.py", "test_object_deps.py",
+            "test_vellum_sdk_consumer.py"])
+
+    def _repo(self, tmp: pathlib.Path) -> pathlib.Path:
+        repo = tmp / "repo"
+        repo.mkdir()
+        for cmd in (["git", "init", "-q", "-b", "main"],
+                    ["git", "-c", "user.name=t", "-c", "user.email=t@example.invalid", "commit", "-q",
+                     "--allow-empty", "-m", "x"]):
+            subprocess.run(cmd, cwd=repo, check=True, capture_output=True)
+        return repo
+
+    def _holders(self, tmp: pathlib.Path) -> list[str]:
+        return sorted(p.name for p in tmp.glob(".source-selftests-base-*"))
+
+    def _enter_and_wait(self, repo: pathlib.Path) -> subprocess.Popen:
+        code = ("import sys,time,pathlib\n"
+                f"sys.path.insert(0, {str(HERE)!r})\n"
+                "import source_selftests as l\n"
+                f"with l.base_checkout('HEAD', pathlib.Path({str(repo)!r})) as b:\n"
+                "    print('ready', flush=True)\n"
+                "    time.sleep(60)\n")
+        proc = subprocess.Popen([sys.executable, "-c", code], stdout=subprocess.PIPE, text=True)
+        self.assertEqual(proc.stdout.readline().strip(), "ready")
+        return proc
+
+    def test_a_term_during_the_base_rerun_removes_the_checkout_and_its_registration(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp).resolve()
+            repo = self._repo(root)
+            proc = self._enter_and_wait(repo)
+            self.assertEqual(len(self._holders(root)), 1)
+            proc.terminate()
+            proc.wait(timeout=30)
+            self.assertEqual(self._holders(root), [])
+            listed = subprocess.run(["git", "worktree", "list"], cwd=repo, capture_output=True, text=True).stdout
+            self.assertEqual(len(listed.strip().splitlines()), 1, listed)
+
+    def test_control_a_leaked_checkout_is_what_the_old_code_left(self) -> None:
+        # Killing with SIGKILL cannot run any cleanup, so this proves the harness sees a leftover at all.
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp).resolve()
+            repo = self._repo(root)
+            proc = self._enter_and_wait(repo)
+            proc.kill()
+            proc.wait(timeout=30)
+            self.assertEqual(len(self._holders(root)), 1)
+
+
 class BuildDirChoiceTests(unittest.TestCase):
     """The pr-fast lane reads the build that is current, not the one named build/."""
 

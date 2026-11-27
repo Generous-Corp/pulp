@@ -20,6 +20,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
@@ -80,6 +81,7 @@ def make_origin(base: Path) -> Path:
     sh(origin, "git", "config", "user.name", "t")
     write(origin / ".gitattributes", "ledger.yaml merge=pulp-gpu-ledger\n")
     write(origin / "ledger.yaml", "a: 1\n")
+    write(origin / ".githooks/pre-push", "#!/bin/sh\n", executable=True)
     write(origin / "setup.sh", SETUP, executable=True)
     write(origin / "tools/scripts/install-githooks.sh", INSTALLER, executable=True)
     write(origin / pre.CENSUS_FILE, json.dumps({"profiles": {f"{SYSTEM}-{MACHINE}-all": profile("ON", "ON")}}))
@@ -112,7 +114,7 @@ class PreflightTests(unittest.TestCase):
     def complete(self, name: str = "work") -> Path:
         """A full clone with every prerequisite present."""
         root = self.clone(name)
-        sh(root, "sh", "tools/scripts/install-githooks.sh")
+        self.assertEqual(pre.install_worktree_hooks(root), "")
         sh(root, "sh", "setup.sh")
         sh(root, "sh", "-c", f"PATH={self.bin}:$PATH npm ci --prefix {JSX}")
         return root
@@ -144,14 +146,16 @@ class PreflightTests(unittest.TestCase):
 
     def test_missing_merge_driver_names_the_installer(self) -> None:
         root = self.complete()
-        sh(root, "git", "config", "--unset", "merge.pulp-gpu-ledger.driver")
+        sh(root, "git", "config", "--worktree", "--unset", "merge.pulp-gpu-ledger.driver")
         finding = self.only(self.collect(root), "githooks")
-        self.assertEqual(finding.fix, ["tools/scripts/install-githooks.sh"])
+        self.assertIn("git config --worktree core.hooksPath .githooks", finding.fix[0])
+        self.assertIn("git config --worktree merge.pulp-gpu-ledger.driver", finding.fix[0])
+        self.assertIn("this worktree", finding.what)
         self.assertIn("pulp-gpu-ledger", finding.what)
 
     def test_missing_hooks_path_is_the_same_finding(self) -> None:
         root = self.complete()
-        sh(root, "git", "config", "--unset", "core.hooksPath")
+        sh(root, "git", "config", "--worktree", "--unset", "core.hooksPath")
         self.only(self.collect(root), "githooks")
 
     def test_missing_sdks_name_setup_deps_only(self) -> None:
@@ -243,7 +247,7 @@ class PreflightTests(unittest.TestCase):
     def test_cli_exits_one_and_prints_every_fix_in_one_list(self) -> None:
         proc = self.run_cli(self.clone(depth=1))
         self.assertEqual(proc.returncode, 1, proc.stderr)
-        for command in ("git fetch --unshallow", "tools/scripts/install-githooks.sh",
+        for command in ("git fetch --unshallow", "git config --worktree core.hooksPath .githooks",
                         "./setup.sh --deps-only --non-interactive", "npm ci --cache"):
             self.assertIn(command, proc.stderr)
         self.assertIn("4 missing prerequisite(s)", proc.stderr)
@@ -264,6 +268,9 @@ class PreflightTests(unittest.TestCase):
         self.assertTrue((root / "external/vst3sdk/pluginterfaces").is_dir())
         self.assertTrue((root / JSX / "node_modules/esbuild/package.json").is_file())
         self.assertTrue(sh(root, "git", "config", "--get", "merge.pulp-gpu-ledger.driver").strip())
+        shared = subprocess.run(["git", "config", "--local", "--get-regexp", "core.hookspath|merge.pulp"], cwd=root,
+                                capture_output=True, text=True, check=False).stdout
+        self.assertEqual(shared.strip(), "", "the shared .git/config must stay untouched")
         self.assertTrue(pre.has_codemodel_reply(root / "build"))
         self.assertEqual(self.run_cli(root).returncode, 0)
 
@@ -294,6 +301,52 @@ class PreflightTests(unittest.TestCase):
         return subprocess.run(["bash", str(root / "tools/scripts/gates.sh"), *args], cwd=root, capture_output=True,
                               text=True, encoding="utf-8", check=False,
                               env={**os.environ, **self.env, **extra})
+
+    def test_bootstrap_in_a_linked_worktree_leaves_the_main_clone_and_siblings_alone(self) -> None:
+        main = self.complete("main-clone")
+        sh(main, "git", "config", "--worktree", "--unset", "core.hooksPath")
+        sh(main, "git", "config", "--worktree", "--unset", "merge.pulp-gpu-ledger.driver")
+        linked = self.base / "linked"
+        sh(main, "git", "worktree", "add", "-q", "--detach", str(linked))
+        sibling = self.base / "sibling"
+        sh(main, "git", "worktree", "add", "-q", "--detach", str(sibling))
+        self.assertEqual(pre.install_worktree_hooks(linked), "")
+        self.assertEqual(sh(linked, "git", "config", "--get", "core.hooksPath").strip(), ".githooks")
+        for other in (main, sibling):
+            proc = subprocess.run(["git", "config", "--get", "core.hooksPath"], cwd=other, capture_output=True,
+                                  text=True, check=False)
+            self.assertEqual(proc.stdout.strip(), "", f"{other.name} must not inherit the hook path")
+
+    def test_configure_prerequisites_are_advisory_when_the_diff_needs_no_configure(self) -> None:
+        root = self.clone(depth=1)
+        report = pre.collect(root, self.env, needs_configure=False)
+        blocking = [f.key for f in pre.blocking(report)]
+        self.assertEqual(blocking, ["shallow", "githooks"], "only what fails whatever the diff is blocking")
+        self.assertEqual([f.key for f in report.findings if f.advisory], ["sdks", "jsx-runtime"])
+
+    def test_control_the_same_checkout_blocks_on_everything_when_the_diff_needs_a_configure(self) -> None:
+        report = pre.collect(self.clone(depth=1), self.env, needs_configure=True)
+        self.assertEqual([f.key for f in pre.blocking(report)], ["shallow", "githooks", "sdks", "jsx-runtime"])
+
+    def test_cli_with_a_docs_only_base_exits_zero_on_a_fresh_worktree_that_has_only_the_always_checks(self) -> None:
+        root = self.complete()
+        shutil.rmtree(root / "external")
+        shutil.rmtree(root / JSX / "node_modules")
+        with mock.patch.object(pre, "diff_needs_configure", return_value=False):
+            report = pre.collect(root, self.env, needs_configure=pre.diff_needs_configure(root, "origin/main"))
+        self.assertEqual(pre.blocking(report), [])
+        self.assertEqual(len(report.findings), 2)
+
+    def test_the_diff_decides_through_the_real_reason_functions(self) -> None:
+        root = self.clone()
+        # A base that does not resolve means the diff cannot be read: fail closed.
+        self.assertTrue(pre.diff_needs_configure(root, "no-such-ref"))
+        # Control: a readable, empty diff reaches no configure lane.
+        self.assertFalse(pre.diff_needs_configure(root, "origin/main"))
+        write(root / "test/cmake/new_tests.cmake", "add_test(NAME x COMMAND y)\n")
+        sh(root, "git", "add", "-A")
+        sh(root, "git", "-c", "user.name=t", "-c", "user.email=t@example.invalid", "commit", "-q", "-m", "c")
+        self.assertTrue(pre.diff_needs_configure(root, "origin/main"))
 
     def test_gates_sh_stops_at_the_preflight_before_any_gate(self) -> None:
         proc = self.run_gates(self.gates_checkout(shallow=True))

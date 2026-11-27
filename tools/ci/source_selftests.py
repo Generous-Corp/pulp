@@ -44,6 +44,7 @@ import os
 import pathlib
 import re
 import shutil
+import signal
 import subprocess
 import sys
 import tempfile
@@ -681,6 +682,29 @@ def change_tokens(path: str) -> set[str]:
 WORKFLOW_LINT = REPO_ROOT / ".github" / "workflows" / "workflow-lint.yml"
 # Workflow suites that cannot run in bounded time on a developer checkout. Each
 # is reported as NOT CHECKED, never as a pass; the workflow still runs it.
+# Suites that configure a build, compile or link something. A gate host that
+# serves the required gate refuses them (gates.sh passes --no-compile there).
+COMPILING_SUITES = {
+    "test_object_deps.py": "builds targets with cmake --build",
+    "test_ccache_pch_isolation.py": "drives clang and ccache",
+    "test_check_installed_rpaths.py": "links a dylib with clang",
+    "test_vellum_sdk_consumer.py": "configures and builds a consumer with ninja",
+}
+
+
+def drop_compiling(entries: list[dict[str, Any]]) -> dict[str, str]:
+    """Remove the suites that compile from ``entries`` in place; name -> why."""
+    dropped: dict[str, str] = {}
+    for entry in list(entries):
+        words = [entry.get("name", ""), *[str(a) for a in entry.get("argv", [])]]
+        for suite, why in COMPILING_SUITES.items():
+            if any(w.endswith(suite) for w in words):
+                entries.remove(entry)
+                dropped[entry["name"]] = why
+                break
+    return dropped
+
+
 WORKFLOW_LOCAL_SKIPS = {
     "tools/scripts/test_generated_version_bump_check.py": (
         "35 fixtures each clone the checkout and let the check add a worktree, so "
@@ -1640,16 +1664,31 @@ def base_checkout(ref: str, repo: pathlib.Path = REPO_ROOT) -> Iterator[pathlib.
     # would then fail on the base for a reason the branch does not share.
     holder = pathlib.Path(tempfile.mkdtemp(prefix=".source-selftests-base-", dir=repo.parent))
     checkout = holder / "base"
-    subprocess.run(
-        ["git", "worktree", "add", "--quiet", "--detach", str(checkout), merge_base],
-        cwd=repo, capture_output=True, text=True, check=True,
-    )
+    # A TERM or HUP (a wall-time cap, a closed terminal) would otherwise skip the
+    # cleanup below and leave a registered worktree and a full checkout behind.
+    previous: dict[int, Any] = {}
+
+    def _exit_on_signal(signum: int, _frame: Any) -> None:
+        raise SystemExit(128 + signum)
+
+    for sig in (signal.SIGTERM, signal.SIGHUP):
+        try:
+            previous[sig] = signal.signal(sig, _exit_on_signal)
+        except ValueError:  # not the main thread
+            break
     try:
+        subprocess.run(
+            ["git", "worktree", "add", "--quiet", "--detach", str(checkout), merge_base],
+            cwd=repo, capture_output=True, text=True, check=True,
+        )
         yield checkout
     finally:
+        for sig, handler in previous.items():
+            signal.signal(sig, handler)
         subprocess.run(["git", "worktree", "remove", "--force", str(checkout)],
                        cwd=repo, capture_output=True, text=True, check=False)
         shutil.rmtree(holder, ignore_errors=True)
+        subprocess.run(["git", "worktree", "prune"], cwd=repo, capture_output=True, text=True, check=False)
 
 
 def rerun_on_base(
@@ -1842,6 +1881,12 @@ def entry_from_registration(test: dict[str, Any], repo: pathlib.Path, build: str
 
 def _run_and_report(args: argparse.Namespace, parser: argparse.ArgumentParser,
                     entries: list[dict[str, Any]], start: float) -> int:
+    if getattr(args, "no_compile", False):
+        for name, why in sorted(drop_compiling(entries).items()):
+            print(f"source-selftests: NOT CHECKED locally: {name} (it {why}, which a gate host "
+                  "refuses); CI runs it", flush=True)
+        if not entries:
+            return 0
     results = run(entries, jobs=args.jobs)
     failed = [r for r in results if r["returncode"] != 0]
     # A step CI marks continue-on-error reports here too, and cannot fail the run.
@@ -1952,6 +1997,12 @@ def main(argv: list[str] | None = None) -> int:
         "like --ctest-label; a superset of --ctest-label pr-fast. Takes --build-dir",
     )
     p_run.add_argument("--build-dir", type=pathlib.Path)
+    p_run.add_argument(
+        "--no-compile",
+        action="store_true",
+        help="leave out the suites that configure or compile something and list them NOT CHECKED "
+        "(a gate host that serves the required gate passes this)",
+    )
     p_run.add_argument(
         "--ctest-python",
         action="store_true",

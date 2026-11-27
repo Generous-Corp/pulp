@@ -123,6 +123,7 @@ if [ "${PULP_GATES_SKIP_PREFLIGHT:-}" = "1" ]; then
     gates_preflight_skipped=1
 elif [ -f "$ROOT/tools/scripts/gates_preflight.py" ]; then
     "${PYTHON:-python3}" "$ROOT/tools/scripts/gates_preflight.py" --repo-root "$ROOT" \
+        --base "${1:-${PULP_GATES_BASE:-origin/main}}" \
         ${gates_bootstrap_args[@]+"${gates_bootstrap_args[@]}"} || exit $?
 fi
 
@@ -170,8 +171,13 @@ if pulp_gate_host_builds_reserved; then
         gate_host_python_lanes=0
         gate_host_skipped_what="$gate_host_skipped_what and the source-selftest suites (source-only, workflow-lint, pr-fast ctest, ctest-registered Python, sync-job fixtures)"
     else
-        gate_python_runner=("$PYTHON" "$ROOT/tools/scripts/run_capped.py" --seconds "$gate_host_cap_s" --nice 19 --)
-        gate_python_jobs=(--jobs 2)
+        # nice 19 and background QoS, never above two concurrent suites (or the
+        # operator's lower PULP_BUILD_JOBS), and no suite that compiles. There is
+        # no tartci lease here: the configure-only lane takes one, these do not.
+        gate_host_jobs=2
+        case "${PULP_BUILD_JOBS:-}" in 1) gate_host_jobs=1 ;; esac
+        gate_python_runner=("$PYTHON" "$ROOT/tools/scripts/run_capped.py" --seconds "$gate_host_cap_s" --nice 19 --background --)
+        gate_python_jobs=(--jobs "$gate_host_jobs" --no-compile)
     fi
     pulp_gate_host_skip_line "$gate_host_skipped_what" "tools/scripts/gates.sh $BASE"
 fi
@@ -762,7 +768,8 @@ if [ "$gate_host_python_lanes" -eq 1 ] && [ -f "$ROOT/tools/ci/source_selftests.
                 >"$src_selftest_log" 2>&1 || src_rc=$?
         if [ "$src_rc" -eq 0 ]; then
             sed -n 's/^source-selftests: /  source-selftests: /p' "$src_selftest_log" >&2
-        elif [ "$src_rc" -eq 124 ] && [ "$gate_host_builds_skipped" -eq 1 ]; then
+        elif [ "$src_rc" -eq 124 ] && [ "$gate_host_builds_skipped" -eq 1 ] \
+                && ! grep -qE '\*\*\*Failed|^FAIL:' "$src_selftest_log"; then
             tail -n 5 "$src_selftest_log" >&2
             echo "[$src_lane] NOT CHECKED: exceeded the ${gate_host_cap_s}s gate-host wall-time cap; CI runs it" >>"$not_checked_log"
         else
@@ -811,7 +818,8 @@ if [ -f "$ROOT/tools/ci/sync_job_parity.json" ] && [ "${PULP_SKIP_SOURCE_SELFTES
             ${gate_python_jobs[@]+"${gate_python_jobs[@]}"} >"$sync_job_log" 2>&1 || sync_rc=$?
     if [ "$sync_rc" -eq 0 ]; then
         sed -n 's/^source-selftests: /  source-selftests: /p' "$sync_job_log" | tail -n 12 >&2
-    elif [ "$sync_rc" -eq 124 ] && [ "$gate_host_builds_skipped" -eq 1 ]; then
+    elif [ "$sync_rc" -eq 124 ] && [ "$gate_host_builds_skipped" -eq 1 ] \
+            && ! grep -qE '\*\*\*Failed|^FAIL:' "$sync_job_log"; then
         tail -n 5 "$sync_job_log" >&2
         echo "[sync-job] NOT CHECKED: exceeded the ${gate_host_cap_s}s gate-host wall-time cap; CI runs it" >>"$not_checked_log"
     else

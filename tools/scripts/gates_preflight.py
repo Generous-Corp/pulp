@@ -20,8 +20,17 @@ use for a prerequisite is never told to install it:
     file-API reply      a reusable build dir exists (a missing one is configured with the query)
     Vellum build dir    PULP_GATES_BUILD_DIR names one (an unset choice just skips it)
 
-Bootstrap performs only the reversible ones. It never moves or deletes a build
-dir: a Vellum-enabled tree is left alone and the gates choose another.
+Bootstrap performs only the automatic ones, and says what each touches: a fetch
+(unshallow), this worktree's git config (never the shared one), gitignored
+symlinks and packages under the checkout (setup.sh, npm ci, both at nice 10), and
+a configure-only rerun of an existing build dir for the file-API reply. It never
+moves or deletes a build dir: a Vellum-enabled tree is left alone and the gates
+choose another.
+
+With --base, the SDK, jsx-runtime and file-API checks apply only when the diff can
+reach a configure (the generated-manifest and census lanes); otherwise they are
+advisory and neither fail the run nor are fixed by --bootstrap. The shallow clone
+and merge driver checks always apply: their gates fail whatever the diff.
 
 Exit codes: 0 ready, 1 a prerequisite is missing (or a bootstrap step failed), 2 internal error.
 """
@@ -32,6 +41,7 @@ import argparse
 import json
 import os
 import platform
+import shlex
 import shutil
 import subprocess
 import sys
@@ -64,6 +74,7 @@ class Finding:
     # Performs the fix; returns "" on success, else why it could not. None: not automatable.
     action: Callable[[], str] | None = None
     why_not_automatic: str = ""
+    advisory: bool = False
 
 
 @dataclass
@@ -119,25 +130,53 @@ def check_shallow(root: Path) -> Finding | None:
         lambda: run(["git", "fetch", "--unshallow"], root))
 
 
+HOOKS_DIR = Path(".githooks")
+DRIVER_CMD = "tools/scripts/gpu_ledger_merge_driver.py %O %A %B"
+DRIVER_NAME = "GPU handoff ledger: three-way merge with regenerable fields sentinelled"
+
+
+def worktree_config_commands() -> list[list[str]]:
+    """The git config for this worktree only. The shared .git/config would switch the
+    enforcing pre-push hook on in every sibling worktree, so only the repository
+    format flag that makes per-worktree config readable is set there."""
+    return [["git", "config", "extensions.worktreeConfig", "true"],
+            ["git", "config", "--worktree", "core.hooksPath", ".githooks"],
+            ["git", "config", "--worktree", f"merge.{LEDGER_DRIVER}.name", DRIVER_NAME],
+            ["git", "config", "--worktree", f"merge.{LEDGER_DRIVER}.driver", DRIVER_CMD]]
+
+
+def install_worktree_hooks(root: Path) -> str:
+    for cmd in worktree_config_commands():
+        why = run(cmd, root)
+        if why:
+            return why
+    for hook in (root / HOOKS_DIR).glob("*"):
+        try:
+            hook.chmod(hook.stat().st_mode | 0o111)
+        except OSError:
+            pass
+    return ""
+
+
 def check_merge_driver(root: Path) -> Finding | None:
     try:
         attributes = (root / ".gitattributes").read_text(encoding="utf-8")
     except OSError:
         return None
-    if f"merge={LEDGER_DRIVER}" not in attributes:
+    if f"merge={LEDGER_DRIVER}" not in attributes or not (root / HOOKS_DIR).is_dir():
         return None
-    installer = root / "tools" / "scripts" / "install-githooks.sh"
     _, driver = git(root, "config", "--get", f"merge.{LEDGER_DRIVER}.driver")
     _, hooks = git(root, "config", "--get", "core.hooksPath")
     missing = [n for n, ok in ((f"the {LEDGER_DRIVER} merge driver", bool(driver)),
                                ("core.hooksPath=.githooks", hooks == ".githooks")) if not ok]
-    if not missing or not installer.is_file():
+    if not missing:
         return None
     return Finding(
-        "githooks", f"{' and '.join(missing)} not registered in this checkout's git config "
-        "(a merge of main then leaves the GPU ledger unregenerated and the sentinel gate fails)",
-        ["tools/scripts/install-githooks.sh"],
-        lambda: run(["bash", str(installer)], root))
+        "githooks", f"{' and '.join(missing)} not set for this worktree (a merge of main then leaves the GPU "
+        "ledger unregenerated and the sentinel gate fails). The fix sets them for this worktree only; "
+        "tools/scripts/install-githooks.sh sets them for every worktree of the clone",
+        [" && ".join(" ".join(shlex.quote(a) for a in c) for c in worktree_config_commands())],
+        lambda: install_worktree_hooks(root))
 
 
 def check_sdks(root: Path, env: dict[str, str]) -> Finding | None:
@@ -159,7 +198,7 @@ def check_sdks(root: Path, env: dict[str, str]) -> Finding | None:
         "sdks", f"{' and '.join(missing)} missing under external/; without them the configure matches a "
         "different census profile and the gate reports drift that is not yours",
         ["./setup.sh --deps-only --non-interactive"],
-        lambda: run(["bash", setup, "--deps-only", "--non-interactive"], root))
+        lambda: run(["nice", "-n", "10", "bash", setup, "--deps-only", "--non-interactive"], root))
 
 
 def npm_cache_dir(root: Path, env: dict[str, str]) -> Path:
@@ -185,12 +224,13 @@ def check_jsx_runtime(root: Path, env: dict[str, str]) -> Finding | None:
     return Finding(
         "jsx-runtime", f"{shown}/node_modules is missing (the changed-surface families check needs it)",
         [f"(cd {shown} && npm ci --cache {cache})"],
-        lambda: run(["npm", "ci", "--prefix", str(jsx), "--cache", str(cache), "--prefer-offline",
-                     "--no-audit", "--no-fund"], root))
+        lambda: run(["nice", "-n", "10", "npm", "ci", "--prefix", str(jsx), "--cache", str(cache),
+                     "--prefer-offline", "--no-audit", "--no-fund"], root))
 
 
 def reconfigure_for_reply(root: Path, build: Path) -> str:
     """Add the file-API query and configure again so CMake writes the reply (no compile)."""
+    say(f"    reconfiguring your build dir {build.name} (configure only, no compile; adds the file-API query)")
     (build / CODEMODEL_QUERY).parent.mkdir(parents=True, exist_ok=True)
     (build / CODEMODEL_QUERY).touch()
     env = {**os.environ, **configure_only.GOVERNED_ENV}
@@ -245,30 +285,57 @@ def check_build_dir(root: Path, env: dict[str, str], report: Report) -> None:
     shown = build.name
     report.findings.append(Finding(
         "file-api", f"{shown} has no CMake file-API codemodel reply (the changed-surface families check "
-        "cannot read the target graph from it)",
+        "cannot read the target graph from it); --bootstrap reruns cmake -S . -B on it, configure only",
         [f"mkdir -p {shown}/.cmake/api/v1/query && touch {shown}/.cmake/api/v1/query/codemodel-v2",
          f"cmake -S . -B {shown}"],
         lambda: reconfigure_for_reply(root, build)))
 
 
-def collect(root: Path, env: dict[str, str]) -> Report:
+CONFIGURE_KEYS = {"sdks", "jsx-runtime", "file-api"}
+
+
+def diff_needs_configure(root: Path, base: str) -> bool:
+    """Whether the diff can reach a lane that configures a build (the generated test
+    manifests, the changed-surface families, the census). Fails closed: a diff that
+    cannot be read is treated as needing one."""
+    try:
+        import gates_script_inputs as gsi  # noqa: PLC0415  (heavy; only --base callers pay for it)
+        changed = gsi.sti.changed_files(root, base)
+        return bool(gsi.sti.touch_reasons(root, base) or gsi.generated_manifest_reasons(changed)
+                    or gsi.census_reasons(root, base, changed))
+    except Exception:  # noqa: BLE001 - any failure to read the diff means "assume it does"
+        return True
+
+
+def collect(root: Path, env: dict[str, str], needs_configure: bool = True) -> Report:
     report = Report()
     for finding in (check_shallow(root), check_merge_driver(root), check_sdks(root, env),
                     check_jsx_runtime(root, env)):
         if finding:
             report.findings.append(finding)
     check_build_dir(root, env, report)
+    for finding in report.findings:
+        finding.advisory = finding.key in CONFIGURE_KEYS and not needs_configure
     return report
+
+
+def blocking(report: Report) -> list[Finding]:
+    return [f for f in report.findings if not f.advisory]
 
 
 def print_report(report: Report, bootstrap_hint: bool) -> None:
     for note in report.notes:
         say(f"  note: {note}")
-    if not report.findings:
+    for finding in report.findings:
+        if finding.advisory:
+            say(f"  note: [{finding.key}] not needed for this diff (it reaches no lane that configures a build): "
+                f"{finding.what.split(';')[0]}")
+    todo = blocking(report)
+    if not todo:
         return
-    say(f"gates: preflight found {len(report.findings)} missing prerequisite(s). Each one otherwise "
+    say(f"gates: preflight found {len(todo)} missing prerequisite(s). Each one otherwise "
         "fails a separate gates run, minutes apart:")
-    for index, finding in enumerate(report.findings, 1):
+    for index, finding in enumerate(todo, 1):
         say(f"  {index}. [{finding.key}] {finding.what}")
         for command in finding.fix:
             say(f"       fix: {command}")
@@ -282,22 +349,24 @@ def main(argv: list[str]) -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--repo-root", default=str(HERE.parents[1]))
     ap.add_argument("--bootstrap", action="store_true", help="perform the safe fixes, then re-check")
+    ap.add_argument("--base", default=None, help="scope the configure-time checks to what this diff needs")
     args = ap.parse_args(argv[1:])
     root = Path(args.repo_root).resolve()
     env = dict(os.environ)
+    needs = diff_needs_configure(root, args.base) if args.base else True
 
-    report = collect(root, env)
-    if args.bootstrap and report.findings:
-        say(f"gates: bootstrap: fixing {len(report.findings)} prerequisite(s)")
-        for finding in report.findings:
+    report = collect(root, env, needs)
+    if args.bootstrap and blocking(report):
+        say(f"gates: bootstrap: fixing {len(blocking(report))} prerequisite(s)")
+        for finding in blocking(report):
             if finding.action is None:
                 continue
             say(f"  [{finding.key}] {finding.what.split(';')[0]}")
             why = finding.action()
             say(f"    {'done' if not why else 'FAILED: ' + why}")
-        report = collect(root, env)
+        report = collect(root, env, needs)
     print_report(report, bootstrap_hint=not args.bootstrap)
-    if report.findings:
+    if blocking(report):
         return 1
     say("gates: preflight ok")
     return 0
