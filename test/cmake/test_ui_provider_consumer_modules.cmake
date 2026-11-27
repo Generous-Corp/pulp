@@ -264,6 +264,19 @@ elseif(SCENARIO STREQUAL "standalone")
             "add_library(Pulp::standalone INTERFACE IMPORTED)\ninclude(\"${PULP_SOURCE_DIR}/tools/cmake/PulpRuntimeStaging.cmake\")\n${_call}"
             "does not export the view-free Pulp::standalone-contract")
     endforeach()
+    # A plug-in with no editor keyword in vellum mode takes its editor from
+    # Processor::editor_factory(), so its Standalone is the view-free host too;
+    # in pulp mode the same call keeps Pulp's view standalone (the control).
+    set(_default
+        "pulp_add_plugin(Pdef BUNDLE_ID dev.pulp.def FORMATS Standalone)\n"
+        "get_target_property(_links Pdef_Standalone LINK_LIBRARIES)\n"
+        "message(STATUS \"default-links=[\${_links}]\")\n")
+    string(JOIN "" _default ${_default})
+    _expect_pass(vellum default "${_hosts}${_default}")
+    _expect_text("default-links=[Pdef_Core;Pulp::standalone-contract]"
+        "the view-free standalone host for an editor_factory() editor")
+    _expect_pass(pulp default "${_hosts}${_default}")
+    _expect_text("default-links=[Pdef_Core;Pulp::standalone]" "Pulp's view standalone in pulp mode")
 
 else()
     message(FATAL_ERROR "unknown SCENARIO '${SCENARIO}'")

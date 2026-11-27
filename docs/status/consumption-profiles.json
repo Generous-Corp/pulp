@@ -359,6 +359,7 @@
       "pulp/format/host_version.hpp",
       "pulp/format/ios_audio_session.h",
       "pulp/format/ios_audio_session.hpp",
+      "pulp/format/legacy_view.hpp",
       "pulp/format/lv2_adapter.hpp",
       "pulp/format/lv2_entry.hpp",
       "pulp/format/max_block_contract.hpp",
@@ -1768,7 +1769,7 @@
       },
       "build_scope": {
         "PULP_BUILD_TESTS": "ON",
-        "PULP_BUILD_EXAMPLES": "ON"
+        "PULP_BUILD_EXAMPLES": "OFF"
       },
       "summary": {
         "installed_target_count": 90,

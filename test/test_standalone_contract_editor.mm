@@ -17,6 +17,7 @@
 #include <pulp/format/standalone_panel.hpp>
 #include <pulp/state/store.hpp>
 
+#include <algorithm>
 #include <cmath>
 #include <filesystem>
 #include <functional>
@@ -474,4 +475,54 @@ TEST_CASE("a standalone panel toggles on its Command shortcut from the editor wi
     // The panel was handed the editor window, and let go of it at close.
     CHECK(shortcut_record.window_while_running != nullptr);
     CHECK(shortcut_record.window_cleared);
+}
+
+TEST_CASE("a standalone contract window opens the plug-in's settings editor in its own window",
+          "[standalone][editor-host][standalone-contract][settings]") {
+    EditorEnvironment env;
+    reset_contract_recording();
+    contract_config().factory_supports_settings = true;
+    const auto png = temp_png("pulp-standalone-plugin-settings");
+    std::filesystem::remove(png);
+
+    pulp::format::StandaloneApp app(create_contract_processor);
+    auto config = headless_config(png);
+    config.test_open_plugin_settings_frame = 1;
+    int max_live = 0;
+    config.test_on_editor_frame = [&] { max_live = std::max(max_live, contract_log().live); };
+    app.set_config(config);
+    REQUIRE(app.run_with_editor(false));
+
+    // A settings-role editor was built, attached beside the main editor and
+    // ticked with it, then both detached in order before the run ended.
+    REQUIRE(contract_log().settings_created == 1);
+    REQUIRE(max_live == 2);
+    int attaches = 0;
+    int detaches = 0;
+    for (const auto& call : contract_log().calls) {
+        attaches += call == "attach:cocoa_view";
+        detaches += call == "detach";
+    }
+    REQUIRE(attaches == 2);
+    REQUIRE(detaches == 2);
+    REQUIRE_FALSE(contract_log().saw("invalidate"));
+    REQUIRE(contract_log().live == 0);
+    std::filesystem::remove(png);
+}
+
+TEST_CASE("a standalone contract window builds no settings editor the factory does not offer",
+          "[standalone][editor-host][standalone-contract][settings]") {
+    EditorEnvironment env;
+    reset_contract_recording();
+    const auto png = temp_png("pulp-standalone-no-plugin-settings");
+    std::filesystem::remove(png);
+
+    pulp::format::StandaloneApp app(create_contract_processor);
+    auto config = headless_config(png);
+    config.test_open_plugin_settings_frame = 1;
+    app.set_config(config);
+    REQUIRE(app.run_with_editor(false));
+    REQUIRE(contract_log().settings_created == 0);
+    REQUIRE(contract_log().live == 0);
+    std::filesystem::remove(png);
 }

@@ -196,13 +196,14 @@ void ContractEditorSession::disconnect_owner() {
 
 std::unique_ptr<ContractEditorSession>
 ContractEditorSession::create(Processor& processor, state::StateStore& store,
-                              EditorFactory& factory, HostHooks hooks, IdleSource idle) {
-    if (!factory.supports(EditorRole::editor))
+                              EditorFactory& factory, HostHooks hooks, IdleSource idle,
+                              EditorRole role) {
+    if (!factory.supports(role))
         return nullptr;
     std::unique_ptr<ContractEditorSession> session(
         new ContractEditorSession(processor, store, std::move(hooks), idle));
     try {
-        session->editor_ = factory.create(processor, *session->context_, EditorRole::editor);
+        session->editor_ = factory.create(processor, *session->context_, role);
     } catch (const std::exception& error) {
         runtime::log_error("editor host: editor factory threw: {}", error.what());
         return nullptr;

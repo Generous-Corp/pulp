@@ -57,9 +57,7 @@ class MidiLearnEngine;
 /// reserved body that returns null or does nothing. The reserved names leave
 /// `create_view` free for an integration's own editor hook. Hot reload also
 /// refuses a logic library built in the other mode (build_fingerprint.hpp).
-#ifndef PULP_FORMAT_LEGACY_VIEW
-#define PULP_FORMAT_LEGACY_VIEW 1
-#endif
+#include <pulp/format/legacy_view.hpp>
 
 #if PULP_FORMAT_LEGACY_VIEW
 #define PULP_FORMAT_LEGACY_VIEW_NAME(name) name

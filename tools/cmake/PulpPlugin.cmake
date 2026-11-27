@@ -359,9 +359,10 @@ function(pulp_add_plugin target)
 
     _pulp_normalize_ui_script_path(_PULP_UI_SCRIPT "${CMAKE_CURRENT_SOURCE_DIR}" "${PLUGIN_UI_SCRIPT}")
     set(PULP_${target}_UI_SCRIPT "${_PULP_UI_SCRIPT}" CACHE INTERNAL "")
-    if(PLUGIN_UI AND NOT PLUGIN_UI STREQUAL "none")
-        # UI <package> implies a view-free link for the standalone too: its
-        # editor is the package's, so Pulp's view, render and Dawn stay out of
+    if((PLUGIN_UI AND NOT PLUGIN_UI STREQUAL "none") OR _pulp_vellum_default_no_editor)
+        # UI <package> implies a view-free link for the standalone too, and so
+        # does an editor from Processor::editor_factory() in an SDK whose UI is
+        # Vellum: its editor is the package's (or the processor's), so Pulp's view, render and Dawn stay out of
         # the app, and a package that draws with Dawn brings the only copy.
         set(PULP_${target}_VIEW_TARGET "${_PULP_VIEW_TARGET}" CACHE INTERNAL "")
         set(PULP_${target}_STANDALONE_TARGET "${_PULP_CONTRACT_STANDALONE_TARGET}" CACHE INTERNAL "")
@@ -377,7 +378,7 @@ function(pulp_add_plugin target)
         set(PULP_${target}_VIEW_TARGET "${_PULP_VIEW_TARGET}" CACHE INTERNAL "")
         set(PULP_${target}_STANDALONE_TARGET "${_PULP_STANDALONE_TARGET}" CACHE INTERNAL "")
     endif()
-    if(NOT PLUGIN_UI OR PLUGIN_UI STREQUAL "none")
+    if((NOT PLUGIN_UI OR PLUGIN_UI STREQUAL "none") AND NOT _pulp_vellum_default_no_editor)
         set(PULP_${target}_VIEW_FREE_STANDALONE FALSE CACHE INTERNAL "")
     endif()
     set(PULP_${target}_CONTENT_CAPABILITIES "${PLUGIN_CONTENT_CAPABILITIES}" CACHE INTERNAL "")

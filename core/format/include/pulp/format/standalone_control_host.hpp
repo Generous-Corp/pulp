@@ -1,5 +1,7 @@
 #pragma once
 
+#include <pulp/format/legacy_view.hpp>
+
 #include <memory>
 
 namespace pulp::format {
@@ -13,10 +15,19 @@ namespace pulp::state {
 class StateStore;
 }
 
+// attach_editor() hands over the create_view() editor. Without Pulp's view
+// layer there is none, and the slot keeps opaque types (legacy_view.hpp).
+#if PULP_FORMAT_LEGACY_VIEW
 namespace pulp::view {
 class View;
 class WindowHost;
 }
+#else
+namespace pulp::format::view {
+class View;
+class WindowHost;
+} // namespace pulp::format::view
+#endif
 
 namespace pulp::format {
 

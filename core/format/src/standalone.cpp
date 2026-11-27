@@ -935,6 +935,7 @@ bool StandaloneApp::run_contract_editor(EditorFactory& factory) {
     options.screen_visible_width = config_.test_screen_visible_width;
     options.screen_visible_height = config_.test_screen_visible_height;
     options.on_window_ready = config_.test_on_editor_window;
+    options.test_open_plugin_settings_frame = config_.test_open_plugin_settings_frame;
     if (!config_.test_key_sequence.empty()) {
         std::string error;
         if (!detail::parse_key_sequence(config_.test_key_sequence, options.key_steps, error)) {

@@ -191,10 +191,12 @@
 @interface PulpStandaloneContractMenuTarget : NSObject {
   @public
     std::function<bool()> openSettings;
+    std::function<bool()> openPluginSettings;
     std::vector<pulp::format::StandalonePanel*> panels;
     NSWindow* editorWindow;
 }
 - (void)openSettings:(id)sender;
+- (void)openPluginSettings:(id)sender;
 - (void)togglePanel:(id)sender;
 - (void)closeEditor:(id)sender;
 @end
@@ -204,6 +206,11 @@
     (void)sender;
     if (openSettings)
         openSettings();
+}
+- (void)openPluginSettings:(id)sender {
+    (void)sender;
+    if (openPluginSettings)
+        openPluginSettings();
 }
 - (void)closeEditor:(id)sender {
     (void)sender;
@@ -238,6 +245,15 @@ bool install_app_menu(PulpStandaloneContractMenuTarget* target, NSString* title)
         settings.target = target;
         [appMenu addItem:settings];
     }
+    if (target->openPluginSettings) {
+        NSMenuItem* plugin =
+            [[[NSMenuItem alloc] initWithTitle:[title stringByAppendingString:@" Settings\u2026"]
+                                        action:@selector(openPluginSettings:)
+                                 keyEquivalent:@","] autorelease];
+        plugin.keyEquivalentModifierMask = NSEventModifierFlagCommand | NSEventModifierFlagOption;
+        plugin.target = target;
+        [appMenu addItem:plugin];
+    }
     for (std::size_t i = 0; i < target->panels.size(); ++i) {
         auto* panel = target->panels[i];
         const char key[2] = {panel->shortcut(), '\0'};
@@ -259,6 +275,129 @@ bool install_app_menu(PulpStandaloneContractMenuTarget* target, NSString* title)
     [NSApp setMainMenu:bar];
     return true;
 }
+
+// The plug-in's own settings (EditorRole::settings) in a second window. Opened
+// on demand; the editor window's loop ticks it and closes it before the main
+// editor detaches. Headless runs build it without ever showing it.
+class PluginSettingsWindow {
+  public:
+    PluginSettingsWindow(Processor& processor, state::StateStore& store, EditorFactory& factory,
+                         std::string title, bool headless)
+        : processor_(processor), store_(store), factory_(factory), title_(std::move(title)),
+          headless_(headless) {}
+    ~PluginSettingsWindow() {
+        close();
+    }
+
+    // Open it, or bring it forward when it is already open. False when the
+    // factory builds no settings editor or it does not attach.
+    bool open() {
+        if (window_ != nil) {
+            if (!headless_)
+                [window_ makeKeyAndOrderFront:nil];
+            return true;
+        }
+        ContractEditorSession::HostHooks hooks;
+        hooks.request_resize = [this](const EditorSize& size) {
+            if (content_ == nil)
+                return false;
+            return [content_ applyEditorSize:NSMakeSize(size.width, size.height)];
+        };
+        hooks.host_action = [this](const HostActionRequest& request) {
+            if (request.action != HostAction::close_editor || window_ == nil)
+                return false;
+            [window_ performClose:nil];
+            return true;
+        };
+        session_ = ContractEditorSession::create(processor_, store_, factory_, std::move(hooks),
+                                                 ContractEditorSession::IdleSource::host_driven,
+                                                 EditorRole::settings);
+        if (!session_) {
+            runtime::log_error("Standalone: the editor factory built no settings editor");
+            return false;
+        }
+        const auto size = session_->size();
+        NSWindowStyleMask style = NSWindowStyleMaskTitled | NSWindowStyleMaskClosable;
+        if (session_->resizable())
+            style |= NSWindowStyleMaskResizable;
+        window_ = [[NSWindow alloc] initWithContentRect:NSMakeRect(0, 0, size.width, size.height)
+                                              styleMask:style
+                                                backing:NSBackingStoreBuffered
+                                                  defer:NO];
+        window_.releasedWhenClosed = NO;
+        window_.title = [NSString stringWithUTF8String:title_.c_str()];
+        content_ = [[PulpStandaloneContractView alloc]
+            initWithFrame:NSMakeRect(0, 0, size.width, size.height)];
+        window_.contentView = content_;
+        delegate_ = [[PulpStandaloneContractWindowDelegate alloc] init];
+        delegate_->session = session_.get();
+        window_.delegate = delegate_;
+        NativeParent parent;
+        parent.kind = NativeParentKind::cocoa_view;
+        parent.handle = (__bridge void*)content_;
+        if (!session_->attach(parent)) {
+            runtime::log_error("Standalone: the settings editor did not attach");
+            close();
+            return false;
+        }
+        [content_ setSession:session_.get() onTransportKey:{}];
+        session_->set_scale(window_.backingScaleFactor);
+        if (!headless_) {
+            session_->visibility_changed(true);
+            [window_ center];
+            pulp::platform::order_in_window(window_);
+        }
+        return true;
+    }
+
+    bool is_open() const {
+        return window_ != nil;
+    }
+
+    // One frame: tick while open, and close once the user closed the window.
+    void tick() {
+        if (window_ == nil)
+            return;
+        if (delegate_->closed) {
+            close();
+            return;
+        }
+        session_->tick();
+    }
+
+    // An orderly close: the window still exists while the editor detaches.
+    void close() {
+        if (window_ == nil)
+            return;
+        if (session_) {
+            if (!headless_)
+                session_->visibility_changed(false);
+            session_->detach();
+        }
+        [content_ setSession:nullptr onTransportKey:{}];
+        delegate_->session = nullptr;
+        session_.reset();
+        window_.delegate = nil;
+        [delegate_ release];
+        delegate_ = nil;
+        [content_ release];
+        content_ = nil;
+        [window_ orderOut:nil];
+        [window_ release];
+        window_ = nil;
+    }
+
+  private:
+    Processor& processor_;
+    state::StateStore& store_;
+    EditorFactory& factory_;
+    std::string title_;
+    bool headless_;
+    std::unique_ptr<ContractEditorSession> session_;
+    NSWindow* window_ = nil;
+    PulpStandaloneContractView* content_ = nil;
+    PulpStandaloneContractWindowDelegate* delegate_ = nil;
+};
 
 bool write_file(const std::string& path, const std::vector<std::uint8_t>& bytes) {
     std::ofstream out(path, std::ios::binary | std::ios::trunc);
@@ -397,11 +536,22 @@ bool run_standalone_contract_editor(Processor& processor, state::StateStore& sto
     [window makeFirstResponder:content];
     if (options.on_window_ready)
         options.on_window_ready((__bridge void*)window);
+    // The plug-in's own settings, when its factory offers a settings editor.
+    std::unique_ptr<PluginSettingsWindow> plugin_settings;
+    if (factory.supports(EditorRole::settings)) {
+        plugin_settings = std::make_unique<PluginSettingsWindow>(
+            processor, store, factory, processor.descriptor().name + " Settings", options.headless);
+    }
     PulpStandaloneContractMenuTarget* menu_target = nil;
     bool installed_menu = false;
-    if (!options.headless && (options.on_open_settings || !options.panels.empty())) {
+    if (!options.headless &&
+        (options.on_open_settings || !options.panels.empty() || plugin_settings)) {
         menu_target = [[PulpStandaloneContractMenuTarget alloc] init];
         menu_target->openSettings = options.on_open_settings;
+        if (plugin_settings) {
+            auto* settings_window = plugin_settings.get();
+            menu_target->openPluginSettings = [settings_window] { return settings_window->open(); };
+        }
         menu_target->panels = options.panels;
         menu_target->editorWindow = window;
         installed_menu = install_app_menu(
@@ -423,6 +573,11 @@ bool run_standalone_contract_editor(Processor& processor, state::StateStore& sto
     while (!delegate->closed) {
         pump_one_frame();
         session->tick();
+        if (plugin_settings) {
+            if (frame == options.test_open_plugin_settings_frame)
+                plugin_settings->open();
+            plugin_settings->tick();
+        }
         if (options.on_idle)
             options.on_idle();
         ++frame;
@@ -460,6 +615,8 @@ bool run_standalone_contract_editor(Processor& processor, state::StateStore& sto
         break;
     }
 
+    // The settings editor goes first, while the main editor is still attached.
+    plugin_settings.reset();
     // An orderly close: the window still exists while the editor detaches.
     if (!options.headless)
         session->visibility_changed(false);

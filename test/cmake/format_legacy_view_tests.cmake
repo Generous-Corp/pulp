@@ -204,6 +204,27 @@ if(APPLE AND NOT PULP_IOS AND PULP_HAS_AUSDK AND TARGET pulp-test-au-v3-view-con
     set_target_properties(pulp-test-au-v3-view-controller-ui-free PROPERTIES
         CXX_STANDARD 23 OBJCXX_STANDARD 23)
 endif()
+# The standalone app's view-free host (pulp-standalone-contract) with every one
+# of its sources at mode 0: the standalone a Vellum-UI SDK ships, hosting a
+# contract editor and the plug-in's settings editor.
+if(APPLE AND NOT PULP_IOS AND TARGET pulp-standalone-contract
+   AND TARGET pulp-test-standalone-contract-editor)
+    get_target_property(_standalone_contract_sources pulp-standalone-contract SOURCES)
+    set(_standalone_ui_free_sources "")
+    foreach(_source IN LISTS _standalone_contract_sources)
+        if(IS_ABSOLUTE "${_source}" OR _source MATCHES "^\\$<")
+            list(APPEND _standalone_ui_free_sources "${_source}")
+        else()
+            list(APPEND _standalone_ui_free_sources "${CMAKE_SOURCE_DIR}/${_source}")
+        endif()
+    endforeach()
+    _pulp_ui_free_adapter_test(pulp-test-standalone-contract-editor-ui-free
+        TEST test_standalone_contract_editor.mm
+        LEGACY pulp-test-standalone-contract-editor
+        SOURCES ${_standalone_ui_free_sources}
+        LIBRARIES pulp::format-core "-framework AppKit"
+        DEFINITIONS PULP_ENABLE_INSPECTOR=0)
+endif()
 if(_ui_free_adapter_pairs AND CMAKE_NM)
     add_test(NAME format-adapters-ui-free-symbols
         COMMAND ${CMAKE_COMMAND} -DNM=${CMAKE_NM} "-DPAIRS=${_ui_free_adapter_pairs}"

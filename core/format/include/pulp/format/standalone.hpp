@@ -7,6 +7,7 @@
 #include <pulp/audio/rolling_audio_capture_buffer.hpp>
 #endif
 #include <pulp/format/detail/playhead_diff.hpp>
+#include <pulp/format/legacy_view.hpp>
 #include <pulp/format/processor.hpp>
 #include <pulp/format/standalone_config.hpp>
 #include <pulp/format/standalone_control_host.hpp>
@@ -32,10 +33,19 @@
 #include <string>
 #include <vector>
 
+// View-layer members are owned through ViewLayerPtr; without Pulp's view
+// layer (legacy_view.hpp) their types are opaque and the pointers stay null.
+#if PULP_FORMAT_LEGACY_VIEW
 namespace pulp::view {
 class AudioInspectorWindow;
 class CommandRegistry;
 }  // namespace pulp::view
+#else
+namespace pulp::format::view {
+class AudioInspectorWindow;
+class CommandRegistry;
+} // namespace pulp::format::view
+#endif
 
 namespace pulp::state {
 class PresetManager;

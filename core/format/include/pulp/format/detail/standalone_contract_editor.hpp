@@ -63,6 +63,11 @@ struct StandaloneContractEditorOptions {
     /// main modifier toggles it from the editor window, and it is handed the
     /// editor window so it can open beside it. Owned by the caller.
     std::vector<StandalonePanel*> panels;
+    /// When the factory offers EditorRole::settings, the window's app menu
+    /// gets "<name> Settings…" (Cmd+Option+,), which opens the plug-in's
+    /// settings editor in a second window. A test opens it at this loop frame
+    /// instead; -1 never.
+    int test_open_plugin_settings_frame = -1;
     /// Called once with the native window (an `NSWindow*` on macOS) before
     /// the loop runs, so a test can reach its delegate.
     std::function<void(void* native_window)> on_window_ready;

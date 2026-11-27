@@ -34,6 +34,15 @@ opens inside the screen's usable frame (`detail::fit_size_to_area`). A test
 reaches the delegate and a small screen through `StandaloneConfig`'s
 `test_on_editor_window`, `test_on_editor_frame` and `test_screen_visible_*`.
 
+A factory that offers `EditorRole::settings` gets a "<name> Settings…" item
+(Cmd+Option+,) in the contract window's app menu; it opens the settings editor
+in a second window through its own `ContractEditorSession`
+(`ContractEditorSession::create(..., role)`). The editor window's loop ticks
+it and closes it before the main editor detaches. This is where a plug-in's
+settings sections show once its editor comes from a factory: the
+`settings_sections()` tabs exist only in the create_view() window. Tests open it
+with `StandaloneConfig::test_open_plugin_settings_frame`.
+
 Fixed user sizing does not forbid an editor-origin resize: preserve the
 `EditorContext::request_resize` acknowledgment even when `can_resize` is false.
 Install the pending request before calling the host because an acknowledgment
@@ -2449,6 +2458,11 @@ construct, so the slot can only return null or do nothing. Gotchas:
   gets it), and the macOS AU v3 controller compiles its ViewBridge path under
   `PULP_FORMAT_LEGACY_VIEW` only, so its framework links format-core alone.
   The iOS controller still has the ViewBridge path unconditionally.
+- **Any format header that names a view type takes the same switch.**
+  `legacy_view.hpp` defaults the macro; `standalone.hpp` and
+  `standalone_control_host.hpp` declare their view types in `pulp::format::view`
+  when it is 0. The poison found both only once the standalone sources were
+  compiled at mode 0, so a new header-level view name shows up there first.
 - **A new view-named virtual goes through the macro too.** `node_abi_gate.py`
   reads `PULP_FORMAT_LEGACY_VIEW_NAME(x)` as `x` and expands no other macro.
 - **The hot-reload fingerprint carries the mode** (`legacyview=` in
