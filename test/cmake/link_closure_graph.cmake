@@ -65,7 +65,18 @@ function(_pulp_link_closure_write_graph)
     set(_content "")
     while(_queue)
         list(POP_FRONT _queue _target)
-        if(_target IN_LIST _seen OR NOT TARGET "${_target}")
+        if(_target IN_LIST _seen)
+            continue()
+        endif()
+        if(NOT TARGET "${_target}")
+            if(_target IN_LIST _known_imported)
+                # Local imported targets are not visible from this deferred
+                # top-level scope. Emit their node now; the codemodel refresh
+                # at test time supplies the declaring-directory properties.
+                list(APPEND _seen "${_target}")
+                string(APPEND _content
+                       "${_target}\tIMPORTED_DIRECTORY_SCOPED\t\t\t\t\n")
+            endif()
             continue()
         endif()
         list(APPEND _seen "${_target}")
