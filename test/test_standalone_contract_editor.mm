@@ -40,7 +40,9 @@ using pulp::test_support::reset_contract_recording;
 // The contract window's test controls live in detail::StandaloneTestHooks,
 // not in the public StandaloneConfig an app fills in.
 template <class C>
-concept ConfigCarriesWindowTestHooks = requires(C c) { c.test_open_plugin_settings_frame; };
+concept ConfigCarriesWindowTestHooks = requires(C c) { c.test_open_plugin_settings_frame; } ||
+                                       requires(C c) { c.test_update_service; } ||
+                                       requires(C c) { c.test_on_app_menu; };
 static_assert(!ConfigCarriesWindowTestHooks<pulp::format::StandaloneConfig>,
               "StandaloneConfig must not carry the contract window's test hooks");
 
@@ -558,12 +560,13 @@ class CountingUpdateService final : public pulp::format::AppUpdateService {
     }
 };
 
-using MenuItems = std::vector<std::pair<std::string, std::function<void()>>>;
+using MenuItem = pulp::format::detail::StandaloneContractMenuItem;
+using MenuItems = std::vector<MenuItem>;
 
-const std::function<void()>* find_item(const MenuItems& items, const std::string& title) {
-    for (const auto& [name, action] : items)
-        if (name == title)
-            return &action;
+const MenuItem* find_item(const MenuItems& items, MenuItem::Role role) {
+    for (const auto& item : items)
+        if (item.role == role)
+            return &item;
     return nullptr;
 }
 
@@ -579,30 +582,33 @@ TEST_CASE("the contract window offers Check for Updates and it drives the update
     auto service = std::make_shared<CountingUpdateService>();
     pulp::format::StandaloneApp app(create_contract_processor);
     auto config = headless_config(png);
-    config.test_update_service = service;
     MenuItems items;
     bool saw_service = false;
-    config.test_on_app_menu = [&](const MenuItems& menu) {
-        items = menu;
-        saw_service = pulp::format::app_update_status().available;
-    };
+    app.set_test_hooks({.update_service = service, .on_app_menu = [&](const MenuItems& menu) {
+                            items = menu;
+                            saw_service = pulp::format::app_update_status().available;
+                        }});
     app.set_config(config);
     REQUIRE(app.run_with_editor(false));
 
-    // The service was installed before the editor's menu was built.
+    // The service was installed before the editor's menu was built, and does
+    // not outlive the window.
     CHECK(saw_service);
-    const auto* check = find_item(items, "Check for Updates\u2026");
+    CHECK_FALSE(pulp::format::app_update_status().available);
+    const auto* check = find_item(items, MenuItem::Role::updates);
     REQUIRE(check != nullptr);
-    REQUIRE(static_cast<bool>(*check));
-    // The item runs a check on whatever service is installed; reinstall it,
-    // since the app removed it when it stopped.
+    CHECK(check->title == "Check for Updates\u2026");
+    REQUIRE(static_cast<bool>(check->action));
+    // The item runs a check on whatever service is installed.
     pulp::format::set_app_update_service(service);
-    (*check)();
+    check->action();
     CHECK(service->checks == 1);
     pulp::format::set_app_update_service(nullptr);
-    // Quit is always the last item.
+    // The updater's item comes first and Quit last.
     REQUIRE_FALSE(items.empty());
-    CHECK(items.back().first == "Quit Contract Standalone");
+    CHECK(items.front().role == MenuItem::Role::updates);
+    CHECK(items.back().role == MenuItem::Role::quit);
+    CHECK(items.back().title == "Quit Contract Standalone");
     std::filesystem::remove(png);
 }
 
@@ -618,14 +624,14 @@ TEST_CASE("the contract window offers no Check for Updates when no updater is pl
     auto config = headless_config(png);
     MenuItems items;
     bool called = false;
-    config.test_on_app_menu = [&](const MenuItems& menu) {
+    app.set_test_hooks({.on_app_menu = [&](const MenuItems& menu) {
         items = menu;
         called = true;
-    };
+    }});
     app.set_config(config);
     REQUIRE(app.run_with_editor(false));
     REQUIRE(called);
-    CHECK(find_item(items, "Check for Updates\u2026") == nullptr);
+    CHECK(find_item(items, MenuItem::Role::updates) == nullptr);
     CHECK_FALSE(pulp::format::app_update_status().available);
     std::filesystem::remove(png);
 }

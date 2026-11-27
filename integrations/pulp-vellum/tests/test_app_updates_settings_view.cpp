@@ -3,6 +3,7 @@
 // against the same fake AppUpdateService.
 
 #include <pulp/vellum/app_updates_settings_view.hpp>
+#include <pulp/vellum/view_editor.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -119,4 +120,21 @@ TEST_CASE("The Vellum Settings group mirrors and drives the service",
     set_app_update_service(nullptr);
     view.refresh();
     CHECK_FALSE(view.visible());
+}
+
+TEST_CASE("The Vellum Settings group refreshes on the editor's idle tick",
+          "[pulp-vellum][updates][view][idle]") {
+    ScopedService scope(spectr_like());
+    AppUpdatesSettingsView view;
+    // A ViewEditorFactory editor ticks every EditorIdleTarget in its tree, so
+    // the view stays live inside a settings tab.
+    auto* target = dynamic_cast<pulp::vellum::EditorIdleTarget*>(&view);
+    REQUIRE(target != nullptr);
+    CHECK(view.status_label()->text() == "Version 1.0.7 \xC2\xB7 Last checked: never");
+    // A background check finishes: only the tick can show it.
+    scope.service->next.last_check_unix_seconds = 1'790'000'000;
+    scope.service->next.can_check_now = false;
+    target->editor_idle();
+    CHECK(view.status_label()->text().find("never") == std::string::npos);
+    CHECK_FALSE(view.check_button()->is_enabled());
 }

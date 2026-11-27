@@ -22,6 +22,7 @@
 /// itself also hides its controls when the service disappears. Main thread.
 
 #include <pulp/format/app_updates.hpp>
+#include <pulp/vellum/view_editor.hpp>
 
 #include <vellum/view/view.hpp>
 
@@ -33,7 +34,7 @@ class Toggle;
 
 namespace pulp::vellum {
 
-class AppUpdatesSettingsView : public ::vellum::view::View {
+class AppUpdatesSettingsView : public ::vellum::view::View, public EditorIdleTarget {
   public:
     AppUpdatesSettingsView();
 
@@ -41,8 +42,10 @@ class AppUpdatesSettingsView : public ::vellum::view::View {
     /// editor's idle.
     void refresh();
 
-    /// Calls refresh(), so a settings window that ticks its editor stays live.
-    void editor_idle() {
+    /// Calls refresh() on each editor idle tick, wherever the view sits in a
+    /// ViewEditorFactory editor's tree (a settings tab included), so a check
+    /// that finishes in the background shows without a click.
+    void editor_idle() override {
         refresh();
     }
 

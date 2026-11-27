@@ -1,4 +1,5 @@
 #include <pulp/format/app_updates.hpp>
+#include <pulp/format/detail/app_update_messages.hpp>
 
 #include <choc/text/choc_JSON.h>
 
@@ -220,6 +221,19 @@ bool read_on(const choc::value::ValueView& payload, bool& on) {
 
 std::string app_update_message_response(std::string_view type, std::string_view payload_json) {
     try {
+        if (payload_json.empty())
+            return detail::app_update_message_response(type, choc::value::createObject(""));
+        return detail::app_update_message_response(type, choc::json::parse(payload_json));
+    } catch (...) {
+        return error_envelope("malformed payload");
+    }
+}
+
+namespace detail {
+
+std::string app_update_message_response(std::string_view type,
+                                        const choc::value::ValueView& payload) {
+    try {
         if (type == kAppUpdatesGetMessage)
             return status_response();
         if (type == kAppUpdatesCheckMessage) {
@@ -227,8 +241,6 @@ std::string app_update_message_response(std::string_view type, std::string_view 
             return status_response("started", started);
         }
         if (type == kAppUpdatesSetAutomaticMessage) {
-            const auto payload = payload_json.empty() ? choc::value::createObject("")
-                                                      : choc::json::parse(payload_json);
             bool on = false;
             if (!read_on(payload, on))
                 return error_envelope("pulp_updates_set_automatic needs {on: true|false}");
@@ -244,5 +256,7 @@ std::string app_update_message_response(std::string_view type, std::string_view 
         return error_envelope("internal error");
     }
 }
+
+} // namespace detail
 
 } // namespace pulp::format

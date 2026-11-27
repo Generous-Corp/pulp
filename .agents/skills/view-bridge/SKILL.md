@@ -43,11 +43,14 @@ settings sections show once its editor comes from a factory: the
 `settings_sections()` tabs exist only in the create_view() window. Tests open it
 with `StandaloneApp::set_test_hooks({.open_plugin_settings_frame = N})`; the contract window's test controls live in `detail/standalone_test_hooks.hpp`, never in the public `StandaloneConfig`.
 
-The window's app menu is a model (`StandaloneContractMenuItem`) that AppKit
-and tests both read: `StandaloneConfig::test_on_app_menu` sees the items in a
-headless run, which installs no menu, and `test_update_service` plans an
-updater there so "Check for Updates…" can be asserted and invoked. A new menu
-item goes into `build_app_menu_model()`, never straight into the NSMenu.
+The window's app menu is a model (`StandaloneContractMenuItem`, each item with
+a role) that AppKit and tests both read. `set_test_hooks({.on_app_menu = ...})`
+sees the items in a headless run, which installs no menu, and
+`{.update_service = ...}` plans an updater there so "Check for Updates…" can be
+asserted and invoked; the window removes that service when it closes. A new
+menu item goes into `build_app_menu_model()`, never straight into the NSMenu,
+and separators follow roles, never titles. Both standalones install the updater
+through `install_standalone_updater()`.
 
 Fixed user sizing does not forbid an editor-origin resize: preserve the
 `EditorContext::request_resize` acknowledgment even when `can_resize` is false.
