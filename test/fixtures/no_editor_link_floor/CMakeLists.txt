@@ -38,8 +38,16 @@ pulp_add_plugin(PulpNoEditorLinkFloor
 # Positive control: the same processor, default link path.
 # FULL_EDITOR: the control must carry the full editor stack the NO_EDITOR
 # plug-in leaves out; the macOS default (lite) would carry no Skia or Dawn.
+# An SDK whose UI is Vellum has no Pulp view editor to select, so there the
+# control takes the default route, the generated parameter editor on Vellum,
+# which carries the Vellum view stack the NO_EDITOR plug-in leaves out.
+_pulp_ui_provider(_no_editor_ui_provider)
+set(_no_editor_control_editor FULL_EDITOR)
+if(_no_editor_ui_provider STREQUAL "vellum")
+    set(_no_editor_control_editor "")
+endif()
 pulp_add_plugin(PulpNoEditorLinkFloorControl
-    FULL_EDITOR
+    ${_no_editor_control_editor}
     FORMATS           CLAP
     PLUGIN_NAME       "Pulp No Editor Link Floor Control"
     BUNDLE_ID         "dev.pulp.test.no-editor-link-floor-control"
@@ -104,10 +112,15 @@ if(TARGET pulp-vellum)
 endif()
 
 # What the control's editor stack contains in this configuration. View and
-# canvas always; the GPU layers only when the build has them.
+# canvas always; the GPU layers only when the build has them. With the UI from
+# Vellum it is Vellum's view stack instead, which loads its own Skia and Dawn
+# provider library.
 set(_no_editor_control_families view canvas)
 set(_no_editor_control_gpu OFF)
-if(PULP_ENABLE_GPU AND TARGET pulp-render AND (PULP_HAS_SKIA OR PULP_HAS_WEBGPU))
+if(_no_editor_ui_provider STREQUAL "vellum")
+    set(_no_editor_control_families vellum)
+    set(_no_editor_control_gpu ON)
+elseif(PULP_ENABLE_GPU AND TARGET pulp-render AND (PULP_HAS_SKIA OR PULP_HAS_WEBGPU))
     list(APPEND _no_editor_control_families render)
     set(_no_editor_control_gpu ON)
     # The control must describe the provider actually linked by pulp-render.
@@ -184,7 +197,12 @@ string(REPLACE ";" "|" _no_editor_notices "${_no_editor_notices}")
 _pulp_notices_output(_control_notices PulpNoEditorLinkFloorControl_CLAP CLAP
     "Pulp No Editor Link Floor Control" ThirdPartyNotices.json)
 set(_control_notice_requires CLAP Yoga "Notices Probe Component")
-if(_no_editor_control_gpu AND PULP_HAS_SKIA)
+if(_no_editor_ui_provider STREQUAL "vellum")
+    # The control links no Pulp view, so no Yoga; Vellum's view stack draws
+    # through its Skia and Dawn provider, which its notices name.
+    set(_control_notice_requires CLAP "Notices Probe Component"
+        "Skia Graphite and Dawn renderer toolchain")
+elseif(_no_editor_control_gpu AND PULP_HAS_SKIA)
     list(APPEND _control_notice_requires Skia)
     if(PULP_SKIA_PROVIDES_DAWN)
         list(APPEND _control_notice_requires Dawn)

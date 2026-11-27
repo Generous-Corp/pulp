@@ -1,6 +1,6 @@
 # Artifact half of the NO_EDITOR link floor. For every editor-less module:
 # no GPU-runtime load dependency, and no defined symbol from the view, canvas,
-# render, Skia, Dawn or wgpu layers. The control module (same processor, default
+# render, Skia, Dawn or wgpu layers, or from Vellum's. The control module (same processor, default
 # link path) must show each family, or the scanner proves nothing.
 # Script mode starts with no policies set; pin them so IN_LIST (CMP0057) works
 # under CMake 3.x as well as 4.x.
@@ -28,11 +28,14 @@ set(_families
     "render=[A-Za-z] pulp::render::"
     "skia=[A-Za-z] (Sk[A-Z][A-Za-z0-9_]*::|skgpu::)"
     "dawn=[A-Za-z] dawn::"
-    "wgpu=[A-Za-z] _?wgpu[A-Z]")
+    "wgpu=[A-Za-z] _?wgpu[A-Z]"
+    "vellum=[A-Za-z] vellum::")
 include("${CMAKE_CURRENT_LIST_DIR}/no_editor_runtime_deps.cmake")
 if(APPLE)
     pulp_no_editor_runtime_deps(_runtime_deps apple)
     string(APPEND _runtime_deps "|/Metal\\.framework/|/MetalKit\\.framework/|/QuartzCore\\.framework/")
+    # The Skia and Dawn provider a Vellum view stack loads.
+    string(APPEND _runtime_deps "|/libvellum-skia-dawn-provider")
 else()
     pulp_no_editor_runtime_deps(_runtime_deps elf)
     # Static Skia/Dawn builds on Linux can retain the X11 windowing

@@ -1126,6 +1126,14 @@ if(PULP_BUILD_TESTS)
     add_subdirectory(test/fixtures/linux_reload_host)
     add_subdirectory(test/fixtures/ui_script_plugin)
 endif()
+# The NO_EDITOR link floor in a tree whose UI comes from Vellum, where the test
+# tree does not configure yet. cmake-vellum-ui-in-tree-real sets
+# PULP_VELLUM_IN_TREE_LINK_FLOOR_FIXTURE on a tests-off build and runs its tests.
+if(PULP_UI_FROM_VELLUM_IN_TREE AND PULP_VELLUM_IN_TREE_LINK_FLOOR_FIXTURE
+        AND NOT PULP_BUILD_TESTS)
+    enable_testing()
+    add_subdirectory(test/fixtures/no_editor_link_floor)
+endif()
 
 # The pulp-native example plug-in, built with the tests so its host proof and
 # symbol census run, or on request with the examples.
