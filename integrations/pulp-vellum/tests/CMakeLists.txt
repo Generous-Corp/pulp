@@ -54,6 +54,13 @@ if(PULP_BUILD_TESTS AND TARGET Catch2::Catch2WithMain)
         target_link_libraries(pulp-test-pulp-vellum-editor PRIVATE
             pulp::vellum Vellum::MirrorView_core Catch2::Catch2WithMain
             Threads::Threads)
+        # Header weight: each public header preprocesses on its own within
+        # budget and pulls in none of the implementation headers it keeps out.
+        include("${PULP_ROOT_DIR}/test/support/PulpHeaderWeight.cmake")
+        pulp_add_header_weight_test(pulp-vellum-header-weight-view-editor
+            HEADER pulp/vellum/view_editor.hpp USAGE pulp-vellum
+            FORBID "pulp/vellum/editor\\.hpp|/vellum/view/view\\.hpp"
+            MAX_LINES 80000 LABELS "pulp-vellum;header-weight")
         if(TARGET Vellum::MirrorView_script)
             target_link_libraries(pulp-test-pulp-vellum-editor PRIVATE Vellum::MirrorView_script)
             target_compile_definitions(pulp-test-pulp-vellum-editor PRIVATE
