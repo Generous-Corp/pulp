@@ -31,7 +31,10 @@
 #           fixture; nm confirms format-core is the PULP_FORMAT_LEGACY_VIEW=0
 #           build, that each plug-in module sits in its bundle with pulp::format
 #           and no pulp::view or pulp::canvas symbol and no scripted editor,
-#           and the fixture's tests pass. A
+#           pulp-native's metal probe included, the fixture's tests pass, and
+#           both hot-reload shells reach an editor headlessly. AAX is refused
+#           for a plug-in with an editor and passes for NO_EDITOR and
+#           AAX_HEADLESS (decided before the AAX SDK is read). A
 #           probe plug-in added to that tree builds its CLAP module without
 #           PULP_CLAP_GUI, each Pulp view editor keyword is refused, and a
 #           program linking pulp::format-view alone reaches both adapters.
@@ -376,47 +379,17 @@ elseif(SCENARIO STREQUAL "real")
     # (examples/vellum_in_tree.cmake) and the NO_EDITOR link floor fixture.
     # format-core must be the UI-free one: its archive holds the reserved
     # create_view slot and the mode marker, and no create_view under its plain
-    # name. A deferred include (registered by a project include, so no file in
-    # the source tree changes) writes the list of plug-in modules the examples
-    # define, with their source directories, and adds an object that defines a
-    # pulp::view symbol as the control for the symbol scan below.
-    set(_plugins_src "${FIXTURE_DIR}/real-plugins-src")
-    file(REMOVE_RECURSE "${FIXTURE_DIR}/real-build" "${_plugins_src}")
-    file(WRITE "${_plugins_src}/view_marker.cpp"
-        "namespace pulp::view { int in_tree_plugin_scan_marker() { return 6; } }\n")
-    file(WRITE "${_plugins_src}/plugins.cmake"
-        "add_library(pulp-in-tree-view-marker OBJECT \"${_plugins_src}/view_marker.cpp\")\n"
-        "add_custom_target(pulp-in-tree-plugin-proof)\n"
-        "add_dependencies(pulp-in-tree-plugin-proof pulp-in-tree-view-marker pulp-examples-all\n"
-        "    pulp-format-core pulp-format-view pulp-vellum)\n"
-        "foreach(_t PulpNoEditorLinkFloor_VST3 PulpNoEditorLinkFloor_CLAP PulpNoEditorLinkFloor_AU\n"
-        "        PulpNoEditorLinkFloorControl_CLAP)\n"
-        "    if(TARGET \${_t})\n"
-        "        add_dependencies(pulp-in-tree-plugin-proof \${_t})\n"
-        "    endif()\n"
-        "endforeach()\n"
-        "include(\"\${CMAKE_SOURCE_DIR}/tools/cmake/PulpCollectTargets.cmake\")\n"
-        "pulp_collect_targets_recursive(_targets \"\${CMAKE_SOURCE_DIR}/examples\"\n"
-        "    TYPES MODULE_LIBRARY SHARED_LIBRARY EXECUTABLE)\n"
-        "get_property(_dirs DIRECTORY \"\${CMAKE_SOURCE_DIR}/examples\" PROPERTY SUBDIRECTORIES)\n"
-        "set(_lines \"\")\n"
-        "foreach(_dir IN LISTS _dirs)\n"
-        "    string(APPEND _lines \"dir|\${_dir}\\n\")\n"
-        "endforeach()\n"
-        "foreach(_t IN LISTS _targets)\n"
-        "    if(_t MATCHES \"_(VST3|CLAP|AU|Standalone|AUv3Framework)$\")\n"
-        "        get_target_property(_src \${_t} SOURCE_DIR)\n"
-        "        string(APPEND _lines \"module|\${_t}|\${_src}|$<TARGET_FILE:\${_t}>\\n\")\n"
-        "    endif()\n"
-        "endforeach()\n"
-        "string(APPEND _lines \"marker|$<TARGET_OBJECTS:pulp-in-tree-view-marker>\\n\")\n"
-        "file(GENERATE OUTPUT \"\${CMAKE_BINARY_DIR}/pulp-in-tree-plugin-modules.txt\"\n"
-        "    CONTENT \"\${_lines}\")\n")
+    # name. test/fixtures/vellum_in_tree/plugin_proof.cmake, included at the
+    # end of the top-level directory through a project include, adds the build
+    # target, a pulp::view marker object as the control for the symbol scan,
+    # and the reload editor probes, and lists every plug-in module with its
+    # source directory.
+    file(REMOVE_RECURSE "${FIXTURE_DIR}/real-build")
     set(_plugins_include "${FIXTURE_DIR}/real-plugins-include.cmake")
     file(WRITE "${_plugins_include}"
         "if(CMAKE_CURRENT_SOURCE_DIR STREQUAL CMAKE_SOURCE_DIR)\n"
         "    cmake_language(DEFER DIRECTORY \"\${CMAKE_SOURCE_DIR}\" CALL include\n"
-        "        \"${_plugins_src}/plugins.cmake\")\n"
+        "        \"${PULP_SOURCE_DIR}/test/fixtures/vellum_in_tree/plugin_proof.cmake\")\n"
         "endif()\n")
     execute_process(COMMAND "${CMAKE_COMMAND}" -S "${PULP_SOURCE_DIR}"
             -B "${FIXTURE_DIR}/real-build" ${_common} -DPULP_UI_FROM_VELLUM_IN_TREE=ON
@@ -480,6 +453,8 @@ elseif(SCENARIO STREQUAL "real")
     endif()
     file(STRINGS "${_manifest_file}" _manifest)
     set(_configured_dirs "")
+    set(_extra_dirs "")
+    set(_reload_probes "")
     set(_modules "")
     set(_marker "")
     foreach(_line IN LISTS _manifest)
@@ -489,6 +464,10 @@ elseif(SCENARIO STREQUAL "real")
             list(APPEND _modules "${_line}")
         elseif(_line MATCHES "^marker\\|(.+)$")
             set(_marker "${CMAKE_MATCH_1}")
+        elseif(_line MATCHES "^extra\\|(.+)$")
+            list(APPEND _extra_dirs "${CMAKE_MATCH_1}")
+        elseif(_line MATCHES "^reload\\|")
+            list(APPEND _reload_probes "${_line}")
         endif()
     endforeach()
     file(STRINGS "${PULP_SOURCE_DIR}/examples/vellum_in_tree.cmake" _example_lines
@@ -507,8 +486,13 @@ elseif(SCENARIO STREQUAL "real")
             message(FATAL_ERROR "real: ${_required} is not among the examples the mode builds")
         endif()
     endforeach()
+    # pulp-native's metal probe is a plug-in the root adds with the examples,
+    # outside examples/; it is scanned like them.
+    if(NOT _extra_dirs)
+        message(FATAL_ERROR "real: pulp-native's metal probe was not configured with the examples")
+    endif()
     set(_plugin_examples 0)
-    foreach(_dir IN LISTS _configured_dirs)
+    foreach(_dir IN LISTS _configured_dirs _extra_dirs)
         file(READ "${_dir}/CMakeLists.txt" _example_cmake)
         if(NOT _example_cmake MATCHES "pulp_add_plugin")
             continue()
@@ -618,6 +602,25 @@ elseif(SCENARIO STREQUAL "real")
     endif()
     message(STATUS "real: the NO_EDITOR link floor holds in the mode")
 
+    # The hot-reload shells reach an editor in the mode: each probe loads its
+    # example's logic library and asks the shell for an editor without
+    # attaching it, so no window opens.
+    list(LENGTH _reload_probes _reload_count)
+    if(NOT _reload_count EQUAL 2)
+        message(FATAL_ERROR "real: expected two reload editor probes, found [${_reload_probes}]")
+    endif()
+    foreach(_probe IN LISTS _reload_probes)
+        string(REPLACE "|" ";" _fields "${_probe}")
+        list(GET _fields 1 _name)
+        list(GET _fields 2 _exe)
+        execute_process(COMMAND "${_exe}" RESULT_VARIABLE _rc OUTPUT_VARIABLE _out ERROR_VARIABLE _err
+            TIMEOUT 120)
+        if(NOT _rc EQUAL 0 OR NOT _out MATCHES "reload-editor-probe ${_name}: shell=1 logic=1 supports=1 created=1")
+            message(FATAL_ERROR "real: the hot-reload ${_name} shell has no editor in the mode:\n${_out}${_err}")
+        endif()
+    endforeach()
+    message(STATUS "real: both hot-reload shells reach an editor in the mode")
+
     # Plug-ins in the mode, through the real pulp_add_plugin. The probe runs
     # at the end of the top-level directory, after every Pulp target exists,
     # from a deferred include that a project include registers, so no file
@@ -649,6 +652,15 @@ elseif(SCENARIO STREQUAL "real")
         "pulp_add_plugin(InTreeProbe BUNDLE_ID dev.pulp.in-tree-probe FORMATS CLAP \${_keyword})\n"
         "get_target_property(_definitions InTreeProbe_CLAP COMPILE_DEFINITIONS)\n"
         "message(STATUS \"in-tree probe: CLAP definitions=[\${_definitions}]\")\n"
+        "if(PULP_IN_TREE_PROBE_AAX)\n"
+        "    set(PULP_HAS_AAX TRUE)\n"
+        "    set(_aax_keyword \"\${PULP_IN_TREE_PROBE_AAX}\")\n"
+        "    if(_aax_keyword STREQUAL \"default\")\n"
+        "        set(_aax_keyword \"\")\n"
+        "    endif()\n"
+        "    pulp_add_plugin(InTreeAaxProbe BUNDLE_ID dev.pulp.in-tree-aax-probe FORMATS AAX\n"
+        "        MANUFACTURER_CODE PlPr AAX_PRODUCT_CODE PiAp AAX_NATIVE_CODE PiAn \${_aax_keyword})\n"
+        "endif()\n"
         "add_executable(pulp-in-tree-format-view-links \"${_probe_src}/format_view_links.cpp\")\n"
         "target_link_libraries(pulp-in-tree-format-view-links PRIVATE pulp::format-view)\n")
     set(_probe_include "${FIXTURE_DIR}/real-probe-include.cmake")
@@ -692,7 +704,30 @@ elseif(SCENARIO STREQUAL "real")
         _expect("${_text}" "pulp_add_plugin\\(InTreeProbe\\): this Pulp SDK serves Pulp::view from Vellum"
             "${_keyword} refused as Pulp's own view editor")
     endforeach()
+    # AAX in the mode, decided before the AAX SDK is read, so PULP_HAS_AAX is
+    # forced on and every case stops at the missing SDK at the latest. A
+    # plug-in with an editor (here the generated Vellum one) is refused, since
+    # the AAX GUI glue cannot open it; NO_EDITOR and AAX_HEADLESS pass that
+    # point and reach the SDK, the control that the refusal is specific.
+    foreach(_aax IN ITEMS default NO_EDITOR AAX_HEADLESS)
+        execute_process(COMMAND "${CMAKE_COMMAND}" -S "${PULP_SOURCE_DIR}"
+                -B "${FIXTURE_DIR}/real-probe" ${_probe_common}
+                "-DPULP_IN_TREE_PROBE_KEYWORD=" "-DPULP_IN_TREE_PROBE_AAX=${_aax}"
+            RESULT_VARIABLE _rc OUTPUT_VARIABLE _out ERROR_VARIABLE _err)
+        string(REGEX REPLACE "[ \t\r\n]+" " " _text "${_out}${_err}")
+        if(_rc EQUAL 0)
+            message(FATAL_ERROR "real: an AAX probe (${_aax}) configured without an AAX SDK:\n${_text}")
+        endif()
+        set(_refusal "pulp_add_plugin\\(InTreeAaxProbe\\) AAX: this Pulp SDK serves its UI from Vellum")
+        if(_aax STREQUAL "default")
+            _expect("${_text}" "${_refusal}" "AAX refused for a plug-in with an editor")
+        else()
+            _reject("${_text}" "${_refusal}" "the AAX refusal for ${_aax}")
+            _expect("${_text}" "AAX SDK helper targets requested before" "${_aax} reaching the AAX SDK")
+        endif()
+    endforeach()
     message(STATUS "real: CLAP plug-ins build view-free in the mode, every Pulp view editor keyword is refused, and pulp::format-view reaches both adapters")
+    message(STATUS "real: AAX is refused for a plug-in with an editor; NO_EDITOR and AAX_HEADLESS build processor-only")
     message(STATUS "real: ok")
 
 else()
