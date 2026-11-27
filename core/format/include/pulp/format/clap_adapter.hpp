@@ -35,18 +35,12 @@
 #include <thread>
 #include <vector>
 
-// View includes only when building GUI-capable CLAP targets.
-//
-// Important: PulpClapPlugin is shared across clap_entry.hpp (compiled into the
-// plugin module) and clap_adapter.cpp (compiled into pulp-format). Both
-// translation units must see the same PULP_CLAP_GUI value or the instance
-// layout diverges and lifecycle callbacks write through the wrong offsets.
-#if defined(PULP_CLAP_GUI) && PULP_CLAP_GUI
-#include <pulp/format/view_bridge.hpp>
-#include <pulp/view/plugin_view_host.hpp>
-#endif
 
 namespace pulp::format::clap_adapter {
+
+/// The create_view() editor's per-instance state, defined with the view
+/// layer in pulp-format (src/clap_legacy_gui_state.hpp).
+struct LegacyClapGui;
 
 // Per-bus channel ceiling. Single source of truth is
 // boundary::kBoundaryMaxChannels (adapter_boundary.hpp) — kept as an `int` here
@@ -337,25 +331,11 @@ struct PulpClapPlugin {
     // main-thread only.
     EditorFactory* editor_factory = nullptr;
 
-    // Editor state (created on GUI create, destroyed on GUI destroy).
-    // `bridge` owns the view tree and dispatches Processor lifecycle
-    // callbacks (on_view_opened/closed/resized). editor_host is the
-    // platform-native window surface that hosts bridge->view().
-#if defined(PULP_CLAP_GUI) && PULP_CLAP_GUI
-    std::unique_ptr<ViewBridge> bridge;
-    std::unique_ptr<view::PluginViewHost> editor_host;
-    // Forwards editor_host's GPU-surface transitions into bridge's scripted UI
-    // session. Reset in gui_destroy() before either of them dies.
-    view::PluginViewHost::GpuSurfaceSubscription gpu_surface_binding;
-    // Native embedded CLAP editors use the host's timer-support extension as
-    // their UI-thread frame source. The timer is registered only while the
-    // editor is attached and visible; no worker or fabricated clock runs when
-    // the host cannot provide this extension.
-    const clap_host_timer_support_t* editor_host_timer = nullptr;
-    clap_id editor_timer_id = CLAP_INVALID_ID;
-    bool editor_parent_attached = false;
-#endif
-    bool editor_visible = false;
+    // The create_view() editor's state, type-erased so this header names no
+    // view type and the instance has one layout whether or not the plug-in
+    // entry was built with PULP_CLAP_GUI. Created on the first GUI call;
+    // declared after processor and store, so it is destroyed before them.
+    std::unique_ptr<LegacyClapGui, void (*)(LegacyClapGui*)> legacy_gui{nullptr, nullptr};
 
     // Previous-block transport snapshot used to derive the `tempo_changed` /
     // `time_sig_changed` / `transport_changed` flags on `ProcessContext`.

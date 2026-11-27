@@ -54,6 +54,15 @@ if(PULP_BUILD_TESTS AND TARGET Catch2::Catch2WithMain)
         target_link_libraries(pulp-test-pulp-vellum-editor PRIVATE
             pulp::vellum Vellum::MirrorView_core Catch2::Catch2WithMain
             Threads::Threads)
+        # A CLAP host opening a Vellum editor through the view-free contract
+        # GUI: the plug-in entry compiles without PULP_CLAP_GUI and links the
+        # view-free CLAP adapter, as a `UI <package>` plug-in does.
+        if(TARGET pulp-format-clap-core)
+            target_link_libraries(pulp-test-pulp-vellum-editor PRIVATE
+                pulp::format-clap-core clap)
+            target_compile_definitions(pulp-test-pulp-vellum-editor PRIVATE
+                PULP_TEST_VELLUM_CLAP=1)
+        endif()
         # Header weight: each public header preprocesses on its own within
         # budget and pulls in none of the implementation headers it keeps out.
         include("${PULP_ROOT_DIR}/test/support/PulpHeaderWeight.cmake")

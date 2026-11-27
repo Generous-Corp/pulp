@@ -7,6 +7,7 @@
 #include <pulp/format/processor.hpp>
 #include <pulp/format/ara.hpp>
 #include <pulp/format/clap_entry.hpp>
+#include "../core/format/src/clap_legacy_gui_state.hpp"
 #include <pulp/format/clap_adapter.hpp>
 #include "../examples/pulp-gain/pulp_gain.hpp"
 #include <pulp/format/host_quirks.hpp>
@@ -1674,8 +1675,8 @@ public:
 void make_clap_plugin_with_size(
     pulp::format::clap_adapter::PulpClapPlugin& data, ViewSize vs) {
     data.processor = std::make_unique<ClapResizeProcessor>(vs);
-    data.bridge = std::make_unique<pulp::format::ViewBridge>(*data.processor,
-                                                             data.store);
+    pulp::format::clap_adapter::legacy_gui(data).bridge =
+        std::make_unique<pulp::format::ViewBridge>(*data.processor, data.store);
     data.plugin.plugin_data = &data;
 }
 
@@ -1844,12 +1845,13 @@ TEST_CASE("CLAP native attachment refusal leaves the editor unopened and retryab
     auto& processor = static_cast<ClapResizeProcessor&>(*data.processor);
     auto options = pulp::format::ViewBridge::Options::hosted_editor();
     options.content_first_open = true;
-    data.bridge = std::make_unique<pulp::format::ViewBridge>(processor, data.store, options);
-    REQUIRE(data.bridge->open());
+    pulp::format::clap_adapter::legacy_gui(data).bridge =
+        std::make_unique<pulp::format::ViewBridge>(processor, data.store, options);
+    REQUIRE(pulp::format::clap_adapter::legacy_gui(data).bridge->open());
     auto editor_host = std::make_unique<FakePluginViewHost>();
     auto& native_host = *editor_host;
     native_host.accept_attach = false;
-    data.editor_host = std::move(editor_host);
+    pulp::format::clap_adapter::legacy_gui(data).editor_host = std::move(editor_host);
 
     clap_window_t parent{};
 #ifdef __APPLE__
@@ -1868,7 +1870,7 @@ TEST_CASE("CLAP native attachment refusal leaves the editor unopened and retryab
     CHECK(processor.opened == 0);
     CHECK(processor.closed == 0);
     CHECK(native_host.first_frames == 0);
-    REQUIRE(data.bridge->is_open());
+    REQUIRE(pulp::format::clap_adapter::legacy_gui(data).bridge->is_open());
 
     native_host.accept_attach = true;
     REQUIRE(gui_set_parent(&data.plugin, &parent));
@@ -1891,15 +1893,17 @@ TEST_CASE("CLAP editor resize negotiates through the host and rolls back refusal
     data.host = &host.host;
     auto editor_host = std::make_unique<FakePluginViewHost>();
     auto* editor_host_ptr = editor_host.get();
-    data.editor_host = std::move(editor_host);
+    pulp::format::clap_adapter::legacy_gui(data).editor_host = std::move(editor_host);
     install_editor_resize_handler(data);
 
     REQUIRE(data.processor->request_editor_resize(640, 480));
     REQUIRE(host.requests == 1);
     REQUIRE(host.requested_width == 640);
     REQUIRE(host.requested_height == 480);
-    REQUIRE(data.bridge->size_hints().preferred_width == 640);
-    REQUIRE(data.bridge->size_hints().preferred_height == 480);
+    REQUIRE(pulp::format::clap_adapter::legacy_gui(data).bridge->size_hints().preferred_width ==
+            640);
+    REQUIRE(pulp::format::clap_adapter::legacy_gui(data).bridge->size_hints().preferred_height ==
+            480);
     REQUIRE_THAT(editor_host_ptr->design_width, WithinAbs(640.0, 0.001));
     REQUIRE_THAT(editor_host_ptr->design_height, WithinAbs(480.0, 0.001));
     REQUIRE_THAT(editor_host_ptr->aspect_ratio, WithinAbs(4.0 / 3.0, 0.001));
@@ -1907,12 +1911,15 @@ TEST_CASE("CLAP editor resize negotiates through the host and rolls back refusal
     host.accept = false;
     REQUIRE_FALSE(data.processor->request_editor_resize(700, 500));
     REQUIRE(host.requests == 2);
-    REQUIRE(data.bridge->size_hints().preferred_width == 640);
-    REQUIRE(data.bridge->size_hints().preferred_height == 480);
+    REQUIRE(pulp::format::clap_adapter::legacy_gui(data).bridge->size_hints().preferred_width ==
+            640);
+    REQUIRE(pulp::format::clap_adapter::legacy_gui(data).bridge->size_hints().preferred_height ==
+            480);
 
     data.host = nullptr;
     REQUIRE_FALSE(data.processor->request_editor_resize(720, 540));
-    REQUIRE(data.bridge->size_hints().preferred_width == 640);
+    REQUIRE(pulp::format::clap_adapter::legacy_gui(data).bridge->size_hints().preferred_width ==
+            640);
 
     gui_destroy(&data.plugin);
     REQUIRE_FALSE(data.processor->request_editor_resize(720, 540));
@@ -1931,7 +1938,7 @@ TEST_CASE("CLAP responsive editor resize never re-pins the design viewport",
     data.host = &host.host;
     auto editor_host = std::make_unique<FakePluginViewHost>();
     auto* editor_host_ptr = editor_host.get();
-    data.editor_host = std::move(editor_host);
+    pulp::format::clap_adapter::legacy_gui(data).editor_host = std::move(editor_host);
     install_editor_resize_handler(data);
 
     REQUIRE(data.processor->request_editor_resize(640, 480));
@@ -1952,7 +1959,7 @@ TEST_CASE("CLAP editor resize handler fails closed after bridge teardown",
     FakeClapGuiHost host;
     data.host = &host.host;
     install_editor_resize_handler(data);
-    data.bridge.reset();
+    pulp::format::clap_adapter::legacy_gui(data).bridge.reset();
 
     REQUIRE_FALSE(data.processor->request_editor_resize(640, 480));
     REQUIRE(host.requests == 0);
