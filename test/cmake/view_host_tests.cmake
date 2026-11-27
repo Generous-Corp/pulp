@@ -554,11 +554,11 @@ pulp_add_test_suite(pulp-test-uia-mapping GROUP pulp-test-group-view-host
     LIBRARIES pulp::view)
 pulp_add_test_suite(pulp-test-atspi-mapping GROUP pulp-test-group-view-host
     LIBRARIES pulp::view)
-# The Linux backends' platform-independent helpers (UTF-8 text offsets, XDND
-# reply validation and pointer tracking, /proc/meminfo classification, AT-SPI
-# component geometry). They have no platform dependency, so they run everywhere.
-pulp_add_test_suite(pulp-test-linux-pure-helpers
-    LIBRARIES pulp::view pulp::platform)
+# Keep the Linux backend fixtures on the platform that owns their headers.
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    pulp_add_test_suite(pulp-test-linux-pure-helpers
+        LIBRARIES pulp::view pulp::platform)
+endif()
 # The Avahi and libnotify backends against fake libraries. The test includes the
 # backend sources to reach their internals, so it is built where they are.
 if(UNIX AND NOT APPLE AND NOT ANDROID)

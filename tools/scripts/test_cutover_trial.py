@@ -449,10 +449,56 @@ class RepairRegressionTests(unittest.TestCase):
 
 
 class InputTests(unittest.TestCase):
-    def test_shipped_inputs_hold_the_687_paths(self):
-        data = ct.load_inputs()
-        self.assertEqual(len(data["delete_paths"]), 687)
-        self.assertEqual(len(set(data["delete_paths"])), 687)
+    def test_shipped_deletion_paths_are_unique(self):
+        paths = ct.load_inputs()["delete_paths"]
+        self.assertEqual(len(paths), len(set(paths)))
+
+    def test_trial_inventory_keeps_retained_build_inputs(self):
+        # C4a trial failures showed that retained tests and build targets
+        # still depend on these paths.
+        retained = {
+            "core/view/cmake/PulpViewJsPreludes.cmake",
+            "core/view/include/pulp/view/recognition_audio_pack.hpp",
+            "core/view/include/pulp/view/value_channel_json.hpp",
+            "core/view/include/pulp/view/value_channel_set.hpp",
+            "core/view/include/pulp/view/value_channel_telemetry.hpp",
+            "core/view/js/css-colors.js",
+            "core/view/js/css-parser.js",
+            "core/view/js/embed_js.py",
+            "core/view/js/import-runtime.js",
+            "core/view/js/web-compat-animation.js",
+            "core/view/js/web-compat-canvas-gpu.js",
+            "core/view/js/web-compat-canvas-image.js",
+            "core/view/js/web-compat-canvas-matrix.js",
+            "core/view/js/web-compat-canvas.js",
+            "core/view/js/web-compat-document-gpu-mock.js",
+            "core/view/js/web-compat-document-selectors.js",
+            "core/view/js/web-compat-document.js",
+            "core/view/js/web-compat-dom-ops.js",
+            "core/view/js/web-compat-element-events.js",
+            "core/view/js/web-compat-element.js",
+            "core/view/js/web-compat-gpu-buffered.js",
+            "core/view/js/web-compat-observers.js",
+            "core/view/js/web-compat-scheduler.js",
+            "core/view/js/web-compat-style-decl-helpers.js",
+            "core/view/js/web-compat-style-decl-layout.js",
+            "core/view/js/web-compat-style-decl-misc.js",
+            "core/view/js/web-compat-style-decl-paint.js",
+            "core/view/js/web-compat-style-decl-transform.js",
+            "core/view/js/web-compat-style-decl-typography.js",
+            "core/view/js/web-compat-style-decl.js",
+            "core/view/js/web-compat-style-dedup-table.js",
+            "core/view/js/web-compat-transient-interaction.js",
+            "external/fonts/Inter-Regular.ttf",
+            "external/fonts/JetBrainsMono-Regular.ttf",
+            "external/fonts/Jost-Bold.ttf",
+            "external/fonts/Jost-Medium.ttf",
+            "external/fonts/Jost-Regular.ttf",
+            "external/fonts/Jost-SemiBold.ttf",
+            "tools/cmake/PulpEmbedData.cmake",
+            "tools/cmake/scripts/encode_binary_data.py",
+        }
+        self.assertEqual(retained.intersection(ct.load_inputs()["delete_paths"]), set())
 
     def test_row_count_equals_the_ledger_stranded_count(self):
         data = ct.load_inputs()
