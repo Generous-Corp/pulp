@@ -221,8 +221,17 @@ def _canonical_virtual_signature(raw_decl: str) -> tuple[str, str]:
     return name, signature
 
 
+# processor.hpp spells the view-named Processor virtuals as
+# PULP_FORMAT_LEGACY_VIEW_NAME(name), which keeps each slot under a reserved
+# name in an SDK whose UI is not Pulp's. The slot, its position and its
+# signature are the same in both spellings, so the gate compares the plain
+# name. This is the only macro the gate expands.
+_LEGACY_VIEW_NAME = re.compile(r"\bPULP_FORMAT_LEGACY_VIEW_NAME\(\s*([A-Za-z_]\w*)\s*\)")
+
+
 def virtual_order(text: str, class_name: str) -> list[VirtualDecl]:
     body = class_body(strip_c_comments(text), class_name)
+    body = _LEGACY_VIEW_NAME.sub(r"\1", body)
     decls: list[VirtualDecl] = []
     for match in re.finditer(r"\bvirtual\b(?P<decl>.*?)(?:;|{)", body, re.DOTALL):
         raw_decl = match.group("decl").strip()

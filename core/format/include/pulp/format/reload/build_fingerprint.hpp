@@ -23,7 +23,7 @@
 namespace pulp::format::reload {
 
 /// Bump when the fingerprint layout/semantics change.
-inline constexpr uint32_t kBuildFingerprintSchema = 1;
+inline constexpr uint32_t kBuildFingerprintSchema = 2;
 
 struct BuildFingerprint {
     uint32_t schema_version = 0;
@@ -32,7 +32,7 @@ struct BuildFingerprint {
     char compiler[64] = {};         // "clang 17.0.0" / "gcc 13.2.0" / "msvc 1939"
     char target[48] = {};           // "arm64-macos"
     char stdlib[48] = {};           // "libc++ 170000" / "libstdc++ 20230801"
-    char abi_flags[160] = {};       // ndebug/exc/rtti/cxx11abi/itdbg/hardening/libcppabi
+    char abi_flags[160] = {};       // ndebug/exc/rtti/cxx11abi/itdbg/hardening/libcppabi/legacyview
     char sanitizers[48] = {};       // "asan,tsan" or "none"
     char sdk_version[48] = {};      // Pulp SDK version (shell+logic share a checkout)
 };
@@ -141,9 +141,18 @@ inline BuildFingerprint current_build_fingerprint() {
 #else
         const int libcppabi = -1;
 #endif
+        // Processor's legacy view hooks keep their slots in both modes, but
+        // under different names, so a logic library and a shell that disagree
+        // on PULP_FORMAT_LEGACY_VIEW (processor.hpp) are not one build.
+#if defined(PULP_FORMAT_LEGACY_VIEW) && !PULP_FORMAT_LEGACY_VIEW
+        const int legacyview = 0;
+#else
+        const int legacyview = 1;
+#endif
         std::snprintf(fp.abi_flags, sizeof fp.abi_flags,
-                      "ndebug=%d;exc=%d;rtti=%d;cxx11abi=%d;itdbg=%d;harden=%d;libcppabi=%d",
-                      ndebug, exc, rtti, cxx11abi, itdbg, hardening, libcppabi);
+                      "ndebug=%d;exc=%d;rtti=%d;cxx11abi=%d;itdbg=%d;harden=%d;libcppabi=%d;"
+                      "legacyview=%d",
+                      ndebug, exc, rtti, cxx11abi, itdbg, hardening, libcppabi, legacyview);
     }
 
     {

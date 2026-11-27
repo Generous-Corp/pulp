@@ -185,6 +185,74 @@ class NodeAbiSurfaceUnitTests(unittest.TestCase):
                     nag.check_surface(root, "origin/main", "Processor", "processor.hpp") or "",
                 )
 
+    def test_legacy_view_name_macro_is_the_plain_slot(self) -> None:
+        base = textwrap.dedent(
+            """\
+            class Processor {
+            public:
+              virtual std::unique_ptr<view::View> create_view();
+              virtual void on_view_opened(view::View& /*view*/) {}
+              virtual void* editor_factory();
+            };
+            """
+        )
+        spelled = textwrap.dedent(
+            """\
+            class Processor {
+            public:
+              virtual std::unique_ptr<view::View> PULP_FORMAT_LEGACY_VIEW_NAME(create_view)();
+              virtual void PULP_FORMAT_LEGACY_VIEW_NAME( on_view_opened )(view::View& /*view*/) {}
+              virtual void* editor_factory();
+            };
+            """
+        )
+        self.assertEqual(
+            nag.virtual_order(spelled, "Processor"), nag.virtual_order(base, "Processor")
+        )
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            (root / "processor.hpp").write_text(spelled, encoding="utf-8")
+            with mock.patch.object(nag, "git_show", return_value=base):
+                self.assertIsNone(nag.check_surface(root, "origin/main", "Processor", "processor.hpp"))
+
+    def test_legacy_view_name_macro_still_flags_a_signature_change(self) -> None:
+        base = textwrap.dedent(
+            """\
+            class Processor {
+            public:
+              virtual void on_view_opened(view::View& /*view*/) {}
+              virtual void* editor_factory();
+            };
+            """
+        )
+        changed = textwrap.dedent(
+            """\
+            class Processor {
+            public:
+              virtual void PULP_FORMAT_LEGACY_VIEW_NAME(on_view_opened)(const view::View& /*view*/) {}
+              virtual void* editor_factory();
+            };
+            """
+        )
+        renamed = textwrap.dedent(
+            """\
+            class Processor {
+            public:
+              virtual void PULP_FORMAT_LEGACY_VIEW_NAME(on_view_shown)(view::View& /*view*/) {}
+              virtual void* editor_factory();
+            };
+            """
+        )
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            for text in (changed, renamed):
+                (root / "processor.hpp").write_text(text, encoding="utf-8")
+                with mock.patch.object(nag, "git_show", return_value=base):
+                    self.assertIn(
+                        "virtual order is not additive-only",
+                        nag.check_surface(root, "origin/main", "Processor", "processor.hpp") or "",
+                    )
+
     def test_check_surface_reports_parse_errors(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
