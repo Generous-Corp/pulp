@@ -36,16 +36,20 @@ import hashlib
 import json
 import os
 import platform
+import shutil
 import subprocess
 import sys
 import tempfile
+import time
 from dataclasses import dataclass
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
+sys.path.insert(0, str(HERE.parent / "ci"))
 import configure_only  # noqa: E402
 import consumption_census as census  # noqa: E402
+import source_selftests as sst  # noqa: E402
 
 CACHE_NAME = "pulp-census-verified.json"
 SDK_DIRS = {"PULP_HAS_VST3": "vst3sdk", "PULP_HAS_AUSDK": "AudioUnitSDK"}
@@ -130,22 +134,61 @@ def make_overlay(root: Path, dest: Path, keep_sdks: set[str]) -> Path:
     return dest
 
 
+OVERLAY_PREFIX = "build-census-src."
+STALE_OVERLAY_S = 2 * 3600
+
+
+def sweep_overlays(root: Path) -> list[str]:
+    """Remove overlay directories a killed run left behind (they hold only symlinks)."""
+    swept = []
+    for old in sorted(root.glob(OVERLAY_PREFIX + "*")):
+        try:
+            if old.is_dir() and time.time() - old.stat().st_mtime > STALE_OVERLAY_S:
+                shutil.rmtree(old, ignore_errors=True)
+                swept.append(old.name)
+        except OSError:
+            continue
+    return swept
+
+
 def scratch_source_dir(root: Path) -> tempfile.TemporaryDirectory:
     """Where an overlay lives. CMake refuses a checkout under the system temp dir, so it sits in
     the worktree under a ``build`` name: git-ignored, skipped by the overlay itself and by the
     build-dir chooser (it holds no CMakeCache), and removed when the profile is done."""
-    return tempfile.TemporaryDirectory(prefix="build-census-src.", dir=root)
+    sweep_overlays(root)
+    return tempfile.TemporaryDirectory(prefix=OVERLAY_PREFIX, dir=root)
+
+
+def tool_version(*cmd: str) -> str:
+    try:
+        out = subprocess.run(list(cmd), capture_output=True, text=True, encoding="utf-8", errors="replace",
+                             check=False, timeout=30).stdout
+    except (OSError, subprocess.TimeoutExpired):
+        return "unavailable"
+    return out.splitlines()[0] if out.strip() else "unavailable"
+
+
+def environment_signature(root: Path) -> str:
+    """What a configure reads that is not tracked: the cmake and compiler versions, the SDKs present,
+    and the Skia library set the profiles record (FindSkia globs it)."""
+    parts = [tool_version(os.environ.get("CMAKE", "cmake"), "--version"),
+             tool_version(os.environ.get("CXX", "c++"), "--version"), ",".join(sorted(present_sdks(root)))]
+    skia_roots = [root / "external" / "skia-build"] + ([Path(os.environ["SKIA_DIR"])] if os.environ.get("SKIA_DIR") else [])
+    for skia in skia_roots:
+        if skia.exists():
+            parts += sorted(f"{lib.relative_to(skia)}:{lib.stat().st_size}" for lib in skia.rglob("*.a"))
+    return hashlib.sha256("\n".join(parts).encode()).hexdigest()
 
 
 def inputs_digest(root: Path) -> str:
-    """A digest of everything a profile's measurement depends on that is checked in."""
+    """A digest of everything a profile's measurement depends on that is checked in or ambient."""
     out = subprocess.run(["git", "-C", str(root), "ls-files", "-z"], capture_output=True, check=True).stdout
     digest = hashlib.sha256()
     for raw in sorted(out.split(b"\0")):
         name = raw.decode("utf-8", "replace")
         if name.endswith((".h", ".hpp")):
             digest.update(raw + b"\n")
-        elif name.endswith(("CMakeLists.txt", ".cmake")):
+        elif name.endswith(("CMakeLists.txt", ".cmake", ".cmake.in")):
             try:
                 digest.update(raw + b"\0" + (root / name).read_bytes())
             except OSError:
@@ -153,15 +196,38 @@ def inputs_digest(root: Path) -> str:
     for extra in (Path("tools/scripts/consumption_census.py"), Path("tools/scripts/census_profiles.py")):
         digest.update((root / extra).read_bytes())
     digest.update(host_prefix().encode())
+    digest.update(environment_signature(root).encode())
     return digest.hexdigest()
 
 
-def profile_digest(common: str, document: dict, key: str) -> str:
-    """One profile's cache key: the shared inputs, the committed header lists, and its own block, so
-    editing one profile's block (or regenerating it) invalidates only that profile's cached result."""
+def configure_input_paths(build: Path, source: Path) -> list[str]:
+    """The checkout files CMake itself says this configure read (Ninja's regeneration inputs),
+    relative to the tree it was pointed at: manifests, .in templates, JSON read by file(READ)."""
+    found = []
+    for path in sst.cmake_inputs(build, source):
+        try:
+            rel = path.relative_to(source).as_posix()
+        except ValueError:
+            continue
+        if not rel.startswith("build"):
+            found.append(rel)
+    return sorted(set(found))
+
+
+def profile_digest(common: str, document: dict, key: str, root: Path | None = None,
+                   inputs: list[str] | None = None) -> str:
+    """One profile's cache key: the shared inputs, the committed header lists, its own block, and the
+    content of every file its last configure read, so editing one profile's block (or regenerating
+    it) invalidates only that profile's cached result."""
     digest = hashlib.sha256(common.encode())
     digest.update(json.dumps(document.get("public_headers_by_root", {}), sort_keys=True).encode())
     digest.update(json.dumps(document["profiles"][key], sort_keys=True).encode())
+    for rel in inputs or []:
+        digest.update(rel.encode() + b"\0")
+        try:
+            digest.update(hashlib.sha256((root / rel).read_bytes()).digest() if root else b"")
+        except OSError:
+            digest.update(b"-")
     return digest.hexdigest()
 
 
@@ -196,7 +262,8 @@ def census_cmd(root: Path, build: Path, mode: str, source: Path) -> list[str]:
 
 def run_census(root: Path, build: Path, mode: str, source: Path) -> tuple[int, str]:
     proc = subprocess.run(census_cmd(root, build, mode, source), capture_output=True, text=True,
-                          encoding="utf-8", errors="replace", check=False)
+                          encoding="utf-8", errors="replace", check=False,
+                          env={**os.environ, "GIT_OPTIONAL_LOCKS": "0"})
     return proc.returncode, (proc.stdout + proc.stderr).strip()
 
 
@@ -212,7 +279,10 @@ def configure_profile(root: Path, spec: Spec, build: Path, scratch: Path,
     cmd = configure_only.governor_prefix(root) + [
         os.environ.get("CMAKE", "cmake"), "-S", str(source), "-B", str(build),
         *configure_only.GATE_CONFIGURE_ARGS, *spec.cmake_args()]
-    why = configure_only._run(cmd, root, {**os.environ, **configure_only.GOVERNED_ENV})  # noqa: SLF001
+    # The overlay's .git is the checkout's, so the configure's `git status` would refresh and lock the
+    # checkout's own index; optional locks off means it never takes one.
+    why = configure_only._run(cmd, root, {**os.environ, **configure_only.GOVERNED_ENV,  # noqa: SLF001
+                                          "GIT_OPTIONAL_LOCKS": "0"})
     if why:
         return f"configure failed: {why}", source
     compiled = configure_only.compile_evidence(build)
@@ -227,16 +297,18 @@ def configure_profile(root: Path, spec: Spec, build: Path, scratch: Path,
     return "", source
 
 
-def process(root: Path, spec: Spec, mode: str, force_overlay: bool = False) -> tuple[str, str]:
-    """(status, detail): status is ok, drift, not-configurable or error."""
+def process(root: Path, spec: Spec, mode: str,
+            force_overlay: bool = False) -> tuple[str, str, list[str]]:
+    """(status, detail, configure inputs): status is ok, drift, not-configurable or error."""
     with configure_only.temporary_build(root) as build, scratch_source_dir(root) as scratch:
         why, source = configure_profile(root, spec, build, Path(scratch), force_overlay)
         if why:
-            return "not-configurable", why
+            return "not-configurable", why, []
+        inputs = configure_input_paths(build, source)
         rc, text = run_census(root, build, mode, source)
         if rc == 0:
-            return "ok", text.splitlines()[-1] if text else ""
-        return ("drift" if mode == "--check" and rc == 1 else "error"), text
+            return "ok", text.splitlines()[-1] if text else "", inputs
+        return ("drift" if mode == "--check" and rc == 1 else "error"), text, []
 
 
 def main(argv: list[str]) -> int:
@@ -262,22 +334,39 @@ def main(argv: list[str]) -> int:
     except (OSError, ValueError, KeyError, subprocess.CalledProcessError) as error:
         say(f"census_profiles: cannot read the committed census: {error}")
         return EXIT_ERROR
+    if not specs:
+        # Nothing here to compare is not a pass: say so, and let the caller list it NOT CHECKED.
+        say(f"census_profiles: NOT CHECKED here: the census records no profile for {host_prefix().rstrip('-')} "
+            f"(recorded: {', '.join(other) or 'none'})")
+        return EXIT_NOT_CONFIGURABLE
     cache = load_cache(root)
     results: dict[str, tuple[str, str]] = {}
+    fresh: dict[str, dict] = {}
     for spec in specs:
+        entry = cache.get(spec.key) if isinstance(cache.get(spec.key), dict) else {}
+        reusable = (args.check and args.cached and entry
+                    and entry.get("digest") == profile_digest(common, document, spec.key, root,
+                                                              entry.get("inputs", [])))
         if spec.key in args.skip:
-            results[spec.key] = ("ok", "verified by the caller's build")
-        elif args.check and args.cached and cache.get(spec.key) == profile_digest(common, document, spec.key):
+            results[spec.key] = ("skipped", "verified by the caller's build")
+        elif reusable and entry.get("status") == "ok":
             results[spec.key] = ("ok", "verified for these inputs (cached)")
+        elif reusable and entry.get("status") == "not-configurable":
+            results[spec.key] = ("not-configurable", f"{entry.get('why', '')} (cached)")
         else:
             say(f"census_profiles: {flag[2:]} {spec.key}")
-            results[spec.key] = process(root, spec, flag, args.force_overlay)
+            status, detail, inputs = process(root, spec, flag, args.force_overlay)
+            results[spec.key] = (status, detail)
+            if status in ("ok", "not-configurable"):
+                fresh[spec.key] = {"status": status, "why": detail if status != "ok" else "", "inputs": inputs,
+                                   "digest": profile_digest(common, document, spec.key, root, inputs)}
     if args.check:
-        for key, (status, _) in results.items():
-            if status == "ok":
-                cache[key] = profile_digest(common, document, key)
-            else:
+        # Only what this run measured (or reused a measurement of) is remembered: a profile that was
+        # skipped because the caller's build covered it has not been measured here.
+        for key in list(cache):
+            if key not in results or results[key][0] not in ("ok", "not-configurable"):
                 cache.pop(key, None)
+        cache.update(fresh)
         store_cache(root, cache)
     else:
         # A write changes the committed census, so every remembered result is for dead inputs.

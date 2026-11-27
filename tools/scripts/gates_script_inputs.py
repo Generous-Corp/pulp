@@ -117,7 +117,7 @@ def census_reasons(root: Path, base: str, changed: set[str]) -> list[str]:
     """
     reasons = {p for p in changed
                if p.endswith("CMakeLists.txt") or p.endswith(".cmake")
-               or p in (CENSUS_FILE, CENSUS_SCRIPT.as_posix())}
+               or p in (CENSUS_FILE, CENSUS_SCRIPT.as_posix(), CENSUS_PROFILES_SCRIPT.as_posix())}
     mb = subprocess.run(["git", "-C", str(root), "merge-base", base, "HEAD"],
                         capture_output=True, text=True, encoding="utf-8")
     anchor = mb.stdout.strip() if mb.returncode == 0 and mb.stdout.strip() else base

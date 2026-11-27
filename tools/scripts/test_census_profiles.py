@@ -47,6 +47,7 @@ def census(extra: dict | None = None) -> str:
 
 def fake_cmake(path: Path, record: Path, features_json: dict) -> None:
     path.write_text(f"""#!/bin/sh
+echo "$GIT_OPTIONAL_LOCKS" > "{record}.locks"
 src=""; build=""
 while [ $# -gt 0 ]; do
   case "$1" in -S) src="$2"; shift ;; -B) build="$2"; shift ;; esac
@@ -224,12 +225,14 @@ class CensusProfilesTests(unittest.TestCase):
         self.assertIn("vst3sdk", why)
         self.assertIn("./setup.sh --deps-only --non-interactive", why)
 
-    def run_main(self, *args: str, results: dict | None = None) -> tuple[int, str, list[str]]:
+    def run_main(self, *args: str, results: dict | None = None, inputs: dict | None = None) -> tuple[int, str, list[str]]:
         calls: list[str] = []
 
-        def fake_process(root: Path, spec: cp.Spec, mode: str, force_overlay: bool = False) -> tuple[str, str]:
+        def fake_process(root: Path, spec: cp.Spec, mode: str,
+                         force_overlay: bool = False) -> tuple[str, str, list[str]]:
             calls.append(spec.key)
-            return (results or {}).get(spec.key, ("ok", "consumption_census_verified=true"))
+            status, detail = (results or {}).get(spec.key, ("ok", "consumption_census_verified=true"))
+            return status, detail, (inputs or {}).get(spec.key, [])
 
         err = io.StringIO()
         with mock.patch.object(cp, "process", fake_process), contextlib.redirect_stderr(err):
@@ -289,6 +292,94 @@ class CensusProfilesTests(unittest.TestCase):
         _, _, calls = self.run_main("--check", "--skip", KEY_ALL)
         self.assertEqual(calls, [KEY_NONE])
 
+    # -- the review's findings ------------------------------------------------------------
+
+    def test_a_host_with_no_recorded_profile_is_not_checked_not_a_pass(self) -> None:
+        with mock.patch.object(cp, "host_prefix", return_value="linux-x86_64-"):
+            rc, err, calls = self.run_main("--check", "--cached")
+        self.assertEqual(rc, 3, err)
+        self.assertEqual(calls, [])
+        self.assertIn("NOT CHECKED here: the census records no profile for linux-x86_64", err)
+        self.assertNotIn("0 profile(s) current", err)
+
+    def test_control_the_same_run_on_a_recorded_host_still_passes(self) -> None:
+        rc, err, _ = self.run_main("--check", "--cached")
+        self.assertEqual(rc, 0, err)
+        self.assertIn("2 profile(s) current", err)
+
+    def test_a_skipped_profile_is_never_cached_as_verified(self) -> None:
+        self.run_main("--check", "--skip", KEY_ALL)
+        _, _, calls = self.run_main("--check", "--cached")
+        self.assertEqual(calls, [KEY_ALL], "the profile only the caller's build covered was never measured here")
+
+    def test_an_unconfigurable_profile_is_cached_with_its_reason_and_retried_when_the_host_changes(self) -> None:
+        results = {KEY_ALL: ("not-configurable", "no Skia library")}
+        rc, _, calls = self.run_main("--check", "--cached", results=results)
+        self.assertEqual((rc, calls), (3, [KEY_ALL, KEY_NONE]))
+        rc, err, calls = self.run_main("--check", "--cached", results=results)
+        self.assertEqual((rc, calls), (3, []), "a host that cannot configure it must not reconfigure every run")
+        self.assertIn("no Skia library (cached)", err)
+        # An SDK appearing or disappearing changes what the host can configure.
+        import shutil
+        shutil.rmtree(self.root / "external" / "vst3sdk")
+        _, _, calls = self.run_main("--check", "--cached", results=results)
+        self.assertEqual(calls, [KEY_ALL, KEY_NONE])
+
+    def test_a_file_the_configure_read_invalidates_only_the_profile_that_read_it(self) -> None:
+        data = self.root / "tools" / "data.json"
+        data.parent.mkdir(exist_ok=True)
+        data.write_text("{}", encoding="utf-8")
+        inputs = {KEY_ALL: ["tools/data.json"], KEY_NONE: []}
+        self.run_main("--check", inputs=inputs)
+        _, _, calls = self.run_main("--check", "--cached", inputs=inputs)
+        self.assertEqual(calls, [], "control: nothing changed")
+        data.write_text('{"read": "by file(READ)"}', encoding="utf-8")
+        _, _, calls = self.run_main("--check", "--cached", inputs=inputs)
+        self.assertEqual(calls, [KEY_ALL])
+
+    def test_the_cmake_and_compiler_versions_and_the_skia_libraries_are_part_of_the_key(self) -> None:
+        base = cp.inputs_digest(self.root)
+        with mock.patch.object(cp, "tool_version", side_effect=lambda *c: "9.9.9"):
+            self.assertNotEqual(cp.inputs_digest(self.root), base)
+        lib = self.root / "external" / "skia-build" / "out" / "libskia.a"
+        lib.parent.mkdir(parents=True)
+        lib.write_bytes(b"a")
+        with_lib = cp.inputs_digest(self.root)
+        self.assertNotEqual(with_lib, base)
+        lib.write_bytes(b"ab")
+        self.assertNotEqual(cp.inputs_digest(self.root), with_lib)
+
+    def test_cmake_input_paths_come_from_the_build_and_skip_the_build_tree(self) -> None:
+        build = self.root / "build-x"
+        build.mkdir(exist_ok=True)
+        (self.root / "tools").mkdir(exist_ok=True)
+        for name in ("a.json", "b.h.in"):
+            (self.root / "tools" / name).write_text("", encoding="utf-8")
+        listed = " ".join(str(self.root / n) for n in ("tools/a.json", "tools/b.h.in", "build-x/gen.cmake"))
+        (build / "build.ninja").write_text(f"build build.ninja: RERUN_CMAKE | {listed} || x\n", encoding="utf-8")
+        self.assertEqual(cp.configure_input_paths(build, self.root), ["tools/a.json", "tools/b.h.in"])
+
+    def test_the_configure_never_takes_the_checkouts_index_lock(self) -> None:
+        record = Path(self._tmp.name) / "source-arg"
+        self.configure(cp.Spec(KEY_NONE, features("OFF")), features("OFF"))
+        self.assertEqual((Path(str(record) + ".locks")).read_text(encoding="utf-8").strip(), "0")
+
+    def test_overlays_a_killed_run_left_behind_are_swept_and_live_ones_are_not(self) -> None:
+        old = self.root / "build-census-src.dead"
+        live = self.root / "build-census-src.live"
+        for d in (old, live):
+            d.mkdir()
+            (d / "core").symlink_to(self.root / "core")
+        os.utime(old, (1_000_000_000, 1_000_000_000))  # 2001: older than any threshold
+        self.assertEqual(cp.sweep_overlays(self.root), ["build-census-src.dead"])
+        self.assertFalse(old.exists())
+        self.assertTrue(live.exists())
+        self.assertTrue((self.root / "core").is_dir(), "a symlink inside an overlay must never be followed")
+
+    def test_the_census_profiles_script_itself_is_a_reason_to_run_the_check(self) -> None:
+        reasons = gsi.census_reasons(self.root, "HEAD", {"tools/scripts/census_profiles.py"})
+        self.assertIn("tools/scripts/census_profiles.py", reasons)
+
 
 class GatesIntegrationTests(unittest.TestCase):
     def check(self, rc: int, out: str = "", key: str | None = "k", env: dict | None = None) -> tuple[int, str, list]:
@@ -324,6 +415,30 @@ class GatesIntegrationTests(unittest.TestCase):
         result, err, _ = self.check(3, "NOT CHECKED here: x")
         self.assertEqual(result, 0)
         self.assertIn("NOT CHECKED locally: consumption-census-drift (other profiles", err)
+
+    def run_check_census(self, local_rc: int, local_out: str, other_rc: int, other_out: str = "") -> tuple[int, str]:
+        replies = iter([(local_rc, local_out), (other_rc, other_out)])
+        err = io.StringIO()
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "tools/scripts").mkdir(parents=True)
+            for name in ("consumption_census.py", "census_profiles.py"):
+                (root / "tools/scripts" / name).write_text("", encoding="utf-8")
+            with mock.patch.object(gsi, "run_tool", lambda cmd, r: next(replies)), contextlib.redirect_stdout(err):
+                result = gsi.check_census(root, root / "build", "build")
+        return result, err.getvalue()
+
+    def test_a_host_the_census_does_not_record_prints_not_checked_on_the_77_path(self) -> None:
+        result, out = self.run_check_census(77, "consumption_census_skipped reason=profile-not-recorded host=linux-x",
+                                            3, "census_profiles: NOT CHECKED here: the census records no profile")
+        self.assertEqual(result, 0)
+        self.assertIn("NOT CHECKED locally: consumption-census-drift", out)
+
+    def test_control_when_the_local_check_passes_and_the_siblings_pass_nothing_is_listed(self) -> None:
+        result, out = self.run_check_census(0, "consumption_census_verified=true targets=1 profile=k", 0,
+                                            "census_profiles: 1 profile(s) current")
+        self.assertEqual(result, 0)
+        self.assertNotIn("NOT CHECKED", out)
 
     def test_local_only_opt_out_is_listed_not_checked(self) -> None:
         result, err, seen = self.check(0, env={"PULP_GATES_CENSUS_LOCAL_ONLY": "1"})
