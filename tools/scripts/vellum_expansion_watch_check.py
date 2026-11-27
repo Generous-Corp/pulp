@@ -492,6 +492,8 @@ def _commit_paths(root: pathlib.Path, commit: str, parents: list[str]) -> dict[s
     A merge contributes only what differs from every parent (its own
     resolution), reported with status "merge".
     """
+    if not parents:
+        raise WatchError(f"{commit}: a root commit in the range has no parent to diff against")
     per_parent: list[dict[str, str]] = []
     for parent in parents:
         raw = _git(
@@ -518,15 +520,24 @@ def _shared_claim_errors(
 ) -> list[str]:
     """Why each family claimed by two or more events is a duplicate, if it is.
 
-    Events carry no paths, so a claim's path set comes from history. Every
-    commit in base..head is attributed to the nearest event-adding commit of
-    that family it is an ancestor of (or is); its paths that match the family
-    and survive into the range diff form that event's path set. A family may
-    be claimed more than once only when every claiming event was added by its
-    own non-merge commit, no two claiming events are identical apart from
-    event_id or share a rationale, every claiming event's path set is
-    non-empty, and the path sets are pairwise disjoint. Anything that keeps
-    the history from answering is refused.
+    Events carry no paths, so a claim's path set comes from history. A
+    commit in base..head that is an ancestor of (or is) a claiming event's
+    adding commit belongs to the nearest such event: the one no other claim's
+    adding commit sits between. A non-merge commit that is an ancestor of no
+    claim's adding commit (a fix pushed after the event, or code committed
+    after its event) belongs to the first adding commit on its first-parent
+    line. An event's path set is its commits' paths that match the family and
+    survive into the range diff. A family may be claimed more than once only
+    when every claiming event was added by its own non-merge commit, no two
+    claiming events are identical apart from event_id or share a rationale,
+    every path set is non-empty, and the path sets are pairwise disjoint.
+    Anything that keeps the history from answering is refused.
+
+    Known limit: git records no PR boundary, so a commit between two adding
+    commits on one line always belongs to the upper event. A parent's fix
+    pushed after its event, then a child that adds only an event, gives the
+    child the parent's fix and passes. Coverage equality still refuses the
+    child's spare event once the parent lands first.
     """
     shared = {family: events for family, events in claimants.items() if len(events) > 1}
     if not shared:
@@ -609,6 +620,18 @@ def _shared_claim_errors(
             path_sets[event] = {
                 path for c in segment for path in touched[c] if path in family_paths
             }
+        placed = set().union(*(ancestry[commit_of[e]] for e in claiming))
+        owner_of = {commit_of[e]: e for e in claiming}
+        for commit, its_parents in parents.items():
+            if commit in placed or len(its_parents) != 1:
+                continue
+            walk: str | None = commit
+            while walk in parents and walk not in owner_of:
+                walk = parents[walk][0] if parents[walk] else None
+            if walk in owner_of:
+                path_sets[owner_of[walk]] |= {
+                    path for path in touched[commit] if path in family_paths
+                }
         empty = [event for event in claiming if not path_sets[event]]
         if empty:
             errors.append(refuse(family, f"{empty} record no path of this family of their own"))

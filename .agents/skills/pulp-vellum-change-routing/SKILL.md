@@ -614,8 +614,14 @@ skim of the source:
   hard as omitting one. Two event files may claim the same family in one range
   only when each was added by its own non-merge commit, they differ in more than
   `event_id` and rationale, and their path sets are disjoint and non-empty. An
-  event's path set is the family's changed paths in the commits it is the nearest
-  claiming descendant of. Anything else fails with
+  event's path set is the family's range-diff paths in the commits it is the
+  nearest claiming descendant of, plus any later non-merge commit whose
+  first-parent line reaches its adding commit first (a fix pushed after the
+  event). Known limits: git records no PR boundary, so a parent's fix pushed
+  after its event counts toward a stacked child's event, and an event-only child
+  can pass. A clean merge of main that touches a file the branch also changed
+  counts that file as the merge's own and can refuse a legitimate stack.
+  Anything else fails with
   `duplicate capability-family claims ['<family>']: <reason>`, as does a shallow
   clone or a base that is not an ancestor of head.
 - **Verify a branch against its MERGE-BASE, not `origin/main`.** Diffing a branch

@@ -7,6 +7,7 @@ import copy
 import importlib.util
 import json
 import pathlib
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -540,6 +541,114 @@ class Tests(unittest.TestCase):
             report = self.active_verify(repo, base, head)
         self.assertEqual(report["status"], "fail")
         self.assertIn("history is shallow", report["errors"][0])
+
+    def touch(self, repo: pathlib.Path, path: str, text: str, message: str) -> str:
+        target = repo / path
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(text, encoding="utf-8")
+        return self.commit(repo, message)
+
+    def test_child_fix_after_its_event_editing_the_parent_path_fails(self) -> None:
+        temporary, repo = self.git_repo()
+        del temporary
+        base = run(repo, "git", "rev-parse", "HEAD").stdout.strip()
+        self.claim(repo, "core/render/parent_backend.cpp", "20261127-parent-render-watch")
+        self.claim(repo, "core/render/child_backend.cpp", "20261127-child-render-watch")
+        head = self.touch(repo, "core/render/parent_backend.cpp", "fixed\n", "child fix")
+        report = self.active_verify(repo, base, head)
+        self.assertEqual(report["status"], "fail")
+        self.assertIn("both cover ['core/render/parent_backend.cpp']", report["errors"][0])
+
+    def test_child_event_committed_before_its_code_passes(self) -> None:
+        temporary, repo = self.git_repo()
+        del temporary
+        base = run(repo, "git", "rev-parse", "HEAD").stdout.strip()
+        self.claim(repo, "core/render/parent_backend.cpp", "20261127-parent-render-watch")
+        value = event("render-assets-and-backends", event_id="20261127-child-render-watch")
+        value["rationale"] = "Record the child render change, committed first; no authority."
+        write_json(repo / watch.EVENT_ROOT / "20261127-child-render-watch.json", value)
+        self.commit(repo, "child event first")
+        head = self.touch(repo, "core/render/child_backend.cpp", "child\n", "child code")
+        report = self.active_verify(repo, base, head)
+        self.assertEqual(report["status"], "pass", report["errors"])
+
+    def test_known_limit_parent_fix_feeds_an_event_only_child(self) -> None:
+        # Pinned known limit: git records no PR boundary, so the parent's fix
+        # after its event belongs to the child's event-only commit and passes.
+        temporary, repo = self.git_repo()
+        del temporary
+        base = run(repo, "git", "rev-parse", "HEAD").stdout.strip()
+        self.claim(repo, "core/render/parent_backend.cpp", "20261127-parent-render-watch")
+        self.touch(repo, "core/render/parent_fix.cpp", "fix\n", "parent fix")
+        value = event("render-assets-and-backends", event_id="20261127-child-render-watch")
+        value["rationale"] = "Record a child render change with no path of its own here."
+        write_json(repo / watch.EVENT_ROOT / "20261127-child-render-watch.json", value)
+        head = self.commit(repo, "child event only")
+        report = self.active_verify(repo, base, head)
+        self.assertEqual(report["status"], "pass", report["errors"])
+
+    def test_event_added_inside_a_merge_cannot_share_a_family(self) -> None:
+        temporary, repo = self.git_repo()
+        del temporary
+        base = run(repo, "git", "rev-parse", "HEAD").stdout.strip()
+        run(repo, "git", "checkout", "-q", "-b", "parent")
+        self.claim(repo, "core/render/parent_backend.cpp", "20261127-parent-render-watch")
+        run(repo, "git", "checkout", "-q", "-b", "child", base)
+        self.touch(repo, "core/render/child_backend.cpp", "child\n", "child code")
+        run(repo, "git", "merge", "-q", "--no-commit", "--no-ff", "parent")
+        value = event("render-assets-and-backends", event_id="20261127-child-render-watch")
+        value["rationale"] = "Record the child render change inside a merge; no authority."
+        write_json(repo / watch.EVENT_ROOT / "20261127-child-render-watch.json", value)
+        head = self.commit(repo, "merge with an event")
+        self.assertEqual(len(run(repo, "git", "rev-list", "--parents", "-n1", head)
+                             .stdout.split()), 3)
+        report = self.active_verify(repo, base, head)
+        self.assertEqual(report["status"], "fail")
+        self.assertIn("not added by exactly one non-merge commit", report["errors"][0])
+
+    def test_claim_whose_only_path_is_reverted_in_the_range_fails(self) -> None:
+        temporary, repo = self.git_repo()
+        del temporary
+        base = run(repo, "git", "rev-parse", "HEAD").stdout.strip()
+        self.claim(repo, "core/render/parent_backend.cpp", "20261127-parent-render-watch")
+        self.claim(repo, "core/render/child_backend.cpp", "20261127-child-render-watch")
+        run(repo, "git", "rm", "-q", "core/render/child_backend.cpp")
+        head = self.commit(repo, "revert the child path")
+        report = self.active_verify(repo, base, head)
+        self.assertEqual(report["status"], "fail")
+        self.assertIn("record no path of this family of their own", report["errors"][0])
+
+    def test_three_claims_where_only_the_last_two_overlap_fail(self) -> None:
+        temporary, repo = self.git_repo()
+        del temporary
+        base = run(repo, "git", "rev-parse", "HEAD").stdout.strip()
+        self.claim(repo, "core/render/a.cpp", "20261127-a-render-watch")
+        self.claim(repo, "core/render/b.cpp", "20261127-b-render-watch")
+        head = self.claim(repo, "core/render/b.cpp", "20261127-c-render-watch", text="again\n")
+        report = self.active_verify(repo, base, head)
+        self.assertEqual(report["status"], "fail")
+        self.assertIn("20261127-b-render-watch.json and", report["errors"][0])
+        self.assertIn("both cover ['core/render/b.cpp']", report["errors"][0])
+
+    def test_root_commit_in_the_range_is_a_structured_failure(self) -> None:
+        temporary, repo = self.git_repo()
+        del temporary
+        base = run(repo, "git", "rev-parse", "HEAD").stdout.strip()
+        self.claim(repo, "core/render/parent_backend.cpp", "20261127-parent-render-watch")
+        self.claim(repo, "core/render/child_backend.cpp", "20261127-child-render-watch")
+        run(repo, "git", "checkout", "-q", "--orphan", "unrelated")
+        run(repo, "git", "rm", "-rq", "--cached", ".")
+        for path in list(repo.iterdir()):
+            if path.name != ".git":
+                shutil.rmtree(path) if path.is_dir() else path.unlink()
+        self.touch(repo, "unrelated.txt", "x\n", "unrelated root")
+        run(repo, "git", "checkout", "-q", "-f", "master" if run(
+            repo, "git", "branch", "--list", "master").stdout.strip() else "main")
+        run(repo, "git", "merge", "-q", "--no-edit", "--allow-unrelated-histories", "unrelated")
+        head = run(repo, "git", "rev-parse", "HEAD").stdout.strip()
+        report = self.active_verify(repo, base, head)
+        self.assertEqual(report["status"], "fail")
+        self.assertIn("root commit", report["errors"][0])
 
     def test_single_claims_never_read_history(self) -> None:
         temporary, repo = self.git_repo()
