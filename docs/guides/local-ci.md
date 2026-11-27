@@ -9149,3 +9149,14 @@ workflows (`web-plugins.yml`, `wclap-cloudflare.yml`, `format-baseline-diff.yml`
 call it as `python3 tools/scripts/download_retry.py URL DEST`. The macOS
 `brew install ccache` step in `build.yml` uses the same schedule inline. A new
 workflow download should use the helper rather than a bare `curl -fsSL`.
+
+### Pre-push merge-tree time budget
+
+`PULP_PREPUSH_MERGE_TREE_BOUND` (default 30 seconds, 0 to disable) supplies the
+merge-tree helper's `--overall-bound`. This shared elapsed budget limits worktree
+checkout and checker execution. It does **not** enforce a whole-command deadline:
+Git metadata operations, including `merge-tree`, `commit-tree`, and pruning, and
+worktree cleanup can extend the elapsed time beyond it. Exhaustion reports
+NOT CHECKED, advisory, rather than a pass. A completed failing check still blocks
+the push; when merge-tree does not pass cleanly, the hook retains its static
+changed-surface families check.

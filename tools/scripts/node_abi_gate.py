@@ -221,8 +221,84 @@ def _canonical_virtual_signature(raw_decl: str) -> tuple[str, str]:
     return name, signature
 
 
+# processor.hpp spells the view-named Processor virtuals as
+# PULP_FORMAT_LEGACY_VIEW_NAME(name), which keeps each slot under a reserved
+# name in an SDK whose UI is not Pulp's. The slot, its position and its
+# signature are the same in both spellings, so the gate compares the plain
+# name. This is the only macro the gate expands, and only where it is sound:
+# in Processor's body, for the hooks listed below, with the macro's two
+# definitions pinned to their exact text. Anywhere else the macro fails the
+# gate, because there the substitution would hide what the compiler sees.
+_LEGACY_VIEW_NAME = re.compile(r"\bPULP_FORMAT_LEGACY_VIEW_NAME\(\s*([A-Za-z_]\w*)\s*\)")
+_LEGACY_VIEW_MENTION = re.compile(r"\bPULP_FORMAT_LEGACY_VIEW_NAME\b")
+_LEGACY_VIEW_CLASS = "Processor"
+_LEGACY_VIEW_SLOTS = frozenset({
+    "active_scripted_ui",
+    "create_view",
+    "on_view_closed",
+    "on_view_opened",
+    "on_view_resized",
+    "settings_sections",
+    "visit_active_scripted_ui",
+})
+
+
+_LEGACY_VIEW_DEFINE = re.compile(
+    r"^[ \t]*#[ \t]*define[ \t]+PULP_FORMAT_LEGACY_VIEW_NAME\(([^)]*)\)[ \t]*(.*?)[ \t]*$",
+    re.MULTILINE)
+_LEGACY_VIEW_CONDITIONAL = re.compile(
+    r"^[ \t]*#[ \t]*(?:undef|ifdef|ifndef|if|elif)\b[^\n]*\bPULP_FORMAT_LEGACY_VIEW_NAME\b",
+    re.MULTILINE)
+
+
+def check_legacy_view_macro(text: str) -> None:
+    """The normalization above is sound only while the macro has exactly its
+    two known definitions: the default (`#if PULP_FORMAT_LEGACY_VIEW`) branch
+    expands to the plain name, and the UI-free branch to the reserved name.
+    Nothing may undefine it, test whether it is already defined, or define it
+    a third time. Raises ValueError otherwise, so a changed definition fails
+    the gate instead of hiding behind the substitution."""
+    defines = [(param.strip(), expansion) for param, expansion in _LEGACY_VIEW_DEFINE.findall(text)]
+    if not defines:
+        raise ValueError("PULP_FORMAT_LEGACY_VIEW_NAME is used but not defined in this header")
+    expected = [
+        ("name", "name"),
+        ("name", "reserved_legacy_view_##name##_"),
+    ]
+    if defines != expected:
+        found = "; ".join(f"`({p}) {e}`" for p, e in defines)
+        raise ValueError(
+            "PULP_FORMAT_LEGACY_VIEW_NAME must have exactly its two definitions, "
+            "`(name) name` then `(name) reserved_legacy_view_##name##_`; found " + found)
+    conditional = _LEGACY_VIEW_CONDITIONAL.search(text)
+    if conditional:
+        raise ValueError(
+            "PULP_FORMAT_LEGACY_VIEW_NAME may not be undefined or tested: "
+            f"`{conditional.group(0).strip()}`")
+
+
+def _normalize_legacy_view(text: str, body: str, class_name: str) -> str:
+    if not _LEGACY_VIEW_MENTION.search(body):
+        return body
+    if class_name != _LEGACY_VIEW_CLASS:
+        raise ValueError(
+            f"PULP_FORMAT_LEGACY_VIEW_NAME is used in {class_name}; it is reserved for "
+            f"{_LEGACY_VIEW_CLASS}'s view hooks")
+    check_legacy_view_macro(text)
+    uses = _LEGACY_VIEW_NAME.findall(body)
+    if len(uses) != len(_LEGACY_VIEW_MENTION.findall(body)):
+        raise ValueError("PULP_FORMAT_LEGACY_VIEW_NAME must wrap a single identifier")
+    unknown = sorted(set(uses) - _LEGACY_VIEW_SLOTS)
+    if unknown:
+        raise ValueError(
+            "PULP_FORMAT_LEGACY_VIEW_NAME wraps a name that is not a legacy view hook: "
+            + ", ".join(unknown))
+    return _LEGACY_VIEW_NAME.sub(r"\1", body)
+
+
 def virtual_order(text: str, class_name: str) -> list[VirtualDecl]:
-    body = class_body(strip_c_comments(text), class_name)
+    stripped = strip_c_comments(text)
+    body = _normalize_legacy_view(stripped, class_body(stripped, class_name), class_name)
     decls: list[VirtualDecl] = []
     for match in re.finditer(r"\bvirtual\b(?P<decl>.*?)(?:;|{)", body, re.DOTALL):
         raw_decl = match.group("decl").strip()
