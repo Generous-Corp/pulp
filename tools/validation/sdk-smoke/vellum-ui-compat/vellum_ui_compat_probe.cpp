@@ -65,7 +65,11 @@ int main() {
     pulp::vellum_audio::KeyEvent press;
     press.key = pulp::vellum_audio::KeyCode::a;
     const bool consumed = typing.handle_key(press);
+#if defined(PULP_VELLUM_UI_COMPAT_VIEW_ALONE)
+    std::printf("Pulp::view alone -> MusicalTypingController 'a' sounds note %d\n", sounded);
+#else
     std::printf("Pulp::view-audio -> MusicalTypingController 'a' sounds note %d\n", sounded);
+#endif
     return consumed && sounded == typing.base_note() ? 0 : 1;
 }
 

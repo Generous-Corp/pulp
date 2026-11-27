@@ -822,7 +822,7 @@ the `clap` skill's Parameters section for the complete transport contract.
 | Format | `open()` is called here | `notify_attached()` is called here |
 |---|---|---|
 | VST3 | `CPluginView::attached()` before `attach_to_parent` | After `CPluginView::attached` returns `kResultTrue` |
-| CLAP | `gui_create` | Inside `gui_set_parent` on the matched window API |
+| CLAP | `gui_create` (the `create_view()` GUI at the end of `clap_adapter.cpp`; its `ViewBridge` lives in `LegacyClapGui`, not in `PulpClapPlugin`) | Inside `gui_set_parent` on the matched window API |
 | AU v2 | `uiViewForAudioUnit` — after fetching context via `kPulpEditorContextProperty` | After `PluginViewHost::create` succeeds |
 | AU v3 | `viewDidLoad` | After `PluginViewHost::attach_to_parent` in `viewDidLoad` |
 | AU v3, processor with an `editor_factory()` | `rebuildEditorIfReady` opens a `ContractEditorSession` in `PulpAUv3ContractView` and never creates a ViewBridge | n/a: the contract editor's `attach()` is the attach point |
@@ -2493,6 +2493,10 @@ is `docs/guides/editor-host-contract.md`. Things that are easy to get wrong:
   touched, so a gesture the view opened directly stays for the host's own
   teardown. The root sizes the view in `layout_children()`, not `on_resized()`:
   Vellum's flex layout runs after `on_resized()` and would replace the bounds.
+  The header only declares; the root lives in `src/view_editor.cpp`, and the
+  `pulp-vellum-header-weight-view-editor` test keeps `editor.hpp` and the
+  Vellum view layer out of it. A view anywhere in the hosted tree that
+  implements `EditorIdleTarget` gets the editor's idle tick while attached.
 - **The header must stay view-free.** It names no `pulp::view`, canvas, render,
   Dawn or Vellum type, and `format_header_view_boundary.py` classifies it as a
   `pulp-format-core` header automatically, so an include that reaches the view
