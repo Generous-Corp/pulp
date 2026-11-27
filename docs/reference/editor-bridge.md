@@ -11,8 +11,9 @@ The bridge keeps editor message dispatch shared across plugins so each editor
 does not need to reinvent envelope parsing, handler routing, and error response
 formatting.
 
-- Header: `core/editor_bridge/include/pulp/view/editor_bridge.hpp`
+- Header: `core/editor_bridge/include/pulp/view/editor_bridge.hpp` (the view-free `pulp::editor-bridge` library)
 - Implementation: `core/editor_bridge/src/editor_bridge.cpp`
+- Attachments: `core/view/include/pulp/view/editor_bridge_attach.hpp`, defined in `pulp::view-tooling`
 - Tests: `test/test_editor_bridge.cpp`
 
 ## Envelope
@@ -67,7 +68,7 @@ public:
     EditorBridge();
     ~EditorBridge();
 
-    // Non-copyable AND non-movable. attach_webview / attach_native_runtime
+    // Non-copyable AND non-movable. attach_webview() / attach_native_runtime()
     // install callbacks that reference this bridge instance, so moving an
     // attached bridge would dangle them. Construct in-place; static_asserts
     // in the test suite lock this in.
@@ -89,14 +90,6 @@ public:
     std::string dispatch_webview_message(std::string_view type,
                                          std::string_view payload_json) const noexcept;
 
-    // Renderer attach helpers.
-    void attach_webview        (WebViewPanel& panel);
-    void detach_webview        (WebViewPanel& panel);
-    void attach_native_runtime (JsRuntime& runtime, std::string_view handler_name);
-    void attach_native_runtime (ScriptEngine& engine, std::string_view handler_name);
-    void attach_native_runtime (ScriptedUiSession& session, std::string_view handler_name);
-    void detach_native_runtime (ScriptedUiSession& session, std::string_view handler_name);
-
     // Static value-coercion helpers (never throw).
     static float       get_float (const choc::value::ValueView&, const char* key, float dflt) noexcept;
     static std::size_t get_uint  (const choc::value::ValueView&, const char* key, std::size_t dflt) noexcept;
@@ -108,8 +101,21 @@ public:
     static std::string err_response(std::string_view msg) noexcept;
 };
 
+// pulp/view/editor_bridge_attach.hpp (pulp::view-tooling): renderer attachments.
+void attach_webview       (EditorBridge& bridge, WebViewPanel& panel);
+void detach_webview       (EditorBridge& bridge, WebViewPanel& panel);
+void attach_native_runtime(EditorBridge& bridge, JsRuntime& runtime, std::string_view handler_name);
+void attach_native_runtime(EditorBridge& bridge, ScriptEngine& engine, std::string_view handler_name);
+void attach_native_runtime(EditorBridge& bridge, ScriptedUiSession& session, std::string_view handler_name);
+void detach_native_runtime(EditorBridge& bridge, ScriptedUiSession& session, std::string_view handler_name);
+
 } // namespace pulp::view
 ```
+
+The attachments name view types, so they are declared apart from the
+dispatch core: a consumer that links only `pulp::editor-bridge` (for example
+through a Vellum-backed `Pulp::view-tooling`) sees no declaration it cannot
+link.
 
 ### `attach_webview`
 
@@ -117,8 +123,8 @@ Routes a `WebViewPanel`'s structured message channel through this
 bridge. Equivalent to:
 
 ```cpp
-panel.set_message_handler([this](const WebViewMessage& m) {
-    return dispatch_webview_message(m.type, m.payload_json);
+panel.set_message_handler([&bridge](const WebViewMessage& m) {
+    return bridge.dispatch_webview_message(m.type, m.payload_json);
 });
 ```
 
@@ -134,7 +140,7 @@ bridge and panel are owned side-by-side and you want explicit teardown
 ordering:
 
 ```cpp
-bridge.detach_webview(panel);
+detach_webview(bridge, panel);
 ```
 
 Calling `detach_webview` before an attach is safe; it is a no-op from
@@ -146,7 +152,7 @@ The `ScriptEngine` overload registers a named native function that accepts one
 JSON envelope string and returns the bridge's JSON response string:
 
 ```cpp
-bridge.attach_native_runtime(engine, "__editorDispatch");
+attach_native_runtime(bridge, engine, "__editorDispatch");
 ```
 
 ```js
@@ -164,9 +170,9 @@ For a `ScriptedUiSession`, use the session overload instead of borrowing or
 exposing its engine:
 
 ```cpp
-bridge.attach_native_runtime(session, "__editorDispatch");
+attach_native_runtime(bridge, session, "__editorDispatch");
 // ... before bridge or captured handler state is destroyed:
-bridge.detach_native_runtime(session, "__editorDispatch");
+detach_native_runtime(bridge, session, "__editorDispatch");
 ```
 
 The session installs the endpoint before the live script executes and
@@ -179,7 +185,7 @@ realms and replaces the current global with a detached error response.
 ## Usage example
 
 ```cpp
-#include <pulp/view/editor_bridge.hpp>
+#include <pulp/view/editor_bridge_attach.hpp>
 
 class MyEditor {
 public:
@@ -197,7 +203,7 @@ public:
             return pulp::view::EditorBridge::ok_response(extras);
         });
 
-        bridge_.attach_webview(panel);
+        pulp::view::attach_webview(bridge_, panel);
     }
 private:
     pulp::view::EditorBridge bridge_;

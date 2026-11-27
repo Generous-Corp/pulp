@@ -21,6 +21,8 @@
         "core/editor_bridge/src/editor_bridge.cpp",
         "core/view/src/editor_bridge_native_runtime.cpp",
         "core/editor_bridge/include/pulp/view/editor_bridge.hpp",
+        "core/view/include/pulp/view/editor_bridge_attach.hpp",
+        "core/view/include/pulp/view/editor_bridge_scaffold.hpp",
         "core/view/include/pulp/view/host_param_surface.hpp",
         "core/view/src/script_inspector_bridge.cpp",
         "core/view/include/pulp/view/script_inspector_bridge.hpp",

@@ -54,15 +54,6 @@
 
 namespace pulp::view {
 
-class WebViewPanel;
-class ScriptEngine;
-class ScriptedUiSession;
-
-// Forward-declared so EditorBridge can expose attach_native_runtime()
-// before the JS engine surface is fully available in this header. The
-// concrete JsRuntime type lives in pulp/view/js_engine.hpp.
-class JsRuntime;
-
 /// Renderer-agnostic dispatcher for editor↔processor JSON messages.
 ///
 /// Typical usage from a plugin editor:
@@ -79,7 +70,11 @@ class JsRuntime;
 ///       apply_morph_to_live(t);
 ///       return pulp::view::EditorBridge::ok_response();
 ///   });
-///   bridge.attach_webview(*panel_);
+///   attach_webview(bridge, *panel_);   // pulp/view/editor_bridge_attach.hpp
+///
+/// This header is the view-free dispatch core (pulp::editor-bridge). Attaching
+/// the bridge to a WebView panel or a script engine is in
+/// pulp/view/editor_bridge_attach.hpp, which pulp::view-tooling provides.
 class EditorBridge {
 public:
     /// Handler signature. Receives the parsed payload (or an empty
@@ -93,8 +88,8 @@ public:
 
     // Non-copyable AND non-movable.
     //
-    // attach_webview() and attach_native_runtime() install callbacks
-    // that reference this bridge's internal state. Allowing moves
+    // attach_webview() and attach_native_runtime() (editor_bridge_attach.hpp)
+    // install callbacks that reference this bridge. Allowing moves
     // would let an attached bridge be relocated out from under those
     // callbacks (vector reallocation, std::optional emplace, move-
     // construction of an editor that contains one), and the next
@@ -140,48 +135,10 @@ public:
 
     /// Convenience: dispatch a WebViewPanel message that has already
     /// been split into `type` + `payload_json` by the platform layer.
-    /// Used internally by attach_webview but also useful directly when
+    /// Used by attach_webview() but also useful directly when
     /// a plugin wraps WebViewPanel itself.
     std::string dispatch_webview_message(std::string_view type,
                                          std::string_view payload_json) const noexcept;
-
-    /// Hook this bridge up to a WebViewPanel's structured message
-    /// channel. Equivalent to:
-    ///   panel.set_message_handler([this](const WebViewMessage& m) {
-    ///       return dispatch_webview_message(m.type, m.payload_json);
-    ///   });
-    void attach_webview(WebViewPanel& panel);
-
-    /// Clear the message handler installed by attach_webview(). Safe
-    /// to call even when no WebView handler is currently installed.
-    /// Consumers that own both the bridge and panel can use this to
-    /// make teardown order explicit before the panel or native child
-    /// view is detached.
-    void detach_webview(WebViewPanel& panel);
-
-    /// Hook this bridge up to a native JS runtime's postMessage source.
-    /// `handler_name` is the symbol the runtime exposes that calls back
-    /// into C++ (the equivalent of `__pulpPostMessage` in WebView).
-    ///
-    /// NOTE: This is the integration seam for pulp #468 (Claude Design
-    /// import lane). The full wiring lands when the import lane's
-    /// JsRuntime postMessage shape is concrete; until then the body is
-    /// a stub that records the binding so the call site doesn't have
-    /// to feature-flag itself out.
-    void attach_native_runtime(JsRuntime& runtime, std::string_view handler_name);
-
-    /// Register a global function on a native ScriptEngine that accepts one
-    /// JSON envelope string and returns the bridge's JSON response string.
-    /// The EditorBridge must outlive calls through the registered symbol.
-    void attach_native_runtime(ScriptEngine& engine, std::string_view handler_name);
-
-    /// Attach to a ScriptedUiSession without borrowing its replaceable engine.
-    /// The endpoint is preserved across scripted-UI reloads. This bridge must
-    /// outlive the attachment; call detach_native_runtime() before teardown.
-    void attach_native_runtime(ScriptedUiSession& session,
-                               std::string_view handler_name);
-    void detach_native_runtime(ScriptedUiSession& session,
-                               std::string_view handler_name);
 
     // ── Static value-coercion helpers for handler authors ────────────
     //
@@ -215,13 +172,5 @@ private:
     struct Impl;
     std::unique_ptr<Impl> impl_;
 };
-
-/// Build the starter `bridge_handlers.cpp` text the CLI emits next to
-/// the generated JS view when `--from claude` runs. Pure string-builder;
-/// no I/O. The output references `pulp::view::EditorBridge` and shows
-/// add_handler() registrations + an attach_webview() call so users have
-/// a runnable shape to fill in. Defined in pulp-view-tooling with the
-/// bridge itself, so the extracted design-import headers do not declare it.
-std::string render_claude_bridge_scaffold(const std::string& generated_js_path);
 
 } // namespace pulp::view
