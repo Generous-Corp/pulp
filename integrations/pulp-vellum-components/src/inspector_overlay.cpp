@@ -56,7 +56,8 @@ void InspectorOverlay::set_active(bool active) {
 
 bool InspectorOverlay::select_parent() {
     drop_stale_views();
-    if (!selected_)
+    // Stop at the inspected root: its parent lies outside the inspected tree.
+    if (!selected_ || selected_ == &root_)
         return false;
     View* parent = selected_->parent();
     if (!parent)

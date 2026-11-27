@@ -337,6 +337,18 @@ TEST_CASE("a view removed from the tree is dropped at the next paint",
     REQUIRE(inspector.hovered_view() == nullptr);
 }
 
+TEST_CASE("select_parent never leaves an inspected subtree root",
+          "[pulp-vellum-components][inspector-overlay]") {
+    Pair t;
+    View& sub = *t.a;
+    InspectorOverlay sub_inspector(sub);
+    sub_inspector.set_active(true);
+    sub_inspector.set_selected_view(&sub);
+    REQUIRE(sub.parent() == &t.root);
+    REQUIRE_FALSE(sub_inspector.select_parent());
+    REQUIRE(sub_inspector.selected_view() == &sub);
+}
+
 TEST_CASE("cursor and select_parent on a removed selection never dereference it",
           "[pulp-vellum-components][inspector-overlay]") {
     Pair t;
