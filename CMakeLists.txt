@@ -634,11 +634,12 @@ set(_pulp_standalone_core_sources
     core/format/src/standalone_control_host.cpp
     core/format/src/null_audio_device.cpp
     core/format/src/standalone_settings_model.cpp
+    core/format/src/standalone_updater.cpp
     core/format/src/test_signal.cpp)
 set(_pulp_standalone_view_sources
     core/format/src/standalone_view_layer.cpp
     core/format/src/standalone_musical_typing.cpp
-    core/format/src/standalone_updater.cpp
+    core/format/src/standalone_updater_menu.cpp
     core/format/src/settings_panel.cpp)
 # Synthetic key delivery for the test harness needs AppKit, so the macOS
 # backend is Obj-C++; every other platform links the unsupported stub.
@@ -647,15 +648,15 @@ if(APPLE)
         core/format/src/standalone_key_driver_mac.mm
         core/format/src/standalone_settings_window_mac.mm
         core/format/src/standalone_contract_editor_mac.mm
-        core/format/src/standalone_persistence_mac.mm)
-    list(APPEND _pulp_standalone_view_sources core/format/src/standalone_updater_mac.mm)
+        core/format/src/standalone_persistence_mac.mm
+        core/format/src/standalone_updater_mac.mm)
 else()
     list(APPEND _pulp_standalone_core_sources
         core/format/src/standalone_key_driver_stub.cpp
         core/format/src/standalone_settings_window_stub.cpp
         core/format/src/standalone_contract_editor_stub.cpp
-        core/format/src/standalone_persistence_stub.cpp)
-    list(APPEND _pulp_standalone_view_sources core/format/src/standalone_updater_stub.cpp)
+        core/format/src/standalone_persistence_stub.cpp
+        core/format/src/standalone_updater_stub.cpp)
 endif()
 set(_pulp_standalone_sources ${_pulp_standalone_core_sources} ${_pulp_standalone_view_sources})
 add_library(pulp-standalone STATIC ${_pulp_standalone_sources})
@@ -679,7 +680,8 @@ target_include_directories(pulp-standalone-contract PUBLIC
 target_link_libraries(pulp-standalone-contract PUBLIC pulp::format-core)
 target_compile_definitions(pulp-standalone-contract PRIVATE PULP_ENABLE_INSPECTOR=0)
 if(APPLE AND NOT IOS)
-    target_link_libraries(pulp-standalone-contract PUBLIC "-framework AppKit")
+    # The updater reads the app's own code signature (standalone_updater_mac.mm).
+    target_link_libraries(pulp-standalone-contract PUBLIC "-framework AppKit" "-framework Security")
 endif()
 function(_pulp_configure_standalone_target target view_target)
     target_include_directories(${target} PUBLIC

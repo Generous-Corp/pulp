@@ -288,6 +288,7 @@
       "pulp/format/contract_editor_session.hpp",
       "pulp/format/descriptor_agreement.hpp",
       "pulp/format/descriptor_validation.hpp",
+      "pulp/format/detail/app_update_messages.hpp",
       "pulp/format/detail/appkit_contract_key.hpp",
       "pulp/format/detail/au_resize_trace.hpp",
       "pulp/format/detail/au_v2_editor_resize.hpp",
@@ -319,7 +320,9 @@
       "pulp/format/detail/standalone_musical_typing.hpp",
       "pulp/format/detail/standalone_persistence.hpp",
       "pulp/format/detail/standalone_settings_window.hpp",
+      "pulp/format/detail/standalone_test_hooks.hpp",
       "pulp/format/detail/standalone_updater.hpp",
+      "pulp/format/detail/standalone_updater_menu.hpp",
       "pulp/format/detail/standalone_window_factory.hpp",
       "pulp/format/detail/vst3_bus_layout.hpp",
       "pulp/format/detail/vst3_frame_rate.hpp",
@@ -362,6 +365,7 @@
       "pulp/format/host_version.hpp",
       "pulp/format/ios_audio_session.h",
       "pulp/format/ios_audio_session.hpp",
+      "pulp/format/legacy_view.hpp",
       "pulp/format/lv2_adapter.hpp",
       "pulp/format/lv2_entry.hpp",
       "pulp/format/max_block_contract.hpp",
@@ -409,6 +413,7 @@
       "pulp/format/reload/reload_swap_units.hpp",
       "pulp/format/reload/reload_transaction.hpp",
       "pulp/format/reload/reload_trust_policy.hpp",
+      "pulp/format/reload/reloadable_editor_shell.hpp",
       "pulp/format/reload/reloadable_shell.hpp",
       "pulp/format/reload/reloadable_shell_core.hpp",
       "pulp/format/reload/remote_update.hpp",
@@ -1772,7 +1777,7 @@
       },
       "build_scope": {
         "PULP_BUILD_TESTS": "ON",
-        "PULP_BUILD_EXAMPLES": "ON"
+        "PULP_BUILD_EXAMPLES": "OFF"
       },
       "summary": {
         "installed_target_count": 91,
@@ -7848,6 +7853,7 @@
           },
           "direct_dependencies": [
             "framework:AppKit",
+            "framework:Security",
             "pulp-format-core"
           ]
         },

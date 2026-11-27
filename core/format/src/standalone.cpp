@@ -5,6 +5,8 @@
 #include <pulp/format/detail/standalone_environment.hpp>
 #include <pulp/format/detail/standalone_persistence.hpp>
 #include <pulp/format/detail/standalone_contract_editor.hpp>
+#include <pulp/format/detail/standalone_updater.hpp>
+#include <pulp/format/detail/standalone_test_hooks.hpp>
 #include <pulp/format/detail/standalone_settings_window.hpp>
 #include <pulp/format/detail/standalone_key_driver.hpp>
 #include <pulp/format/detail/standalone_key_sequence.hpp>
@@ -920,6 +922,10 @@ void StandaloneApp::shutdown_panels() noexcept {
     panels_.clear();
 }
 
+void StandaloneApp::set_test_hooks(const detail::StandaloneTestHooks& hooks) {
+    test_hooks_ = std::make_unique<detail::StandaloneTestHooks>(hooks);
+}
+
 bool StandaloneApp::run_contract_editor(EditorFactory& factory) {
     if (!detail::standalone_contract_editor_supported()) {
         runtime::log_error(
@@ -935,6 +941,8 @@ bool StandaloneApp::run_contract_editor(EditorFactory& factory) {
     options.screen_visible_width = config_.test_screen_visible_width;
     options.screen_visible_height = config_.test_screen_visible_height;
     options.on_window_ready = config_.test_on_editor_window;
+    if (test_hooks_)
+        options.test_open_plugin_settings_frame = test_hooks_->open_plugin_settings_frame;
     if (!config_.test_key_sequence.empty()) {
         std::string error;
         if (!detail::parse_key_sequence(config_.test_key_sequence, options.key_steps, error)) {
@@ -950,6 +958,22 @@ bool StandaloneApp::run_contract_editor(EditorFactory& factory) {
         config_.transport_playing = playing;
     };
     options.on_open_settings = [this] { return open_settings_window(); };
+    // In-app updates, as the view standalone installs them: Sparkle when the
+    // app embeds it, or the development stub. Installed before the editor
+    // opens, so an editor's update bridge reads a live service at once.
+    bool offer_updates = false;
+    const bool test_service = test_hooks_ && test_hooks_->update_service;
+    if (test_service) {
+        set_app_update_service(test_hooks_->update_service);
+        offer_updates = true;
+    } else {
+        offer_updates = detail::install_standalone_updater(detail::plan_standalone_updater(
+            detail::probe_standalone_updater_environment(config_.headless)));
+    }
+    if (offer_updates)
+        options.on_check_for_updates = [] { check_for_app_updates(); };
+    if (test_hooks_ && test_hooks_->on_app_menu)
+        options.test_on_app_menu = test_hooks_->on_app_menu;
     for (const auto& panel : panels_)
         options.panels.push_back(panel.get());
     options.on_idle = [this] {
@@ -960,6 +984,9 @@ bool StandaloneApp::run_contract_editor(EditorFactory& factory) {
     };
     const bool ran = detail::run_standalone_contract_editor(*processor_, store_, factory, options);
     detail::close_standalone_settings_windows(this);
+    // A test's service is the test's: it does not outlive the window.
+    if (test_service)
+        set_app_update_service(nullptr);
     return ran;
 }
 

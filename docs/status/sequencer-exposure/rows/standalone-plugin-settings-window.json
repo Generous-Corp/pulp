@@ -1,0 +1,52 @@
+{
+  "id": "standalone-plugin-settings-window",
+  "title": "The standalone contract window opens a plug-in's settings editor and offers in-app updates",
+  "classification": "engine_internal",
+  "delivery_state": "pending",
+  "claim_id": "standalone-plugin-settings-window-20261126",
+  "owned_paths": [
+    "core/format/include/pulp/format/detail/standalone_test_hooks.hpp",
+    "core/format/include/pulp/format/detail/standalone_contract_editor.hpp",
+    "core/format/src/standalone_contract_editor_mac.mm",
+    "test/test_standalone_contract_editor.mm",
+    "docs/status/sequencer-exposure/rows/standalone-plugin-settings-window.json"
+  ],
+  "evidence": [
+    {
+      "path": "core/format/include/pulp/format/detail/standalone_test_hooks.hpp",
+      "needles": [
+        "int open_plugin_settings_frame = -1;",
+        "std::shared_ptr<AppUpdateService> update_service;"
+      ]
+    },
+    {
+      "path": "core/format/src/standalone_contract_editor_mac.mm",
+      "needles": [
+        "class PluginSettingsWindow",
+        "EditorRole::settings"
+      ]
+    }
+  ],
+  "surfaces": {
+    "installed_sdk": {
+      "disposition": "not_applicable",
+      "rationale": "StandaloneApp gains set_test_hooks() over a detail test-hooks struct (a settings-editor frame, an update service and an app-menu observer) that defaults to off; the standalone window gains menu items only for a factory that offers EditorRole::settings or an app whose updater offers checks. No sequencer type, transport or timing contract changes."
+    },
+    "offline_timeline_cli": {
+      "disposition": "not_applicable",
+      "rationale": "No timeline CLI command, flag, or output contract changes."
+    },
+    "offline_timeline_mcp": {
+      "disposition": "not_applicable",
+      "rationale": "No MCP operation, schema, or handler changes."
+    },
+    "live_product_control": {
+      "disposition": "not_applicable",
+      "rationale": "No runtime operation, executor binding, grant, or profile policy changes."
+    },
+    "design_time_agent_manifest": {
+      "disposition": "not_applicable",
+      "rationale": "No design-time capability or authoring contract changes."
+    }
+  }
+}

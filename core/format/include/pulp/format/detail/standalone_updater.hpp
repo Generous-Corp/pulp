@@ -18,7 +18,6 @@
 // the Settings panel's Updates tab and a JS editor's bridge messages read.
 
 #include <pulp/format/app_updates.hpp>
-#include <pulp/view/window_host.hpp>
 
 #include <cstdint>
 #include <memory>
@@ -83,15 +82,16 @@ void check_for_standalone_updates();
 /// and Sparkle's own persisted settings.
 std::shared_ptr<AppUpdateService> make_standalone_update_service(const StandaloneUpdaterPlan& plan);
 
+/// What every standalone does at launch, with or without Pulp's view layer:
+/// install the plan's service as the process-wide AppUpdateService (none when
+/// the plan has no backend) and start Sparkle when the plan says so. True when
+/// the app should offer "Check for Updates…".
+bool install_standalone_updater(const StandaloneUpdaterPlan& plan);
+
 /// A service that never contacts a feed: a check only records its time and
 /// the automatic-check preference lives in memory. Portable; used for the
 /// "stub" backend and by tests.
 std::shared_ptr<AppUpdateService> make_stub_update_service(std::string app_name,
                                                            std::string version);
-
-/// Add "Check for Updates…" to the application menu, directly under "About
-/// <App>", when the plan offers it. The command calls check_for_app_updates().
-void add_standalone_updater_menu_command(view::WindowOptions& options,
-                                         const StandaloneUpdaterPlan& plan);
 
 } // namespace pulp::format::detail

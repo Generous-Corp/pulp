@@ -187,32 +187,19 @@
 }
 @end
 
-// The target of the app menu's items.
+// The target of the app menu's items: each item's tag indexes the menu model.
 @interface PulpStandaloneContractMenuTarget : NSObject {
   @public
-    std::function<bool()> openSettings;
-    std::vector<pulp::format::StandalonePanel*> panels;
-    NSWindow* editorWindow;
+    std::vector<pulp::format::detail::StandaloneContractMenuItem> items;
 }
-- (void)openSettings:(id)sender;
-- (void)togglePanel:(id)sender;
-- (void)closeEditor:(id)sender;
+- (void)invokeItem:(NSMenuItem*)sender;
 @end
 
 @implementation PulpStandaloneContractMenuTarget
-- (void)openSettings:(id)sender {
-    (void)sender;
-    if (openSettings)
-        openSettings();
-}
-- (void)closeEditor:(id)sender {
-    (void)sender;
-    [editorWindow performClose:nil];
-}
-- (void)togglePanel:(NSMenuItem*)sender {
+- (void)invokeItem:(NSMenuItem*)sender {
     const auto index = static_cast<std::size_t>(sender.tag);
-    if (index < panels.size() && panels[index] != nullptr)
-        panels[index]->toggle();
+    if (index < items.size() && items[index].action)
+        items[index].action();
 }
 @end
 
@@ -220,10 +207,39 @@ namespace pulp::format::detail {
 
 namespace {
 
-// The app menu a standalone with Audio/MIDI settings or panels shows:
-// "Audio/MIDI Settings…" (Cmd+,), one item per panel on its shortcut, and a
-// Quit that closes the editor window, so the editor detaches in order. Skipped
-// when the process already has a main menu.
+// The app menu as a model: "Check for Updates…" when the updater offers it,
+// "Audio/MIDI Settings…" (Cmd+,), "<name> Settings…" (Cmd+Option+,) for the
+// plug-in's settings editor, one item per panel on its shortcut, and a Quit
+// that closes the editor window, so the editor detaches in order. Built for
+// every run, headless included, so a test reads the same items the window
+// installs.
+std::vector<StandaloneContractMenuItem>
+build_app_menu_model(const StandaloneContractEditorOptions& options,
+                     std::function<bool()> open_plugin_settings, const std::string& name,
+                     NSWindow* window) {
+    std::vector<StandaloneContractMenuItem> items;
+    if (options.on_check_for_updates)
+        items.push_back({StandaloneContractMenuItem::Role::updates, "Check for Updates\u2026", "",
+                         false, options.on_check_for_updates});
+    if (options.on_open_settings) {
+        auto open = options.on_open_settings;
+        items.push_back({StandaloneContractMenuItem::Role::audio_settings,
+                         "Audio/MIDI Settings\u2026", ",", false, [open] { open(); }});
+    }
+    if (open_plugin_settings)
+        items.push_back({StandaloneContractMenuItem::Role::plugin_settings,
+                         name + " Settings\u2026", ",", true,
+                         [open = std::move(open_plugin_settings)] { open(); }});
+    for (auto* panel : options.panels)
+        items.push_back({StandaloneContractMenuItem::Role::panel, panel->menu_title(),
+                         std::string(1, panel->shortcut()), false, [panel] { panel->toggle(); }});
+    items.push_back({StandaloneContractMenuItem::Role::quit, "Quit " + name, "q", false,
+                     [window] { [window performClose:nil]; }});
+    return items;
+}
+
+// Install the model as the app's main menu. Skipped when the process already
+// has one.
 bool install_app_menu(PulpStandaloneContractMenuTarget* target, NSString* title) {
     if ([NSApp mainMenu] != nil)
         return false;
@@ -231,34 +247,153 @@ bool install_app_menu(PulpStandaloneContractMenuTarget* target, NSString* title)
     NSMenuItem* appItem = [[[NSMenuItem alloc] init] autorelease];
     [bar addItem:appItem];
     NSMenu* appMenu = [[[NSMenu alloc] initWithTitle:title] autorelease];
-    if (target->openSettings) {
-        NSMenuItem* settings = [[[NSMenuItem alloc] initWithTitle:@"Audio/MIDI Settings\u2026"
-                                                           action:@selector(openSettings:)
-                                                    keyEquivalent:@","] autorelease];
-        settings.target = target;
-        [appMenu addItem:settings];
-    }
-    for (std::size_t i = 0; i < target->panels.size(); ++i) {
-        auto* panel = target->panels[i];
-        const char key[2] = {panel->shortcut(), '\0'};
+    for (std::size_t i = 0; i < target->items.size(); ++i) {
+        const auto& model = target->items[i];
+        using Role = StandaloneContractMenuItem::Role;
+        // Quit sits below a separator.
+        if (model.role == Role::quit && i > 0)
+            [appMenu addItem:[NSMenuItem separatorItem]];
         NSMenuItem* item = [[[NSMenuItem alloc]
-            initWithTitle:[NSString stringWithUTF8String:panel->menu_title().c_str()]
-                   action:@selector(togglePanel:)
-            keyEquivalent:[NSString stringWithUTF8String:key]] autorelease];
+            initWithTitle:[NSString stringWithUTF8String:model.title.c_str()]
+                   action:@selector(invokeItem:)
+            keyEquivalent:[NSString stringWithUTF8String:model.key.c_str()]] autorelease];
+        if (model.option_modifier)
+            item.keyEquivalentModifierMask = NSEventModifierFlagCommand | NSEventModifierFlagOption;
         item.tag = static_cast<NSInteger>(i);
         item.target = target;
         [appMenu addItem:item];
+        // So does the updater's item from the settings and panels after it.
+        if (model.role == Role::updates && i + 1 < target->items.size() &&
+            target->items[i + 1].role != Role::quit)
+            [appMenu addItem:[NSMenuItem separatorItem]];
     }
-    [appMenu addItem:[NSMenuItem separatorItem]];
-    NSMenuItem* quit = [[[NSMenuItem alloc] initWithTitle:[@"Quit " stringByAppendingString:title]
-                                                   action:@selector(closeEditor:)
-                                            keyEquivalent:@"q"] autorelease];
-    quit.target = target;
-    [appMenu addItem:quit];
     appItem.submenu = appMenu;
     [NSApp setMainMenu:bar];
     return true;
 }
+
+// The plug-in's own settings (EditorRole::settings) in a second window. Opened
+// on demand; the editor window's loop ticks it and closes it before the main
+// editor detaches. Headless runs build it without ever showing it.
+class PluginSettingsWindow {
+  public:
+    PluginSettingsWindow(Processor& processor, state::StateStore& store, EditorFactory& factory,
+                         std::string title, bool headless)
+        : processor_(processor), store_(store), factory_(factory), title_(std::move(title)),
+          headless_(headless) {}
+    ~PluginSettingsWindow() {
+        close();
+    }
+
+    // Open it, or bring it forward when it is already open. False when the
+    // factory builds no settings editor or it does not attach.
+    bool open() {
+        if (window_ != nil) {
+            if (!headless_)
+                [window_ makeKeyAndOrderFront:nil];
+            return true;
+        }
+        ContractEditorSession::HostHooks hooks;
+        hooks.request_resize = [this](const EditorSize& size) {
+            if (content_ == nil)
+                return false;
+            return [content_ applyEditorSize:NSMakeSize(size.width, size.height)];
+        };
+        hooks.host_action = [this](const HostActionRequest& request) {
+            if (request.action != HostAction::close_editor || window_ == nil)
+                return false;
+            [window_ performClose:nil];
+            return true;
+        };
+        session_ = ContractEditorSession::create(processor_, store_, factory_, std::move(hooks),
+                                                 ContractEditorSession::IdleSource::host_driven,
+                                                 EditorRole::settings);
+        if (!session_) {
+            runtime::log_error("Standalone: the editor factory built no settings editor");
+            return false;
+        }
+        const auto size = session_->size();
+        NSWindowStyleMask style = NSWindowStyleMaskTitled | NSWindowStyleMaskClosable;
+        if (session_->resizable())
+            style |= NSWindowStyleMaskResizable;
+        window_ = [[NSWindow alloc] initWithContentRect:NSMakeRect(0, 0, size.width, size.height)
+                                              styleMask:style
+                                                backing:NSBackingStoreBuffered
+                                                  defer:NO];
+        window_.releasedWhenClosed = NO;
+        window_.title = [NSString stringWithUTF8String:title_.c_str()];
+        content_ = [[PulpStandaloneContractView alloc]
+            initWithFrame:NSMakeRect(0, 0, size.width, size.height)];
+        window_.contentView = content_;
+        delegate_ = [[PulpStandaloneContractWindowDelegate alloc] init];
+        delegate_->session = session_.get();
+        window_.delegate = delegate_;
+        NativeParent parent;
+        parent.kind = NativeParentKind::cocoa_view;
+        parent.handle = (__bridge void*)content_;
+        if (!session_->attach(parent)) {
+            runtime::log_error("Standalone: the settings editor did not attach");
+            close();
+            return false;
+        }
+        [content_ setSession:session_.get() onTransportKey:{}];
+        session_->set_scale(window_.backingScaleFactor);
+        if (!headless_) {
+            session_->visibility_changed(true);
+            [window_ center];
+            pulp::platform::order_in_window(window_);
+        }
+        return true;
+    }
+
+    bool is_open() const {
+        return window_ != nil;
+    }
+
+    // One frame: tick while open, and close once the user closed the window.
+    void tick() {
+        if (window_ == nil)
+            return;
+        if (delegate_->closed) {
+            close();
+            return;
+        }
+        session_->tick();
+    }
+
+    // An orderly close: the window still exists while the editor detaches.
+    void close() {
+        if (window_ == nil)
+            return;
+        if (session_) {
+            if (!headless_)
+                session_->visibility_changed(false);
+            session_->detach();
+        }
+        [content_ setSession:nullptr onTransportKey:{}];
+        delegate_->session = nullptr;
+        session_.reset();
+        window_.delegate = nil;
+        [delegate_ release];
+        delegate_ = nil;
+        [content_ release];
+        content_ = nil;
+        [window_ orderOut:nil];
+        [window_ release];
+        window_ = nil;
+    }
+
+  private:
+    Processor& processor_;
+    state::StateStore& store_;
+    EditorFactory& factory_;
+    std::string title_;
+    bool headless_;
+    std::unique_ptr<ContractEditorSession> session_;
+    NSWindow* window_ = nil;
+    PulpStandaloneContractView* content_ = nil;
+    PulpStandaloneContractWindowDelegate* delegate_ = nil;
+};
 
 bool write_file(const std::string& path, const std::vector<std::uint8_t>& bytes) {
     std::ofstream out(path, std::ios::binary | std::ios::trunc);
@@ -397,13 +532,27 @@ bool run_standalone_contract_editor(Processor& processor, state::StateStore& sto
     [window makeFirstResponder:content];
     if (options.on_window_ready)
         options.on_window_ready((__bridge void*)window);
+    // The plug-in's own settings, when its factory offers a settings editor.
+    std::unique_ptr<PluginSettingsWindow> plugin_settings;
+    if (factory.supports(EditorRole::settings)) {
+        plugin_settings = std::make_unique<PluginSettingsWindow>(
+            processor, store, factory, processor.descriptor().name + " Settings", options.headless);
+    }
+    std::function<bool()> open_plugin_settings;
+    if (plugin_settings) {
+        auto* settings_window = plugin_settings.get();
+        open_plugin_settings = [settings_window] { return settings_window->open(); };
+    }
+    auto menu_items = build_app_menu_model(options, std::move(open_plugin_settings),
+                                           processor.descriptor().name, window);
+    if (options.test_on_app_menu)
+        options.test_on_app_menu(menu_items);
     PulpStandaloneContractMenuTarget* menu_target = nil;
     bool installed_menu = false;
-    if (!options.headless && (options.on_open_settings || !options.panels.empty())) {
+    // A Quit alone is no reason to take over the app's menu.
+    if (!options.headless && menu_items.size() > 1) {
         menu_target = [[PulpStandaloneContractMenuTarget alloc] init];
-        menu_target->openSettings = options.on_open_settings;
-        menu_target->panels = options.panels;
-        menu_target->editorWindow = window;
+        menu_target->items = std::move(menu_items);
         installed_menu = install_app_menu(
             menu_target, [NSString stringWithUTF8String:processor.descriptor().name.c_str()]);
     }
@@ -423,6 +572,11 @@ bool run_standalone_contract_editor(Processor& processor, state::StateStore& sto
     while (!delegate->closed) {
         pump_one_frame();
         session->tick();
+        if (plugin_settings) {
+            if (frame == options.test_open_plugin_settings_frame)
+                plugin_settings->open();
+            plugin_settings->tick();
+        }
         if (options.on_idle)
             options.on_idle();
         ++frame;
@@ -460,6 +614,8 @@ bool run_standalone_contract_editor(Processor& processor, state::StateStore& sto
         break;
     }
 
+    // The settings editor goes first, while the main editor is still attached.
+    plugin_settings.reset();
     // An orderly close: the window still exists while the editor detaches.
     if (!options.headless)
         session->visibility_changed(false);
@@ -475,8 +631,7 @@ bool run_standalone_contract_editor(Processor& processor, state::StateStore& sto
     if (menu_target != nil) {
         if (installed_menu)
             [NSApp setMainMenu:nil];
-        menu_target->editorWindow = nil;
-        menu_target->panels.clear();
+        menu_target->items.clear();
         [menu_target release];
     }
     [window orderOut:nil];

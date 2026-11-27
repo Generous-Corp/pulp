@@ -46,11 +46,52 @@ namespace pulp::state {
 class MidiLearnEngine;
 }
 
+/// 1 (the default) while Processor still declares the editor hooks that name
+/// Pulp's view layer (`create_view()`, `on_view_*`, `settings_sections()`,
+/// `active_scripted_ui()`). An SDK whose UI comes from Vellum defines it 0 on
+/// pulp-format-core, PUBLIC, so every consumer agrees: those virtuals keep
+/// their slots, in the same order, under reserved names, with parameter types
+/// that format-core owns and never defines. Processor's vtable layout is then
+/// identical in both modes, so a binary built against one header never calls
+/// the wrong slot of a Processor built against the other; it reaches a
+/// reserved body that returns null or does nothing. The reserved names leave
+/// `create_view` free for an integration's own editor hook. Hot reload also
+/// refuses a logic library built in the other mode (build_fingerprint.hpp).
+#include <pulp/format/legacy_view.hpp>
+
+#if PULP_FORMAT_LEGACY_VIEW
+#define PULP_FORMAT_LEGACY_VIEW_NAME(name) name
 namespace pulp::view {
 class ScriptedUiSession;
 class View;
 using dataplane::ValueChannelSet;
 }
+#else
+#define PULP_FORMAT_LEGACY_VIEW_NAME(name) reserved_legacy_view_##name##_
+// Opaque stand-ins for the reserved slots. Nothing completes them except
+// format.cpp's anchor, so nothing outside format-core can make one. Inside
+// pulp::format, `view::View` finds these before any pulp::view.
+namespace pulp::format::view {
+class ScriptedUiSession;
+class View;
+using ::pulp::dataplane::ValueChannelSet;
+} // namespace pulp::format::view
+
+// A pulp-format-core built with Pulp's view layer has the view hooks under
+// their plain names, so code compiled with the macro 0 cannot link against it.
+// format.cpp built with the macro 0 defines this symbol, and every translation
+// unit that includes this header with the macro 0 refers to it, so linking such
+// code against the wrong pulp-format-core fails on this name, which says why,
+// rather than on a reserved slot.
+extern "C" const char pulp_format_core_was_built_with_PULP_FORMAT_LEGACY_VIEW_0;
+#if defined(__has_attribute)
+#if __has_attribute(used)
+[[gnu::used]]
+#endif
+#endif
+static const char* const pulp_format_legacy_view_link_check =
+    &pulp_format_core_was_built_with_PULP_FORMAT_LEGACY_VIEW_0;
+#endif
 
 namespace pulp::format {
 
@@ -647,7 +688,7 @@ public:
     /// closes. This method may be called multiple times during the lifetime
     /// of the processor (one per attached editor window).
     ///
-    virtual std::unique_ptr<view::View> create_view();
+    virtual std::unique_ptr<view::View> PULP_FORMAT_LEGACY_VIEW_NAME(create_view)();
 
     /// A custom settings tab this plugin contributes to the host's Settings UI.
     /// (The matching virtual `settings_sections()` is appended at the end of this class
@@ -658,6 +699,12 @@ public:
     /// consumer of pulp::format-core alone (the inline `settings_sections()`
     /// below destroys a vector of them) never needs the view layer. Only the
     /// constructor that adopts a view, and take_view(), live on the view side.
+    ///
+    /// Without Pulp's view layer (PULP_FORMAT_LEGACY_VIEW=0) there is no view
+    /// to adopt: the type is private there and only fills the reserved slot.
+#if !PULP_FORMAT_LEGACY_VIEW
+  private:
+#endif
     struct SettingsSection {
         using ViewDeleter = void (*)(view::View*);
 
@@ -680,19 +727,23 @@ public:
     private:
         static void no_view(view::View*) noexcept {}
     };
+#if !PULP_FORMAT_LEGACY_VIEW
+  public:
+#endif
 
     /// Called after a view has been constructed and attached. Runs on the
     /// host/UI thread. Safe to read state and register UI listeners.
-    virtual void on_view_opened(view::View& /*view*/) {}
+    virtual void PULP_FORMAT_LEGACY_VIEW_NAME(on_view_opened)(view::View& /*view*/) {}
 
     /// Called immediately before a view is destroyed. Runs on the UI thread.
     /// Use to unregister listeners; do not assume the view is still usable
     /// for drawing after this returns.
-    virtual void on_view_closed(view::View& /*view*/) {}
+    virtual void PULP_FORMAT_LEGACY_VIEW_NAME(on_view_closed)(view::View& /*view*/) {}
 
     /// Called when the host resizes the editor window. Dimensions are in
     /// logical pixels. Runs on the UI thread.
-    virtual void on_view_resized(view::View& /*view*/, uint32_t /*w*/, uint32_t /*h*/) {}
+    virtual void PULP_FORMAT_LEGACY_VIEW_NAME(on_view_resized)(view::View& /*view*/, uint32_t /*w*/,
+                                                               uint32_t /*h*/) {}
 
     /// Editor-INITIATED host-window resize (the plugin↔host direction that
     /// `on_view_resized` does not cover). The editor calls this to ask the
@@ -776,8 +827,13 @@ public:
     /// path owns one. The default framework editor path is tracked by
     /// ViewBridge directly; processor-owned sessions use this hook so format
     /// adapters can still select scripted/GPU hosting and poll the session.
-    virtual view::ScriptedUiSession* active_scripted_ui() { return nullptr; }
-    virtual const view::ScriptedUiSession* active_scripted_ui() const { return nullptr; }
+    virtual view::ScriptedUiSession* PULP_FORMAT_LEGACY_VIEW_NAME(active_scripted_ui)() {
+        return nullptr;
+    }
+    virtual const view::ScriptedUiSession*
+    PULP_FORMAT_LEGACY_VIEW_NAME(active_scripted_ui)() const {
+        return nullptr;
+    }
 
     /// Settings tabs this plugin contributes, composed by the host alongside its own
     /// host-owned tabs (e.g. Audio/MIDI device selection in the standalone). This keeps
@@ -785,7 +841,15 @@ public:
     /// device — while letting a plugin surface its own settings (e.g. a model picker) in
     /// one unified Settings panel. Called when the settings UI is built; may be called
     /// again if it is rebuilt. (Appended last to preserve additive-only vtable ordering.)
-    virtual std::vector<SettingsSection> settings_sections() { return {}; }
+#if !PULP_FORMAT_LEGACY_VIEW
+  private:
+#endif
+    virtual std::vector<SettingsSection> PULP_FORMAT_LEGACY_VIEW_NAME(settings_sections)() {
+        return {};
+    }
+#if !PULP_FORMAT_LEGACY_VIEW
+  public:
+#endif
 
     /// Estimate storage the next prepare() will allocate or reserve.
     ///
@@ -1147,16 +1211,18 @@ public:
     /// callback must stay bounded and must not re-enter this processor.
     ///
     /// Appended to preserve additive-only vtable ordering (node_abi_gate).
-    virtual void visit_active_scripted_ui(
+    virtual void PULP_FORMAT_LEGACY_VIEW_NAME(visit_active_scripted_ui)(
         const std::function<void(view::ScriptedUiSession*)>& visitor) {
-        if (visitor) visitor(active_scripted_ui());
+        if (visitor)
+            visitor(PULP_FORMAT_LEGACY_VIEW_NAME(active_scripted_ui)());
     }
 
     /// Const counterpart to visit_active_scripted_ui().
     /// Appended to preserve additive-only vtable ordering (node_abi_gate).
-    virtual void visit_active_scripted_ui(
+    virtual void PULP_FORMAT_LEGACY_VIEW_NAME(visit_active_scripted_ui)(
         const std::function<void(const view::ScriptedUiSession*)>& visitor) const {
-        if (visitor) visitor(active_scripted_ui());
+        if (visitor)
+            visitor(PULP_FORMAT_LEGACY_VIEW_NAME(active_scripted_ui)());
     }
 
     /// Opt in when a processor-owned scripted editor must reload its existing

@@ -136,27 +136,33 @@ class ReloadableShellCore : public Processor {
             visitor(nullptr);
     }
 
-    view::ScriptedUiSession* active_scripted_ui() override {
+    // The legacy scripted-session slots (reserved names without Pulp's view
+    // layer, see processor.hpp). active_scripted_ui() returns null: a raw
+    // pointer cannot carry the hot-swap lease. The visitors reach the live
+    // logic under that lease.
+    view::ScriptedUiSession* PULP_FORMAT_LEGACY_VIEW_NAME(active_scripted_ui)() override {
         return nullptr;
     }
-    const view::ScriptedUiSession* active_scripted_ui() const override {
+    const view::ScriptedUiSession*
+    PULP_FORMAT_LEGACY_VIEW_NAME(active_scripted_ui)() const override {
         return nullptr;
     }
 
-    void visit_active_scripted_ui(
+    void PULP_FORMAT_LEGACY_VIEW_NAME(visit_active_scripted_ui)(
         const std::function<void(view::ScriptedUiSession*)>& visitor) override {
         const bool visited = slot_.with_active([&](Processor& p) {
-            p.visit_active_scripted_ui(visitor);
+            p.PULP_FORMAT_LEGACY_VIEW_NAME(visit_active_scripted_ui)(visitor);
             return true;
         });
         if (!visited && visitor)
             visitor(nullptr);
     }
 
-    void visit_active_scripted_ui(
+    void PULP_FORMAT_LEGACY_VIEW_NAME(visit_active_scripted_ui)(
         const std::function<void(const view::ScriptedUiSession*)>& visitor) const override {
         const bool visited = slot_.with_active([&](Processor& p) {
-            static_cast<const Processor&>(p).visit_active_scripted_ui(visitor);
+            static_cast<const Processor&>(p).PULP_FORMAT_LEGACY_VIEW_NAME(visit_active_scripted_ui)(
+                visitor);
             return true;
         });
         if (!visited && visitor)
@@ -331,6 +337,18 @@ class ReloadableShellCore : public Processor {
     bool has_active_dsp() const {
         return slot_.has_active();
     }
+    /// Retired logic processors an open editor still holds (see
+    /// ProcessorHotSwapSlot::hold()).
+    std::size_t held_retired_logic() const {
+        return slot_.parked_count();
+    }
+    /// Free retired logic processors no editor holds: a completed crossfade's
+    /// fade-out and any parked processor whose holds are released. The dev
+    /// watcher does this on every tick; a host or test without the watcher
+    /// calls it from its control thread.
+    void reclaim_retired_logic() {
+        slot_.reclaim();
+    }
 
   protected:
     /// Run `fn` against the live logic processor under the slot's reader lock
@@ -339,6 +357,15 @@ class ReloadableShellCore : public Processor {
     template <typename Fn>
     auto with_active_logic(Fn&& fn) const -> decltype(fn(std::declval<Processor&>())) {
         return slot_.with_active(std::forward<Fn>(fn));
+    }
+
+    /// Keep a logic processor alive past a hot swap while an editor built from
+    /// it exists; release when that editor is gone. Main thread.
+    void hold_logic(const Processor* logic) {
+        slot_.hold(logic);
+    }
+    void release_logic(const Processor* logic) {
+        slot_.release(logic);
     }
 
   private:

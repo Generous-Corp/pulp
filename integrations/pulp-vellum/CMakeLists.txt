@@ -29,8 +29,10 @@ if(NOT TARGET Vellum::MirrorView_core)
         "pulp-vellum requires a Vellum SDK exporting Vellum::MirrorView_core "
         "and vellum::view::PluginViewHost::create(); the SDK is too old")
 endif()
-# The About view and the Swift motion bridge are built on Vellum's view layer.
-target_sources(pulp-vellum PRIVATE src/about_notices.cpp src/swift_motion_bridge.cpp)
+# The About view, the Updates settings group and the Swift motion bridge are
+# built on Vellum's view layer.
+target_sources(pulp-vellum PRIVATE src/about_notices.cpp src/app_updates_settings_view.cpp
+    src/swift_motion_bridge.cpp src/view_editor.cpp src/settings_view.cpp)
 set_property(TARGET pulp-vellum PROPERTY PULP_VELLUM_HAS_SWIFT_MOTION TRUE)
 target_include_directories(pulp-vellum PRIVATE ${PULP_ROOT_DIR}/apple/Sources/PulpSwift)
 target_link_libraries(pulp-vellum PUBLIC Vellum::MirrorView_core)

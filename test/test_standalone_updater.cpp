@@ -1,9 +1,14 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <pulp/format/app_updates.hpp>
+#include <pulp/format/legacy_view.hpp>
 #include <pulp/format/detail/standalone_updater.hpp>
-
+#if PULP_FORMAT_LEGACY_VIEW
+#include <pulp/format/detail/standalone_updater_menu.hpp>
 using pulp::format::detail::add_standalone_updater_menu_command;
+#endif
+
+using pulp::format::detail::install_standalone_updater;
 using pulp::format::detail::make_standalone_update_service;
 using pulp::format::detail::make_stub_update_service;
 using pulp::format::detail::plan_standalone_updater;
@@ -95,6 +100,7 @@ TEST_CASE("The stub backend wires the menu and Settings in a build without Spark
     CHECK(plan_standalone_updater(dev).backend == StandaloneUpdaterBackend::none);
 }
 
+#if PULP_FORMAT_LEGACY_VIEW
 TEST_CASE("Check for Updates sits directly under About and goes through the service",
           "[standalone][updater]") {
     using Section = pulp::view::WindowOptions::MenuCommand::AppMenuSection;
@@ -123,6 +129,24 @@ TEST_CASE("Check for Updates sits directly under About and goes through the serv
     REQUIRE(static_cast<bool>(command.action));
     command.action();
     CHECK(stub->status().last_check_unix_seconds > 0);
+    pulp::format::set_app_update_service(nullptr);
+}
+#endif
+
+TEST_CASE("Every standalone installs its updater plan's service, with or without a view layer",
+          "[standalone][updater]") {
+    // The stub plan: a service every update surface reads, and the menu item.
+    const bool offered = install_standalone_updater(
+        {.offer_menu_command = true, .backend = StandaloneUpdaterBackend::stub});
+    CHECK(offered);
+    auto status = pulp::format::app_update_status();
+    CHECK(status.available);
+    CHECK(status.stub);
+    CHECK(pulp::format::check_for_app_updates());
+
+    // Control: a plan with no backend installs no service and offers nothing.
+    CHECK_FALSE(install_standalone_updater(StandaloneUpdaterPlan{}));
+    CHECK_FALSE(pulp::format::app_update_status().available);
     pulp::format::set_app_update_service(nullptr);
 }
 

@@ -719,9 +719,11 @@ function(_pulp_add_au target name bundle_id version manufacturer category plugin
         # Cocoa view factory. A plug-in that declares UI <package> gets the
         # view-free contract factory (au_v2_contract_view.mm) instead, which
         # serves the package's editor; any other editor-less AU reports no
-        # kAudioUnitProperty_CocoaUI, so hosts show their generic editor.
+        # kAudioUnitProperty_CocoaUI, so hosts show their generic editor. In an
+        # SDK whose UI is Vellum a plug-in with no editor keyword gets the
+        # contract factory too: its editor is Processor::editor_factory()'s.
         set(_pulp_au_contract_view "")
-        if(PULP_${target}_UI_PACKAGE)
+        if(PULP_${target}_UI_PACKAGE OR PULP_${target}_EDITOR_FROM_FACTORY)
             set(_pulp_au_contract_view ${_PULP_FORMAT_SOURCE_DIR}/au_v2_contract_view.mm)
         endif()
         add_library(${target}_AU MODULE
@@ -769,7 +771,7 @@ function(_pulp_add_au target name bundle_id version manufacturer category plugin
     set(_pulp_au_cocoa_class_suffix "${manufacturer_code}_${plugin_code}")
     string(REGEX REPLACE "[^A-Za-z0-9_]" "_" _pulp_au_cocoa_class_suffix
         "${_pulp_au_cocoa_class_suffix}")
-    if(PULP_${target}_NO_EDITOR AND PULP_${target}_UI_PACKAGE)
+    if(PULP_${target}_NO_EDITOR AND (PULP_${target}_UI_PACKAGE OR PULP_${target}_EDITOR_FROM_FACTORY))
         target_compile_definitions(${target}_AU PRIVATE
             PULP_AU_CONTRACT_VIEW_FACTORY_CLASS=PulpAUContractViewFactory_${_pulp_au_cocoa_class_suffix}
             PULP_AU_CONTRACT_HOST_VIEW_CLASS=PulpAUContractHostView_${_pulp_au_cocoa_class_suffix})

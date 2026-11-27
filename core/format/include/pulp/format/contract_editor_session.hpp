@@ -110,12 +110,11 @@ class ContractEditorSession : public std::enable_shared_from_this<ContractEditor
         host_driven, ///< the adapter, from a host timer
     };
 
-    /// A session over a new editor from `factory`, or null when the factory
-    /// does not offer the editor role or builds no editor.
-    static std::unique_ptr<ContractEditorSession> create(Processor& processor,
-                                                         state::StateStore& store,
-                                                         EditorFactory& factory, HostHooks hooks,
-                                                         IdleSource idle = IdleSource::self_paced);
+    /// A session over a new editor from `factory` in `role`, or null when the
+    /// factory does not offer that role or builds no editor.
+    static std::unique_ptr<ContractEditorSession>
+    create(Processor& processor, state::StateStore& store, EditorFactory& factory, HostHooks hooks,
+           IdleSource idle = IdleSource::self_paced, EditorRole role = EditorRole::editor);
 
     ~ContractEditorSession();
     ContractEditorSession(const ContractEditorSession&) = delete;

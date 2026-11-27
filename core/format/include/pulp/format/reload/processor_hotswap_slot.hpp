@@ -41,9 +41,9 @@
 #include <pulp/format/state_restore_gate.hpp>
 #include <pulp/midi/buffer.hpp>
 
-#include <algorithm>
 #include <pulp/signal/transition_mixer.hpp>
 
+#include <algorithm>
 #include <atomic>
 #include <cstddef>
 #include <cstdint>
@@ -156,7 +156,39 @@ public:
                 fade_done_.store(fading_out_ == nullptr, std::memory_order_release);
             }
         }
+        // A processor an editor still holds is parked rather than freed; see
+        // hold(). Outside the writer lock, like every free here.
+        superseded = park_if_held(std::move(superseded));
+        displaced = park_if_held(std::move(displaced));
         return displaced;  // nullptr on the crossfade path (slot retains the fade-out)
+    }
+
+    /// Keep `processor` alive past its retirement: while held, a swap or
+    /// reclaim() that would free it parks it instead, and reclaim() frees it
+    /// once every hold is released. An editor built from a processor holds it
+    /// for as long as the editor exists, so a hot swap never frees the code
+    /// and state the editor still calls into. Main thread; each hold() needs a
+    /// matching release().
+    void hold(const Processor* processor) {
+        if (processor == nullptr)
+            return;
+        std::lock_guard<std::mutex> lock(hold_mutex_);
+        holds_.push_back(processor);
+    }
+
+    /// Drop one hold() of `processor`. A parked processor is freed by the next
+    /// reclaim() on the control thread, never here.
+    void release(const Processor* processor) {
+        std::lock_guard<std::mutex> lock(hold_mutex_);
+        const auto it = std::find(holds_.begin(), holds_.end(), processor);
+        if (it != holds_.end())
+            holds_.erase(it);
+    }
+
+    /// Retired processors kept alive by a hold (diagnostics and tests).
+    std::size_t parked_count() const {
+        std::lock_guard<std::mutex> lock(hold_mutex_);
+        return parked_.size();
     }
 
     /// Control-thread reclaim of a completed fade-out. Frees the retired
@@ -168,8 +200,25 @@ public:
         if (fading_out_ && fade_done_.load(std::memory_order_acquire)) {
             auto old = std::move(fading_out_);
             lock.unlock();
+            old = park_if_held(std::move(old));
             old.reset();                      // ~Processor() here — control thread
+        } else {
+            lock.unlock();
         }
+        // Free parked processors whose holds are all released.
+        std::vector<std::unique_ptr<Processor>> unheld;
+        {
+            std::lock_guard<std::mutex> hold_lock(hold_mutex_);
+            for (auto it = parked_.begin(); it != parked_.end();) {
+                if (std::find(holds_.begin(), holds_.end(), it->get()) == holds_.end()) {
+                    unheld.push_back(std::move(*it));
+                    it = parked_.erase(it);
+                } else {
+                    ++it;
+                }
+            }
+        }
+        unheld.clear(); // ~Processor() here, on the control thread
     }
 
     /// Control-thread re-prepare of the live processor (e.g. a host sample-rate
@@ -305,6 +354,17 @@ private:
             fade_done_.store(true, std::memory_order_release);
     }
 
+    // Park `p` when an editor holds it; otherwise hand it back to be freed.
+    std::unique_ptr<Processor> park_if_held(std::unique_ptr<Processor> p) {
+        if (!p)
+            return p;
+        std::lock_guard<std::mutex> lock(hold_mutex_);
+        if (std::find(holds_.begin(), holds_.end(), p.get()) == holds_.end())
+            return p;
+        parked_.push_back(std::move(p));
+        return nullptr;
+    }
+
     static void passthrough(audio::BufferView<float>& out,
                             const audio::BufferView<const float>& in) {
         // Shared with the format adapters' state-restore gate so every
@@ -327,6 +387,12 @@ private:
     std::size_t scratch_channels_ = 0;
     midi::MidiBuffer fade_midi_in_;               // empty MIDI for the fading-out tail
     midi::MidiBuffer fade_midi_out_;              // discarded
+
+    // ── Editor holds (main thread) and parked retirees (control thread) ─────
+    // Declared last so parked processors are destroyed first.
+    mutable std::mutex hold_mutex_;
+    std::vector<const Processor*> holds_;
+    std::vector<std::unique_ptr<Processor>> parked_;
 };
 
 } // namespace pulp::format::reload

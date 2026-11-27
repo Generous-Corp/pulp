@@ -30,6 +30,8 @@ struct ContractEditorLog {
     void* parent_handle = nullptr;
     format::EditorContext* context = nullptr;
     int live = 0;
+    /// Editors built for EditorRole::settings.
+    int settings_created = 0;
     int idles = 0;
     double last_scale = 0.0;
     /// Attach, detach, invalidate and destruction calls made off the main
@@ -60,6 +62,8 @@ struct ContractEditorConfig {
     bool identity_adjust = false;
     bool factory_builds_editor = true;
     bool factory_supports_editor = true;
+    /// Also offer and build EditorRole::settings editors.
+    bool factory_supports_settings = false;
     /// Whether the editor offers EditorAutomation::capture_png().
     bool captures_frames = true;
     /// Ask the host for a larger size from inside set_size(), the way an
@@ -219,12 +223,16 @@ class RecordingContractEditor final : public format::Editor {
 class RecordingContractFactory final : public format::EditorFactory {
   public:
     bool supports(format::EditorRole role) const override {
+        if (role == format::EditorRole::settings)
+            return contract_config().factory_supports_settings;
         return role == format::EditorRole::editor && contract_config().factory_supports_editor;
     }
     std::unique_ptr<format::Editor> create(format::Processor&, format::EditorContext& context,
                                            format::EditorRole role) override {
-        if (role != format::EditorRole::editor || !contract_config().factory_builds_editor)
+        if (!supports(role) || !contract_config().factory_builds_editor)
             return nullptr;
+        if (role == format::EditorRole::settings)
+            ++contract_log().settings_created;
         return std::make_unique<RecordingContractEditor>(context);
     }
 };

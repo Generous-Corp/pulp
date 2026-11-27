@@ -11,8 +11,10 @@
 #
 #   provider   the resolved view picks: Pulp's targets in pulp mode, none in
 #              vellum mode (Pulp's editor adapters cannot compile against it).
-#   editor     pulp_add_plugin() with the default editor configures in pulp
-#              mode and is refused in vellum mode with the editors that apply.
+#   editor     pulp_add_plugin() with the default editor configures on Pulp's
+#              view in pulp mode and view-free in vellum mode, where its editor
+#              is Processor::editor_factory()'s; a keyword that selects Pulp's
+#              own view editor is refused in vellum mode.
 #   no-editor  an editor-less plug-in and a UI <package> plug-in configure in
 #              both modes.
 #   bundle     pulp_add_plugin_bundle() shares Pulp's view editor host, so it
@@ -131,7 +133,22 @@ elseif(SCENARIO STREQUAL "editor")
     set(_call "pulp_add_plugin(Peditor BUNDLE_ID dev.pulp.editor)\nmessage(STATUS \"view-target=[\${PULP_Peditor_VIEW_TARGET}]\")")
     _expect_pass(pulp plugin "${_call}")
     _expect_text("view-target=[Pulp::view]" "the default editor on Pulp's view")
-    _expect_refused(vellum plugin "${_call}" "pulp_add_plugin(Peditor): ${_vellum_refusal}")
+    # In vellum mode the default editor builds view-free: its editor is the one
+    # Processor::editor_factory() returns, with no Pulp view target picked.
+    set(_default "pulp_add_plugin(Pdefault BUNDLE_ID dev.pulp.default)\nmessage(STATUS \"view-target=[\${PULP_Pdefault_VIEW_TARGET}] no-editor=[\${PULP_Pdefault_NO_EDITOR}] from-factory=[\${PULP_Pdefault_EDITOR_FROM_FACTORY}]\")")
+    _expect_pass(vellum default "${_default}")
+    _expect_text("view-target=[] no-editor=[TRUE] from-factory=[TRUE]" "the default editor building view-free in vellum mode")
+    # Control: the same call in pulp mode keeps Pulp's own editor.
+    _expect_pass(pulp default "${_default}")
+    _expect_text("view-target=[Pulp::view] no-editor=[FALSE] from-factory=[FALSE]" "the default editor on Pulp's view in pulp mode")
+    # An explicit NO_EDITOR is still no editor: the AU v2 contract factory is
+    # not built for it.
+    _expect_pass(vellum quiet "pulp_add_plugin(Pq BUNDLE_ID dev.pulp.q NO_EDITOR)\nmessage(STATUS \"from-factory=[\${PULP_Pq_EDITOR_FROM_FACTORY}]\")")
+    _expect_text("from-factory=[FALSE]" "an explicit NO_EDITOR without the contract factory")
+    foreach(_kw LITE_EDITOR FULL_EDITOR GPU_UI)
+        _expect_refused(vellum ${_kw} "pulp_add_plugin(P${_kw} BUNDLE_ID dev.pulp.kw ${_kw})"
+            "pulp_add_plugin(P${_kw}): ${_vellum_refusal}")
+    endforeach()
     _expect_refused(vellum native "pulp_add_plugin(Pnative BUNDLE_ID dev.pulp.native NATIVE_UI)"
         "pulp_add_plugin(Pnative): ${_vellum_refusal}")
     # The format helper refuses on its own too, past its SDK check.
@@ -247,6 +264,19 @@ elseif(SCENARIO STREQUAL "standalone")
             "add_library(Pulp::standalone INTERFACE IMPORTED)\ninclude(\"${PULP_SOURCE_DIR}/tools/cmake/PulpRuntimeStaging.cmake\")\n${_call}"
             "does not export the view-free Pulp::standalone-contract")
     endforeach()
+    # A plug-in with no editor keyword in vellum mode takes its editor from
+    # Processor::editor_factory(), so its Standalone is the view-free host too;
+    # in pulp mode the same call keeps Pulp's view standalone (the control).
+    set(_default
+        "pulp_add_plugin(Pdef BUNDLE_ID dev.pulp.def FORMATS Standalone)\n"
+        "get_target_property(_links Pdef_Standalone LINK_LIBRARIES)\n"
+        "message(STATUS \"default-links=[\${_links}]\")\n")
+    string(JOIN "" _default ${_default})
+    _expect_pass(vellum default "${_hosts}${_default}")
+    _expect_text("default-links=[Pdef_Core;Pulp::standalone-contract]"
+        "the view-free standalone host for an editor_factory() editor")
+    _expect_pass(pulp default "${_hosts}${_default}")
+    _expect_text("default-links=[Pdef_Core;Pulp::standalone]" "Pulp's view standalone in pulp mode")
 
 else()
     message(FATAL_ERROR "unknown SCENARIO '${SCENARIO}'")

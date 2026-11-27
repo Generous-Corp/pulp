@@ -190,6 +190,40 @@ logic loaded. `integrations/pulp-vellum/tests/test_reloadable_shell_editor.cpp`
 drives real logic swaps through the shell's watcher under the Vellum scripted
 editor root.
 
+## A logic library that brings its own editor (no Pulp view)
+
+`make_reloadable_editor_shell()` (`reloadable_editor_shell.hpp`) returns the
+shell for a logic library whose editor comes from its own
+`Processor::editor_factory()`, such as a `pulp::vellum::ViewProcessor<>` logic,
+in an SDK built without Pulp's view layer (`PULP_FORMAT_LEGACY_VIEW=0`).
+`reloadable_editor_shell_control()` reaches its reload controls (`reload_now()`,
+the held and contention counters, `reclaim_retired_logic()`). The header is that
+small interface only; the reload stack the shell is built on stays in
+`core/format/src/reloadable_editor_shell.cpp`, which format-core builds on macOS
+and Linux. The shell is view-free, like
+`ReloadableShellCore`:
+
+- the shell's `editor_factory()` hands each `create()` to the active logic's
+  factory through the `Processor` vtable both images share, and never casts the
+  logic to a concrete type across the library boundary;
+- each editor it returns holds the logic processor it was built from, so a hot
+  swap parks that processor (`ProcessorHotSwapSlot::hold()`) instead of freeing
+  it, and the library image is retained as every reload image is;
+- on the editor's next idle tick after a swap, it detaches and destroys the old
+  logic's editor, releases the hold, then builds the new logic's editor and
+  attaches it to the same parent at the same size; nothing calls the retired
+  logic after that tick, and the next reclaim frees it;
+- an editor build takes the hold under the slot's reader lock and calls the
+  logic's factory after releasing it, so a swap never waits for an editor and
+  the audio thread never drops to passthrough while one is built;
+- an editor the host has invalidated never builds again, whatever later swaps
+  do;
+- a logic built in the other `PULP_FORMAT_LEGACY_VIEW` mode is refused by the
+  build fingerprint (`legacyview=` in its ABI flags), at load and on a swap.
+
+`test/test_reloadable_editor_shell.cpp` swaps real logic fixtures built in each
+mode.
+
 ## Hot-reloading the UI too (thin logic)
 
 A reload can swap the **editor** as well as the DSP: `ReloadableShell::create_view()`

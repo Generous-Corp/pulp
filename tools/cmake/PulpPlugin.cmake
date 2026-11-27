@@ -190,6 +190,35 @@ function(pulp_add_plugin target)
         endif()
     endif()
 
+    # An SDK that serves its UI from Vellum has no Pulp view layer to link. A
+    # plug-in that names no editor there gets what Pulp's default editor was:
+    # the generated parameter editor, on Vellum (as UI_ENGINE vellum without
+    # UI_SCRIPT), or no editor when the SDK has no Vellum bridge. Either way its
+    # modules build view-free and a Processor::editor_factory() override, such as
+    # pulp::vellum::ViewProcessor<>, opens instead. A keyword that selects
+    # Pulp's own view editor is refused further down.
+    set(_pulp_vellum_default_no_editor FALSE)
+    if(NOT DEFINED PLUGIN_UI AND NOT PLUGIN_NO_EDITOR)
+        _pulp_ui_provider(_pulp_plugin_ui_provider)
+        set(_pulp_view_keywords "")
+        foreach(_kw NATIVE_UI UI_SCRIPT GPU_UI FULL_EDITOR LITE_EDITOR)
+            if(PLUGIN_${_kw})
+                list(APPEND _pulp_view_keywords ${_kw})
+            endif()
+        endforeach()
+        if(_pulp_plugin_ui_provider STREQUAL "vellum" AND NOT _pulp_view_keywords)
+            if(NOT COMMAND _pulp_vellum_auto_ui_package)
+                include("${CMAKE_CURRENT_FUNCTION_LIST_DIR}/PulpVellumEditorPackage.cmake" OPTIONAL)
+            endif()
+            if(COMMAND _pulp_vellum_auto_ui_package)
+                _pulp_vellum_auto_ui_package("pulp_add_plugin(${target})" PLUGIN_UI)
+            else()
+                set(PLUGIN_NO_EDITOR TRUE)
+                set(_pulp_vellum_default_no_editor TRUE)
+            endif()
+        endif()
+    endif()
+
     # Defaults
     if(NOT PLUGIN_PLUGIN_NAME)
         set(PLUGIN_PLUGIN_NAME "${target}")
@@ -238,6 +267,9 @@ function(pulp_add_plugin target)
     # contradict that and are a configure error. `UI none` selects no package
     # and leaves the link as it would be without UI.
     set(_pulp_no_editor_reason "NO_EDITOR")
+    if(_pulp_vellum_default_no_editor)
+        set(_pulp_no_editor_reason "editor from Processor::editor_factory()")
+    endif()
     # Read by format helpers that build a contract editor of their own (the AU
     # v2 Cocoa view factory); always refreshed so a removed UI leaves nothing.
     set(PULP_${target}_UI_PACKAGE "" CACHE INTERNAL "")
@@ -275,10 +307,15 @@ function(pulp_add_plugin target)
                 "pulp_add_plugin(${target} ${_pulp_no_editor_reason}): this Pulp SDK does not export Pulp::format-clap-core")
         endif()
         set(PULP_${target}_NO_EDITOR TRUE CACHE INTERNAL "")
+        # Read by format helpers that build a contract editor of their own (the
+        # AU v2 Cocoa view factory): TRUE when the editor comes from
+        # Processor::editor_factory() without a UI package.
+        set(PULP_${target}_EDITOR_FROM_FACTORY "${_pulp_vellum_default_no_editor}" CACHE INTERNAL "")
         set(_pulp_core_format_target "${_PULP_FORMAT_CORE_TARGET}")
     else()
         _pulp_refuse_view_editor_from_vellum("pulp_add_plugin(${target})")
         set(PULP_${target}_NO_EDITOR FALSE CACHE INTERNAL "")
+        set(PULP_${target}_EDITOR_FROM_FACTORY FALSE CACHE INTERNAL "")
         set(_pulp_core_format_target "${_PULP_FORMAT_TARGET}")
     endif()
     # AAX_HEADLESS: a processor-only AAX artifact (no custom EffectGUI). Its
@@ -322,9 +359,10 @@ function(pulp_add_plugin target)
 
     _pulp_normalize_ui_script_path(_PULP_UI_SCRIPT "${CMAKE_CURRENT_SOURCE_DIR}" "${PLUGIN_UI_SCRIPT}")
     set(PULP_${target}_UI_SCRIPT "${_PULP_UI_SCRIPT}" CACHE INTERNAL "")
-    if(PLUGIN_UI AND NOT PLUGIN_UI STREQUAL "none")
-        # UI <package> implies a view-free link for the standalone too: its
-        # editor is the package's, so Pulp's view, render and Dawn stay out of
+    if((PLUGIN_UI AND NOT PLUGIN_UI STREQUAL "none") OR _pulp_vellum_default_no_editor)
+        # UI <package> implies a view-free link for the standalone too, and so
+        # does an editor from Processor::editor_factory() in an SDK whose UI is
+        # Vellum: its editor is the package's (or the processor's), so Pulp's view, render and Dawn stay out of
         # the app, and a package that draws with Dawn brings the only copy.
         set(PULP_${target}_VIEW_TARGET "${_PULP_VIEW_TARGET}" CACHE INTERNAL "")
         set(PULP_${target}_STANDALONE_TARGET "${_PULP_CONTRACT_STANDALONE_TARGET}" CACHE INTERNAL "")
@@ -340,7 +378,7 @@ function(pulp_add_plugin target)
         set(PULP_${target}_VIEW_TARGET "${_PULP_VIEW_TARGET}" CACHE INTERNAL "")
         set(PULP_${target}_STANDALONE_TARGET "${_PULP_STANDALONE_TARGET}" CACHE INTERNAL "")
     endif()
-    if(NOT PLUGIN_UI OR PLUGIN_UI STREQUAL "none")
+    if((NOT PLUGIN_UI OR PLUGIN_UI STREQUAL "none") AND NOT _pulp_vellum_default_no_editor)
         set(PULP_${target}_VIEW_FREE_STANDALONE FALSE CACHE INTERNAL "")
     endif()
     set(PULP_${target}_CONTENT_CAPABILITIES "${PLUGIN_CONTENT_CAPABILITIES}" CACHE INTERNAL "")

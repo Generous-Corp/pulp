@@ -660,6 +660,18 @@ AudioComponentRegister factory C function) anywhere in the macOS AU v3
 lane.** The macOS path uses `_NSExtensionMain` + `NSExtensionPrincipalClass`
 to find the factory class.
 
+### The macOS controller without Pulp's view (`PULP_FORMAT_LEGACY_VIEW=0`)
+
+`au_view_controller_mac.mm` keeps its ViewBridge editor, the deferred GPU host
+and the initial-size sync under `#if PULP_FORMAT_LEGACY_VIEW`. With the macro 0
+(an SDK whose UI is Vellum) the controller only opens a contract editor for a
+processor with an `editor_factory()`, logs and shows nothing otherwise, and the
+framework links `pulp-format-core` alone (`PulpAuv3.cmake` picks it when the UI
+provider is Vellum). Keep new view code inside the guard:
+`pulp-test-au-v3-view-controller-ui-free` builds the controller under a poison
+header with no view target, so a stray view include fails there. The iOS
+controller has no such split yet.
+
 ### rpath: 4 levels up, not 2
 
 The .appex's binary at

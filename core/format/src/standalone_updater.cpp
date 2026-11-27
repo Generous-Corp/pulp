@@ -77,24 +77,16 @@ StandaloneUpdaterPlan plan_standalone_updater(const StandaloneUpdaterEnvironment
     return plan;
 }
 
+bool install_standalone_updater(const StandaloneUpdaterPlan& plan) {
+    set_app_update_service(make_standalone_update_service(plan));
+    if (plan.start_at_launch)
+        start_standalone_updater();
+    return plan.offer_menu_command;
+}
+
 std::shared_ptr<AppUpdateService> make_stub_update_service(std::string app_name,
                                                            std::string version) {
     return std::make_shared<StubUpdateService>(std::move(app_name), std::move(version));
-}
-
-void add_standalone_updater_menu_command(view::WindowOptions& options,
-                                         const StandaloneUpdaterPlan& plan) {
-    if (!plan.offer_menu_command) return;
-    // Directly under "About <App>", as macOS apps place it. The command goes
-    // through the AppUpdateService so the menu, the Settings controls and a
-    // JS editor all drive the same backend.
-    view::WindowOptions::MenuCommand command{
-        .menu = {},
-        .title = "Check for Updates\xE2\x80\xA6",
-        .action = [] { check_for_app_updates(); },
-        .app_menu_section = view::WindowOptions::MenuCommand::AppMenuSection::after_about,
-    };
-    options.menu_commands.push_back(std::move(command));
 }
 
 } // namespace pulp::format::detail

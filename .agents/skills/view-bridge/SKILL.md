@@ -34,6 +34,24 @@ opens inside the screen's usable frame (`detail::fit_size_to_area`). A test
 reaches the delegate and a small screen through `StandaloneConfig`'s
 `test_on_editor_window`, `test_on_editor_frame` and `test_screen_visible_*`.
 
+A factory that offers `EditorRole::settings` gets a "<name> Settings…" item
+(Cmd+Option+,) in the contract window's app menu; it opens the settings editor
+in a second window through its own `ContractEditorSession`
+(`ContractEditorSession::create(..., role)`). The editor window's loop ticks
+it and closes it before the main editor detaches. This is where a plug-in's
+settings sections show once its editor comes from a factory: the
+`settings_sections()` tabs exist only in the create_view() window. Tests open it
+with `StandaloneApp::set_test_hooks({.open_plugin_settings_frame = N})`; the contract window's test controls live in `detail/standalone_test_hooks.hpp`, never in the public `StandaloneConfig`.
+
+The window's app menu is a model (`StandaloneContractMenuItem`, each item with
+a role) that AppKit and tests both read. `set_test_hooks({.on_app_menu = ...})`
+sees the items in a headless run, which installs no menu, and
+`{.update_service = ...}` plans an updater there so "Check for Updates…" can be
+asserted and invoked; the window removes that service when it closes. A new
+menu item goes into `build_app_menu_model()`, never straight into the NSMenu,
+and separators follow roles, never titles. Both standalones install the updater
+through `install_standalone_updater()`.
+
 Fixed user sizing does not forbid an editor-origin resize: preserve the
 `EditorContext::request_resize` acknowledgment even when `can_resize` is false.
 Install the pending request before calling the host because an acknowledgment
@@ -2438,16 +2456,121 @@ nothing for processors that don't opt in. (What the hooks *do*, and which format
 actually call them — CLAP does, including native CLAP; VST3/AU/standalone do
 not — is documented in the `clap` skill.)
 
+### The legacy view hooks keep their slots in a UI-free SDK
+
+`create_view()`, `on_view_opened/closed/resized()`, `settings_sections()`,
+`active_scripted_ui()` and `visit_active_scripted_ui()` are declared through
+`PULP_FORMAT_LEGACY_VIEW_NAME(name)`. With `PULP_FORMAT_LEGACY_VIEW=0` (an SDK
+whose UI is Vellum, set PUBLIC on pulp-format-core) each keeps its vtable slot
+under a reserved name, with opaque `pulp::format::view` types nothing can
+construct, so the slot can only return null or do nothing. Gotchas:
+
+- **Never `#if` a virtual out instead.** Every later slot would move, and a
+  binary built in the other mode would call the wrong one without any error.
+  `format-legacy-view-slot-layout` compares the slot positions of both modes
+  and of a header with one slot removed; it fails if they drift.
+- **A ViewProcessor offers what `has_view(role)` says**, answered without
+  building anything (default: the editor only); `create_view()` is pure, and a
+  plug-in whose view can be null overrides `has_view`. It cannot be adopted
+  before the switch: in a mode-1 SDK its header `#error`s with the reason, and
+  docs/guides/editor-host-contract.md lists each downstream's changes.
+- **A plug-in keeps `create_view()` by deriving from `pulp::vellum::ViewProcessor<>`**
+  (`view_processor.hpp`), which `#error`s unless the macro is 0. Its factory is
+  one static per `Base`, shared by every processor; it reaches the processor
+  only through the `Processor&` the host passes to `create()`. Its test links a
+  mode-0 `format.cpp` ahead of the mode-1 `pulp-format-core` archive, which works
+  only because the slot layout matches; a duplicate-symbol or missing
+  `reserved_legacy_view_*` link error there means a slot or a name drifted.
+- **In an SDK whose UI is Vellum, the default editor builds view-free.**
+  `pulp_add_plugin` with no editor keyword takes the Vellum generated editor
+  when the bridge is installed and `NO_EDITOR` otherwise, so a `ViewProcessor<>`
+  or any `editor_factory()` override opens through the contract. The VST3 and
+  CLAP contract tests also build at macro 0 with every adapter source
+  (`ui-free.` prefix); `format-adapters-ui-free-symbols` nm-checks those
+  binaries against the mode-1 builds, because a mode-0 claim that silently
+  linked mode-1 objects would pass every behavioural case.
+- **AU v2 and AU v3 open an `editor_factory()` editor without a package.**
+  In a Vellum-UI SDK, `PULP_<target>_EDITOR_FROM_FACTORY` makes the AU v2
+  module build the contract Cocoa view factory (otherwise only a `UI <package>`
+  gets it), and the macOS AU v3 controller compiles its ViewBridge path under
+  `PULP_FORMAT_LEGACY_VIEW` only, so its framework links format-core alone.
+  The iOS controller still has the ViewBridge path unconditionally.
+- **Any format header that names a view type takes the same switch.**
+  `legacy_view.hpp` defaults the macro; `standalone.hpp` and
+  `standalone_control_host.hpp` declare their view types in `pulp::format::view`
+  when it is 0. The poison found both only once the standalone sources were
+  compiled at mode 0, so a new header-level view name shows up there first.
+- **A ViewProcessor's settings tabs are `settings_sections()`, offered when
+  `has_settings()` says so.** `supports(settings)` asks `has_settings()` and
+  builds nothing; a plug-in overrides both together. One section is shown
+  alone, two or more in a tab panel built in `src/settings_view.cpp`, so
+  `view_processor.hpp` does not pull in `ui_components.hpp`.
+- **Public pulp-vellum headers carry weight tests** (`header-weight` label,
+  `test/support/PulpHeaderWeight.cmake`): each preprocesses on its own within
+  a line budget and fails if it pulls in a header it keeps out.
+- **All of pulp-format-core builds at macro 0 under the poison**
+  (`pulp-test-format-core-ui-free-all`, built with the tests), and so does every
+  public format-core header on its own (`pulp-test-format-core-ui-free-headers`,
+  one generated TU per installed header less the declared view-coupled ones).
+  The per-header build exists because a header-only file that no source
+  includes (`reloadable_shell_core.hpp`, `reload_swap_units.hpp`) is invisible
+  to the source build; `reloadable_shell_core.hpp` still overrode the legacy
+  slots by their plain names until it caught it. AAX headers join only when the
+  Avid SDK is configured.
+- **The in-app updater runs in every standalone.** `install_standalone_updater()`
+  (standalone_updater.hpp, now view-free) installs the plan's service in both
+  the view and the contract standalone; only the WindowHost menu command lives
+  in `standalone_updater_menu.hpp`. The contract window adds "Check for
+  Updates…" itself. `app_update_message_response()` answers the four
+  `pulp_updates_*` messages with no UI type, so a Vellum editor's bridge
+  registers them without Pulp's EditorBridge; `add_app_update_handlers()` is a
+  loop over it. `pulp::vellum::AppUpdatesSettingsView` is the Settings group.
+- **A new view-named virtual goes through the macro too.** `node_abi_gate.py`
+  reads `PULP_FORMAT_LEGACY_VIEW_NAME(x)` as `x`, expands no other macro, and
+  fails when the macro's default definition is anything but the plain name.
+- **The layout probe covers the whole vtable.** It also reports the first
+  virtual a subclass adds, whose slot is Processor's vtable length, so a
+  virtual one mode adds at the end moves it too.
+- **A macro-0 caller linked against a mode-1 pulp-format-core fails on a named
+  marker.** processor.hpp makes every macro-0 TU refer to
+  `pulp_format_core_was_built_with_PULP_FORMAT_LEGACY_VIEW_0`, which only a
+  macro-0 format.cpp defines; `format-core-mode-mismatch-link` checks the link
+  error names it. A mode-0 test that builds no format.cpp defines it itself.
+- **`Processor::SettingsSection` is private at macro 0**: it only fills the
+  reserved slot there, and has no view to adopt.
+- **The hot-reload fingerprint carries the mode** (`legacyview=` in
+  `abi_flags`), so a logic library from the other mode is refused rather than
+  dispatched through renamed slots.
+- **`format-core-ui-free-compile` forces a poison header** that turns any
+  `pulp::view` use into a compile error and fails if `pulp/view/view.hpp` is on
+  the include path; `format-core-poison-control` proves the poison bites with
+  the macro 1 while the view headers are reachable.
+
 ## The UI-agnostic editor-host contract (`editor_host.hpp`)
 
 `pulp/format/editor_host.hpp` (`EditorFactory`, `Editor`, `EditorContext`,
 `ParamPort`, `VisualPort`) is the toolkit-free way to open an editor; the guide
 is `docs/guides/editor-host-contract.md`. Things that are easy to get wrong:
 
-- **No adapter consumes `Processor::editor_factory()` yet.** A processor that
-  returns a factory still opens through `has_editor()` / `create_view()` /
-  `ViewBridge` in every format. Do not assume a factory changes what a DAW
-  shows until an adapter is wired to it.
+- **Every adapter except AAX prefers `Processor::editor_factory()`.** VST3,
+  AU v2, AU v3, CLAP and standalone open a non-null factory's editor through
+  `ContractEditorSession` and fall back to `has_editor()` / `create_view()` /
+  `ViewBridge` only when it is null. That fallback is what keeps a default
+  build's legacy editors unchanged; do not route `create_view()` through a
+  default factory in format-core.
+- **A `create_view()`-shaped tree on Vellum is `pulp::vellum::ViewEditorFactory`**
+  (`integrations/pulp-vellum/include/pulp/vellum/view_editor.hpp`). Its hooks
+  follow the ViewBridge protocol, with two differences worth knowing. An
+  offscreen `NativeParentKind::none` attach fires no opened hook, as for any
+  `pulp::vellum::Editor`. After the editor's `StateStoreParamPort` is
+  disconnected (the instance went away), no hook runs and the store is not
+  touched, so a gesture the view opened directly stays for the host's own
+  teardown. The root sizes the view in `layout_children()`, not `on_resized()`:
+  Vellum's flex layout runs after `on_resized()` and would replace the bounds.
+  The header only declares; the root lives in `src/view_editor.cpp`. A view
+  anywhere in the hosted tree that implements `EditorIdleTarget` gets the
+  editor's idle tick while attached, and each editor shares its hooks with the
+  factory, so it keeps them if it outlives the factory.
 - **The header must stay view-free.** It names no `pulp::view`, canvas, render,
   Dawn or Vellum type, and `format_header_view_boundary.py` classifies it as a
   `pulp-format-core` header automatically, so an include that reaches the view
