@@ -2438,16 +2438,61 @@ nothing for processors that don't opt in. (What the hooks *do*, and which format
 actually call them — CLAP does, including native CLAP; VST3/AU/standalone do
 not — is documented in the `clap` skill.)
 
+### The legacy view hooks keep their slots in a UI-free SDK
+
+`create_view()`, `on_view_opened/closed/resized()`, `settings_sections()`,
+`active_scripted_ui()` and `visit_active_scripted_ui()` are declared through
+`PULP_FORMAT_LEGACY_VIEW_NAME(name)`. With `PULP_FORMAT_LEGACY_VIEW=0` (an SDK
+whose UI is Vellum, set PUBLIC on pulp-format-core) each keeps its vtable slot
+under a reserved name, with opaque `pulp::format::view` types nothing can
+construct, so the slot can only return null or do nothing. Gotchas:
+
+- **Never `#if` a virtual out instead.** Every later slot would move, and a
+  binary built in the other mode would call the wrong one without any error.
+  `format-legacy-view-slot-layout` compares the slot positions of both modes
+  and of a header with one slot removed; it fails if they drift.
+- **A new view-named virtual goes through the macro too.** `node_abi_gate.py`
+  reads `PULP_FORMAT_LEGACY_VIEW_NAME(x)` as `x`, expands no other macro, and
+  fails when the macro's default definition is anything but the plain name.
+- **The layout probe covers the whole vtable.** It also reports the first
+  virtual a subclass adds, whose slot is Processor's vtable length, so a
+  virtual one mode adds at the end moves it too.
+- **A macro-0 caller linked against a mode-1 pulp-format-core fails on a named
+  marker.** processor.hpp makes every macro-0 TU refer to
+  `pulp_format_core_was_built_with_PULP_FORMAT_LEGACY_VIEW_0`, which only a
+  macro-0 format.cpp defines; `format-core-mode-mismatch-link` checks the link
+  error names it. A mode-0 test that builds no format.cpp defines it itself.
+- **`Processor::SettingsSection` is private at macro 0**: it only fills the
+  reserved slot there, and has no view to adopt.
+- **The hot-reload fingerprint carries the mode** (`legacyview=` in
+  `abi_flags`), so a logic library from the other mode is refused rather than
+  dispatched through renamed slots.
+- **`format-core-ui-free-compile` forces a poison header** that turns any
+  `pulp::view` use into a compile error and fails if `pulp/view/view.hpp` is on
+  the include path; `format-core-poison-control` proves the poison bites with
+  the macro 1 while the view headers are reachable.
+
 ## The UI-agnostic editor-host contract (`editor_host.hpp`)
 
 `pulp/format/editor_host.hpp` (`EditorFactory`, `Editor`, `EditorContext`,
 `ParamPort`, `VisualPort`) is the toolkit-free way to open an editor; the guide
 is `docs/guides/editor-host-contract.md`. Things that are easy to get wrong:
 
-- **No adapter consumes `Processor::editor_factory()` yet.** A processor that
-  returns a factory still opens through `has_editor()` / `create_view()` /
-  `ViewBridge` in every format. Do not assume a factory changes what a DAW
-  shows until an adapter is wired to it.
+- **Every adapter except AAX prefers `Processor::editor_factory()`.** VST3,
+  AU v2, AU v3, CLAP and standalone open a non-null factory's editor through
+  `ContractEditorSession` and fall back to `has_editor()` / `create_view()` /
+  `ViewBridge` only when it is null. That fallback is what keeps a default
+  build's legacy editors unchanged; do not route `create_view()` through a
+  default factory in format-core.
+- **A `create_view()`-shaped tree on Vellum is `pulp::vellum::ViewEditorFactory`**
+  (`integrations/pulp-vellum/include/pulp/vellum/view_editor.hpp`). Its hooks
+  follow the ViewBridge protocol, with two differences worth knowing. An
+  offscreen `NativeParentKind::none` attach fires no opened hook, as for any
+  `pulp::vellum::Editor`. After the editor's `StateStoreParamPort` is
+  disconnected (the instance went away), no hook runs and the store is not
+  touched, so a gesture the view opened directly stays for the host's own
+  teardown. The root sizes the view in `layout_children()`, not `on_resized()`:
+  Vellum's flex layout runs after `on_resized()` and would replace the bounds.
 - **The header must stay view-free.** It names no `pulp::view`, canvas, render,
   Dawn or Vellum type, and `format_header_view_boundary.py` classifies it as a
   `pulp-format-core` header automatically, so an include that reaches the view

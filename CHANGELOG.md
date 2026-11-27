@@ -9,6 +9,32 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
      release's bullet block. See docs/guides/versioning.md § Release pipeline
      for the full end-to-end flow. -->
 
+<a id="v12250"></a>
+## [1.225.0] - 2026-11-27
+
+- release/version bump ([#13004](https://github.com/Generous-Corp/pulp/pull/13004))
+- feature/vellum timeline arranger session tests ([#12916](https://github.com/Generous-Corp/pulp/pull/12916))
+
+<a id="v12240"></a>
+## [1.224.0] - 2026-11-27
+
+- release/version bump ([#13000](https://github.com/Generous-Corp/pulp/pull/13000))
+- feature/format legacy view slots ([#12989](https://github.com/Generous-Corp/pulp/pull/12989))
+- feature/vellum renderer3d materials ([#12998](https://github.com/Generous-Corp/pulp/pull/12998))
+
+<a id="v12230"></a>
+## [1.223.0] - 2026-11-27
+
+- release/version bump ([#12997](https://github.com/Generous-Corp/pulp/pull/12997))
+- feature/vellum timeline arranger ([#12909](https://github.com/Generous-Corp/pulp/pull/12909))
+
+<a id="v12220"></a>
+## [1.222.0] - 2026-11-27
+
+- release/version bump ([#12993](https://github.com/Generous-Corp/pulp/pull/12993))
+- feature/gpu health adapter content seam ([#12992](https://github.com/Generous-Corp/pulp/pull/12992))
+- release/version bump ([#12991](https://github.com/Generous-Corp/pulp/pull/12991))
+
 <a id="v12210"></a>
 ## [1.221.0] - 2026-11-27
 
@@ -13855,6 +13881,10 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/Generous-Corp/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/Generous-Corp/pulp/pull/2))
 
+[1.225.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.225.0
+[1.224.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.224.0
+[1.223.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.223.0
+[1.222.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.222.0
 [1.221.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.221.0
 [1.220.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.220.0
 [1.219.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.219.0
