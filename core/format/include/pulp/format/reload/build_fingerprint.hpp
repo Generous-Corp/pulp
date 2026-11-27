@@ -14,6 +14,7 @@
 /// `current_build_fingerprint()` is header-inline + macro-driven so each binary
 /// captures its OWN compiler's settings at its own compile time.
 
+#include <cstddef>
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
@@ -213,9 +214,13 @@ inline bool fingerprints_match(const BuildFingerprint& a, const BuildFingerprint
 inline std::vector<std::string> fingerprint_diff(const BuildFingerprint& shell,
                                                  const BuildFingerprint& logic) {
     std::vector<std::string> out;
-    auto cmp_str = [&](const char* field, const char* s, const char* l) {
-        if (std::strncmp(s, l, 64) != 0)
-            out.push_back(std::string(field) + ": shell='" + s + "' logic='" + l + "'");
+    // Each field compares over its own capacity, as fingerprints_match does,
+    // so a difference past the 64th character (the legacyview flag sits late
+    // in abi_flags) is reported too.
+    auto cmp_str = [&](const char* field, const char* s, const char* l, std::size_t capacity) {
+        if (std::strncmp(s, l, capacity) != 0)
+            out.push_back(std::string(field) + ": shell='" + std::string(s, ::strnlen(s, capacity)) +
+                          "' logic='" + std::string(l, ::strnlen(l, capacity)) + "'");
     };
     auto cmp_int = [&](const char* field, long s, long l) {
         if (s != l)
@@ -225,12 +230,12 @@ inline std::vector<std::string> fingerprint_diff(const BuildFingerprint& shell,
     cmp_int("schema_version", shell.schema_version, logic.schema_version);
     cmp_int("cpp_standard", shell.cpp_standard, logic.cpp_standard);
     cmp_int("sample_precision", shell.sample_precision, logic.sample_precision);
-    cmp_str("compiler", shell.compiler, logic.compiler);
-    cmp_str("target", shell.target, logic.target);
-    cmp_str("stdlib", shell.stdlib, logic.stdlib);
-    cmp_str("abi_flags", shell.abi_flags, logic.abi_flags);
-    cmp_str("sanitizers", shell.sanitizers, logic.sanitizers);
-    cmp_str("sdk_version", shell.sdk_version, logic.sdk_version);
+    cmp_str("compiler", shell.compiler, logic.compiler, sizeof shell.compiler);
+    cmp_str("target", shell.target, logic.target, sizeof shell.target);
+    cmp_str("stdlib", shell.stdlib, logic.stdlib, sizeof shell.stdlib);
+    cmp_str("abi_flags", shell.abi_flags, logic.abi_flags, sizeof shell.abi_flags);
+    cmp_str("sanitizers", shell.sanitizers, logic.sanitizers, sizeof shell.sanitizers);
+    cmp_str("sdk_version", shell.sdk_version, logic.sdk_version, sizeof shell.sdk_version);
     return out;
 }
 
