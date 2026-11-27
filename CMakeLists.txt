@@ -659,6 +659,13 @@ else()
         core/format/src/standalone_updater_stub.cpp)
 endif()
 set(_pulp_standalone_sources ${_pulp_standalone_core_sources} ${_pulp_standalone_view_sources})
+# A tree whose UI comes from Vellum builds no Pulp view layer, so there
+# pulp-standalone is the core alone, as pulp-standalone-contract is: its editor
+# window is the editor-host contract window and its chrome comes from Vellum.
+if(PULP_UI_FROM_VELLUM_IN_TREE)
+    set(_pulp_standalone_sources
+        ${_pulp_standalone_core_sources} core/format/src/standalone_view_layer_none.cpp)
+endif()
 add_library(pulp-standalone STATIC ${_pulp_standalone_sources})
 add_library(pulp::standalone ALIAS pulp-standalone)
 # The native standalone links pulp::view-native, which a Vellum-backed tree does
@@ -674,15 +681,18 @@ endif()
 add_library(pulp-standalone-contract STATIC
     ${_pulp_standalone_core_sources} core/format/src/standalone_view_layer_none.cpp)
 add_library(pulp::standalone-contract ALIAS pulp-standalone-contract)
-target_include_directories(pulp-standalone-contract PUBLIC
-    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/core/format/include>
-    $<INSTALL_INTERFACE:include>)
-target_link_libraries(pulp-standalone-contract PUBLIC pulp::format-core)
-target_compile_definitions(pulp-standalone-contract PRIVATE PULP_ENABLE_INSPECTOR=0)
-if(APPLE AND NOT IOS)
-    # The updater reads the app's own code signature (standalone_updater_mac.mm).
-    target_link_libraries(pulp-standalone-contract PUBLIC "-framework AppKit" "-framework Security")
-endif()
+function(_pulp_configure_contract_standalone_target target)
+    target_include_directories(${target} PUBLIC
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/core/format/include>
+        $<INSTALL_INTERFACE:include>)
+    target_link_libraries(${target} PUBLIC pulp::format-core)
+    target_compile_definitions(${target} PRIVATE PULP_ENABLE_INSPECTOR=0)
+    if(APPLE AND NOT IOS)
+        # The updater reads the app's own code signature (standalone_updater_mac.mm).
+        target_link_libraries(${target} PUBLIC "-framework AppKit" "-framework Security")
+    endif()
+endfunction()
+_pulp_configure_contract_standalone_target(pulp-standalone-contract)
 function(_pulp_configure_standalone_target target view_target)
     target_include_directories(${target} PUBLIC
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/core/format/include>
@@ -698,7 +708,11 @@ function(_pulp_configure_standalone_target target view_target)
         target_link_libraries(${target} PUBLIC "-framework Security")
     endif()
 endfunction()
-_pulp_configure_standalone_target(pulp-standalone pulp::view)
+if(PULP_UI_FROM_VELLUM_IN_TREE)
+    _pulp_configure_contract_standalone_target(pulp-standalone)
+else()
+    _pulp_configure_standalone_target(pulp-standalone pulp::view)
+endif()
 if(NOT PULP_UI_FROM_VELLUM_IN_TREE)
     _pulp_configure_standalone_target(pulp-standalone-native pulp::view-native)
 endif()
