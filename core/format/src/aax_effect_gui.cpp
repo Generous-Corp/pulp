@@ -462,7 +462,11 @@ private:
     /// paints the current modulation state.
     AAX_Result TimerWakeup() override {
         PULP_TRACE_SCOPE_NAMED("render", "aax_timer_wakeup");
-        // A contract editor ticks itself from its session's own timer.
+        // A contract editor ticks itself from its session's own timer; this
+        // timer is where it learns the host's container changed size.
+        contract_.follow_parent_frame([](void* parent, uint32_t& width, uint32_t& height) {
+            return aax_native_parent_size(parent, width, height);
+        });
         if (!bridge_)
             return AAX_SUCCESS;
         // The view host's frame driver already runs this pump once per

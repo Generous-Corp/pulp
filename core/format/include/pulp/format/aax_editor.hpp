@@ -528,8 +528,10 @@ private:
 ///                                      editor's size hints and current size
 ///   editor resize request           -> the publish hook (SetViewSize); an
 ///                                      accepted size is the editor's at once
-///   native frame change             -> host_resized(): the editor takes the
-///                                      size inside its hints
+///   native frame change             -> follow_parent_frame(): the container's
+///                                      size is read from the host's timer and
+///                                      handed to host_resized(), so the editor
+///                                      takes the size inside its hints
 ///   SetControlHighlightInfo         -> parameter_highlight()
 ///   DeleteViewContainer             -> detach(): every gesture released,
 ///                                      Editor::detach()
@@ -599,6 +601,9 @@ class ContractEditorShell {
             runtime::log_error("AAX editor: the contract editor did not attach");
             return false;
         }
+        parent_ = parent.handle;
+        seen_parent_width_ = 0;
+        seen_parent_height_ = 0;
         return true;
     }
 
@@ -631,6 +636,33 @@ class ContractEditorShell {
         return session_->set_host_size(width, height, snapped);
     }
 
+    /// Reads the host container's size in logical units. False, leaving the
+    /// outputs untouched, when the container cannot be read.
+    using ParentSizeReader =
+        std::function<bool(void* native_parent, uint32_t& width, uint32_t& height)>;
+
+    /// Follow the host's container. AAX tells the plug-in nothing when Pro Tools
+    /// or the user resizes the window, so the adapter calls this from the
+    /// host's timer: a container size that differs from the last one seen, and
+    /// from the size the editor already has (the echo of its own SetViewSize),
+    /// is handed to host_resized(). True when the editor took a new size.
+    bool follow_parent_frame(const ParentSizeReader& read) {
+        if (!attached() || parent_ == nullptr || !read)
+            return false;
+        uint32_t width = 0;
+        uint32_t height = 0;
+        if (!read(parent_, width, height))
+            return false;
+        if (width == seen_parent_width_ && height == seen_parent_height_)
+            return false;
+        seen_parent_width_ = width;
+        seen_parent_height_ = height;
+        const auto current = session_->size();
+        if (width == current.width && height == current.height)
+            return false;
+        return host_resized(width, height);
+    }
+
     /// The host highlights a parameter's control.
     void parameter_highlight(state::ParamID id, bool highlighted, uint32_t color_rgb) {
         if (auto* editor = session_ ? session_->editor() : nullptr)
@@ -650,6 +682,7 @@ class ContractEditorShell {
         if (model_ != nullptr)
             model_->release_editor_gestures();
         session_->detach();
+        parent_ = nullptr;
     }
 
     /// Release every gesture and destroy the editor. Safe to call twice.
@@ -657,6 +690,7 @@ class ContractEditorShell {
         if (!session_)
             return;
         auto session = std::move(session_);
+        parent_ = nullptr;
         if (auto* model = std::exchange(model_, nullptr)) {
             model->set_editor_invalidation_handler({});
             model->release_editor_gestures();
@@ -668,6 +702,9 @@ class ContractEditorShell {
   private:
     EditorHost* model_ = nullptr;
     PublishSize publish_;
+    void* parent_ = nullptr; ///< the host container while attached
+    uint32_t seen_parent_width_ = 0;
+    uint32_t seen_parent_height_ = 0;
     std::unique_ptr<ContractEditorSession> session_;
 };
 

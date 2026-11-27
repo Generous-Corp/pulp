@@ -24,6 +24,21 @@ float aax_display_scale(void* native_parent) noexcept {
     }
 }
 
+bool aax_native_parent_size(void* native_parent, std::uint32_t& width,
+                            std::uint32_t& height) noexcept {
+    @autoreleasepool {
+        NSView* parent = (__bridge NSView*)native_parent;
+        if (!parent)
+            return false;
+        const NSSize size = parent.bounds.size;
+        if (size.width < 0.5 || size.height < 0.5)
+            return false;
+        width = static_cast<std::uint32_t>(size.width + 0.5);
+        height = static_cast<std::uint32_t>(size.height + 0.5);
+        return true;
+    }
+}
+
 AaxNativeGeometry aax_native_geometry(void* native_parent, void* native_child) noexcept {
     AaxNativeGeometry g;
     @autoreleasepool {

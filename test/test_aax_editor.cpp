@@ -988,6 +988,90 @@ TEST_CASE("AAX builds a factory editor before its window, sizes from it and atta
     CHECK_FALSE(model.invalidation);
 }
 
+TEST_CASE("AAX follows the host container when it is resized",
+          "[aax][editor-host][aax-contract][resize]") {
+    using pulp::format::aax::ContractEditorShell;
+    reset_contract_recording();
+    contract_config() = {};
+    RecordingContractFactory factory;
+    FakeModel model(&factory);
+    std::vector<std::pair<uint32_t, uint32_t>> published;
+    ContractEditorShell shell;
+    REQUIRE(shell.create(model, [&published](uint32_t w, uint32_t h) {
+        published.emplace_back(w, h);
+        return true;
+    }));
+
+    // The container's size as the host last set it.
+    uint32_t parent_width = 400;
+    uint32_t parent_height = 300;
+    int reads = 0;
+    void* read_from = nullptr;
+    const ContractEditorShell::ParentSizeReader reader = [&](void* parent, uint32_t& w,
+                                                             uint32_t& h) {
+        ++reads;
+        read_from = parent;
+        w = parent_width;
+        h = parent_height;
+        return true;
+    };
+
+    // Nothing to follow before the container exists.
+    CHECK_FALSE(shell.follow_parent_frame(reader));
+    CHECK(reads == 0);
+
+    REQUIRE(shell.attach(aax_parent()));
+    // A container at the editor's own size changes nothing.
+    CHECK_FALSE(shell.follow_parent_frame(reader));
+    CHECK(read_from == &g_aax_fake_view);
+    CHECK_FALSE(contract_log().saw("set_size:400x300"));
+
+    // The host or user drags the window larger: the editor takes the new size.
+    parent_width = 640;
+    parent_height = 480;
+    CHECK(shell.follow_parent_frame(reader));
+    CHECK(contract_log().saw("set_size:640x480"));
+    CHECK(shell.plan()->width == 640);
+    CHECK(shell.plan()->height == 480);
+
+    // The same container size is not applied twice.
+    contract_log().calls.clear();
+    CHECK_FALSE(shell.follow_parent_frame(reader));
+    CHECK_FALSE(contract_log().saw("set_size:640x480"));
+
+    // The editor's own request is echoed back by the host at the size it
+    // already took, and is not applied a second time.
+    REQUIRE(contract_log().context->request_resize({560, 420, 1.0}));
+    CHECK(published.back() == std::pair<uint32_t, uint32_t>{560, 420});
+    contract_log().calls.clear();
+    parent_width = 560;
+    parent_height = 420;
+    CHECK_FALSE(shell.follow_parent_frame(reader));
+    CHECK_FALSE(contract_log().saw("set_size:560x420"));
+
+    // A container that cannot be read, or no reader, leaves the editor alone.
+    const ContractEditorShell::ParentSizeReader unreadable = [](void*, uint32_t&, uint32_t&) {
+        return false;
+    };
+    CHECK_FALSE(shell.follow_parent_frame(unreadable));
+    CHECK_FALSE(shell.follow_parent_frame({}));
+
+    // A container the host took away is no longer followed.
+    shell.detach();
+    parent_width = 800;
+    parent_height = 600;
+    reads = 0;
+    CHECK_FALSE(shell.follow_parent_frame(reader));
+    CHECK(reads == 0);
+
+    // A new container is followed from scratch.
+    REQUIRE(shell.attach(aax_parent()));
+    contract_log().calls.clear();
+    CHECK(shell.follow_parent_frame(reader));
+    CHECK(contract_log().saw("set_size:800x600"));
+    shell.close();
+}
+
 TEST_CASE("AAX closes a factory editor before the model deletes its processor",
           "[aax][editor-host][aax-contract]") {
     using pulp::format::aax::ContractEditorShell;
