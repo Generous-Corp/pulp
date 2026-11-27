@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import shlex
 import unittest
 from pathlib import Path
 
@@ -45,11 +46,39 @@ class ReleaseContentWiring(unittest.TestCase):
         self.assertLess(resign, stamp)
         self.assertLess(stamp, archive)
 
+    @staticmethod
+    def _invocations(script: str) -> list[list[str]]:
+        """Return the argv of each `script` call, joining line continuations."""
+        found = []
+        lines = RELEASE.splitlines()
+        for index, line in enumerate(lines):
+            if script not in line:
+                continue
+            text = line
+            while text.rstrip().endswith(("\\", "`")) and index + 1 < len(lines):
+                index += 1
+                text = text.rstrip()[:-1] + " " + lines[index].strip()
+            found.append(shlex.split(text.replace("${{ matrix.platform }}", "PLATFORM").strip()))
+        return found
+
+    @staticmethod
+    def _options(argv: list[str]) -> dict[str, str]:
+        return {argv[i]: argv[i + 1] for i, arg in enumerate(argv[:-1]) if arg.startswith("--")}
+
     def test_sdk_archives_are_built_and_checked_by_the_normalizing_helper(self) -> None:
         self.assertNotIn("tar czf pulp-sdk-", RELEASE)
         self.assertNotIn("Compress-Archive -Path pulp-sdk", RELEASE)
-        self.assertEqual(RELEASE.count("tools/scripts/archive_sdk.py"), 2)
-        self.assertEqual(RELEASE.count("tools/scripts/check_archive_mtimes.py"), 2)
+        builds = self._invocations("tools/scripts/archive_sdk.py")
+        checks = self._invocations("tools/scripts/check_archive_mtimes.py")
+        self.assertEqual(len(builds), 2)
+        self.assertEqual(len(checks), 2)
+        for build, check, epoch in zip(builds, checks, ("$SOURCE_DATE_EPOCH", "$sourceEpoch")):
+            options = self._options(build)
+            self.assertEqual(options["--source"], "pulp-sdk")
+            self.assertEqual(options["--output"], "pulp-sdk-PLATFORM.tar.gz")
+            self.assertEqual(options["--epoch"], epoch)
+            self.assertIn("pulp-sdk-PLATFORM.tar.gz", check)
+            self.assertEqual(self._options(check)["--max-mtime"], options["--epoch"])
 
     def test_backfill_uses_tag_matrix_or_pre_contract_fallback(self) -> None:
         self.assertIn('if [ ! -f "$path" ]', RELEASE)

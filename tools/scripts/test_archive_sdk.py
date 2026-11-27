@@ -19,6 +19,39 @@ FUTURE = BASE + 8 * 3600
 
 
 class ArchiveSdkTest(unittest.TestCase):
+    def _build_tree(self, base: Path) -> Path:
+        root = base / "pulp-sdk"
+        (root / "bin").mkdir(parents=True)
+        (root / "lib").mkdir()
+        (root / "empty").mkdir()
+        tool = root / "bin" / "tool"
+        tool.write_text("#!/bin/sh\n", encoding="utf-8")
+        tool.chmod(0o755)
+        secret = root / "lib" / "private.dat"
+        secret.write_text("x", encoding="utf-8")
+        secret.chmod(0o600)
+        (root / "lib" / "libx.so.1").write_text("lib", encoding="utf-8")
+        os.symlink("libx.so.1", root / "lib" / "libx.so")
+        os.symlink("missing-target", root / "lib" / "dangling")
+        return root
+
+    def test_archive_preserves_prefix_modes_and_symlinks(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = self._build_tree(Path(temporary))
+            archive = Path(temporary) / "sdk.tar.gz"
+            archive_tree(root, archive, BASE)
+            with tarfile.open(archive, "r:gz") as tar:
+                members = {member.name: member for member in tar.getmembers()}
+            self.assertTrue(all(name == "pulp-sdk" or name.startswith("pulp-sdk/") for name in members))
+            self.assertTrue(members["pulp-sdk"].isdir())
+            self.assertTrue(members["pulp-sdk/empty"].isdir())
+            self.assertEqual(members["pulp-sdk/bin/tool"].mode & 0o777, 0o755)
+            self.assertEqual(members["pulp-sdk/lib/private.dat"].mode & 0o777, 0o600)
+            for name, target in (("libx.so", "libx.so.1"), ("dangling", "missing-target")):
+                link = members[f"pulp-sdk/lib/{name}"]
+                self.assertTrue(link.issym(), name)
+                self.assertEqual(link.linkname, target)
+
     def test_archive_normalizes_all_tar_mtimes(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary) / "pulp-sdk"
