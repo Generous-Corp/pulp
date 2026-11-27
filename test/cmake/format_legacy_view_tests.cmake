@@ -171,6 +171,39 @@ if(PULP_HAS_CLAP AND TARGET pulp-test-clap-contract-editor)
         set_target_properties(pulp-test-clap-contract-editor-ui-free PROPERTIES CXX_STANDARD 23)
     endif()
 endif()
+if(APPLE AND NOT PULP_IOS AND PULP_HAS_AUSDK AND TARGET pulp-test-au-v2-contract-view)
+    _pulp_ui_free_adapter_test(pulp-test-au-v2-contract-view-ui-free
+        TEST test_au_v2_contract_view.mm
+        LEGACY pulp-test-au-v2-contract-view
+        SOURCES "${_ui_free_format_src}/au_v2_contract_view.mm"
+        LIBRARIES pulp::format-core ausdk
+            "-framework AppKit" "-framework AudioToolbox" "-framework AudioUnit"
+        DEFINITIONS
+            PULP_AU_CONTRACT_VIEW_FACTORY_CLASS=PulpAUContractViewFactory_Test
+            PULP_AU_CONTRACT_HOST_VIEW_CLASS=PulpAUContractHostView_Test
+            PULP_AU_V2_TEST_HOOKS=1)
+    set_target_properties(pulp-test-au-v2-contract-view-ui-free PROPERTIES CXX_STANDARD 23)
+    target_compile_options(pulp-test-au-v2-contract-view-ui-free PRIVATE
+        $<$<COMPILE_LANGUAGE:OBJCXX>:-std=gnu++23>)
+    target_link_options(pulp-test-au-v2-contract-view-ui-free PRIVATE -Wl,-export_dynamic)
+endif()
+# The macOS AU v3 view controller without its create_view() editor: linked
+# against format-core with no view target at all, so any view use it kept is a
+# link or compile failure here.
+if(APPLE AND NOT PULP_IOS AND PULP_HAS_AUSDK AND TARGET pulp-test-au-v3-view-controller)
+    _pulp_ui_free_adapter_test(pulp-test-au-v3-view-controller-ui-free
+        TEST test_au_v3_view_controller.mm
+        LEGACY pulp-test-au-v3-view-controller
+        SOURCES
+            "${_ui_free_format_src}/au_adapter.mm"
+            "${_ui_free_format_src}/au_view_controller_mac.mm"
+            "${_ui_free_format_src}/au_v3_contract_view.mm"
+        LIBRARIES pulp::format-core ausdk
+            "-framework AppKit" "-framework AudioToolbox" "-framework AVFoundation"
+            "-framework CoreAudioKit" "-framework Foundation")
+    set_target_properties(pulp-test-au-v3-view-controller-ui-free PROPERTIES
+        CXX_STANDARD 23 OBJCXX_STANDARD 23)
+endif()
 if(_ui_free_adapter_pairs AND CMAKE_NM)
     add_test(NAME format-adapters-ui-free-symbols
         COMMAND ${CMAKE_COMMAND} -DNM=${CMAKE_NM} "-DPAIRS=${_ui_free_adapter_pairs}"

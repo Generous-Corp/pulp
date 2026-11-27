@@ -17,13 +17,18 @@
 #import <CoreAudioKit/CoreAudioKit.h>
 
 #include <pulp/format/detail/editor_environment.hpp>
+#include <pulp/format/processor.hpp>
+#include <pulp/runtime/log.hpp>
+// The create_view() editor (ViewBridge on a PluginViewHost) exists only with
+// Pulp's view layer. Without it the controller opens a processor's
+// editor_factory() editor through the editor-host contract, or none.
+#if PULP_FORMAT_LEGACY_VIEW
 #include <pulp/format/gpu_host_select.hpp>
 #include <pulp/format/editor_idle_pump.hpp>
-#include <pulp/format/processor.hpp>
 #include <pulp/format/view_bridge.hpp>
 #include <pulp/view/plugin_view_host.hpp>
 #include <pulp/view/view.hpp>
-#include <pulp/runtime/log.hpp>
+#endif
 
 #import "au_audio_unit.h"
 #import "au_v3_contract_view.h"
@@ -81,8 +86,10 @@ void pulp_auv3_apply_preferred_size(NSViewController *controller,
 // until a manual resize. We poll the view's real bounds for a short window
 // after attach and re-fit each tick. 8 × 60ms ≈ 0.5s covers Logic's late
 // layout settle without lingering long enough to fight a deliberate resize.
+#if PULP_FORMAT_LEGACY_VIEW
 static constexpr unsigned long kInitialSizeSyncMaxAttempts = 8;
 static constexpr int64_t kInitialSizeSyncIntervalMs = 60;
+#endif
 
 } // namespace
 
@@ -142,6 +149,7 @@ static constexpr int64_t kInitialSizeSyncIntervalMs = 60;
     // the surface is never born at the design size inside a smaller restored
     // Logic window. _pendingRoot points into _bridge / _fallbackView and is
     // only dereferenced before they are reset.
+#if PULP_FORMAT_LEGACY_VIEW
     pulp::view::View *_pendingRoot;
     BOOL _viewHostPending;
     // Ivar order is load-bearing — see -dealloc in
@@ -157,6 +165,7 @@ static constexpr int64_t kInitialSizeSyncIntervalMs = 60;
     // the subscription BEFORE the host it observes and the bridge it writes
     // into; the teardown paths also reset it explicitly.
     pulp::view::PluginViewHost::GpuSurfaceSubscription _gpuSurfaceBinding;
+#endif
     // Non-owning; the audio unit owns the processor. Cached so the
     // editor→host resize handler can be cleared on teardown.
     pulp::format::Processor *_processor;
@@ -293,10 +302,12 @@ static constexpr int64_t kInitialSizeSyncIntervalMs = 60;
         _processor->set_editor_resize_handler((const void *)self, nullptr);
     }
     [self closeContractEditor];
+#if PULP_FORMAT_LEGACY_VIEW
     _gpuSurfaceBinding.reset();
     _viewHost.reset();
     _fallbackView.reset();
     _bridge.reset();
+#endif
 
     pulp::format::Processor *processor = nullptr;
     pulp::state::StateStore *store = nullptr;
@@ -310,12 +321,18 @@ static constexpr int64_t kInitialSizeSyncIntervalMs = 60;
     // A processor with an editor factory is opened through the editor-host
     // contract, as VST3, CLAP and AU v2 do.
     if (processor && store && processor->editor_factory() != nullptr) {
+#if PULP_FORMAT_LEGACY_VIEW
         _pendingRoot = nullptr;
         _viewHostPending = NO;
+#endif
         [self openContractEditorForProcessor:processor store:store];
         return;
     }
 
+#if !PULP_FORMAT_LEGACY_VIEW
+    // No editor factory and no Pulp view layer: the host shows no editor.
+    pulp::runtime::log_info("AU mac: the processor has no editor factory, so no editor");
+#else
     pulp::view::View *root = nullptr;
     uint32_t w = 400, h = 300;
     uint32_t designW = w, designH = h;
@@ -381,6 +398,7 @@ static constexpr int64_t kInitialSizeSyncIntervalMs = 60;
     // and start the settle driver as a fallback for hosts that size us late.
     [self createViewHostIfReady];
     [self scheduleInitialSizeSync];
+#endif
 }
 
 // Open the processor's contract editor into a view that fills the root view.
@@ -449,6 +467,7 @@ static constexpr int64_t kInitialSizeSyncIntervalMs = 60;
 #endif
 }
 
+#if PULP_FORMAT_LEGACY_VIEW
 // Build the GPU host lazily, at the view's REAL bounds, once the host has
 // settled them. While the bounds still equal the design size we wait (up to the
 // initial-size-sync window) for the host to deliver its possibly-smaller
@@ -611,14 +630,17 @@ static constexpr int64_t kInitialSizeSyncIntervalMs = 60;
     // makes the corrected size show on the first settle.
     _viewHost->repaint();
 }
+#endif
 
 - (void)viewDidLayout {
     [super viewDidLayout];
+#if PULP_FORMAT_LEGACY_VIEW
     // Also a creation trigger: on hosts where viewDidLayout *does* fire with a
     // real size, build the deferred GPU host here too (idempotent — no-op once
     // created or while still waiting for a settled size).
     [self createViewHostIfReady];
     [self resizeEditorToViewBounds];
+#endif
 }
 
 // An AU host that closes the plug-in window keeps this controller and its
@@ -628,19 +650,25 @@ static constexpr int64_t kInitialSizeSyncIntervalMs = 60;
     [super viewDidDisappear];
     // AppKit sends appearance callbacks on the main thread, where the host
     // renders. A trim from any other thread would race a frame, so skip it.
+#if PULP_FORMAT_LEGACY_VIEW
     if (_viewHost && [NSThread isMainThread])
         _viewHost->release_gpu_caches();
+#endif
 }
 
 - (void)viewWillTransitionToSize:(NSSize)newSize {
     // AUViewController on macOS may not always route through this selector —
     // viewDidLayout is the authority. This is a belt-and-suspenders for hosts
     // that pre-announce a size change before the layout pass.
+#if PULP_FORMAT_LEGACY_VIEW
     if (!_viewHost) return;
     const uint32_t w = std::max(1u, static_cast<uint32_t>(newSize.width));
     const uint32_t h = std::max(1u, static_cast<uint32_t>(newSize.height));
     _viewHost->set_size(w, h);
     if (_bridge) _bridge->resize(w, h);
+#else
+    (void)newSize;
+#endif
 }
 
 - (void)dealloc {
@@ -662,8 +690,10 @@ static constexpr int64_t kInitialSizeSyncIntervalMs = 60;
       }
       // Before the host publishes its surface teardown, and before the
       // scripted session the observer writes into can go away.
+#if PULP_FORMAT_LEGACY_VIEW
       self->_gpuSurfaceBinding.reset();
       self->_viewHost.reset();
+#endif
     };
     // The GPU host owns the CVDisplayLink idle pump, dispatched to the MAIN
     // queue, which dereferences the bridge. An AU v3 controller can be released

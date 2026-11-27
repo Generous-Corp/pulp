@@ -2443,6 +2443,12 @@ construct, so the slot can only return null or do nothing. Gotchas:
   (`ui-free.` prefix); `format-adapters-ui-free-symbols` nm-checks those
   binaries against the mode-1 builds, because a mode-0 claim that silently
   linked mode-1 objects would pass every behavioural case.
+- **AU v2 and AU v3 open an `editor_factory()` editor without a package.**
+  In a Vellum-UI SDK, `PULP_<target>_EDITOR_FROM_FACTORY` makes the AU v2
+  module build the contract Cocoa view factory (otherwise only a `UI <package>`
+  gets it), and the macOS AU v3 controller compiles its ViewBridge path under
+  `PULP_FORMAT_LEGACY_VIEW` only, so its framework links format-core alone.
+  The iOS controller still has the ViewBridge path unconditionally.
 - **A new view-named virtual goes through the macro too.** `node_abi_gate.py`
   reads `PULP_FORMAT_LEGACY_VIEW_NAME(x)` as `x` and expands no other macro.
 - **The hot-reload fingerprint carries the mode** (`legacyview=` in

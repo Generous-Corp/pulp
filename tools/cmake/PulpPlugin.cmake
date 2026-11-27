@@ -307,10 +307,15 @@ function(pulp_add_plugin target)
                 "pulp_add_plugin(${target} ${_pulp_no_editor_reason}): this Pulp SDK does not export Pulp::format-clap-core")
         endif()
         set(PULP_${target}_NO_EDITOR TRUE CACHE INTERNAL "")
+        # Read by format helpers that build a contract editor of their own (the
+        # AU v2 Cocoa view factory): TRUE when the editor comes from
+        # Processor::editor_factory() without a UI package.
+        set(PULP_${target}_EDITOR_FROM_FACTORY "${_pulp_vellum_default_no_editor}" CACHE INTERNAL "")
         set(_pulp_core_format_target "${_PULP_FORMAT_CORE_TARGET}")
     else()
         _pulp_refuse_view_editor_from_vellum("pulp_add_plugin(${target})")
         set(PULP_${target}_NO_EDITOR FALSE CACHE INTERNAL "")
+        set(PULP_${target}_EDITOR_FROM_FACTORY FALSE CACHE INTERNAL "")
         set(_pulp_core_format_target "${_PULP_FORMAT_TARGET}")
     endif()
     # AAX_HEADLESS: a processor-only AAX artifact (no custom EffectGUI). Its

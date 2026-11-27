@@ -135,12 +135,16 @@ elseif(SCENARIO STREQUAL "editor")
     _expect_text("view-target=[Pulp::view]" "the default editor on Pulp's view")
     # In vellum mode the default editor builds view-free: its editor is the one
     # Processor::editor_factory() returns, with no Pulp view target picked.
-    set(_default "pulp_add_plugin(Pdefault BUNDLE_ID dev.pulp.default)\nmessage(STATUS \"view-target=[\${PULP_Pdefault_VIEW_TARGET}] no-editor=[\${PULP_Pdefault_NO_EDITOR}]\")")
+    set(_default "pulp_add_plugin(Pdefault BUNDLE_ID dev.pulp.default)\nmessage(STATUS \"view-target=[\${PULP_Pdefault_VIEW_TARGET}] no-editor=[\${PULP_Pdefault_NO_EDITOR}] from-factory=[\${PULP_Pdefault_EDITOR_FROM_FACTORY}]\")")
     _expect_pass(vellum default "${_default}")
-    _expect_text("view-target=[] no-editor=[TRUE]" "the default editor building view-free in vellum mode")
+    _expect_text("view-target=[] no-editor=[TRUE] from-factory=[TRUE]" "the default editor building view-free in vellum mode")
     # Control: the same call in pulp mode keeps Pulp's own editor.
     _expect_pass(pulp default "${_default}")
-    _expect_text("view-target=[Pulp::view] no-editor=[FALSE]" "the default editor on Pulp's view in pulp mode")
+    _expect_text("view-target=[Pulp::view] no-editor=[FALSE] from-factory=[FALSE]" "the default editor on Pulp's view in pulp mode")
+    # An explicit NO_EDITOR is still no editor: the AU v2 contract factory is
+    # not built for it.
+    _expect_pass(vellum quiet "pulp_add_plugin(Pq BUNDLE_ID dev.pulp.q NO_EDITOR)\nmessage(STATUS \"from-factory=[\${PULP_Pq_EDITOR_FROM_FACTORY}]\")")
+    _expect_text("from-factory=[FALSE]" "an explicit NO_EDITOR without the contract factory")
     foreach(_kw LITE_EDITOR FULL_EDITOR GPU_UI)
         _expect_refused(vellum ${_kw} "pulp_add_plugin(P${_kw} BUNDLE_ID dev.pulp.kw ${_kw})"
             "pulp_add_plugin(P${_kw}): ${_vellum_refusal}")
