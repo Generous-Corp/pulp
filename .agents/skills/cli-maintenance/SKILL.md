@@ -4478,6 +4478,15 @@ before building and refuses the install when the lock is missing or malformed.
 A snapshot without `tools/deps/pulp_lock.py` is treated as a failure, not
 skipped.
 
+## The GPU adapter probe's verdict rules have no GPU dependency
+
+`tools/cli/gpu_probe/src/adapter_probe.cpp` judges adapter evidence and sampled
+pixels with plain structs, so its unit test runs in the default build. The
+probe executable that fills the structs from Vellum's GPU runtime lives in
+`integrations/pulp-vellum` and compiles that source directly; it is not part of
+the `pulp doctor gpu` or `pulp gpu probe` recipe registry. `unavailable` (no
+device) and `fail` (device came up wrong) stay distinct exit codes (2 and 1).
+
 ## `pulp audio` image PNGs are encoded without the render layer
 
 `tools/cli/audio_png_encoder.cpp` writes the scope, waveform and spectrogram

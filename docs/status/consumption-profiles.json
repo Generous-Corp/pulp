@@ -1727,6 +1727,19 @@
       "pulp/native/metal_surface.hpp",
       "pulp/native/surface.hpp"
     ],
+    "integrations/pulp-vellum-components/include": [
+      "pulp/vellum_components/ab_compare.hpp",
+      "pulp/vellum_components/aliases.hpp",
+      "pulp/vellum_components/arranger_view.hpp",
+      "pulp/vellum_components/catalogue.hpp",
+      "pulp/vellum_components/gpu_health_content.hpp",
+      "pulp/vellum_components/inspector_window.hpp",
+      "pulp/vellum_components/lasso.hpp",
+      "pulp/vellum_components/model_manager_view.hpp",
+      "pulp/vellum_components/panic_button.hpp",
+      "pulp/vellum_components/panic_target.hpp",
+      "pulp/vellum_components/preferences_panel.hpp"
+    ],
     "tools/audio/analysis/include": [
       "pulp/audio/analysis/audio_artifacts.hpp",
       "pulp/audio/analysis/audio_assertions.hpp",
@@ -22729,7 +22742,7 @@
         "PULP_BUILD_EXAMPLES": "OFF"
       },
       "summary": {
-        "installed_target_count": 88,
+        "installed_target_count": 89,
         "ranked_by_closure": [
           {
             "exported_as": "Pulp::inspect-standalone-runtime",
@@ -22842,6 +22855,10 @@
           {
             "exported_as": "Pulp::canvas",
             "closure_node_count": 45
+          },
+          {
+            "exported_as": "Pulp::vellum-components",
+            "closure_node_count": 44
           },
           {
             "exported_as": "Pulp::sequence",
@@ -29105,6 +29122,99 @@
             "generated_include_roots": 0
           },
           "direct_dependencies": []
+        },
+        "vellum-components": {
+          "target": "pulp-vellum-components",
+          "exported_as": "Pulp::vellum-components",
+          "type": "STATIC_LIBRARY",
+          "source_dir": "integrations/pulp-vellum-components",
+          "closure": {
+            "node_count": 44,
+            "pulp_targets": [
+              "pulp-audio",
+              "pulp-dataplane",
+              "pulp-events",
+              "pulp-format-core",
+              "pulp-foundation",
+              "pulp-graph",
+              "pulp-midi",
+              "pulp-music",
+              "pulp-native-components",
+              "pulp-platform",
+              "pulp-runtime",
+              "pulp-sample-bank-manifest",
+              "pulp-signal",
+              "pulp-simd",
+              "pulp-state",
+              "pulp-timebase",
+              "pulp-timeline",
+              "pulp-timeline-editor"
+            ],
+            "third_party_targets": [
+              "everest",
+              "gpu-runtime-device-api",
+              "hwy",
+              "lv2-headers",
+              "mbedcrypto",
+              "mbedtls",
+              "mbedx509",
+              "p256m",
+              "pulp-cpp-httplib",
+              "pulp-tracing",
+              "pulp-vellum-components"
+            ]
+          },
+          "external_dependencies": {
+            "count": 26,
+            "third_party_targets": [
+              "everest",
+              "gpu-runtime-device-api",
+              "hwy",
+              "lv2-headers",
+              "mbedcrypto",
+              "mbedtls",
+              "mbedx509",
+              "p256m",
+              "pulp-cpp-httplib",
+              "pulp-tracing",
+              "pulp-vellum-components"
+            ],
+            "prebuilt_archives": [],
+            "imported_targets": [],
+            "frameworks": [
+              "Accelerate",
+              "AppKit",
+              "AudioToolbox",
+              "Cocoa",
+              "CoreAudio",
+              "CoreBluetooth",
+              "CoreFoundation",
+              "CoreMIDI",
+              "CoreServices",
+              "Foundation",
+              "Security",
+              "UniformTypeIdentifiers",
+              "UserNotifications"
+            ],
+            "system_libraries": [
+              "Vellum::MirrorView_core",
+              "bsm"
+            ]
+          },
+          "public_headers": {
+            "roots": [
+              "integrations/pulp-vellum-components/include"
+            ],
+            "generated_include_roots": 0
+          },
+          "direct_dependencies": [
+            "pulp-format-core",
+            "pulp-state",
+            "pulp-timebase",
+            "pulp-timeline",
+            "pulp-timeline-editor",
+            "system:Vellum::MirrorView_core"
+          ]
         },
         "view": {
           "target": "pulp-view",

@@ -288,6 +288,11 @@ stopped compiling and no Pulp check noticed.
   not contain the given Vellum commit (checked through Vellum's compare endpoint
   before any download). The workflow sets it to the commit that introduced the
   `ParamModel` surface that `integrations/pulp-vellum` builds on.
+- **GPU adapter probe.** The bridge configure also builds
+  `pulp-vellum-gpu-adapter-probe`, which renders a fixed scene on the SDK's GPU
+  runtime and judges the adapter identity and three sampled pixels. Its
+  `pulp-vellum` ctest entries require a pass, and require that the same run with
+  the adapter name dropped fails with reason `empty-adapter`.
 - **MCP UI tools.** After the bridge, the lane builds `pulp-test-mcp-server` in
   the same configure and runs its `[ui]` cases with
   `PULP_TEST_VELLUM_APP_HOST` set to the SDK's `bin/vellum-app-host`. The live
