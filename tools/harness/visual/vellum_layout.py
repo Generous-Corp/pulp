@@ -36,6 +36,7 @@ is dropped from the snapshot.
 from __future__ import annotations
 
 import json
+import math
 import os
 from pathlib import Path
 import subprocess
@@ -184,12 +185,27 @@ def run_host(host: Path, tree: dict[str, Any]) -> dict[str, Any]:
         return json.loads(dump.read_text(encoding="utf-8"))
 
 
+def _rects_by_id(tree: dict[str, Any], label: str, problems: list[str]) -> dict[str, Any]:
+    """Rects keyed by node id; duplicate ids and non-finite values are problems."""
+    rects: dict[str, Any] = {}
+    for n in tree["nodes"]:
+        node_id = n["id"]
+        if node_id in rects:
+            problems.append(f"{node_id}: duplicate node id in the {label} tree")
+            continue
+        rects[node_id] = n["rect"]
+        for axis in ("x", "y", "w", "h"):
+            if not math.isfinite(float(n["rect"][axis])):
+                problems.append(f"{node_id}.{axis}: non-finite value in the {label} tree")
+    return rects
+
+
 def compare_rects(expected: dict[str, Any], actual: dict[str, Any],
                   tolerance: float) -> list[str]:
     """Differences between node ids and rects; empty when they agree."""
-    want = {n["id"]: n["rect"] for n in expected["nodes"]}
-    got = {n["id"]: n["rect"] for n in actual["nodes"]}
-    problems = []
+    problems: list[str] = []
+    want = _rects_by_id(expected, "golden", problems)
+    got = _rects_by_id(actual, "vellum", problems)
     for node_id in sorted(set(want) | set(got)):
         if node_id not in got:
             problems.append(f"{node_id}: missing from the Vellum tree")
@@ -197,7 +213,8 @@ def compare_rects(expected: dict[str, Any], actual: dict[str, Any],
             problems.append(f"{node_id}: not in the golden")
         else:
             for axis in ("x", "y", "w", "h"):
-                if abs(float(want[node_id][axis]) - float(got[node_id][axis])) > tolerance:
+                delta = abs(float(want[node_id][axis]) - float(got[node_id][axis]))
+                if not delta <= tolerance:
                     problems.append(
                         f"{node_id}.{axis}: golden {want[node_id][axis]} vs vellum {got[node_id][axis]}")
     return problems

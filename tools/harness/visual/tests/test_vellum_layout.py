@@ -82,6 +82,24 @@ class MappingTests(unittest.TestCase):
         self.assertTrue(any(p.startswith("a.w") for p in problems), problems)
         self.assertTrue(any(p.startswith("b:") for p in problems), problems)
 
+    def test_compare_rects_rejects_duplicate_ids(self) -> None:
+        node = {"id": "a", "rect": {"x": 0, "y": 0, "w": 10, "h": 10}}
+        golden = {"nodes": [node]}
+        dup = {"nodes": [node, {"id": "a", "rect": {"x": 9, "y": 9, "w": 1, "h": 1}}]}
+        problems = vellum_layout.compare_rects(golden, dup, 0.001)
+        self.assertTrue(any("duplicate node id" in p for p in problems), problems)
+        problems = vellum_layout.compare_rects(dup, golden, 0.001)
+        self.assertTrue(any("duplicate node id" in p for p in problems), problems)
+
+    def test_compare_rects_rejects_non_finite_values(self) -> None:
+        for bad in (float("nan"), float("inf")):
+            rect = {"x": bad, "y": 0, "w": 10, "h": 10}
+            both = {"nodes": [{"id": "a", "rect": rect}]}
+            problems = vellum_layout.compare_rects(both, json.loads(json.dumps(both)), 0.001)
+            self.assertTrue(problems, bad)
+            good = {"nodes": [{"id": "a", "rect": {"x": 0, "y": 0, "w": 10, "h": 10}}]}
+            self.assertTrue(vellum_layout.compare_rects(good, both, 0.001), bad)
+
 
 def run_runner(*arguments: str) -> tuple[int, str, str]:
     out, err = io.StringIO(), io.StringIO()

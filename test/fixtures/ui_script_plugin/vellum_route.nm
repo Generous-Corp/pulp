@@ -1,0 +1,5 @@
+0000000000001000 T _clap_entry
+000000000004527c t __ZN4pulp6vellum23scripted_editor_factoryEv
+0000000000002000 T __ZNKSt3__110__function12__value_funcIFvPKN4pulp4view17ScriptedUiSessionEEEclB8ne190102EOS6_
+                 U __ZN4pulp6format10ViewBridge11scripted_uiEv
+                 U __ZN4pulp6format31install_scripted_editor_builderEv
