@@ -117,10 +117,59 @@ foreach(_target IN LISTS _control_targets)
     endif()
 endforeach()
 
+# The data plane is the control SDK's value-channel home: a consumer that
+# includes only pulp/dataplane headers links the telemetry target and no view
+# target. The walker below reads the installed link interface, so a control
+# target that starts requiring a view target fails here; the Standalone UI
+# adapter, which does, must be reported, or the walker proves nothing.
+function(_pulp_closure_reaches_view root out)
+    set(_queue "${root}")
+    set(_seen "")
+    set(_found FALSE)
+    while(_queue)
+        list(POP_FRONT _queue _t)
+        if(_t IN_LIST _seen OR NOT TARGET ${_t})
+            continue()
+        endif()
+        list(APPEND _seen ${_t})
+        if(_t MATCHES "^Pulp::view")
+            set(_found TRUE)
+        endif()
+        get_target_property(_l ${_t} INTERFACE_LINK_LIBRARIES)
+        if(_l)
+            string(REGEX MATCHALL "Pulp::[A-Za-z0-9_+-]+" _names "${_l}")
+            list(APPEND _queue ${_names})
+        endif()
+    endwhile()
+    set(${out} ${_found} PARENT_SCOPE)
+endfunction()
+_pulp_closure_reaches_view(Pulp::inspect-telemetry _telemetry_reaches_view)
+if(_telemetry_reaches_view)
+    message(FATAL_ERROR "Pulp::inspect-telemetry requires a view target; the control SDK must not")
+endif()
+_pulp_closure_reaches_view(Pulp::inspect-ui-runtime _ui_reaches_view)
+if(NOT _ui_reaches_view)
+    message(FATAL_ERROR "Walker control failed: Pulp::inspect-ui-runtime reached no view target")
+endif()
+add_executable(pulp-control-dataplane-consumer dataplane_consumer.cpp)
+target_compile_features(pulp-control-dataplane-consumer PRIVATE cxx_std_20)
+target_link_libraries(pulp-control-dataplane-consumer PRIVATE Pulp::inspect-telemetry)
+
 add_executable(pulp-control-sdk-consumer main.cpp)
 target_compile_features(pulp-control-sdk-consumer PRIVATE cxx_std_20)
 target_link_libraries(pulp-control-sdk-consumer PRIVATE ${_control_targets})
 add_subdirectory(standalone-consumer)
+]=])
+
+file(WRITE "${_consumer_source}/dataplane_consumer.cpp" [=[
+#include <pulp/dataplane/value_channel_set.hpp>
+#include <pulp/inspect/control_telemetry_tap.hpp>
+
+int main() {
+  pulp::dataplane::ValueChannelSet channels;
+  pulp::inspect::ControlTelemetryTap tap(pulp::inspect::ControlTelemetryTapConfig{});
+  return channels.size() == 0 && tap.subscription_count() == 0 ? 0 : 1;
+}
 ]=])
 
 file(WRITE "${_consumer_source}/main.cpp" [=[
@@ -357,7 +406,8 @@ file(WRITE "${_consumer_source}/standalone-consumer/standalone.cpp" [=[
 #include <pulp/view/motion.hpp>
 #include <pulp/view/motion_cost.hpp>
 #include <pulp/view/ui_components.hpp>
-#include <pulp/view/value_channel_set.hpp>
+#include <pulp/dataplane/fwd.hpp>
+#include <pulp/dataplane/value_channel_set.hpp>
 #include <pulp/view/view.hpp>
 
 #include <algorithm>
