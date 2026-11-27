@@ -308,8 +308,10 @@ class PropertyPanel : public View {
         auto* p = find_mut(key);
         if (!p || p->kind != Kind::Button)
             return false;
-        if (p->on_click)
-            p->on_click();
+        // Copy the action: it may re-register properties (reallocating
+        // properties_) or replace this very Button, destroying the functor.
+        if (auto action = p->on_click)
+            action();
         return true;
     }
 
@@ -392,10 +394,18 @@ class PropertyPanel : public View {
         return nullptr;
     }
 
+    // The observer may call add_* (reallocating properties_ or replacing this
+    // slot), so keep the key, callback and argument alive independently of the
+    // registry and reacquire the property by key before persisting.
     void fire(const Property& p) {
-        if (p.on_change)
-            p.on_change(p.value);
-        persist(p);
+        const std::string key = p.key;
+        if (p.on_change) {
+            const auto callback = p.on_change;
+            const Value arg = p.value;
+            callback(arg);
+        }
+        if (const Property* current = find(key))
+            persist(*current);
     }
 
     void persist(const Property& p) const {

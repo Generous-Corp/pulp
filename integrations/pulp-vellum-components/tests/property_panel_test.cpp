@@ -335,3 +335,29 @@ TEST_CASE("PropertyPanel: every member the header documents exists", "[property-
     for (const auto& name : documented)
         CHECK(code.find(name + "(") != std::string::npos);
 }
+
+TEST_CASE("PropertyPanel: observer that registers properties does not dangle",
+          "[property-panel][lifetime]") {
+    pulp::state::PropertiesFile props;
+    PropertyPanel panel;
+    panel.bind_persistence(&props);
+    int seen = -1;
+    panel.add_text("a", "A", "x", [&](const std::string& v) {
+        // Force properties_ to reallocate while fire() is mid-flight, and
+        // replace the firing slot itself (destroys the running callback).
+        for (int i = 0; i < 64; ++i)
+            panel.add_boolean("dep" + std::to_string(i), "D", false);
+        panel.add_text("a", "A", v);
+        seen = static_cast<int>(v.size());
+    });
+    REQUIRE(panel.set_text("a", "hello"));
+    CHECK(seen == 5);
+    CHECK(panel.size() == 65);
+    CHECK(props.get_string("a").value_or("") == "hello");
+    panel.add_button("b", "B", [&] {
+        for (int i = 0; i < 64; ++i)
+            panel.add_boolean("more" + std::to_string(i), "M", false);
+        panel.add_button("b", "B", [] {});
+    });
+    CHECK(panel.click("b"));
+}
