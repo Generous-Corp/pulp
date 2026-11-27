@@ -5,9 +5,11 @@
 // these symbols lives with the plug-in rather than in the generated editor
 // package, so a target that holds only the package's source cannot link.
 
-#include <pulp/vellum/editor_env.hpp>
-
 #include <vellum/view/view.hpp>
+
+namespace pulp::vellum {
+struct EditorEnv;
+}
 
 namespace pulp::test_fixtures {
 
@@ -19,9 +21,6 @@ class Auv3EditorView final : public ::vellum::view::View {
     void editor_idle();
     void editor_closing();
     void layout_children() override;
-
-  private:
-    pulp::vellum::EditorEnv& env_;
 };
 
 } // namespace pulp::test_fixtures
