@@ -72,6 +72,17 @@ if(_gutted STREQUAL _full)
     message(FATAL_ERROR "the graph has no gpu_helper record to remove")
 endif()
 file(WRITE "${BINARY_DIR}/gutted.tsv" "${_gutted}")
+set(_gutted_build "${BINARY_DIR}/gutted-codemodel")
+file(MAKE_DIRECTORY "${_gutted_build}/.cmake/api/v1")
+file(COPY "${BINARY_DIR}/.cmake/api/v1/reply"
+     DESTINATION "${_gutted_build}/.cmake/api/v1")
+file(GLOB _gpu_helper_json
+     "${_gutted_build}/.cmake/api/v1/reply/target-gpu_helper-*.json")
+if(NOT _gpu_helper_json)
+    message(FATAL_ERROR "the codemodel has no gpu_helper target to remove")
+endif()
+file(REMOVE ${_gpu_helper_json})
+file(WRITE "${BINARY_DIR}/gutted.codemodel" "${_gutted_build}")
 execute_process(
     COMMAND "${PYTHON}" "${CHECKER}" --graph "${BINARY_DIR}/gutted.tsv" --root route_name
             --forbid "pulp::canvas"
