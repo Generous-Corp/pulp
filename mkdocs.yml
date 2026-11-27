@@ -132,6 +132,7 @@ nav:
       - Testing: guides/testing.md
       - Docs Maintenance: guides/docs-maintenance.md
       - API and Header Design: guides/api-design.md
+      - Review Depth: guides/code-review.md
       - iOS Deployment: getting-started/ios-deployment.md
   - Support:
       - Capabilities: reference/capabilities.md

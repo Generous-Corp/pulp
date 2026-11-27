@@ -55,6 +55,7 @@ MIT-licensed. No royalties. No copyleft.
 - [Design from Figma](guides/figma-plugin.md) — the "Design for Pulp" plugin, export, and import ([model](reference/design-import-model.md))
 - [Docs Maintenance](guides/docs-maintenance.md) — how docs stay consistent with code
 - [API and Header Design](guides/api-design.md) — layering, strong types, small processors, lean headers
+- [Review Depth](guides/code-review.md) — how much review a change gets, by risk
 
 ## Policies
 

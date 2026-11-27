@@ -1864,28 +1864,9 @@ every agent (Claude and Codex) and contributor, not optional:
 2. **Adversarial review** (complete-feature bar, not happy-path) — hunt for
    correctness bugs, missed edge cases, and unverified claims.
 
-Run both **inline by default** (cheap — you read the diff and apply the two
-lenses) or via `/code-review`. The heavier `autoreview` (Codex panel) and
-`thermo-nuclear-code-quality-review` skills are **opt-in** — use them only when
-you want the deep/expensive pass. Either way the review happens and findings are
-swept before the PR lands.
-
-Scale the depth of review to the risk of the change:
-
-| Change | Review |
-|--------|--------|
-| Every PR | Inline architecture review plus adversarial review, as above |
-| A complex or fragile PR (ABI or layout, lifetime or threading, security, release or signing, gate or guard changes, large refactors) | Add a fresh adversarial review by a separate reviewer |
-| A finished phase or stack | One adversarial review of the whole stack before it lands |
-| A major milestone, such as completing a migration | The thermo-nuclear review |
-
-Adjust the depth by measured yield: if a tier keeps finding nothing, relax it;
-if defects keep escaping past it, deepen it.
-
-New public headers and APIs also follow
-[`docs/guides/api-design.md`](docs/guides/api-design.md) (layering, strong
-types, small processors, lean headers); the `api-design` skill carries the
-checklist.
+Run both **inline by default** or via `/code-review`; `autoreview` and the thermo-nuclear
+skills are **opt-in**. Depth scales with risk ([`docs/guides/code-review.md`](docs/guides/code-review.md));
+new public headers follow [`docs/guides/api-design.md`](docs/guides/api-design.md) (`api-design` skill).
 
 ---
 
