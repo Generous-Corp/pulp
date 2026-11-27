@@ -11,8 +11,8 @@ The bridge keeps editor message dispatch shared across plugins so each editor
 does not need to reinvent envelope parsing, handler routing, and error response
 formatting.
 
-- Header: `core/view/include/pulp/view/editor_bridge.hpp`
-- Implementation: `core/view/src/editor_bridge.cpp`
+- Header: `core/editor_bridge/include/pulp/view/editor_bridge.hpp`
+- Implementation: `core/editor_bridge/src/editor_bridge.cpp`
 - Tests: `test/test_editor_bridge.cpp`
 
 ## Envelope

@@ -1974,7 +1974,7 @@ Key invariants:
   the framework explicitly does NOT carry `EditorBridgeState`-style
   per-session state. Capture it on `[this]` instead.
 
-EditorBridge's dispatch core (`core/view/src/editor_bridge.cpp`: handlers,
+EditorBridge's dispatch core (`core/editor_bridge/src/editor_bridge.cpp`: handlers,
 `dispatch`, `dispatch_json`, `dispatch_webview_message`, the response and
 `get_*` helpers) is its own view-free target, `pulp-editor-bridge`, which needs
 only CHOC and the runtime. The `attach_native_runtime` / `detach_native_runtime`
@@ -1984,7 +1984,7 @@ dispatch code free of view-script includes; in an SDK that serves its UI names
 from Vellum, `Pulp::view-tooling` links the core and nothing else of Pulp's
 view, so a WebView editor's bridge comes from it.
 
-When you change `core/view/src/editor_bridge.cpp` or its header, the
+When you change `core/editor_bridge/src/editor_bridge.cpp` or its header, the
 skill-sync gate requires updates to either *this* skill or the
 `import-design` skill (or both). The path map maps both to the file.
 
@@ -2709,10 +2709,10 @@ this boundary. Parameter text and custom state have matching containment in
   unchanged — that include is the compatibility contract, not an incidental
   one. The same split moved `ProcessContext` to `process_context.hpp` and
   `PrepareContext` to `prepare_resources.hpp`.
-- `core/view/include/pulp/view/editor_bridge.hpp` — EditorBridge API
+- `core/editor_bridge/include/pulp/view/editor_bridge.hpp` — EditorBridge API
 - `core/view/include/pulp/view/scripted_ui.hpp` — session-owned native message
   attachment and realm-replacement persistence
-- `core/view/src/editor_bridge.cpp` — EditorBridge implementation
+- `core/editor_bridge/src/editor_bridge.cpp` — EditorBridge implementation
 - `docs/guides/view-bridge.md` — user-facing guide
 - `docs/reference/editor-bridge.md` — EditorBridge reference
 - `examples/view-bridge-demo/main.cpp` — runnable headless demo

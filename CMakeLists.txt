@@ -548,6 +548,8 @@ endif()
 # After core/render so the GPU convolver node can link pulp::gpu-device when GPU is
 # enabled. The transport itself is GPU-agnostic and builds regardless.
 add_subdirectory(core/gpu_audio)
+# The view-free editor bridge comes before core/view, whose tooling layer links it.
+add_subdirectory(core/editor_bridge)
 add_subdirectory(core/view)
 # The lite editor stack's replacement objects (see PulpLiteEditorObjects.cmake).
 # Apple only: the lite TextShaper measures through CoreText.

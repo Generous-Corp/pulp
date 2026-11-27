@@ -1140,6 +1140,12 @@ pulp_test_data(pulp-test-editor-bridge NO_DEFINE
 # Only test_editor_bridge.cpp spawns in this group (spawning_sources), so the
 # group-level NONE covers exactly that process call.
 pulp_test_spawns(pulp-test-group-view-widgets NONE REASON "its only spawn runs the system node interpreter on the checked-in bridge, nothing the tree builds")
+# EditorBridge's dispatch core against pulp::editor-bridge alone: a working
+# bridge with no Pulp view library linked and no legacy view header reachable.
+# NO_PCH because the shared test PCH is built with the view headers on its
+# include path.
+pulp_add_test_suite(pulp-test-editor-bridge-core NO_PCH
+    LIBRARIES pulp::editor-bridge)
 
 # Input events tests
 pulp_add_test_suite(pulp-test-input-events GROUP pulp-test-group-view-widgets LIBRARIES pulp::view)
