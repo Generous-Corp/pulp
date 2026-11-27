@@ -129,7 +129,21 @@ if(PULP_ENABLE_GPU)
         pulp::tool-gpu-probe-recipes)
 endif()
 
+# Verdict rules of the Vellum-backed adapter probe. No GPU or Vellum types, so
+# it builds everywhere; the probe executable itself is in integrations/pulp-vellum.
+add_library(pulp-tool-gpu-adapter-probe STATIC src/adapter_probe.cpp)
+add_library(pulp::tool-gpu-adapter-probe ALIAS pulp-tool-gpu-adapter-probe)
+target_compile_features(pulp-tool-gpu-adapter-probe PUBLIC cxx_std_20)
+target_include_directories(pulp-tool-gpu-adapter-probe
+    PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>)
+
 if(PULP_BUILD_TESTS)
+    add_executable(pulp-test-gpu-adapter-probe
+        ${CMAKE_SOURCE_DIR}/test/test_gpu_adapter_probe.cpp)
+    target_link_libraries(pulp-test-gpu-adapter-probe PRIVATE
+        pulp::tool-gpu-adapter-probe Catch2::Catch2WithMain)
+    add_test(NAME gpu-adapter-probe COMMAND pulp-test-gpu-adapter-probe)
+
     add_executable(pulp-test-gpu-probe-result
         ${CMAKE_SOURCE_DIR}/test/test_gpu_probe_result.cpp)
     target_link_libraries(pulp-test-gpu-probe-result PRIVATE
