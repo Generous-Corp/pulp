@@ -107,6 +107,7 @@ class Graph:
         self.link_edges: set[tuple[str, str]] = set()
         self.archive_derived: set[str] = set()
         self.path_derived: set[str] = set()
+        self.opaque: set[str] = set()
 
     @classmethod
     def parse(cls, text: str) -> "Graph":
@@ -123,6 +124,8 @@ class Graph:
                 # The writer lists the words CMake resolved to a target.
                 graph.explicit.update(canonical(w) for w in re.split(r"[;\s]+", fields[5]) if w)
             graph.types[name] = fields[1].strip()
+            if graph.types[name] == "IMPORTED_DIRECTORY_SCOPED":
+                graph.opaque.add(name)
             targets: list[str] = []
             for field_index, value in enumerate(fields[2:5]):
                 if value.endswith("-NOTFOUND"):
@@ -227,6 +230,10 @@ def find_paths(graph: Graph, root: str, forbidden: list[str],
                 while parent[path[-1]] is not None:
                     path.append(parent[path[-1]])  # type: ignore[arg-type]
                 found.append(list(reversed(path)))
+                continue
+            if target in graph.opaque:
+                if unresolved is not None:
+                    unresolved.append(target)
                 continue
             if target not in graph.edges:
                 if external is not None and EXTERNAL_NS_RE.match(target):

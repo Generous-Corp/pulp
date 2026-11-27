@@ -227,6 +227,15 @@ class ClosureWalk(unittest.TestCase):
         self.assertEqual(code, 2)
         self.assertIn("gpu_helper", err)
 
+    def test_opaque_directory_scoped_import_record_is_inconclusive(self) -> None:
+        text = graph_text({"pulp-root": ("helper_import", ""),
+                           "helper_import": ("", "")})
+        text = text.replace("helper_import\tSTATIC_LIBRARY",
+                            "helper_import\tIMPORTED_DIRECTORY_SCOPED", 1)
+        code, err = self.run_raw(text, ["pulp-root"])
+        self.assertEqual(code, 2)
+        self.assertIn("helper_import", err)
+
     def test_ordinary_named_target_with_record_is_walked(self) -> None:
         records = {"pulp-root": ("gpu_helper", "", "", "gpu_helper"),
                    "gpu_helper": ("pulp::view-core", "")}
