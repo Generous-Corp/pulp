@@ -104,6 +104,10 @@ NON_EXECUTING_PREFIXES = ("docs/", ".github/", "planning/", ".agents/", ".claude
 
 
 SKIP_EXIT = 77
+# The artifact `shipyard apply-derived` reads (`[[derived_files.artifacts]]` in
+# .shipyard/config.toml): its root is .shipyard/, so it holds the families
+# file at its top level.
+EXPECTED_ARTIFACT = "changed-surface-families-expected"
 
 
 class GenerationError(RuntimeError):
@@ -667,6 +671,12 @@ def main(argv: list[str]) -> int:
                         help="diff-scope --check to changes since this ref (default: as "
                              "script_test_inputs.py --check resolves it; none means a full check)")
     parser.add_argument("--head", default="HEAD", help="--static: the revision to check (default HEAD)")
+    parser.add_argument("--emit-expected", default=os.environ.get("PULP_FAMILIES_EMIT_DIR") or (
+        str(Path(os.environ["RUNNER_TEMP"]) / EXPECTED_ARTIFACT) if os.environ.get("RUNNER_TEMP") else None),
+                        metavar="DIR", help="with --check, on blocking drift write the families file "
+                        "--write would produce to DIR/" + FAMILIES_FILE.name + " (the layout of the "
+                        "`" + EXPECTED_ARTIFACT + "` artifact, rooted at .shipyard/; default: "
+                        "$RUNNER_TEMP/" + EXPECTED_ARTIFACT + " when set)")
     mode = parser.add_mutually_exclusive_group(required=True)
     mode.add_argument("--write", action="store_true")
     mode.add_argument("--check", action="store_true")
@@ -768,6 +778,14 @@ def run_against(root: Path, build_dir: Path, args: argparse.Namespace) -> int:
           file=sys.stderr)
     for line in describe_drift(current, updated)[:12]:
         print(f"  {line}", file=sys.stderr)
+    if getattr(args, "emit_expected", None):
+        target = Path(args.emit_expected) / FAMILIES_FILE.name
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(updated, encoding="utf-8")
+        print(f"changed-surface script families: expected {FAMILIES_FILE} written to {target}. "
+              f"No-configure repair: `shipyard apply-derived --pr <n> --push`, or download the "
+              f"`{EXPECTED_ARTIFACT}` artifact of this run and copy it to {FAMILIES_FILE}.",
+              file=sys.stderr)
     if script_test_inputs.advisory_here():
         print("::warning title=changed-surface script families stale (advisory in a merge group)::"
               "regenerate on the next push")
