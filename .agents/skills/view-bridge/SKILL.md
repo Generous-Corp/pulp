@@ -2466,6 +2466,10 @@ is `docs/guides/editor-host-contract.md`. Things that are easy to get wrong:
   touched, so a gesture the view opened directly stays for the host's own
   teardown. The root sizes the view in `layout_children()`, not `on_resized()`:
   Vellum's flex layout runs after `on_resized()` and would replace the bounds.
+  The header only declares; the root lives in `src/view_editor.cpp`. A view
+  anywhere in the hosted tree that implements `EditorIdleTarget` gets the
+  editor's idle tick while attached, and each editor shares its hooks with the
+  factory, so it keeps them if it outlives the factory.
 - **The header must stay view-free.** It names no `pulp::view`, canvas, render,
   Dawn or Vellum type, and `format_header_view_boundary.py` classifies it as a
   `pulp-format-core` header automatically, so an include that reaches the view
