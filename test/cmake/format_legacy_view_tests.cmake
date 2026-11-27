@@ -97,6 +97,7 @@ add_test(NAME format-core-ui-free-compile
     COMMAND ${CMAKE_COMMAND}
         "-DOBJECTS=$<TARGET_OBJECTS:pulp-test-format-core-ui-free>"
         "-DINPUTS=${CMAKE_SOURCE_DIR}/core/format/src/format.cpp;${CMAKE_SOURCE_DIR}/core/format/include/pulp/format/processor.hpp"
+        "-DPRESENT=$<TARGET_OBJECTS:pulp-test-format-core-ui-free-all>"
         -P "${_legacy_view_dir}/check_objects_built.cmake")
 set_tests_properties(format-core-ui-free-compile PROPERTIES
     LABELS "format"

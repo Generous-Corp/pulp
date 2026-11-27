@@ -157,6 +157,7 @@ switch to such an SDK, not before. What changes:
 | `std::unique_ptr<pulp::view::View> create_view() override` | `std::unique_ptr<::vellum::view::View> create_view() override` |
 | `on_view_opened/closed/resized(pulp::view::View&)` | the same names over `::vellum::view::View&` |
 | a `create_view()` that can return null | also override `has_view(role)` to say when it does not |
+| `std::vector<SettingsSection> settings_sections()` | `std::vector<pulp::vellum::ViewSettingsSection> settings_sections()`, plus `has_settings()` |
 | `active_scripted_ui()` / `visit_active_scripted_ui()` | no equivalent; a scripted editor comes from `UI_ENGINE vellum` |
 | the editor's body, written against `pulp::view` | rewritten against `vellum::view` (the widget port) |
 | `pulp_add_plugin(... NATIVE_UI/GPU_UI/FULL_EDITOR/LITE_EDITOR)` | no editor keyword |

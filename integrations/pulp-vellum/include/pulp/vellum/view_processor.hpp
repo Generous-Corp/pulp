@@ -28,9 +28,10 @@
 /// the factory offers; its default calls `create_view()` for the editor, builds
 /// the settings editor from `settings_sections()`, and returns null otherwise.
 /// `has_view(role)` says which roles the factory offers, without building
-/// anything: the editor by default, so a second window is opt-in. A plug-in
-/// whose `create_view()` can return null overrides `has_view`. Hosts ask it
-/// whenever they query an editor, so it must be cheap. Every call is on the
+/// anything: the editor by default, the settings editor when `has_settings()`
+/// is true, so a second window is opt-in. A plug-in whose `create_view()` can
+/// return null overrides `has_view`. Hosts ask it whenever they query an
+/// editor, so it and `has_settings()` must be cheap. Every call is on the
 /// host's main thread.
 ///
 /// `settings_sections()` is the Vellum form of Processor's legacy settings
@@ -46,9 +47,9 @@
 
 #include <pulp/format/editor_host.hpp>
 #include <pulp/format/processor.hpp>
+#include <pulp/vellum/settings_view.hpp>
 #include <pulp/vellum/view_editor.hpp>
 
-#include <vellum/view/ui_components.hpp>
 #include <vellum/view/view.hpp>
 
 #include <cstdint>
@@ -66,12 +67,6 @@ build against a Vellum-UI SDK (docs/guides/editor-host-contract.md)."
 
 namespace pulp::vellum {
 
-/// One settings tab a ViewProcessor contributes.
-struct ViewSettingsSection {
-    std::string title;
-    std::unique_ptr<::vellum::view::View> view;
-};
-
 
 template <class Base = format::Processor> class ViewProcessor : public Base {
   public:
@@ -86,7 +81,7 @@ template <class Base = format::Processor> class ViewProcessor : public Base {
         if (role == format::EditorRole::editor)
             return create_view();
         if (role == format::EditorRole::settings)
-            return settings_view(settings_sections());
+            return make_settings_view(settings_sections());
         return nullptr;
     }
 
@@ -96,10 +91,18 @@ template <class Base = format::Processor> class ViewProcessor : public Base {
         return {};
     }
 
+    /// Whether `settings_sections()` returns a section with a view, answered
+    /// without building one. Override it with `settings_sections()`. Default:
+    /// false, so no settings editor.
+    virtual bool has_settings() const {
+        return false;
+    }
+
     /// Whether `create_view(role)` builds a view, answered without building one.
-    /// Default: the editor only.
+    /// Default: the editor, and the settings editor when `has_settings()`.
     virtual bool has_view(format::EditorRole role) const {
-        return role == format::EditorRole::editor;
+        return role == format::EditorRole::editor ||
+               (role == format::EditorRole::settings && has_settings());
     }
 
     /// After the view attached to a native window.
@@ -117,19 +120,6 @@ template <class Base = format::Processor> class ViewProcessor : public Base {
     }
 
   private:
-    static std::unique_ptr<::vellum::view::View>
-    settings_view(std::vector<ViewSettingsSection> sections) {
-        std::erase_if(sections, [](const ViewSettingsSection& s) { return s.view == nullptr; });
-        if (sections.empty())
-            return nullptr;
-        if (sections.size() == 1)
-            return std::move(sections.front().view);
-        auto tabs = std::make_unique<::vellum::view::TabPanel>();
-        for (auto& section : sections)
-            tabs->add_tab(std::move(section.title), std::move(section.view));
-        return tabs;
-    }
-
     // This processor's factory: offers what has_view() says, and builds
     // through the shared builder below. Owned by the processor, as the
     // contract asks.

@@ -2468,10 +2468,14 @@ construct, so the slot can only return null or do nothing. Gotchas:
   `standalone_control_host.hpp` declare their view types in `pulp::format::view`
   when it is 0. The poison found both only once the standalone sources were
   compiled at mode 0, so a new header-level view name shows up there first.
-- **A ViewProcessor's settings tabs are `settings_sections()`.** Its factory
-  offers the settings role for every ViewProcessor and builds nothing when the
-  sections are empty, so a host shows a settings item that opens no window for
-  such a plug-in; a `TabPanel` wraps two or more sections, one is shown alone.
+- **A ViewProcessor's settings tabs are `settings_sections()`, offered when
+  `has_settings()` says so.** `supports(settings)` asks `has_settings()` and
+  builds nothing; a plug-in overrides both together. One section is shown
+  alone, two or more in a tab panel built in `src/settings_view.cpp`, so
+  `view_processor.hpp` does not pull in `ui_components.hpp`.
+- **Public pulp-vellum headers carry weight tests** (`header-weight` label,
+  `test/support/PulpHeaderWeight.cmake`): each preprocesses on its own within
+  a line budget and fails if it pulls in a header it keeps out.
 - **All of pulp-format-core builds at macro 0 under the poison**
   (`pulp-test-format-core-ui-free-all`, built with the tests). A core source or
   header that names `pulp::view` fails that build before any SDK sees it.

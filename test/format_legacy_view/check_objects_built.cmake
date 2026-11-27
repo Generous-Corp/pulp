@@ -1,5 +1,5 @@
-# OBJECTS is a list of object files the build must have produced from SOURCES
-# (one source per object, same order), each newer than its source. Fails when
+# OBJECTS is a list of object files the build must have produced, each newer
+# than every file in INPUTS. Fails when
 # an object is missing or stale, so the test reports what the build actually
 # compiled rather than passing on its own.
 list(LENGTH OBJECTS _count)
@@ -20,4 +20,12 @@ foreach(_object IN LISTS OBJECTS)
         endif()
     endforeach()
 endforeach()
-message(STATUS "${_count} object(s) built and current")
+# PRESENT: more objects that must exist, without a freshness check (each
+# depends on its own sources, which the caller does not list).
+foreach(_object IN LISTS PRESENT)
+    if(NOT EXISTS "${_object}")
+        message(FATAL_ERROR "not built: ${_object}")
+    endif()
+endforeach()
+list(LENGTH PRESENT _present)
+message(STATUS "${_count} object(s) built and current, ${_present} more present")

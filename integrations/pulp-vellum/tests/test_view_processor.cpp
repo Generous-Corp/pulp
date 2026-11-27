@@ -191,16 +191,21 @@ class SettingsPlugin final : public pulp::vellum::ViewProcessor<> {
         return std::make_unique<Panel>(0);
     }
     std::vector<pulp::vellum::ViewSettingsSection> settings_sections() override {
+        ++section_builds;
         std::vector<pulp::vellum::ViewSettingsSection> out;
         for (int i = 0; i < sections; ++i)
             out.push_back({"Section " + std::to_string(i), std::make_unique<Panel>(100 + i)});
         return out;
+    }
+    bool has_settings() const override {
+        return sections > 0;
     }
     void on_view_opened(::vellum::view::View& view) override {
         opened_view = &view;
     }
 
     int sections;
+    int section_builds = 0;
     ::vellum::view::View* opened_view = nullptr;
 };
 
@@ -324,9 +329,15 @@ TEST_CASE("A ViewProcessor offers an inspector window only when it builds one",
 TEST_CASE("A ViewProcessor's settings sections are its settings editor",
           "[pulp-vellum][view-processor][settings]") {
     Host h;
+    // No sections: the settings role is not offered, and asking builds no view.
     SettingsPlugin none(0);
-    REQUIRE(none.editor_factory()->supports(EditorRole::settings));
-    CHECK(h.open(none, EditorRole::settings) == nullptr);
+    CHECK_FALSE(none.editor_factory()->supports(EditorRole::settings));
+    CHECK(none.editor_factory()->supports(EditorRole::editor));
+    CHECK(none.section_builds == 0);
+
+    SettingsPlugin offered(2);
+    CHECK(offered.editor_factory()->supports(EditorRole::settings));
+    CHECK(offered.section_builds == 0);
 
     SettingsPlugin one(1);
     auto single = h.open(one, EditorRole::settings);
