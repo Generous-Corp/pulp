@@ -197,6 +197,12 @@ on a real PR. Do them in order.
    `git fetch origin main -q && git merge-base --is-ancestor <merge-sha> origin/main`.
    A `wait` exit code is not merge proof.
 
+The PR route of `version-at-land` keeps the standing bump description aligned
+with its commit. It compares the complete normalized body, filters the bump
+branch to this repository's head owner, and emits an Actions error plus a
+failing status when the description GET or PATCH fails; the next drain retries
+the reconciliation.
+
 ## A `run:` step stops at the first failing command
 
 GitHub's default shell for `run:` is `bash -e {0}` (no pipefail), so a step
@@ -13951,6 +13957,13 @@ with `-k 0`, and uploads a JSON report grouped by capability-ledger row. Notes:
   (`cmake-vellum-ui-compat-real`, `-wrong-version`) take the label only when the
   configure found Vellum, and with `REQUIRE_VELLUM` they fail instead of
   printing SKIP, which ctest reports as skipped and leaves the lane green.
+- **The installed-SDK smoke is a separate configure and build.** `cmake
+  --install` aborts on any unbuilt target, and the labelled build above builds
+  only test targets, so the smoke step configures `build-vellum-install` with
+  the release profile and builds everything before running
+  `test/cmake/test_vellum_installed_sdk_smoke.cmake` (an install to an empty
+  prefix, then a from-scratch consumer). Its control configures the same
+  consumer with Vellum unfindable and must be refused.
 
 ## Exporting a platform's Vellum closure
 
@@ -14001,6 +14014,11 @@ main's SDK. A new optional Vellum integration package needs its option, its
 `pulp-test-*` target and a `paths:` entry added there, or no lane compiles it
 against main. The tests' ctest label should start with `pulp-vellum` so the
 lane's `-L pulp-vellum` filter runs them.
+
+The lane's `-L pulp-vellum` run includes the GPU adapter probe and its
+empty-adapter negative control (`PASS_REGULAR_EXPRESSION` on the fail JSON, since
+the control must exit non-zero). The probe target is picked up by the
+`labelled-targets` derivation, so it needs no workflow edit.
 
 The same lane also runs the MCP UI tool cases (`pulp-test-mcp-server "[ui]"`)
 against the SDK's `bin/vellum-app-host` through `PULP_TEST_VELLUM_APP_HOST`. The

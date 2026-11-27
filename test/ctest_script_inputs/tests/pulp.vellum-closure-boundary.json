@@ -18,6 +18,7 @@
    "core/view/cmake/PulpViewJsPreludes.cmake",
    "core/view/include",
    "core/view/include/pulp/view/widgets.hpp",
+   "core/view/js",
    "core/view/js/embed_js.py",
    "core/view/src/reload_exports.cpp",
    "tools/cmake",
