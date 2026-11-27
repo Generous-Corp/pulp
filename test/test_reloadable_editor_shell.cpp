@@ -10,6 +10,7 @@
 
 #include <pulp/audio/buffer.hpp>
 #include <pulp/format/editor_host.hpp>
+#include <pulp/format/editor_package.hpp>
 #include <pulp/midi/buffer.hpp>
 #include <pulp/state/store.hpp>
 
@@ -285,4 +286,69 @@ TEST_CASE("An invalidated editor does not rebuild on a hot swap", "[reload][edit
     context.events.clear();
     live->idle();
     CHECK(first_index(context.events, 101) >= 0);
+}
+
+namespace {
+
+// A stand-in for the plug-in image's UI package: it offers only the settings
+// role, which the gen1 logic does not, and records the processor it was given.
+class PackageEditor final : public format::Editor {
+  public:
+    bool supports_parent(format::NativeParentKind) const override { return true; }
+    bool attach(const format::NativeParent&) override { return true; }
+    void detach() override {}
+    void invalidate() override {}
+    format::EditorSize size() const override { return {320, 200, 1.0}; }
+    bool set_size(const format::EditorSize&) override { return true; }
+};
+
+class PackageFactory final : public format::EditorFactory {
+  public:
+    bool supports(format::EditorRole role) const override {
+        return role == format::EditorRole::settings;
+    }
+    std::unique_ptr<format::Editor> create(format::Processor& processor, format::EditorContext&,
+                                           format::EditorRole) override {
+        created_for = &processor;
+        return std::make_unique<PackageEditor>();
+    }
+    format::Processor* created_for = nullptr;
+};
+
+PackageFactory& package_factory() {
+    static PackageFactory factory;
+    return factory;
+}
+
+format::EditorFactory* package_hook() {
+    return &package_factory();
+}
+
+} // namespace
+
+TEST_CASE("A role the logic does not offer comes from the shell image's UI package",
+          "[reload][editor-shell]") {
+    Rig rig("pulp_editor_shell_package.dylib", RELOAD_EDITOR_GEN1);
+    REQUIRE(rig.control->has_active_dsp());
+    auto* factory = rig.shell->editor_factory();
+    REQUIRE(factory != nullptr);
+    // Without a package in this image the logic's roles are all there is.
+    CHECK_FALSE(factory->supports(format::EditorRole::settings));
+
+    format::install_plugin_editor_factory_hook(&package_hook);
+    package_factory().created_for = nullptr;
+    CHECK(factory->supports(format::EditorRole::editor));
+    CHECK(factory->supports(format::EditorRole::settings));
+    RecordingContext context(rig.store);
+    auto settings = factory->create(*rig.shell, context, format::EditorRole::settings);
+    CHECK(settings != nullptr);
+    CHECK(package_factory().created_for == rig.shell.get());
+    // The logic still serves the role it offers.
+    package_factory().created_for = nullptr;
+    auto editor = factory->create(*rig.shell, context, format::EditorRole::editor);
+    CHECK(editor != nullptr);
+    CHECK(package_factory().created_for == nullptr);
+    settings.reset();
+    editor.reset();
+    format::install_plugin_editor_factory_hook(nullptr);
 }
