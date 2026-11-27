@@ -449,18 +449,18 @@
       "pulp_paths": [
         {
           "repo": "Generous-Corp/pulp",
-          "path": "core/view/platform/mac/window_host_mac.mm",
+          "path": "core/editor_bridge/src/editor_bridge.cpp",
           "state": "pulp-owned-retained",
-          "revision": "12423ff4dc0fcbe6d97aed148ae47841dc654d70",
-          "object_id": "7a22dc64f747e34f5b1bf29c3b33c6be10b5b654",
+          "revision": "0447e490ab75e9b6c4b1defef474e15624cfa885",
+          "object_id": "c8b0277eeffdb8998c1ee86ac2dce5790e5adf58",
           "object_type": "blob"
         },
         {
           "repo": "Generous-Corp/pulp",
-          "path": "core/view/src/editor_bridge.cpp",
+          "path": "core/view/platform/mac/window_host_mac.mm",
           "state": "pulp-owned-retained",
-          "revision": "0447e490ab75e9b6c4b1defef474e15624cfa885",
-          "object_id": "c8b0277eeffdb8998c1ee86ac2dce5790e5adf58",
+          "revision": "12423ff4dc0fcbe6d97aed148ae47841dc654d70",
+          "object_id": "7a22dc64f747e34f5b1bf29c3b33c6be10b5b654",
           "object_type": "blob"
         },
         {
@@ -578,8 +578,8 @@
         "duplicate_rejection": "Reject double emission from both Pulp and Vellum for one semantic event."
       },
       "retained_paths": [
+        "core/editor_bridge/src/editor_bridge.cpp",
         "core/view/platform/mac/window_host_mac.mm",
-        "core/view/src/editor_bridge.cpp",
         "core/view/src/view.cpp",
         "core/view/src/widget_bridge.cpp",
         "core/view/src/widget_bridge/bridge_dispatch.cpp"

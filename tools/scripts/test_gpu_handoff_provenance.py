@@ -694,7 +694,7 @@ CANONICAL_PATH_FLOOR = frozenset(
         "core/render/include/pulp/render/skia_surface.hpp",
         "core/render/src/skia_surface.cpp",
         "core/view/platform/mac/window_host_mac.mm",
-        "core/view/src/editor_bridge.cpp",
+        "core/editor_bridge/src/editor_bridge.cpp",
         "core/view/src/view.cpp",
         "core/view/src/widget_bridge.cpp",
         "core/view/src/widget_bridge/bridge_dispatch.cpp",
