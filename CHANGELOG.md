@@ -9,6 +9,30 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
      release's bullet block. See docs/guides/versioning.md § Release pipeline
      for the full end-to-end flow. -->
 
+<a id="v12210"></a>
+## [1.221.0] - 2026-11-27
+
+- release/version bump ([#12983](https://github.com/Generous-Corp/pulp/pull/12983))
+- feature/h7 view audio tooling compat ([#12950](https://github.com/Generous-Corp/pulp/pull/12950))
+
+<a id="v12200"></a>
+## [1.220.0] - 2026-11-27
+
+- release/version bump ([#12981](https://github.com/Generous-Corp/pulp/pull/12981))
+- lane/gpu adapter probe vellum ([#12927](https://github.com/Generous-Corp/pulp/pull/12927))
+- feature/vellum waveform gpu primitives ([#12974](https://github.com/Generous-Corp/pulp/pull/12974))
+
+<a id="v12190"></a>
+## [1.219.0] - 2026-11-27
+
+- release/version bump ([#12980](https://github.com/Generous-Corp/pulp/pull/12980))
+- feature/vellum components d4 ab compare ([#12953](https://github.com/Generous-Corp/pulp/pull/12953))
+- feature/vellum route census checker ([#12951](https://github.com/Generous-Corp/pulp/pull/12951))
+- test/slice editors declare size hints ([#12895](https://github.com/Generous-Corp/pulp/pull/12895))
+- feature/vellum widget gallery ([#12957](https://github.com/Generous-Corp/pulp/pull/12957))
+- fix/vellum resolver follow reuse ([#12967](https://github.com/Generous-Corp/pulp/pull/12967))
+- feature/h7 installed sdk smoke ([#12954](https://github.com/Generous-Corp/pulp/pull/12954))
+
 <a id="v12180"></a>
 ## [1.218.0] - 2026-11-26
 
@@ -13831,6 +13855,9 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/Generous-Corp/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/Generous-Corp/pulp/pull/2))
 
+[1.221.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.221.0
+[1.220.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.220.0
+[1.219.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.219.0
 [1.218.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.218.0
 [1.217.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.217.0
 [1.216.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.216.0
