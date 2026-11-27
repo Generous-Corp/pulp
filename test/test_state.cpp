@@ -6,8 +6,11 @@
 #include <unistd.h>
 #endif
 #include <string>
+#include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
+#include <pulp/dataplane/host_param_surface.hpp>
+#include <pulp/dataplane/host_surfaces.hpp>
 #include <pulp/events/event_loop.hpp>
 #include <pulp/runtime/scoped_no_alloc.hpp>
 #include <pulp/state/binding.hpp>
@@ -26,6 +29,8 @@
 #include <mutex>
 #include <optional>
 #include <stdexcept>
+#include <string_view>
+#include <unordered_map>
 #include <thread>
 #include <vector>
 
@@ -3622,3 +3627,357 @@ TEST_CASE("StateScanGate: a scan that overlapped a writer is repeated", "[state]
     CHECK(f.seen[9] == 0.9f);
     CHECK_FALSE(gate.scan_if_changed(f.store, [&] { f.scan(); }));
 }
+
+// The editor data plane's parameter host surface, exercised with no view,
+// canvas or render layer linked: the StateStore backing, the key resolver,
+// param_step_count and the discrete-index helpers, plus a framework-agnostic
+// fake proving the base-class defaults degrade to "continuous/unknown".
+namespace pulp::dataplane_host_param_test {
+
+using pulp::dataplane::HostParamSurface;
+using pulp::dataplane::StateStoreHostParamSurface;
+
+namespace {
+
+// A minimal in-memory HostParamSurface with no StateStore behind it. Records
+// writes so a test can assert what a surface was asked to do.
+class FakeHostParamSurface : public HostParamSurface {
+  public:
+    std::unordered_map<std::string, double> values;
+    std::string display_suffix;
+    // Value cardinality per key. A key absent here reports 0, the surface's
+    // "continuous / no index domain" signal, which is also the base class's
+    // default, so an existing test that never populates this is unaffected.
+    std::unordered_map<std::string, int> steps;
+    std::vector<std::string> gesture_log; // "begin:key" / "end:key"
+    int set_calls = 0;
+
+  protected:
+    int do_param_step_count(std::string_view key) override {
+        auto it = steps.find(std::string(key));
+        return it == steps.end() ? 0 : it->second;
+    }
+
+    bool do_has_param(std::string_view key) override {
+        return values.count(std::string(key)) > 0;
+    }
+    double do_get_param(std::string_view key) override {
+        auto it = values.find(std::string(key));
+        return it == values.end() ? 0.0 : it->second;
+    }
+    void do_set_param(std::string_view key, double v) override {
+        values[std::string(key)] = v;
+        ++set_calls;
+    }
+    void do_begin_gesture(std::string_view key) override {
+        gesture_log.push_back("begin:" + std::string(key));
+    }
+    void do_end_gesture(std::string_view key) override {
+        gesture_log.push_back("end:" + std::string(key));
+    }
+    std::string do_param_display_text(std::string_view key, double v) override {
+        (void)v;
+        return "disp:" + std::string(key) + display_suffix;
+    }
+};
+
+} // namespace
+
+TEST_CASE("StateStoreHostParamSurface round-trips through the store", "[dataplane][host-param]") {
+    state::StateStore store;
+    state::ParamInfo gain;
+    gain.id = 1;
+    gain.name = "gain";
+    gain.unit = "dB";
+    gain.range = state::ParamRange::linear(-60.0f, 0.0f, -12.0f);
+    store.add_parameter(gain);
+
+    std::vector<state::ParamID> begun, ended;
+    store.set_gesture_callbacks([&](state::ParamID id) { begun.push_back(id); },
+                                [&](state::ParamID id) { ended.push_back(id); });
+
+    StateStoreHostParamSurface surface(store);
+
+    SECTION("membership is live and name-keyed by default") {
+        REQUIRE(surface.has_param("gain"));
+        REQUIRE_FALSE(surface.has_param("nonexistent"));
+    }
+
+    SECTION("get/set round-trips normalized values") {
+        surface.set_param("gain", 0.75);
+        REQUIRE(store.get_normalized(1) == Catch::Approx(0.75f));
+        REQUIRE(surface.get_param("gain") == Catch::Approx(0.75));
+    }
+
+    SECTION("gestures forward to the store's undo grouping") {
+        surface.begin_gesture("gain");
+        surface.set_param("gain", 0.5);
+        surface.end_gesture("gain");
+        REQUIRE(begun == std::vector<state::ParamID>{1});
+        REQUIRE(ended == std::vector<state::ParamID>{1});
+    }
+
+    SECTION("display text uses a numeric+unit fallback when no formatter is set") {
+        // -60..0 dB linear; normalized 1.0 -> 0 dB.
+        REQUIRE(surface.param_display_text("gain", 1.0) == "0 dB");
+    }
+
+    SECTION("display text uses ParamInfo::to_string when present") {
+        state::ParamInfo freq;
+        freq.id = 2;
+        freq.name = "freq";
+        freq.range = state::ParamRange::linear(20.0f, 20000.0f, 440.0f);
+        freq.to_string = [](float v) { return std::to_string(static_cast<int>(v)) + " Hz custom"; };
+        store.add_parameter(freq);
+        StateStoreHostParamSurface s2(store);
+        REQUIRE(s2.param_display_text("freq", 0.0) == "20 Hz custom");
+    }
+
+    SECTION("unknown keys are inert, never a crash") {
+        REQUIRE(surface.get_param("missing") == 0.0);
+        surface.set_param("missing", 0.5); // no-op
+        REQUIRE(surface.param_display_text("missing", 0.5).empty());
+    }
+}
+
+TEST_CASE("param_step_count reports the parameter's own value cardinality",
+          "[dataplane][host-param][state]") {
+    state::StateStore store;
+
+    state::ParamInfo cutoff; // continuous
+    cutoff.id = 1;
+    cutoff.name = "cutoff";
+    cutoff.range = state::ParamRange::linear(20.0f, 20000.0f, 440.0f);
+    store.add_parameter(cutoff);
+
+    state::ParamInfo waveform; // 6-way enum, labeled
+    waveform.id = 2;
+    waveform.name = "lfo_waveform";
+    waveform.kind = state::ParamKind::Enum;
+    waveform.range = state::ParamRange::linear(0.0f, 5.0f, 0.0f, 1.0f);
+    waveform.value_labels = {"Sine", "Triangle", "Saw", "Ramp", "Square", "Random"};
+    store.add_parameter(waveform);
+
+    state::ParamInfo bypass; // toggle: off/on
+    bypass.id = 3;
+    bypass.name = "bypass";
+    bypass.kind = state::ParamKind::Toggle;
+    bypass.range = state::ParamRange::linear(0.0f, 1.0f, 0.0f, 1.0f);
+    store.add_parameter(bypass);
+
+    state::ParamInfo quantized; // continuous, but range.step quantizes
+    quantized.id = 4;
+    quantized.name = "quantized";
+    quantized.range = state::ParamRange::linear(0.0f, 10.0f, 0.0f, 0.5f);
+    store.add_parameter(quantized);
+
+    state::ParamInfo octave; // integer range, no labels
+    octave.id = 5;
+    octave.name = "octave";
+    octave.kind = state::ParamKind::Integer;
+    octave.range = state::ParamRange::linear(-2.0f, 2.0f, 0.0f, 1.0f);
+    store.add_parameter(octave);
+
+    StateStoreHostParamSurface surface(store);
+
+    SECTION("a continuous param has no index domain") {
+        REQUIRE(surface.param_step_count("cutoff") == 0);
+    }
+
+    SECTION("an unknown key reports 0, the same no-index-domain signal") {
+        REQUIRE(surface.param_step_count("nonexistent") == 0);
+        REQUIRE_FALSE(surface.has_param("nonexistent"));
+    }
+
+    SECTION("a discrete param reports its declared value count") {
+        REQUIRE(surface.param_step_count("lfo_waveform") == 6);
+        REQUIRE(surface.param_step_count("bypass") == 2);
+        // Integer range with no labels: cardinality is derived from range/step.
+        REQUIRE(surface.param_step_count("octave") == 5);
+    }
+
+    SECTION("range.step alone does not make a param discrete") {
+        // Quantization is not semantics: the author declared Continuous, so
+        // there is no index domain to divide by even though values snap.
+        REQUIRE(surface.param_step_count("quantized") == 0);
+    }
+
+    SECTION("a default host surface reports 0 rather than guessing") {
+        // An out-of-repo subclass that predates this accessor must degrade to
+        // "continuous/unknown", never to a wrong cardinality.
+        FakeHostParamSurface fake;
+        fake.values["gain"] = 0.5;
+        REQUIRE(fake.has_param("gain"));
+        REQUIRE(fake.param_step_count("gain") == 0);
+    }
+}
+
+TEST_CASE("the step count comes from the parameter, not from a control's option list",
+          "[dataplane][host-param][state]") {
+    // The porting hazard this accessor exists to kill: a control that renders
+    // 3 visible positions bound to a 6-value parameter. Scaling by the number
+    // of things drawn silently emits wrong normalized values; the parameter is
+    // the only authority on its own divisor.
+    state::StateStore store;
+    state::ParamInfo waveform;
+    waveform.id = 1;
+    waveform.name = "lfo_waveform";
+    waveform.kind = state::ParamKind::Enum;
+    waveform.range = state::ParamRange::linear(0.0f, 5.0f, 0.0f, 1.0f);
+    waveform.value_labels = {"Sine", "Triangle", "Saw", "Ramp", "Square", "Random"};
+    store.add_parameter(waveform);
+
+    StateStoreHostParamSurface surface(store);
+
+    const int visible_options = 3; // what a radio happens to draw
+    const int steps = surface.param_step_count("lfo_waveform");
+    REQUIRE(steps == 6); // unchanged by the UI's opinion
+    REQUIRE(steps != visible_options);
+
+    // Selecting index 2 must scale against 6 values (2/5), never against the
+    // 3 drawn options (2/2 == 1.0, which would jump the host to the last value).
+    const double correct = pulp::dataplane::param_index_to_normalized(2, steps);
+    REQUIRE(correct == Catch::Approx(2.0 / 5.0));
+
+    const double from_ui_option_count =
+        pulp::dataplane::param_index_to_normalized(2, visible_options);
+    REQUIRE(from_ui_option_count == Catch::Approx(1.0));
+    REQUIRE(correct != Catch::Approx(from_ui_option_count));
+
+    // The correct divisor round-trips through the real store; the UI-derived
+    // one lands on a different value entirely.
+    surface.set_param("lfo_waveform", correct);
+    REQUIRE(surface.param_display_text("lfo_waveform", surface.get_param("lfo_waveform")) == "2");
+    surface.set_param("lfo_waveform", from_ui_option_count);
+    REQUIRE(surface.param_display_text("lfo_waveform", surface.get_param("lfo_waveform")) == "5");
+}
+
+TEST_CASE("param_index_to_normalized spans the full automation range", "[dataplane][host-param]") {
+    SECTION("index 0 and the last index reach the range ends") {
+        REQUIRE(pulp::dataplane::param_index_to_normalized(0, 6) == Catch::Approx(0.0));
+        REQUIRE(pulp::dataplane::param_index_to_normalized(5, 6) == Catch::Approx(1.0));
+        REQUIRE(pulp::dataplane::param_index_to_normalized(1, 6) == Catch::Approx(0.2));
+    }
+
+    SECTION("a toggle spans off/on") {
+        REQUIRE(pulp::dataplane::param_index_to_normalized(0, 2) == Catch::Approx(0.0));
+        REQUIRE(pulp::dataplane::param_index_to_normalized(1, 2) == Catch::Approx(1.0));
+    }
+
+    SECTION("a 0 step count never divides by zero") {
+        // 0 is the continuous/unknown signal; 1 has a single value. Neither
+        // carries an index domain, so both collapse to 0.0 instead of trapping.
+        REQUIRE(pulp::dataplane::param_index_to_normalized(3, 0) == Catch::Approx(0.0));
+        REQUIRE(pulp::dataplane::param_index_to_normalized(3, 1) == Catch::Approx(0.0));
+        REQUIRE(pulp::dataplane::param_normalized_to_index(0.7, 0) == 0);
+        REQUIRE(pulp::dataplane::param_normalized_to_index(0.7, 1) == 0);
+    }
+
+    SECTION("out-of-domain indices and values clamp") {
+        REQUIRE(pulp::dataplane::param_index_to_normalized(-1, 6) == Catch::Approx(0.0));
+        REQUIRE(pulp::dataplane::param_index_to_normalized(99, 6) == Catch::Approx(1.0));
+        REQUIRE(pulp::dataplane::param_normalized_to_index(-0.5, 6) == 0);
+        REQUIRE(pulp::dataplane::param_normalized_to_index(1.5, 6) == 5);
+    }
+
+    SECTION("normalized_to_index snaps to the nearest index") {
+        REQUIRE(pulp::dataplane::param_normalized_to_index(0.19, 6) == 1);
+        REQUIRE(pulp::dataplane::param_normalized_to_index(0.21, 6) == 1);
+        REQUIRE(pulp::dataplane::param_normalized_to_index(0.5, 6) == 3); // 2.5 rounds up
+    }
+
+    SECTION("index -> normalized -> index round-trips every value") {
+        for (int steps : {2, 3, 6, 17}) {
+            for (int i = 0; i < steps; ++i) {
+                const double n = pulp::dataplane::param_index_to_normalized(i, steps);
+                REQUIRE(pulp::dataplane::param_normalized_to_index(n, steps) == i);
+            }
+        }
+    }
+}
+
+TEST_CASE("a discrete param's normalized index agrees with its ParamRange",
+          "[dataplane][host-param][state]") {
+    // param_index_to_normalized works off a bare step count because a host
+    // surface may have no ParamRange behind it. For a StateStore-backed
+    // discrete param the two must not disagree, or the embed and native lanes
+    // would scale the same control differently.
+    state::StateStore store;
+    state::ParamInfo waveform;
+    waveform.id = 1;
+    waveform.name = "lfo_waveform";
+    waveform.kind = state::ParamKind::Enum;
+    waveform.range = state::ParamRange::linear(0.0f, 5.0f, 0.0f, 1.0f);
+    waveform.value_labels = {"Sine", "Triangle", "Saw", "Ramp", "Square", "Random"};
+    store.add_parameter(waveform);
+
+    StateStoreHostParamSurface surface(store);
+    const int steps = surface.param_step_count("lfo_waveform");
+
+    REQUIRE(waveform.range.is_linear()); // the helper's stated assumption
+
+    for (int i = 0; i < steps; ++i) {
+        const double n = pulp::dataplane::param_index_to_normalized(i, steps);
+        REQUIRE(n == Catch::Approx(waveform.range.normalize(static_cast<float>(i))));
+
+        // And it survives a real write/read through the store.
+        surface.set_param("lfo_waveform", n);
+        REQUIRE(pulp::dataplane::param_normalized_to_index(surface.get_param("lfo_waveform"),
+                                                           steps) == i);
+    }
+}
+
+TEST_CASE("a skewed discrete range is outside the index helper's contract",
+          "[dataplane][host-param][state]") {
+    // param_index_to_normalized takes a bare count because a host surface may
+    // have no ParamRange behind it, so it can only assume even spacing. A
+    // discrete param that declares a skew defines its own curve and the two
+    // genuinely disagree. This pins that boundary as a known limit rather than
+    // leaving it a silent mis-scale: authors declare discrete params linear.
+    state::StateStore store;
+    state::ParamInfo shaped;
+    shaped.id = 1;
+    shaped.name = "shaped";
+    shaped.kind = state::ParamKind::Enum;
+    shaped.range = state::ParamRange{0.0f, 5.0f, 0.0f, 1.0f, 0.5f, false};
+    shaped.value_labels = {"a", "b", "c", "d", "e", "f"};
+    store.add_parameter(shaped);
+
+    StateStoreHostParamSurface surface(store);
+    const int steps = surface.param_step_count("shaped");
+    REQUIRE(steps == 6); // cardinality is still correct
+    REQUIRE_FALSE(shaped.range.is_linear());
+
+    // The ends still agree, a skew fixes both endpoints.
+    REQUIRE(pulp::dataplane::param_index_to_normalized(0, steps) ==
+            Catch::Approx(shaped.range.normalize(0.0f)));
+    REQUIRE(pulp::dataplane::param_index_to_normalized(5, steps) ==
+            Catch::Approx(shaped.range.normalize(5.0f)));
+
+    // The interior does NOT. The range's curve is the authority here.
+    REQUIRE(pulp::dataplane::param_index_to_normalized(1, steps) !=
+            Catch::Approx(shaped.range.normalize(1.0f)));
+}
+
+TEST_CASE("StateStoreHostParamSurface honors a custom key resolver", "[dataplane][host-param]") {
+    state::StateStore store;
+    state::ParamInfo p;
+    p.id = 7;
+    p.name = "Internal Name";
+    p.range = state::ParamRange::linear(0.0f, 1.0f, 0.0f);
+    store.add_parameter(p);
+
+    // Map a design key ("cutoff") to a store param whose name differs.
+    StateStoreHostParamSurface surface(store,
+                                       [](std::string_view key) -> std::optional<state::ParamID> {
+                                           if (key == "cutoff")
+                                               return state::ParamID{7};
+                                           return std::nullopt;
+                                       });
+    REQUIRE(surface.has_param("cutoff"));
+    REQUIRE_FALSE(surface.has_param("Internal Name"));
+    surface.set_param("cutoff", 0.3);
+    REQUIRE(store.get_normalized(7) == Catch::Approx(0.3f));
+}
+
+} // namespace pulp::dataplane_host_param_test
