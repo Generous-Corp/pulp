@@ -2,9 +2,13 @@
 """Check that a set of Pulp targets does not reach a forbidden set through links.
 
 Input is a link graph written at generate time by
-test/cmake/link_closure_graph.cmake: one record per Pulp target,
-`name<TAB>type<TAB>LINK_LIBRARIES<TAB>INTERFACE_LINK_LIBRARIES`, with the list
-values as CMake stored them (`;`-separated, generator expressions unevaluated).
+test/cmake/link_closure_graph.cmake: one record per target (every buildsystem
+target, plus the imported targets, aliases and object libraries they name),
+`name<TAB>type<TAB>LINK_LIBRARIES<TAB>INTERFACE_LINK_LIBRARIES<TAB>SOURCES`,
+with the values as CMake stored them (generator expressions unevaluated). An
+edge is any word of those values that names a node, so a link, a
+`$<TARGET_OBJECTS:objs>` source and an imported target are all followed, and a
+raw `libname.a` / `name.lib` path counts as the target `name`.
 
 The walk follows both properties from every root, through every Pulp target it
 reaches, so a forbidden target that sits behind an intermediate archive is found
@@ -30,8 +34,9 @@ import sys
 from collections import deque
 from pathlib import Path
 
-TARGET_RE = re.compile(r"(?<![A-Za-z0-9_+.-])((?:[Pp]ulp)(?:::|-)[A-Za-z0-9_+.:-]*[A-Za-z0-9_+])")
 MIN_GRAPH_TARGETS = 20
+WORD_RE = re.compile(r"[A-Za-z0-9_+.@/-]+")
+ARCHIVE_RE = re.compile(r"^(?:lib)?(.+?)\.(?:a|so|dylib|lib|dll)(?:\.[0-9.]+)?$")
 
 
 def canonical(name: str) -> str:
@@ -43,11 +48,24 @@ def canonical(name: str) -> str:
 
 
 def referenced_targets(value: str) -> list[str]:
+    """Every name a property value may refer to, generator syntax stripped."""
     seen: list[str] = []
-    for match in TARGET_RE.findall(value):
-        name = canonical(match)
-        if name not in seen:
+
+    def add(name: str) -> None:
+        name = canonical(name)
+        if name and name not in seen:
             seen.append(name)
+
+    for word in WORD_RE.findall(value.replace("::", "@NS@")):
+        word = word.replace("@NS@", "::")
+        add(word)
+        base = word.rsplit("/", 1)[-1]
+        if base != word:
+            add(base)
+        archive = ARCHIVE_RE.match(base)
+        if archive:
+            add(archive.group(1))
+            add(base[:-len(base.rsplit(".", 1)[-1]) - 1])
     return seen
 
 
@@ -68,7 +86,7 @@ class Graph:
             name = canonical(fields[0].strip())
             graph.types[name] = fields[1].strip()
             targets: list[str] = []
-            for value in fields[2:4]:
+            for value in fields[2:]:
                 if value.endswith("-NOTFOUND"):
                     continue
                 for target in referenced_targets(value):
@@ -155,7 +173,8 @@ def main(argv: list[str] | None = None) -> int:
         allowed.add((canonical(source), canonical(target)))
 
     roots = [canonical(root) for root in args.root]
-    errors, notes = check(graph, roots, args.forbid, allowed)
+    forbidden = [canonical(pattern) for pattern in args.forbid]
+    errors, notes = check(graph, roots, forbidden, allowed)
     for source, target in sorted(allowed):
         print(f"link-closure: allowed edge {source} -> {target}")
     for note in notes:
