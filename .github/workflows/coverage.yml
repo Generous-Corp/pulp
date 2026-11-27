@@ -255,8 +255,7 @@ jobs:
           # Normal refreshes must finish even when Windows has no runner:
           # the receipt watchdog only credits completed workflow runs. An
           # explicit dispatch can still request and require Windows proof.
-          windows='"windows-latest"'
-          windows_leg=skip
+          windows_route=$(printf '%s\n' 'runs_on="windows-latest"' 'route=skip')
           if [ "${GITHUB_EVENT_NAME}" = workflow_dispatch ] && [ -n "${EXPLICIT_WINDOWS_RUNNER_SELECTOR_JSON}" ]; then
             windows_route=$(python3 tools/scripts/windows_runner_selector.py --route \
               --selector "$EXPLICIT_WINDOWS_RUNNER_SELECTOR_JSON" \
@@ -264,9 +263,9 @@ jobs:
               --allow-hosted "$ALLOW_HOSTED_WINDOWS" \
               --head-repo "$PR_HEAD_REPO")
             echo "$windows_route"
-            windows=$(printf '%s\n' "$windows_route" | sed -n 's/^runs_on=//p')
-            windows_leg=$(printf '%s\n' "$windows_route" | sed -n 's/^route=//p')
           fi
+          windows=$(printf '%s\n' "$windows_route" | sed -n 's/^runs_on=//p')
+          windows_leg=$(printf '%s\n' "$windows_route" | sed -n 's/^route=//p')
           {
             echo "linux_runs_on=${linux}"
             echo "macos_runs_on=${macos}"
