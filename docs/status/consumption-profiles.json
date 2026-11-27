@@ -1727,6 +1727,20 @@
       "pulp/native/metal_surface.hpp",
       "pulp/native/surface.hpp"
     ],
+    "integrations/pulp-vellum-components/include": [
+      "pulp/vellum_components/ab_compare.hpp",
+      "pulp/vellum_components/aliases.hpp",
+      "pulp/vellum_components/arranger_view.hpp",
+      "pulp/vellum_components/catalogue.hpp",
+      "pulp/vellum_components/gpu_health_content.hpp",
+      "pulp/vellum_components/inspector_window.hpp",
+      "pulp/vellum_components/lasso.hpp",
+      "pulp/vellum_components/model_manager_view.hpp",
+      "pulp/vellum_components/panic_button.hpp",
+      "pulp/vellum_components/panic_target.hpp",
+      "pulp/vellum_components/preferences_panel.hpp",
+      "pulp/vellum_components/property_panel.hpp"
+    ],
     "tools/audio/analysis/include": [
       "pulp/audio/analysis/audio_artifacts.hpp",
       "pulp/audio/analysis/audio_assertions.hpp",
