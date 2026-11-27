@@ -67,7 +67,6 @@ build against a Vellum-UI SDK (docs/guides/editor-host-contract.md)."
 
 namespace pulp::vellum {
 
-
 template <class Base = format::Processor> class ViewProcessor : public Base {
   public:
     using Base::Base;

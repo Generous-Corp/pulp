@@ -8,7 +8,8 @@
 
 namespace pulp::vellum {
 
-std::unique_ptr<::vellum::view::View> make_settings_view(std::vector<ViewSettingsSection> sections) {
+std::unique_ptr<::vellum::view::View>
+make_settings_view(std::vector<ViewSettingsSection> sections) {
     std::erase_if(sections, [](const ViewSettingsSection& s) { return s.view == nullptr; });
     if (sections.empty())
         return nullptr;
