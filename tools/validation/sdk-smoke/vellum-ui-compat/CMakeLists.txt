@@ -39,3 +39,18 @@ unset(_name)
 unset(_id)
 unset(_upper)
 unset(_exe)
+
+# The umbrella carries the audio layer: an audio widget is reachable through
+# Pulp::view with no other Pulp name linked, as with Pulp's own umbrella.
+if("view" IN_LIST PULP_VELLUM_UI_COMPAT_PROBE_NAMES
+        AND "view-audio" IN_LIST PULP_VELLUM_UI_COMPAT_PROBE_NAMES)
+    add_executable(PulpVellumUiCompat_view_alone
+        "${CMAKE_CURRENT_LIST_DIR}/vellum_ui_compat_probe.cpp")
+    target_compile_definitions(PulpVellumUiCompat_view_alone PRIVATE
+        PULP_VELLUM_UI_COMPAT_PROBE_VIEW_AUDIO=1 PULP_VELLUM_UI_COMPAT_VIEW_ALONE=1)
+    target_link_libraries(PulpVellumUiCompat_view_alone PRIVATE Pulp::view)
+    add_custom_command(TARGET PulpVellumUiCompat_view_alone POST_BUILD
+        COMMAND "$<TARGET_FILE:PulpVellumUiCompat_view_alone>"
+        COMMENT "Running an audio widget through Pulp::view alone"
+        VERBATIM)
+endif()

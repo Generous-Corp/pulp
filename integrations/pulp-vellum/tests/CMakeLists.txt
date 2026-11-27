@@ -68,6 +68,13 @@ if(PULP_BUILD_TESTS AND TARGET Catch2::Catch2WithMain)
             pulp::vellum Vellum::MirrorView_core Catch2::Catch2WithMain Threads::Threads)
         catch_discover_tests(pulp-test-pulp-vellum-view-processor
             PROPERTIES LABELS pulp-vellum-editor)
+        # Header weight: each public header preprocesses on its own within
+        # budget and pulls in none of the implementation headers it keeps out.
+        include("${PULP_ROOT_DIR}/test/support/PulpHeaderWeight.cmake")
+        pulp_add_header_weight_test(pulp-vellum-header-weight-view-editor
+            HEADER pulp/vellum/view_editor.hpp USAGE pulp-vellum
+            FORBID "pulp/vellum/editor\\.hpp|/vellum/view/view\\.hpp"
+            MAX_LINES 80000 LABELS "pulp-vellum;header-weight")
         # A CLAP host opening a Vellum editor through the view-free contract
         # GUI: the plug-in entry compiles without PULP_CLAP_GUI and links the
         # view-free CLAP adapter, as a `UI <package>` plug-in does.
