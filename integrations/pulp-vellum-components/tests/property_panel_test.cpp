@@ -22,6 +22,7 @@
 #include <regex>
 #include <set>
 #include <sstream>
+#include <stdexcept>
 #include <string>
 #if defined(_WIN32)
 #include <process.h>
@@ -447,4 +448,31 @@ TEST_CASE("PropertyPanel: replacement then nested event on the same key keeps th
     panel.set_text("t", "2");
     CHECK(old_hits == 1);
     CHECK(new_hits == 2);
+}
+
+TEST_CASE("PropertyPanel: a throwing observer or action keeps its handler", "[property-panel]") {
+    PropertyPanel panel;
+    int hits = 0;
+    bool boom = true;
+    panel.add_text("t", "T", "", [&](const std::string&) {
+        ++hits;
+        if (boom)
+            throw std::runtime_error("observer failed");
+    });
+    CHECK_THROWS_AS(panel.set_text("t", "1"), std::runtime_error);
+    boom = false;
+    panel.set_text("t", "2");
+    CHECK(hits == 2);
+
+    int clicks = 0;
+    bool click_boom = true;
+    panel.add_button("b", "B", [&] {
+        ++clicks;
+        if (click_boom)
+            throw std::runtime_error("action failed");
+    });
+    CHECK_THROWS_AS(panel.click("b"), std::runtime_error);
+    click_boom = false;
+    panel.click("b");
+    CHECK(clicks == 2);
 }

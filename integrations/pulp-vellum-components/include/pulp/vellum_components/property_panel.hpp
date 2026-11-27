@@ -316,7 +316,16 @@ class PropertyPanel : public View {
             action.swap(
                 p->on_click); // swap, not move: a moved-from std::function need not be empty
             ActiveScope scope(active_, k);
-            action();
+            // Restore the action even when it throws, so one failed click
+            // does not leave the button permanently inert.
+            try {
+                action();
+            } catch (...) {
+                if (!scope.replaced())
+                    if (Property* cur = find_mut(k))
+                        cur->on_click = std::move(action);
+                throw;
+            }
             if (!scope.replaced())
                 if (Property* cur = find_mut(k))
                     cur->on_click = std::move(action);
@@ -447,7 +456,15 @@ class PropertyPanel : public View {
             callback.swap(find_mut(key)->on_change); // swap, not move: moved-from need not be empty
             const Value arg = p.value;
             ActiveScope scope(active_, key);
-            callback(arg);
+            try {
+                callback(arg);
+            } catch (...) {
+                // A throwing observer must not lose its handler.
+                if (!scope.replaced())
+                    if (Property* cur = find_mut(key))
+                        cur->on_change = std::move(callback);
+                throw;
+            }
             // Restore only if the slot survived un-replaced.
             if (!scope.replaced())
                 if (Property* cur = find_mut(key))
