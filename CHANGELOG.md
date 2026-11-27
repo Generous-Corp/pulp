@@ -9,6 +9,12 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
      release's bullet block. See docs/guides/versioning.md § Release pipeline
      for the full end-to-end flow. -->
 
+<a id="v12210"></a>
+## [1.221.0] - 2026-11-27
+
+- release/version bump ([#12983](https://github.com/Generous-Corp/pulp/pull/12983))
+- feature/h7 view audio tooling compat ([#12950](https://github.com/Generous-Corp/pulp/pull/12950))
+
 <a id="v12200"></a>
 ## [1.220.0] - 2026-11-27
 
@@ -13849,6 +13855,7 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/Generous-Corp/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/Generous-Corp/pulp/pull/2))
 
+[1.221.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.221.0
 [1.220.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.220.0
 [1.219.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.219.0
 [1.218.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.218.0
