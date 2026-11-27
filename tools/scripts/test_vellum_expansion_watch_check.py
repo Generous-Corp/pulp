@@ -406,6 +406,149 @@ class Tests(unittest.TestCase):
         report = self.active_verify(repo, base, head)
         self.assertEqual(report["status"], "fail")
         self.assertIn("duplicate capability-family claims", report["errors"][0])
+        self.assertIn("added by the same commit", report["errors"][0])
+
+    def claim(self, repo: pathlib.Path, path: str, event_id: str, *,
+              value: dict | None = None, text: str | None = None) -> str:
+        """One commit that changes a watched path and adds its own event."""
+        target = repo / path
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(text or f"{event_id}\n")
+        if value is None:
+            value = event("render-assets-and-backends", event_id=event_id)
+            value["rationale"] = f"Record the {event_id} render change; no authority moves."
+        write_json(repo / watch.EVENT_ROOT / f"{event_id}.json", value)
+        return self.commit(repo, f"record {event_id}")
+
+    def test_stacked_disjoint_claims_of_one_family_pass(self) -> None:
+        temporary, repo = self.git_repo()
+        del temporary
+        base = run(repo, "git", "rev-parse", "HEAD").stdout.strip()
+        self.claim(repo, "core/render/parent_backend.cpp", "20261127-parent-render-watch")
+        head = self.claim(repo, "core/render/child_backend.cpp", "20261127-child-render-watch")
+        report = self.active_verify(repo, base, head)
+        self.assertEqual(report["status"], "pass", report["errors"])
+        self.assertEqual(len(report["events"]), 2)
+
+    def test_disjoint_claims_from_merged_branches_pass(self) -> None:
+        temporary, repo = self.git_repo()
+        del temporary
+        base = run(repo, "git", "rev-parse", "HEAD").stdout.strip()
+        run(repo, "git", "checkout", "-q", "-b", "parent")
+        self.claim(repo, "core/render/parent_backend.cpp", "20261127-parent-render-watch")
+        run(repo, "git", "checkout", "-q", "-b", "child", base)
+        self.claim(repo, "core/render/child_backend.cpp", "20261127-child-render-watch")
+        run(repo, "git", "merge", "-q", "--no-edit", "parent")
+        head = run(repo, "git", "rev-parse", "HEAD").stdout.strip()
+        report = self.active_verify(repo, base, head)
+        self.assertEqual(report["status"], "pass", report["errors"])
+
+    def test_overlapping_claims_of_one_family_fail(self) -> None:
+        temporary, repo = self.git_repo()
+        del temporary
+        base = run(repo, "git", "rev-parse", "HEAD").stdout.strip()
+        self.claim(repo, "core/render/backend.cpp", "20261127-parent-render-watch")
+        head = self.claim(repo, "core/render/backend.cpp", "20261127-child-render-watch",
+                          text="edited again\n")
+        report = self.active_verify(repo, base, head)
+        self.assertEqual(report["status"], "fail")
+        self.assertIn("duplicate capability-family claims", report["errors"][0])
+        self.assertIn("both cover ['core/render/backend.cpp']", report["errors"][0])
+
+    def test_exact_duplicate_event_fails_even_with_disjoint_paths(self) -> None:
+        temporary, repo = self.git_repo()
+        del temporary
+        base = run(repo, "git", "rev-parse", "HEAD").stdout.strip()
+        first = event("render-assets-and-backends", event_id="20261127-render-watch")
+        self.claim(repo, "core/render/a.cpp", "20261127-render-watch", value=first)
+        copy_of = dict(first, event_id="20261127-render-copy-watch")
+        head = self.claim(repo, "core/render/b.cpp", "20261127-render-copy-watch", value=copy_of)
+        report = self.active_verify(repo, base, head)
+        self.assertEqual(report["status"], "fail")
+        self.assertIn("record the same change", report["errors"][0])
+
+    def test_shared_rationale_fails_even_with_disjoint_paths(self) -> None:
+        temporary, repo = self.git_repo()
+        del temporary
+        base = run(repo, "git", "rev-parse", "HEAD").stdout.strip()
+        first = event("render-assets-and-backends", event_id="20261127-render-watch")
+        self.claim(repo, "core/render/a.cpp", "20261127-render-watch", value=first)
+        later = dict(first, event_id="20261127-render-later-watch",
+                     created_at="2026-11-27T09:00:00Z")
+        later["rationale"] = "  " + first["rationale"].replace(" ", "\n ", 1)
+        head = self.claim(repo, "core/render/b.cpp", "20261127-render-later-watch", value=later)
+        report = self.active_verify(repo, base, head)
+        self.assertEqual(report["status"], "fail")
+        self.assertIn("record the same change", report["errors"][0])
+
+    def test_claim_with_no_path_of_its_own_fails(self) -> None:
+        temporary, repo = self.git_repo()
+        del temporary
+        base = run(repo, "git", "rev-parse", "HEAD").stdout.strip()
+        self.claim(repo, "core/render/backend.cpp", "20261127-parent-render-watch")
+        value = event("render-assets-and-backends", event_id="20261127-again-render-watch")
+        value["rationale"] = "Record the render change a second time; no authority moves."
+        write_json(repo / watch.EVENT_ROOT / "20261127-again-render-watch.json", value)
+        head = self.commit(repo, "second event, no change of its own")
+        report = self.active_verify(repo, base, head)
+        self.assertEqual(report["status"], "fail")
+        self.assertIn("record no path of this family of their own", report["errors"][0])
+
+    def test_event_rewritten_inside_the_range_cannot_share_a_family(self) -> None:
+        temporary, repo = self.git_repo()
+        del temporary
+        base = run(repo, "git", "rev-parse", "HEAD").stdout.strip()
+        self.claim(repo, "core/render/parent_backend.cpp", "20261127-parent-render-watch")
+        self.claim(repo, "core/render/child_backend.cpp", "20261127-child-render-watch")
+        path = repo / watch.EVENT_ROOT / "20261127-child-render-watch.json"
+        value = json.loads(path.read_text())
+        value["rationale"] += " Edited."
+        write_json(path, value)
+        head = self.commit(repo, "edit an event inside the range")
+        report = self.active_verify(repo, base, head)
+        self.assertEqual(report["status"], "fail")
+        self.assertIn("not added by exactly one non-merge commit", report["errors"][0])
+
+    def test_shared_claims_need_base_to_be_an_ancestor(self) -> None:
+        temporary, repo = self.git_repo()
+        del temporary
+        seed = run(repo, "git", "rev-parse", "HEAD").stdout.strip()
+        run(repo, "git", "checkout", "-q", "-b", "side")
+        (repo / "side.txt").write_text("side\n")
+        side = self.commit(repo, "side")
+        run(repo, "git", "checkout", "-q", "-b", "work", seed)
+        self.claim(repo, "core/render/parent_backend.cpp", "20261127-parent-render-watch")
+        head = self.claim(repo, "core/render/child_backend.cpp", "20261127-child-render-watch")
+        report = self.active_verify(repo, side, head)
+        self.assertEqual(report["status"], "fail")
+        self.assertIn("base is not an ancestor of head", report["errors"][0])
+
+    def test_shared_claims_refused_on_shallow_history(self) -> None:
+        temporary, repo = self.git_repo()
+        del temporary
+        base = run(repo, "git", "rev-parse", "HEAD").stdout.strip()
+        self.claim(repo, "core/render/parent_backend.cpp", "20261127-parent-render-watch")
+        head = self.claim(repo, "core/render/child_backend.cpp", "20261127-child-render-watch")
+        real = watch._git
+
+        def shallow(root, *args, check=True):
+            if args == ("rev-parse", "--is-shallow-repository"):
+                return subprocess.CompletedProcess(args, 0, b"true\n", b"")
+            return real(root, *args, check=check)
+
+        with mock.patch.object(watch, "_git", side_effect=shallow):
+            report = self.active_verify(repo, base, head)
+        self.assertEqual(report["status"], "fail")
+        self.assertIn("history is shallow", report["errors"][0])
+
+    def test_single_claims_never_read_history(self) -> None:
+        temporary, repo = self.git_repo()
+        del temporary
+        base = run(repo, "git", "rev-parse", "HEAD").stdout.strip()
+        head = self.claim(repo, "core/render/backend.cpp", "20261127-render-watch")
+        with mock.patch.object(watch, "_commit_paths", side_effect=AssertionError):
+            report = self.active_verify(repo, base, head)
+        self.assertEqual(report["status"], "pass", report["errors"])
 
     def test_existing_event_is_append_only(self) -> None:
         temporary, repo = self.git_repo()

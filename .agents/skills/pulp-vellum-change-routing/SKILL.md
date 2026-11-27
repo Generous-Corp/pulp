@@ -611,8 +611,13 @@ skim of the source:
   `verify()` directly (as the preflight does) must pass full SHAs.
 - **Coverage is exact set equality**, not a superset test: the checker raises on
   `covered != affected`, so claiming an extra capability family fails exactly as
-  hard as omitting one. Claiming the same family from two event files in one diff
-  is also rejected (`duplicate capability-family claims`).
+  hard as omitting one. Two event files may claim the same family in one range
+  only when each was added by its own non-merge commit, they differ in more than
+  `event_id` and rationale, and their path sets are disjoint and non-empty. An
+  event's path set is the family's changed paths in the commits it is the nearest
+  claiming descendant of. Anything else fails with
+  `duplicate capability-family claims ['<family>']: <reason>`, as does a shallow
+  clone or a base that is not an ancestor of head.
 - **Verify a branch against its MERGE-BASE, not `origin/main`.** Diffing a branch
   that is behind main reports every watch event main has added since as a
   deletion, and the checker rejects it with
@@ -897,11 +902,12 @@ branch stacked on another unmerged PR, that diff also holds the parent's
 commits and the parent's watch event, so the range reads as covered even
 when the branch's own change has no event. Once the parent merges, the merge
 queue measures only the branch's change, finds no event, and ejects the whole
-batch. The branch cannot carry its own event while
-it is stacked: two events claiming the same families in one range are refused
-as duplicates. `vellum_watch_preflight.py` prints an advisory when every
-covering event was added by a commit another remote branch carries. Merge main
-after the parent lands, write the branch's own event, and only then enqueue it.
+batch. The branch can carry its own event while stacked, added in its own
+commit, as long as its own commits touch other paths of each shared family
+than the parent's do; overlapping paths are still refused as duplicates.
+`vellum_watch_preflight.py` prints an advisory when every covering event was
+added by a commit another remote branch carries. Add the branch's own event
+then, or merge main after the parent lands and write it, before enqueueing.
 
 The PR job of `Vellum freeze` reports the same rule
 (`tools/scripts/vellum_borrowed_coverage_check.py`) as a `::warning::`

@@ -486,6 +486,148 @@ def _affected(scopes: dict[str, list[str]], paths: set[str]) -> set[str]:
     }
 
 
+def _commit_paths(root: pathlib.Path, commit: str, parents: list[str]) -> dict[str, str]:
+    """Paths this commit itself changed, with the status against its parent.
+
+    A merge contributes only what differs from every parent (its own
+    resolution), reported with status "merge".
+    """
+    per_parent: list[dict[str, str]] = []
+    for parent in parents:
+        raw = _git(
+            root, "diff-tree", "-r", "-z", "--no-renames", "--name-status", parent, commit
+        ).stdout.split(b"\0")
+        values = [item.decode("utf-8", errors="surrogateescape") for item in raw if item]
+        if len(values) % 2:
+            raise WatchError("git diff-tree returned a truncated name-status record")
+        per_parent.append({values[i + 1]: values[i] for i in range(0, len(values), 2)})
+    if len(per_parent) == 1:
+        return per_parent[0]
+    own = set(per_parent[0]).intersection(*per_parent[1:])
+    return {path: "merge" for path in own}
+
+
+def _shared_claim_errors(
+    root: pathlib.Path,
+    base: str,
+    head: str,
+    scopes: dict[str, list[str]],
+    changed_paths: set[str],
+    claimants: dict[str, list[str]],
+    contents: dict[str, Any],
+) -> list[str]:
+    """Why each family claimed by two or more events is a duplicate, if it is.
+
+    Events carry no paths, so a claim's path set comes from history. Every
+    commit in base..head is attributed to the nearest event-adding commit of
+    that family it is an ancestor of (or is); its paths that match the family
+    and survive into the range diff form that event's path set. A family may
+    be claimed more than once only when every claiming event was added by its
+    own non-merge commit, no two claiming events are identical apart from
+    event_id or share a rationale, every claiming event's path set is
+    non-empty, and the path sets are pairwise disjoint. Anything that keeps
+    the history from answering is refused.
+    """
+    shared = {family: events for family, events in claimants.items() if len(events) > 1}
+    if not shared:
+        return []
+
+    def refuse(family: str, reason: str) -> str:
+        return f"duplicate capability-family claims {[family]}: {reason}"
+
+    shallow = _git(root, "rev-parse", "--is-shallow-repository").stdout.strip()
+    if shallow != b"false":
+        return [refuse(f, "history is shallow, so the claims cannot be told apart")
+                for f in sorted(shared)]
+    if _git(root, "merge-base", "--is-ancestor", base, head, check=False).returncode:
+        return [refuse(f, "base is not an ancestor of head") for f in sorted(shared)]
+
+    parents: dict[str, list[str]] = {}
+    for line in _git(root, "rev-list", "--parents", f"{base}..{head}").stdout.decode().splitlines():
+        commit, *its_parents = line.split()
+        parents[commit] = its_parents
+    touched = {commit: _commit_paths(root, commit, ps) for commit, ps in parents.items()}
+
+    events = sorted({event for paths in shared.values() for event in paths})
+    adder: dict[str, str | None] = {}
+    for event in events:
+        touching = [(c, paths[event]) for c, paths in touched.items() if event in paths]
+        adder[event] = touching[0][0] if len(touching) == 1 and touching[0][1] == "A" else None
+    ancestry: dict[str, set[str]] = {}
+    for commit in {c for c in adder.values() if c is not None}:
+        ancestry[commit] = set(
+            _git(root, "rev-list", f"{base}..{commit}").stdout.decode().split()
+        )
+
+    errors: list[str] = []
+    for family in sorted(shared):
+        claiming = sorted(shared[family])
+        unattributable = [e for e in claiming if adder[e] is None]
+        if unattributable:
+            errors.append(refuse(
+                family,
+                f"{unattributable} not added by exactly one non-merge commit in the range",
+            ))
+            continue
+        by_commit: dict[str, list[str]] = {}
+        for event in claiming:
+            by_commit.setdefault(adder[event], []).append(event)
+        same = [group for group in by_commit.values() if len(group) > 1]
+        if same:
+            errors.append(refuse(family, f"{same[0]} were added by the same commit"))
+            continue
+        bodies: dict[str, str] = {}
+        rationales: dict[str, str] = {}
+        duplicate = None
+        for event in claiming:
+            body = {k: v for k, v in contents[event].items() if k != "event_id"}
+            key = json.dumps(body, sort_keys=True)
+            rationale = " ".join(contents[event]["rationale"].split())
+            twin = bodies.get(key) or rationales.get(rationale)
+            if twin:
+                duplicate = [twin, event]
+                break
+            bodies[key] = event
+            rationales[rationale] = event
+        if duplicate:
+            errors.append(refuse(family, f"{duplicate} record the same change"))
+            continue
+        selectors = scopes[family]
+        family_paths = {
+            path for path in changed_paths
+            if any(_matches(path, selector) for selector in selectors)
+        }
+        commit_of = {event: adder[event] for event in claiming}
+        path_sets: dict[str, set[str]] = {}
+        for event in claiming:
+            mine = ancestry[commit_of[event]]
+            nearer = [
+                ancestry[commit_of[other]] for other in claiming
+                if other != event and commit_of[other] in mine
+            ]
+            segment = {c for c in mine if not any(c in other for other in nearer)}
+            path_sets[event] = {
+                path for c in segment for path in touched[c] if path in family_paths
+            }
+        empty = [event for event in claiming if not path_sets[event]]
+        if empty:
+            errors.append(refuse(family, f"{empty} record no path of this family of their own"))
+            continue
+        for index, event in enumerate(claiming):
+            for other in claiming[index + 1:]:
+                overlap = path_sets[event] & path_sets[other]
+                if overlap:
+                    errors.append(refuse(
+                        family,
+                        f"{event} and {other} both cover {sorted(overlap)[:5]}",
+                    ))
+                    break
+            else:
+                continue
+            break
+    return errors
+
+
 def validate_event(value: Any, filename: str) -> set[str]:
     common_fields = {
         "schema_version",
@@ -607,6 +749,8 @@ def verify(root: pathlib.Path, base: str | None = None, head: str | None = None)
             else:
                 affected = _affected(scopes, changed_paths)
                 covered: set[str] = set()
+                claimants: dict[str, list[str]] = {}
+                contents: dict[str, Any] = {}
                 for status, path in event_changes:
                     if status != "A":
                         raise WatchError(f"{path}: watch events are append-only")
@@ -615,15 +759,20 @@ def verify(root: pathlib.Path, base: str | None = None, head: str | None = None)
                     file_path = root / path
                     if file_path.is_symlink() or not file_path.is_file():
                         raise WatchError(f"{path}: event must be a regular file")
-                    claims = validate_event(_load_bytes(file_path.read_bytes(), path), path)
-                    duplicate_claims = covered & claims
-                    if duplicate_claims:
-                        raise WatchError(
-                            f"{path}: duplicate capability-family claims "
-                            f"{sorted(duplicate_claims)}"
-                        )
+                    value = _load_bytes(file_path.read_bytes(), path)
+                    claims = validate_event(value, path)
+                    contents[path] = value
+                    for family in claims:
+                        claimants.setdefault(family, []).append(path)
                     covered.update(claims)
                     events.append(path)
+                # One family claimed by several events is a duplicate unless
+                # history shows each event records its own, disjoint paths.
+                shared_errors = _shared_claim_errors(
+                    root, base, head, scopes, changed_paths, claimants, contents
+                )
+                if shared_errors:
+                    raise WatchError("; ".join(shared_errors))
                 if covered != affected:
                     raise WatchError(
                         "watch event family coverage differs; "
