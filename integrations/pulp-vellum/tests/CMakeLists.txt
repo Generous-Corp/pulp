@@ -161,6 +161,10 @@ if(PULP_BUILD_TESTS AND TARGET Catch2::Catch2WithMain)
         target_link_libraries(pulp-test-pulp-vellum-about-notices PRIVATE
             pulp::vellum Vellum::MirrorView_core Catch2::Catch2WithMain Threads::Threads)
         catch_discover_tests(pulp-test-pulp-vellum-about-notices PROPERTIES LABELS pulp-vellum-editor)
+
+        # An AU v2 host opening a Vellum editor. The target defines a test-only
+        # macro, so its definition lives under test/ with the other test targets.
+        include(${PULP_ROOT_DIR}/test/cmake/au_v2_vellum_view_tests.cmake)
     else()
         message(STATUS "pulp-vellum: Vellum::MirrorView_core not in this Vellum SDK; "
             "skipping pulp-test-pulp-vellum-editor")
