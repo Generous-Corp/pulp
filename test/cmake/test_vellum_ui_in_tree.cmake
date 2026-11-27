@@ -260,9 +260,6 @@ elseif(SCENARIO STREQUAL "real")
     # when it is ported; the test then fails until the entry is removed, so the
     # list cannot go stale, and any entry not listed fails it.
     set(_unported
-        "pulp-format-core -> pulp-view-core"
-        "pulp-format-view -> pulp::view-core"
-        "pulp-format-view -> pulp::view-script"
         "pulp-inspect-telemetry -> pulp::view-core")
     set(_generator)
     find_program(_ninja ninja)

@@ -29,12 +29,14 @@ set(_legacy_view_dir "${CMAKE_SOURCE_DIR}/test/format_legacy_view")
 set(_legacy_view_poison "${_legacy_view_dir}/view_poison.hpp")
 
 # Headers and definitions only: these never link format-core, so the probes
-# see exactly what a consumer's compiler sees in each mode.
+# see exactly what a consumer's compiler sees in each mode. Each probe sets
+# PULP_FORMAT_LEGACY_VIEW itself, so format-core's own value (PUBLIC in a tree
+# built with PULP_UI_FROM_VELLUM_IN_TREE) is left out rather than defined twice.
 function(_pulp_legacy_view_usage target)
     target_include_directories(${target} PRIVATE
         $<TARGET_PROPERTY:pulp-format-core,INTERFACE_INCLUDE_DIRECTORIES>)
     target_compile_definitions(${target} PRIVATE
-        $<TARGET_PROPERTY:pulp-format-core,INTERFACE_COMPILE_DEFINITIONS>)
+        "$<FILTER:$<TARGET_PROPERTY:pulp-format-core,INTERFACE_COMPILE_DEFINITIONS>,EXCLUDE,^PULP_FORMAT_LEGACY_VIEW=>")
     target_compile_features(${target} PRIVATE cxx_std_20)
 endfunction()
 

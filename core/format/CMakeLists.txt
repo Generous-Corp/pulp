@@ -103,33 +103,47 @@ if(NOT WIN32 AND NOT EMSCRIPTEN AND NOT IOS AND NOT ANDROID)
     target_sources(pulp-format-core PRIVATE src/reloadable_editor_shell.cpp)
 endif()
 
-target_sources(pulp-format-view PRIVATE
-    src/view_bridge.cpp
-    # Constructs the UI_SCRIPT editor's ScriptedUiSession. Its own archive
-    # member, loaded only by a binary that calls
-    # install_scripted_editor_builder(), so AutoUi plug-ins do not link the
-    # script runtime.
-    src/scripted_editor_builder.cpp
-    # The two Processor::SettingsSection members that need view::View complete
-    # (adopting a view, take_view); create_view() does not, and stays in
-    # format.cpp.
-    src/settings_section.cpp
-    # In-app update surfaces over the core AppUpdateService: the EditorBridge
-    # messages a JS editor calls and the native Settings group.
-    src/app_updates_bridge.cpp
-    src/app_updates_settings_view.cpp
-)
+# With PULP_UI_FROM_VELLUM_IN_TREE the UI is Vellum's. pulp-format-core then
+# builds with PULP_FORMAT_LEGACY_VIEW=0, PUBLIC so every consumer agrees: its
+# view hooks keep their vtable slots under reserved names, and no format-core
+# source or header names Pulp's view layer. pulp-format-view keeps its name and
+# archive, so pulp-format and the SDK export list are unchanged, but holds none
+# of the ViewBridge sources below. Its role is served by the Vellum editor
+# adapter, pulp::vellum (ViewProcessor<>, ViewEditorFactory and the Updates
+# settings group), and by the CLAP adapter without its ViewBridge GUI
+# extension, pulp::format-clap-core.
+if(PULP_UI_FROM_VELLUM_IN_TREE)
+    target_compile_definitions(pulp-format-core PUBLIC PULP_FORMAT_LEGACY_VIEW=0)
+    target_sources(pulp-format-view PRIVATE src/placeholder.cpp)
+else()
+    target_sources(pulp-format-view PRIVATE
+        src/view_bridge.cpp
+        # Constructs the UI_SCRIPT editor's ScriptedUiSession. Its own archive
+        # member, loaded only by a binary that calls
+        # install_scripted_editor_builder(), so AutoUi plug-ins do not link the
+        # script runtime.
+        src/scripted_editor_builder.cpp
+        # The two Processor::SettingsSection members that need view::View complete
+        # (adopting a view, take_view); create_view() does not, and stays in
+        # format.cpp.
+        src/settings_section.cpp
+        # In-app update surfaces over the core AppUpdateService: the EditorBridge
+        # messages a JS editor calls and the native Settings group.
+        src/app_updates_bridge.cpp
+        src/app_updates_settings_view.cpp
+    )
 
-# format.cpp needs view::View COMPLETE, and only for its compile: libstdc++
-# instantiates ~unique_ptr<View> in create_view()'s return path, so GCC rejects
-# a forward declaration there even though Apple Clang accepts it. See the
-# comment at the top of format.cpp.
-#
-# Headers only, and PRIVATE. This adds view's include directories to this
-# target's own sources and nothing else: no view archive joins the link
-# closure, and nothing propagates to consumers.
-target_include_directories(pulp-format-core PRIVATE
-    $<TARGET_PROPERTY:pulp-view-core,INTERFACE_INCLUDE_DIRECTORIES>)
+    # format.cpp needs view::View COMPLETE, and only for its compile: libstdc++
+    # instantiates ~unique_ptr<View> in create_view()'s return path, so GCC rejects
+    # a forward declaration there even though Apple Clang accepts it. See the
+    # comment at the top of format.cpp.
+    #
+    # Headers only, and PRIVATE. This adds view's include directories to this
+    # target's own sources and nothing else: no view archive joins the link
+    # closure, and nothing propagates to consumers.
+    target_include_directories(pulp-format-core PRIVATE
+        $<TARGET_PROPERTY:pulp-view-core,INTERFACE_INCLUDE_DIRECTORIES>)
+endif()
 
 target_link_libraries(pulp-format-core
     PUBLIC
@@ -162,14 +176,18 @@ target_link_libraries(pulp-format-core
 #   * clap_adapter.cpp conditions on PULP_HAS_ARA and would otherwise never
 #     see it, compiling ARA support out of the CLAP adapter with nothing red.
 # The dependency is one-way: no core translation unit references pulp::view.
-target_link_libraries(pulp-format-view
-    PUBLIC
-        pulp::format-core
-        # Public ViewBridge headers expose native View types, not WebView.
-        pulp::view-core
-        pulp::view-tooling
-        pulp::view-audio
-)
+if(PULP_UI_FROM_VELLUM_IN_TREE)
+    target_link_libraries(pulp-format-view PUBLIC pulp::format-core pulp::vellum)
+else()
+    target_link_libraries(pulp-format-view
+        PUBLIC
+            pulp::format-core
+            # Public ViewBridge headers expose native View types, not WebView.
+            pulp::view-core
+            pulp::view-tooling
+            pulp::view-audio
+    )
+endif()
 
 target_link_libraries(pulp-format
     PUBLIC
@@ -182,7 +200,7 @@ if(NOT DEFINED PULP_ENABLE_JS)
         "PULP_ENABLE_JS must be declared before core/format is configured; "
         "otherwise ViewBridge's scripted-UI static closure is order-dependent")
 endif()
-if(PULP_ENABLE_JS)
+if(PULP_ENABLE_JS AND NOT PULP_UI_FROM_VELLUM_IN_TREE)
     # ViewBridge's implementation reaches ScriptedUiSession. Keep that static
     # closure link-only so the final artifact chooses view-native or the legacy
     # WebView-capable view umbrella without inheriting both compositions.
@@ -294,7 +312,7 @@ endif()
 # extension block in clap_entry.hpp, and clap_adapter.hpp would still have to
 # include pulp/view/plugin_view_host.hpp for sizeof afterwards -- moving the
 # dependency out of CMake and into the source rather than removing it.
-if(PULP_HAS_CLAP)
+if(PULP_HAS_CLAP AND NOT PULP_UI_FROM_VELLUM_IN_TREE)
     target_sources(pulp-format-view PRIVATE
         src/clap_adapter.cpp
         src/clap_contract_gui.cpp
@@ -307,6 +325,8 @@ if(PULP_HAS_CLAP)
     # per-plugin clap_entry.cpp TU. The entry target defines PULP_CLAP_GUI=1;
     # the shared adapter must do the same or GUI members shift later fields.
     target_compile_definitions(pulp-format-view PRIVATE PULP_CLAP=1 PULP_CLAP_GUI=1)
+endif()
+if(PULP_HAS_CLAP)
 
     # The same adapter without the GUI extension, for editor-less plug-ins
     # (pulp_add_plugin NO_EDITOR). PULP_CLAP_GUI is undefined here and in the
@@ -330,6 +350,9 @@ if(PULP_HAS_CLAP)
     target_compile_definitions(pulp-format-clap-core PRIVATE PULP_CLAP=1)
     if(PULP_HAS_AUSDK)
         set_target_properties(pulp-format-clap-core PROPERTIES CXX_STANDARD 23)
+    endif()
+    if(PULP_UI_FROM_VELLUM_IN_TREE)
+        target_link_libraries(pulp-format-view PUBLIC pulp::format-clap-core)
     endif()
 endif()
 
