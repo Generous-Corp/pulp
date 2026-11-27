@@ -181,10 +181,15 @@ class ClosureWalk(unittest.TestCase):
         self.assertIn("pulp-mid", err)
         self.assertIn("no record", err)
 
-    def test_missing_namespaced_target_record_is_inconclusive(self) -> None:
-        records = {"pulp-root": ("vendor::lib", "")}
-        code, _, _ = self.run_check(records, ["pulp-root"], ["pulp-view*"])
+    def test_missing_namespaced_target_record_is_inconclusive_when_writer_lists_it(self) -> None:
+        text = graph_text({"pulp-root": ("vendor::lib", "", "", "vendor::lib")})
+        code, _ = self.run_raw(text, ["pulp-root"])
         self.assertEqual(code, 2)
+
+    def test_directory_scoped_imported_target_the_writer_cannot_see_is_not_held_against(self) -> None:
+        records = {"pulp-root": ("Threads::Threads", "$<LINK_ONLY:Threads::Threads>")}
+        code, _, _ = self.run_check(records, ["pulp-root"], ["pulp-view*"])
+        self.assertEqual(code, 0)
 
     def test_missing_target_objects_record_is_inconclusive(self) -> None:
         for expr in ("$<TARGET_OBJECTS:canvas_objs>", "$<TARGET_FILE:canvas_objs>",

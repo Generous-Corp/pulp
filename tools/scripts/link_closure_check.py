@@ -22,8 +22,7 @@ A root may name an `--allow` edge (`from>to`) for a dependency the layering
 still owes; every allowed edge is printed, so an exemption never goes unseen.
 
 A graph that cannot be trusted is never a PASS: a record with fewer than four
-fields (a truncated dump) and a reachable target-shaped name (`pulp-*` or a
-`ns::name` target, a name the writer's REFS field or a `$<TARGET_OBJECTS:x>`-style
+fields (a truncated dump) and a reachable target-shaped name (`pulp-*` name, a name the writer's REFS field or a `$<TARGET_OBJECTS:x>`-style
 expression names as a target) that
 has no record are both INCONCLUSIVE. Paths, flags and
 generator-expression tokens are not target-shaped, so they are not held against
@@ -46,7 +45,10 @@ from pathlib import Path
 
 MIN_GRAPH_TARGETS = 20
 WORD_RE = re.compile(r"[A-Za-z0-9_+.@/-]+")
-TARGET_SHAPED_RE = re.compile(r"^(?:pulp-[a-z0-9_+-]+|[a-z0-9_+-]+::[a-z0-9_+:-]+)$")
+# Only Pulp's own names are inferred to be targets; a third-party `ns::name` may be an
+# imported target that CMake keeps in a directory scope the writer cannot see, so the
+# writer's REFS field is what names the rest.
+TARGET_SHAPED_RE = re.compile(r"^pulp-[a-z0-9_+-]+$")
 EXPLICIT_TARGET_RE = re.compile(
     r"\$<TARGET_(?:OBJECTS|FILE|FILE_DIR|FILE_NAME|LINKER_FILE|SONAME_FILE|PROPERTY|"
     r"NAME_IF_EXISTS|BUNDLE_DIR):([A-Za-z0-9_+.@:-]+)", re.IGNORECASE)
