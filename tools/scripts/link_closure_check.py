@@ -58,7 +58,8 @@ EXTERNAL_NS_RE = re.compile(r"^[a-z0-9_+-]+::[a-z0-9_+:-]+$")
 TARGET_SHAPED_RE = re.compile(r"^pulp-[a-z0-9_+-]+$")
 ORDINARY_TARGET_RE = re.compile(r"^[a-z_][a-z0-9_+.-]*$")
 SOURCE_SUFFIX_RE = re.compile(r"\.(?:c|cc|cpp|cxx|m|mm|h|hh|hpp|hxx|swift|rs)$")
-SYSTEM_LINK_NAMES = {"atomic", "c", "dl", "gcc", "gcc_s", "m", "pthread", "rt", "stdc++"}
+SYSTEM_LINK_NAMES = {"atomic", "c", "dl", "dwmapi", "gcc", "gcc_s", "m", "pthread",
+                     "rt", "stdc++"}
 GENERATOR_TOKENS = {"build_interface", "config", "install_interface", "link_only",
                    "target_objects", "target_file", "target_file_base_name",
                    "target_file_name", "target_file_dir", "target_linker_file"}
@@ -134,10 +135,13 @@ class Graph:
                 if value.endswith("-NOTFOUND"):
                     continue
                 graph.explicit.update(canonical(m) for m in EXPLICIT_TARGET_RE.findall(value))
-                for raw in WORD_RE.findall(value):
+                raw_words = WORD_RE.findall(value)
+                for raw_index, raw in enumerate(raw_words):
                     base = raw.rsplit("/", 1)[-1]
                     if base != raw:
                         graph.path_derived.update({canonical(raw), canonical(base)})
+                    if raw_index and raw_words[raw_index - 1].lower() == "-framework":
+                        graph.path_derived.add(canonical(raw))
                     archive = ARCHIVE_RE.match(base)
                     if archive:
                         graph.archive_derived.update({canonical(archive.group(1)),
@@ -267,7 +271,9 @@ def find_paths(graph: Graph, root: str, forbidden: list[str],
                 found.append(list(reversed(path)))
                 continue
             if target in graph.opaque:
-                if unresolved is not None:
+                if external is not None and EXTERNAL_NS_RE.match(target):
+                    external.append(target)
+                elif unresolved is not None:
                     unresolved.append(target)
                 continue
             if target not in graph.edges:
