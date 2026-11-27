@@ -1292,6 +1292,385 @@ TEST_CASE("runtime interaction coordinates scale to Vellum backing pixels",
     CHECK(view.events[2].pointer_id == view.events[0].pointer_id);
 }
 
+// ── A CLAP host opening a Vellum editor ─────────────────────────────────────
+//
+// The CLAP entry offers a factory-backed processor the view-free contract GUI
+// (clap_contract_gui.cpp), which drives a pulp::vellum::Editor and the Vellum
+// PluginViewHost it owns. Each case stands in for the host and calls the
+// clap_plugin_gui functions a host calls, then checks what the Vellum root and
+// its host saw. The plug-in is built without PULP_CLAP_GUI and links
+// pulp-format-clap-core, the way a `UI <package>` plug-in is. Rendering stays
+// offscreen: the parent is another Vellum host's native view, never shown.
+
+#if defined(PULP_TEST_VELLUM_CLAP)
+
+#include <pulp/format/clap_adapter.hpp>
+
+#include <clap/clap.h>
+#include <clap/ext/gui.h>
+#include <clap/ext/params.h>
+#include <clap/ext/timer-support.h>
+
+#include <cstdlib>
+#include <cstring>
+#include <string>
+
+namespace clap_cases {
+
+using PluginViewHost = ::vellum::view::PluginViewHost;
+
+/// What the root saw, reset by each case.
+struct ClapRootLog {
+    int opens = 0;
+    int closes = 0;
+    ::vellum::view::View* root = nullptr;
+};
+ClapRootLog g_clap_root;
+
+/// An aspect-locked root that counts its attachment edges.
+class ClapRootView final : public ::vellum::view::View {
+  public:
+    explicit ClapRootView(pulp::vellum::EditorEnv&) {
+        g_clap_root.root = this;
+    }
+    ~ClapRootView() override {
+        g_clap_root.root = nullptr;
+    }
+
+    pulp::format::ViewSize editor_view_size() const {
+        return {.preferred_width = 400,
+                .preferred_height = 300,
+                .min_width = 200,
+                .min_height = 150,
+                .max_width = 800,
+                .max_height = 600,
+                .aspect_ratio = 4.0 / 3.0};
+    }
+    void editor_opened() {
+        ++g_clap_root.opens;
+    }
+    void editor_closing() {
+        ++g_clap_root.closes;
+    }
+};
+
+class ClapRootProcessor final : public pulp::format::Processor {
+  public:
+    pulp::format::PluginDescriptor descriptor() const override {
+        pulp::format::PluginDescriptor d;
+        d.name = "Vellum CLAP Editor";
+        d.manufacturer = "Pulp";
+        d.bundle_id = "dev.pulp.test.clap-vellum-editor";
+        d.version = "1.0.0";
+        d.input_buses = {{"Audio In", 2}};
+        d.output_buses = {{"Audio Out", 2}};
+        return d;
+    }
+    void define_parameters(pulp::state::StateStore& store) override {
+        pulp::state::ParamInfo info;
+        info.id = 1;
+        info.name = "Gain";
+        info.range = {0.0f, 1.0f, 0.5f};
+        store.add_parameter(info);
+    }
+    void prepare(const pulp::format::PrepareContext&) override {}
+    void process(pulp::audio::BufferView<float>& out, const pulp::audio::BufferView<const float>&,
+                 pulp::midi::MidiBuffer&, pulp::midi::MidiBuffer&,
+                 const pulp::format::ProcessContext&) override {
+        out.clear();
+    }
+    pulp::format::EditorFactory* editor_factory() override {
+        return pulp::vellum::editor_factory<ClapRootView>();
+    }
+};
+
+std::unique_ptr<pulp::format::Processor> create_clap_root_processor() {
+    return std::make_unique<ClapRootProcessor>();
+}
+
+} // namespace clap_cases
+
+#include <pulp/format/clap_entry.hpp>
+PULP_CLAP_PLUGIN(clap_cases::create_clap_root_processor)
+
+namespace clap_cases {
+
+// A host with params, gui and, when asked, timer-support.
+struct ClapHost {
+    clap_host_t host{};
+    clap_host_params_t params{};
+    clap_host_gui_t gui{};
+    clap_host_timer_support_t timers{};
+    bool offers_timers = false;
+    std::vector<clap_id> live_timers;
+    clap_id next_timer = 7;
+
+    ClapHost() {
+        host.clap_version = CLAP_VERSION;
+        host.host_data = this;
+        host.name = "Pulp Vellum editor test host";
+        host.vendor = "Pulp";
+        host.url = "https://pulp.audio";
+        host.version = "1";
+        host.get_extension = [](const clap_host_t* h, const char* id) -> const void* {
+            auto* self = static_cast<ClapHost*>(h->host_data);
+            if (std::strcmp(id, CLAP_EXT_PARAMS) == 0)
+                return &self->params;
+            if (std::strcmp(id, CLAP_EXT_GUI) == 0)
+                return &self->gui;
+            if (std::strcmp(id, CLAP_EXT_TIMER_SUPPORT) == 0)
+                return self->offers_timers ? &self->timers : nullptr;
+            return nullptr;
+        };
+        host.request_restart = [](const clap_host_t*) {};
+        host.request_process = [](const clap_host_t*) {};
+        host.request_callback = [](const clap_host_t*) {};
+        params.rescan = [](const clap_host_t*, clap_param_rescan_flags) {};
+        params.clear = [](const clap_host_t*, clap_id, clap_param_clear_flags) {};
+        params.request_flush = [](const clap_host_t*) {};
+        gui.resize_hints_changed = [](const clap_host_t*) {};
+        gui.request_resize = [](const clap_host_t*, uint32_t, uint32_t) { return true; };
+        gui.request_show = [](const clap_host_t*) { return false; };
+        gui.request_hide = [](const clap_host_t*) { return false; };
+        gui.closed = [](const clap_host_t*, bool) {};
+        timers.register_timer = [](const clap_host_t* h, uint32_t, clap_id* id) {
+            auto* self = static_cast<ClapHost*>(h->host_data);
+            *id = self->next_timer++;
+            self->live_timers.push_back(*id);
+            return true;
+        };
+        timers.unregister_timer = [](const clap_host_t* h, clap_id id) {
+            auto& live = static_cast<ClapHost*>(h->host_data)->live_timers;
+            for (auto it = live.begin(); it != live.end(); ++it)
+                if (*it == id) {
+                    live.erase(it);
+                    return true;
+                }
+            return false;
+        };
+    }
+};
+
+// Unset an environment variable for one scope, then put back what was there.
+class ClapScopedEnvUnset {
+  public:
+    explicit ClapScopedEnvUnset(const char* name) : name_(name) {
+        if (const char* prev = std::getenv(name))
+            prev_ = std::string(prev);
+        ::unsetenv(name_.c_str());
+    }
+    ~ClapScopedEnvUnset() {
+        if (prev_)
+            ::setenv(name_.c_str(), prev_->c_str(), 1);
+    }
+
+  private:
+    std::string name_;
+    std::optional<std::string> prev_;
+};
+
+// The contract GUI is withheld in CI and headless environments; these cases
+// open an editor offscreen.
+struct ClapEditorEnvironment {
+    ClapScopedEnvUnset disable_editor{"PULP_DISABLE_PLUGIN_EDITOR"};
+    ClapScopedEnvUnset headless{"PULP_HEADLESS"};
+    ClapScopedEnvUnset test_mode{"PULP_TEST_MODE"};
+    ClapScopedEnvUnset ci{"CI"};
+};
+
+// Clears any host factory a case registers, even when an assertion stops it.
+struct ClapFactoryReset {
+    ~ClapFactoryReset() {
+        PluginViewHost::clear_factory();
+    }
+};
+
+// A host whose native view never accepts a parent.
+class ClapRefusingHost final : public PluginViewHost {
+  public:
+    explicit ClapRefusingHost(Size size) : size_(size) {}
+    ::vellum::view::NativeViewHandle native_handle() override {
+        return this;
+    }
+    void attach_to_parent(::vellum::view::NativeViewHandle) override {}
+    bool is_attached() const noexcept override {
+        return false;
+    }
+    void detach() override {}
+    void repaint() override {}
+    void set_size(uint32_t width, uint32_t height) override {
+        size_ = {width, height};
+    }
+    Size get_size() const override {
+        return size_;
+    }
+
+  private:
+    Size size_;
+};
+
+/// One initialized plug-in instance, its GUI extension and an offscreen parent.
+struct ClapFixture {
+    ClapEditorEnvironment env;
+    ClapHost host;
+    const clap_plugin_t* plugin = nullptr;
+    const clap_plugin_gui_t* gui = nullptr;
+    ::vellum::view::View parent_root;
+    std::unique_ptr<PluginViewHost> parent;
+
+    explicit ClapFixture(bool offers_timers = false) {
+        g_clap_root = {};
+        host.offers_timers = offers_timers;
+        REQUIRE(clap_entry.init("test"));
+        auto* factory = static_cast<const clap_plugin_factory_t*>(
+            clap_entry.get_factory(CLAP_PLUGIN_FACTORY_ID));
+        REQUIRE(factory != nullptr);
+        auto* desc = factory->get_plugin_descriptor(factory, 0);
+        plugin = factory->create_plugin(factory, &host.host, desc->id);
+        REQUIRE(plugin != nullptr);
+        REQUIRE(plugin->init(plugin));
+        gui = static_cast<const clap_plugin_gui_t*>(plugin->get_extension(plugin, CLAP_EXT_GUI));
+        REQUIRE(gui != nullptr);
+    }
+    ~ClapFixture() {
+        if (plugin != nullptr)
+            plugin->destroy(plugin);
+        clap_entry.deinit();
+    }
+
+    // A second Vellum host stands in for the host's NSView.
+    clap_window_t window() {
+        if (!parent) {
+            parent = PluginViewHost::create(parent_root, PluginViewHost::Size{800, 600});
+            REQUIRE(parent != nullptr);
+        }
+        clap_window_t w{};
+        w.api = CLAP_WINDOW_API_COCOA;
+        w.cocoa = parent->native_handle();
+        return w;
+    }
+    // Any non-null pointer for a host whose view never attaches.
+    clap_window_t stand_in_window() {
+        static int stand_in = 0;
+        clap_window_t w{};
+        w.api = CLAP_WINDOW_API_COCOA;
+        w.cocoa = &stand_in;
+        return w;
+    }
+};
+
+} // namespace clap_cases
+
+using namespace clap_cases;
+
+TEST_CASE("A CLAP host opens, sizes and closes a Vellum editor",
+          "[pulp-vellum][clap][editor-host]") {
+#if !defined(__APPLE__)
+    SKIP("Vellum's SDK ships its GPU plug-in view host on macOS only");
+#endif
+    ClapFixture fx;
+    REQUIRE(fx.gui->is_api_supported(fx.plugin, CLAP_WINDOW_API_COCOA, false));
+    REQUIRE(fx.gui->create(fx.plugin, CLAP_WINDOW_API_COCOA, false));
+    REQUIRE(g_clap_root.root != nullptr);
+    auto* host = g_clap_root.root->plugin_view_host();
+    REQUIRE(host != nullptr);
+
+    // Before attach: the root's declared preferred size.
+    std::uint32_t width = 0;
+    std::uint32_t height = 0;
+    REQUIRE(fx.gui->get_size(fx.plugin, &width, &height));
+    CHECK(width == 400);
+    CHECK(height == 300);
+
+    const auto window = fx.window();
+    REQUIRE(fx.gui->set_parent(fx.plugin, &window));
+    CHECK(g_clap_root.opens == 1);
+    CHECK(host->is_attached());
+
+    // The declared hints drive resize negotiation: 4:3 inside [min, max].
+    REQUIRE(fx.gui->can_resize(fx.plugin));
+    width = 1000;
+    height = 1000;
+    REQUIRE(fx.gui->adjust_size(fx.plugin, &width, &height));
+    CHECK(width == 800);
+    CHECK(height == 600);
+    REQUIRE(fx.gui->set_size(fx.plugin, 640, 480));
+    REQUIRE(fx.gui->get_size(fx.plugin, &width, &height));
+    CHECK(width == 640);
+    CHECK(height == 480);
+    CHECK(host->get_size().width == 640);
+    CHECK(host->get_size().height == 480);
+
+    CHECK(fx.gui->show(fx.plugin));
+    CHECK(fx.gui->hide(fx.plugin));
+    fx.gui->destroy(fx.plugin);
+    CHECK(g_clap_root.closes == 1);
+    CHECK(g_clap_root.root == nullptr);
+}
+
+TEST_CASE("A CLAP Vellum editor uses the host's timer only when the host offers one",
+          "[pulp-vellum][clap][editor-host][timer]") {
+#if !defined(__APPLE__)
+    SKIP("Vellum's SDK ships its GPU plug-in view host on macOS only");
+#endif
+    SECTION("with timer-support") {
+        ClapFixture fx(/*offers_timers=*/true);
+        REQUIRE(fx.gui->create(fx.plugin, CLAP_WINDOW_API_COCOA, false));
+        const auto window = fx.window();
+        REQUIRE(fx.gui->set_parent(fx.plugin, &window));
+        CHECK(fx.host.live_timers.size() == 1);
+        fx.gui->destroy(fx.plugin);
+        CHECK(fx.host.live_timers.empty());
+    }
+    SECTION("without timer-support") {
+        ClapFixture fx(/*offers_timers=*/false);
+        REQUIRE(fx.gui->create(fx.plugin, CLAP_WINDOW_API_COCOA, false));
+        const auto window = fx.window();
+        REQUIRE(fx.gui->set_parent(fx.plugin, &window));
+        CHECK(g_clap_root.opens == 1);
+        CHECK(fx.host.live_timers.empty());
+        fx.gui->destroy(fx.plugin);
+        CHECK(g_clap_root.closes == 1);
+    }
+}
+
+TEST_CASE("A CLAP host gets no Vellum editor when the view host cannot be created",
+          "[pulp-vellum][clap][editor-host][negative]") {
+    ClapFactoryReset reset;
+    PluginViewHost::set_factory(
+        [](::vellum::view::View&,
+           const PluginViewHost::Options&) -> std::unique_ptr<PluginViewHost> { return nullptr; });
+    ClapFixture fx;
+    REQUIRE(fx.gui->create(fx.plugin, CLAP_WINDOW_API_COCOA, false));
+    const auto window = fx.stand_in_window();
+    CHECK_FALSE(fx.gui->set_parent(fx.plugin, &window));
+    CHECK(g_clap_root.opens == 0);
+    fx.gui->destroy(fx.plugin);
+    CHECK(g_clap_root.closes == 0);
+}
+
+TEST_CASE("A CLAP host whose parent refuses the Vellum view never opens the editor",
+          "[pulp-vellum][clap][editor-host][negative]") {
+    ClapFactoryReset reset;
+    ClapRefusingHost* made = nullptr;
+    PluginViewHost::set_factory(
+        [&made](::vellum::view::View&, const PluginViewHost::Options& options) {
+            auto host = std::make_unique<ClapRefusingHost>(options.size);
+            made = host.get();
+            return std::unique_ptr<PluginViewHost>(std::move(host));
+        });
+    ClapFixture fx;
+    REQUIRE(fx.gui->create(fx.plugin, CLAP_WINDOW_API_COCOA, false));
+    REQUIRE(made != nullptr);
+    const auto window = fx.stand_in_window();
+    CHECK_FALSE(fx.gui->set_parent(fx.plugin, &window));
+    CHECK(g_clap_root.opens == 0);
+    fx.gui->destroy(fx.plugin);
+    CHECK(g_clap_root.closes == 0);
+}
+
+#endif // PULP_TEST_VELLUM_CLAP
+
 namespace {
 
 // A root that opts into content-first presentation and reports when its

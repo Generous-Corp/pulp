@@ -68,6 +68,15 @@ if(PULP_BUILD_TESTS AND TARGET Catch2::Catch2WithMain)
             pulp::vellum Vellum::MirrorView_core Catch2::Catch2WithMain Threads::Threads)
         catch_discover_tests(pulp-test-pulp-vellum-view-processor
             PROPERTIES LABELS pulp-vellum-editor)
+        # A CLAP host opening a Vellum editor through the view-free contract
+        # GUI: the plug-in entry compiles without PULP_CLAP_GUI and links the
+        # view-free CLAP adapter, as a `UI <package>` plug-in does.
+        if(TARGET pulp-format-clap-core)
+            target_link_libraries(pulp-test-pulp-vellum-editor PRIVATE
+                pulp::format-clap-core clap)
+            target_compile_definitions(pulp-test-pulp-vellum-editor PRIVATE
+                PULP_TEST_VELLUM_CLAP=1)
+        endif()
         if(TARGET Vellum::MirrorView_script)
             target_link_libraries(pulp-test-pulp-vellum-editor PRIVATE Vellum::MirrorView_script)
             target_compile_definitions(pulp-test-pulp-vellum-editor PRIVATE
@@ -161,6 +170,12 @@ if(PULP_BUILD_TESTS AND TARGET Catch2::Catch2WithMain)
         target_link_libraries(pulp-test-pulp-vellum-about-notices PRIVATE
             pulp::vellum Vellum::MirrorView_core Catch2::Catch2WithMain Threads::Threads)
         catch_discover_tests(pulp-test-pulp-vellum-about-notices PROPERTIES LABELS pulp-vellum-editor)
+        # A macOS AUv3 plug-in with a Vellum editor package: the appex stub
+        # must link, and the editor code must live in the framework.
+        if(APPLE AND NOT PULP_IOS)
+            add_subdirectory(auv3_editor_package)
+        endif()
+
 
         # An AU v2 host opening a Vellum editor. The target defines a test-only
         # macro, so its definition lives under test/ with the other test targets.
