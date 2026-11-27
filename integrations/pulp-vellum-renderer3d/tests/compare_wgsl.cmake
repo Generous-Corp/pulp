@@ -1,0 +1,20 @@
+# Fails when the package's scene shader and the legacy core/render copy differ
+# anywhere past their two-line header comment, which names each file's own
+# C++ twin. Run with -DPORTED=<path> -DLEGACY=<path>.
+foreach(_which PORTED LEGACY)
+    file(READ "${${_which}}" _text)
+    string(FIND "${_text}" "\n" _first)
+    if(_first LESS 0)
+        message(FATAL_ERROR "wgsl-twin: ${${_which}} has no header comment")
+    endif()
+    math(EXPR _after_first "${_first} + 1")
+    string(SUBSTRING "${_text}" ${_after_first} -1 _rest)
+    string(FIND "${_rest}" "\n" _second)
+    math(EXPR _after_second "${_second} + 1")
+    string(SUBSTRING "${_rest}" ${_after_second} -1 _body_${_which})
+    string(LENGTH "${_body_${_which}}" _length_${_which})
+endforeach()
+if(NOT _body_PORTED STREQUAL _body_LEGACY)
+    message(FATAL_ERROR "wgsl-twin: ${PORTED} and ${LEGACY} differ past their header comment")
+endif()
+message(STATUS "wgsl-twin: identical past the header comment (${_length_PORTED} bytes)")

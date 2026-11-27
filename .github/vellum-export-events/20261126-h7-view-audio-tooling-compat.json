@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "event_id": "20261126-h7-view-audio-tooling-compat",
+  "kind": "exported-path-change",
+  "created_at": "2026-11-26T15:06:21Z",
+  "receipt_export_id": "20261107-f0ac0a4ff392",
+  "paths": [
+    "core/view/src/editor_bridge_native_runtime.cpp"
+  ],
+  "vellum_inherits": false,
+  "rationale": "The attach_native_runtime overloads that name view-script types move into their own Pulp-kept source in pulp-view-tooling; Vellum does not export the editor bridge, so a re-export has nothing to carry."
+}

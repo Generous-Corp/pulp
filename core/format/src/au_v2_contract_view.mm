@@ -360,6 +360,9 @@ EditorKeyEvent contract_key_event(unsigned short key_code, NSString* characters,
         view.layer.backgroundColor = [NSColor colorWithSRGBRed:r green:g blue:b alpha:1.0].CGColor;
     }
     format::ContractEditorSession::HostHooks hooks;
+    // Keys reach the container from AppKit, after its key-equivalent pass has
+    // already shown them to the editor's own view.
+    hooks.keys_after_native_pass = true;
     // The view owns the session, so it outlives every hook call.
     hooks.request_resize = [view](const format::EditorSize& requested) {
         // AU v2 has no resize request: the host follows the view's frame.

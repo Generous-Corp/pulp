@@ -22,10 +22,10 @@ the list fails this check, which is the signal that either the include is
 unintended or the target boundary has moved.
 
 The walk deliberately ignores preprocessor conditionals: it follows every
-#include regardless of #if. That over-approximates -- clap_adapter.hpp is
-view-free when PULP_CLAP_GUI is off, and is still listed here -- which is the
-safe direction, because it can only classify a header as more coupled than it
-is, never less.
+#include regardless of #if. That over-approximates (a header whose view include
+sits under an #if is classified as view-coupled even in a configuration that
+leaves it out), which is the safe direction, because it can only classify a
+header as more coupled than it is, never less.
 
 Exit codes: 0 clean, 1 boundary violated, 2 the walker could not resolve part of
 the include graph and its verdicts cannot be trusted.
@@ -55,8 +55,6 @@ GENERATED_TEMPLATES = {
 VIEW_HEADERS = {
     "pulp/format/app_updates_bridge.hpp",
     "pulp/format/app_updates_settings_view.hpp",
-    "pulp/format/clap_adapter.hpp",
-    "pulp/format/clap_entry.hpp",
     "pulp/format/detail/au_v2_editor_resize.hpp",
     "pulp/format/detail/standalone_editor_chrome.hpp",
     "pulp/format/detail/standalone_musical_typing.hpp",
@@ -66,7 +64,6 @@ VIEW_HEADERS = {
     "pulp/format/editor_ui.hpp",
     "pulp/format/gpu_host_select.hpp",
     "pulp/format/panic_target.hpp",
-    "pulp/format/reload/pack_build.hpp",
     "pulp/format/reload/reloadable_shell.hpp",
     "pulp/format/reload/scripted_ui_swap_unit.hpp",
     "pulp/format/settings_panel.hpp",

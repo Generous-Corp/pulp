@@ -110,7 +110,11 @@ on a real PR. Do them in order.
      covers `Processor`, `PluginSlot`, and the experimental `GpuAudioNode`
      surface. New GPU-audio virtual hooks belong at the end of that class;
      inserting one in the middle shifts existing slots even though the SDK
-     remains source-rebuild oriented. The editor-host interfaces (`Editor`,
+     remains source-rebuild oriented. The gate reads
+     `PULP_FORMAT_LEGACY_VIEW_NAME(x)` in `processor.hpp` as `x` (the reserved
+     names a UI-free SDK gives the view hooks) and expands no other macro, so
+     a renamed spelling of an existing slot passes and a changed signature
+     inside the macro still fails. The editor-host interfaces (`Editor`,
      `EditorContext`, `EditorFactory`, `NativeSurfaceHost`) are checked under a
      stricter FROZEN policy: an appended virtual fails too, because a UI
      package and a format adapter are separate prebuilt binaries. Don't "fix"
@@ -196,6 +200,12 @@ on a real PR. Do them in order.
    `shipyard wait pr <N> --state merged`, then
    `git fetch origin main -q && git merge-base --is-ancestor <merge-sha> origin/main`.
    A `wait` exit code is not merge proof.
+
+The PR route of `version-at-land` keeps the standing bump description aligned
+with its commit. It compares the complete normalized body, filters the bump
+branch to this repository's head owner, and emits an Actions error plus a
+failing status when the description GET or PATCH fails; the next drain retries
+the reconciliation.
 
 ## A `run:` step stops at the first failing command
 
@@ -3378,7 +3388,8 @@ Without the second line a zero is ambiguous between "not wired" and "bad grep".
 `.github/workflows/scene3d-advisory.yml` now covers that surface: path-filtered,
 advisory, `macos-15`, SCENE3D ON, not on `merge_group`. The `Vellum SDK
 consumer` lane also turns SCENE3D ON, for `integrations/pulp-vellum-renderer3d`
-(the scene3d renderer on gpu-runtime's device): that package refuses to
+(the scene3d renderer on gpu-runtime's device) and `integrations/pulp-vellum-scene`
+(Vellum's Draco decoder behind the glTF loader hook): those packages refuse to
 configure without `pulp::scene`. Three things about the scene3d lane
 generalize to any lane you add:
 
@@ -13950,6 +13961,13 @@ with `-k 0`, and uploads a JSON report grouped by capability-ledger row. Notes:
   (`cmake-vellum-ui-compat-real`, `-wrong-version`) take the label only when the
   configure found Vellum, and with `REQUIRE_VELLUM` they fail instead of
   printing SKIP, which ctest reports as skipped and leaves the lane green.
+- **The installed-SDK smoke is a separate configure and build.** `cmake
+  --install` aborts on any unbuilt target, and the labelled build above builds
+  only test targets, so the smoke step configures `build-vellum-install` with
+  the release profile and builds everything before running
+  `test/cmake/test_vellum_installed_sdk_smoke.cmake` (an install to an empty
+  prefix, then a from-scratch consumer). Its control configures the same
+  consumer with Vellum unfindable and must be refused.
 
 ## Exporting a platform's Vellum closure
 
@@ -14000,6 +14018,16 @@ main's SDK. A new optional Vellum integration package needs its option, its
 `pulp-test-*` target and a `paths:` entry added there, or no lane compiles it
 against main. The tests' ctest label should start with `pulp-vellum` so the
 lane's `-L pulp-vellum` filter runs them.
+
+The lane also runs the Yoga layout fixtures on Vellum's layout (`runner.py
+--verify --engine vellum`, `VELLUM_APP_HOST` set to the SDK's `bin/vellum-app-host`).
+Keep it a parallel mode: the `pulp-test-visual` lane stays until the UI cutover,
+and exit 3 (nothing measured) must keep failing the step.
+
+The lane's `-L pulp-vellum` run includes the GPU adapter probe and its
+empty-adapter negative control (`PASS_REGULAR_EXPRESSION` on the fail JSON, since
+the control must exit non-zero). The probe target is picked up by the
+`labelled-targets` derivation, so it needs no workflow edit.
 
 The same lane also runs the MCP UI tool cases (`pulp-test-mcp-server "[ui]"`)
 against the SDK's `bin/vellum-app-host` through `PULP_TEST_VELLUM_APP_HOST`. The

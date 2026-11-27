@@ -822,7 +822,7 @@ the `clap` skill's Parameters section for the complete transport contract.
 | Format | `open()` is called here | `notify_attached()` is called here |
 |---|---|---|
 | VST3 | `CPluginView::attached()` before `attach_to_parent` | After `CPluginView::attached` returns `kResultTrue` |
-| CLAP | `gui_create` | Inside `gui_set_parent` on the matched window API |
+| CLAP | `gui_create` (the `create_view()` GUI at the end of `clap_adapter.cpp`; its `ViewBridge` lives in `LegacyClapGui`, not in `PulpClapPlugin`) | Inside `gui_set_parent` on the matched window API |
 | AU v2 | `uiViewForAudioUnit` — after fetching context via `kPulpEditorContextProperty` | After `PluginViewHost::create` succeeds |
 | AU v3 | `viewDidLoad` | After `PluginViewHost::attach_to_parent` in `viewDidLoad` |
 | AU v3, processor with an `editor_factory()` | `rebuildEditorIfReady` opens a `ContractEditorSession` in `PulpAUv3ContractView` and never creates a ViewBridge | n/a: the contract editor's `attach()` is the attach point |
@@ -1974,6 +1974,16 @@ Key invariants:
   the framework explicitly does NOT carry `EditorBridgeState`-style
   per-session state. Capture it on `[this]` instead.
 
+EditorBridge's dispatch core (`core/view/src/editor_bridge.cpp`: handlers,
+`dispatch`, `dispatch_json`, `dispatch_webview_message`, the response and
+`get_*` helpers) is its own view-free target, `pulp-editor-bridge`, which needs
+only CHOC and the runtime. The `attach_native_runtime` / `detach_native_runtime`
+overloads name view-script types, so they stay in `pulp-view-tooling`
+(`editor_bridge_native_runtime.cpp`), which links the core. Keep any new
+dispatch code free of view-script includes; in an SDK that serves its UI names
+from Vellum, `Pulp::view-tooling` links the core and nothing else of Pulp's
+view, so a WebView editor's bridge comes from it.
+
 When you change `core/view/src/editor_bridge.cpp` or its header, the
 skill-sync gate requires updates to either *this* skill or the
 `import-design` skill (or both). The path map maps both to the file.
@@ -2415,16 +2425,65 @@ nothing for processors that don't opt in. (What the hooks *do*, and which format
 actually call them — CLAP does, including native CLAP; VST3/AU/standalone do
 not — is documented in the `clap` skill.)
 
+### The legacy view hooks keep their slots in a UI-free SDK
+
+`create_view()`, `on_view_opened/closed/resized()`, `settings_sections()`,
+`active_scripted_ui()` and `visit_active_scripted_ui()` are declared through
+`PULP_FORMAT_LEGACY_VIEW_NAME(name)`. With `PULP_FORMAT_LEGACY_VIEW=0` (an SDK
+whose UI is Vellum, set PUBLIC on pulp-format-core) each keeps its vtable slot
+under a reserved name, with opaque `pulp::format::view` types nothing can
+construct, so the slot can only return null or do nothing. Gotchas:
+
+- **Never `#if` a virtual out instead.** Every later slot would move, and a
+  binary built in the other mode would call the wrong one without any error.
+  `format-legacy-view-slot-layout` compares the slot positions of both modes
+  and of a header with one slot removed; it fails if they drift.
+- **A new view-named virtual goes through the macro too.** `node_abi_gate.py`
+  reads `PULP_FORMAT_LEGACY_VIEW_NAME(x)` as `x`, expands no other macro, and
+  fails when the macro's default definition is anything but the plain name.
+- **The layout probe covers the whole vtable.** It also reports the first
+  virtual a subclass adds, whose slot is Processor's vtable length, so a
+  virtual one mode adds at the end moves it too.
+- **A macro-0 caller linked against a mode-1 pulp-format-core fails on a named
+  marker.** processor.hpp makes every macro-0 TU refer to
+  `pulp_format_core_was_built_with_PULP_FORMAT_LEGACY_VIEW_0`, which only a
+  macro-0 format.cpp defines; `format-core-mode-mismatch-link` checks the link
+  error names it. A mode-0 test that builds no format.cpp defines it itself.
+- **`Processor::SettingsSection` is private at macro 0**: it only fills the
+  reserved slot there, and has no view to adopt.
+- **The hot-reload fingerprint carries the mode** (`legacyview=` in
+  `abi_flags`), so a logic library from the other mode is refused rather than
+  dispatched through renamed slots.
+- **`format-core-ui-free-compile` forces a poison header** that turns any
+  `pulp::view` use into a compile error and fails if `pulp/view/view.hpp` is on
+  the include path; `format-core-poison-control` proves the poison bites with
+  the macro 1 while the view headers are reachable.
+
 ## The UI-agnostic editor-host contract (`editor_host.hpp`)
 
 `pulp/format/editor_host.hpp` (`EditorFactory`, `Editor`, `EditorContext`,
 `ParamPort`, `VisualPort`) is the toolkit-free way to open an editor; the guide
 is `docs/guides/editor-host-contract.md`. Things that are easy to get wrong:
 
-- **No adapter consumes `Processor::editor_factory()` yet.** A processor that
-  returns a factory still opens through `has_editor()` / `create_view()` /
-  `ViewBridge` in every format. Do not assume a factory changes what a DAW
-  shows until an adapter is wired to it.
+- **Every adapter except AAX prefers `Processor::editor_factory()`.** VST3,
+  AU v2, AU v3, CLAP and standalone open a non-null factory's editor through
+  `ContractEditorSession` and fall back to `has_editor()` / `create_view()` /
+  `ViewBridge` only when it is null. That fallback is what keeps a default
+  build's legacy editors unchanged; do not route `create_view()` through a
+  default factory in format-core.
+- **A `create_view()`-shaped tree on Vellum is `pulp::vellum::ViewEditorFactory`**
+  (`integrations/pulp-vellum/include/pulp/vellum/view_editor.hpp`). Its hooks
+  follow the ViewBridge protocol, with two differences worth knowing. An
+  offscreen `NativeParentKind::none` attach fires no opened hook, as for any
+  `pulp::vellum::Editor`. After the editor's `StateStoreParamPort` is
+  disconnected (the instance went away), no hook runs and the store is not
+  touched, so a gesture the view opened directly stays for the host's own
+  teardown. The root sizes the view in `layout_children()`, not `on_resized()`:
+  Vellum's flex layout runs after `on_resized()` and would replace the bounds.
+  The header only declares; the root lives in `src/view_editor.cpp`, and the
+  `pulp-vellum-header-weight-view-editor` test keeps `editor.hpp` and the
+  Vellum view layer out of it. A view anywhere in the hosted tree that
+  implements `EditorIdleTarget` gets the editor's idle tick while attached.
 - **The header must stay view-free.** It names no `pulp::view`, canvas, render,
   Dawn or Vellum type, and `format_header_view_boundary.py` classifies it as a
   `pulp-format-core` header automatically, so an include that reaches the view
@@ -4037,6 +4096,10 @@ installs at static init. Things that are easy to get wrong:
   `performKeyEquivalent:`, not only from the menu. A headless run has no menu,
   and the key driver offers `performKeyEquivalent:` first, so
   `PULP_TEST_KEY_SEQUENCE=cmd+k` reaches it.
+- A panel that listens for keys app-wide must leave them to a text field.
+  `StandalonePanelContext::text_input_focused` answers whether an editable
+  field in any app window has focus (macOS: the first responders' field
+  editors); without that check typing into a field also plays notes.
 - `drain_midi_into` runs on the audio thread until the standalone destroys the
   panel, which happens after audio stops. A panel must not free what drain reads
   in `shutdown()`.
@@ -4195,3 +4258,5 @@ is not reachable from a host that dlopens it. The opt-in CLAP extension
 `pulp.editor-automation/1` (`PULP_EDITOR_AUTOMATION_EXTENSION`, default OFF)
 forwards `capture_png` to the open session's `EditorAutomation`; it is a test
 seam and absent from release plug-ins. See the `clap` skill.
+
+`inspect::ControlGpuHealthViewAdapter` takes its captured-PNG analysis as `Config::analyze_png` rather than calling the view layer, so a host on Vellum views supplies `pulp::vellum_components::analyze_png_content`. The field order matters for designated initializers: `analyze_png` follows `provider`.

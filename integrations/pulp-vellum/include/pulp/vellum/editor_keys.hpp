@@ -37,8 +37,13 @@ inline bool offers_editor_key(const format::EditorKeyEvent& event) {
 
 /// Route a host-offered key through `root`. Only a Space press is ever
 /// consumed; a key release, a chord and every other key are forwarded.
+/// `offer_global_hook` is false when the host's keys have already been
+/// through the native key-equivalent pass over the editor's view, which gave
+/// the root's global hook its one look at the press
+/// (`format::editor_keys_after_native_pass_extension_id`).
 inline format::KeyDisposition offer_editor_key(::vellum::view::View& root,
-                                               const format::EditorKeyEvent& event) {
+                                               const format::EditorKeyEvent& event,
+                                               bool offer_global_hook = true) {
     if (!event.is_down || !offers_editor_key(event))
         return format::KeyDisposition::forward;
 
@@ -49,9 +54,9 @@ inline format::KeyDisposition offer_editor_key(::vellum::view::View& root,
         (event.modifiers & format::editor_modifier_shift) != 0 ? view::kModShift : 0);
     offer.key.is_down = true;
     offer.key.is_repeat = event.is_repeat;
-    // A host's offer is one delivery point for the press, so this is the only
-    // place the root's global hook is consulted for it.
-    offer.offer_global_hook = true;
+    // Where the host's offer is the press's only delivery point, this is the
+    // one place the root's global hook is consulted for it.
+    offer.offer_global_hook = offer_global_hook;
 
     switch (view::route_plugin_key(root, offer)) {
     case view::PluginKeyDisposition::consumed:
