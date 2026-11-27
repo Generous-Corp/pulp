@@ -124,8 +124,7 @@ class ViewEditorRoot final : public ::vellum::view::View {
 
 ViewEditorFactory::ViewEditorFactory(ViewFactory make, ViewEditorHooks hooks,
                                      std::initializer_list<format::EditorRole> roles)
-    : make_(std::move(make)), hooks_(std::move(hooks)),
-      roles_(roles) {}
+    : make_(std::move(make)), hooks_(std::move(hooks)), roles_(roles) {}
 
 ViewEditorFactory::~ViewEditorFactory() = default;
 
