@@ -1,0 +1,13 @@
+{
+  "schema_version": 1,
+  "event_id": "20261126-reload-autocaps-runtime",
+  "kind": "exported-path-change",
+  "created_at": "2026-11-26T03:00:00Z",
+  "receipt_export_id": "20261107-f0ac0a4ff392",
+  "paths": [
+    "core/runtime/CMakeLists.txt",
+    "core/runtime/include/pulp/runtime/reload_autocaps.hpp"
+  ],
+  "vellum_inherits": false,
+  "rationale": "Pulp-only move of capability inference (autocaps) into runtime beside the capability vocabulary, so the format layer builds UX pack manifests without its view layer. Vellum has no pack builder and keeps its own capability header."
+}

@@ -20,7 +20,8 @@ endif()
 
 add_library(pulp-vellum-renderer3d STATIC
     src/renderer3d.cpp
-    src/renderer3d_frame.cpp)
+    src/renderer3d_frame.cpp
+    src/renderer3d_scene.cpp)
 add_library(pulp::vellum-renderer3d ALIAS pulp-vellum-renderer3d)
 target_include_directories(pulp-vellum-renderer3d
     PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
