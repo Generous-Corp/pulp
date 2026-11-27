@@ -219,8 +219,9 @@ inline std::vector<std::string> fingerprint_diff(const BuildFingerprint& shell,
     // in abi_flags) is reported too.
     auto cmp_str = [&](const char* field, const char* s, const char* l, std::size_t capacity) {
         if (std::strncmp(s, l, capacity) != 0)
-            out.push_back(std::string(field) + ": shell='" + std::string(s, ::strnlen(s, capacity)) +
-                          "' logic='" + std::string(l, ::strnlen(l, capacity)) + "'");
+            out.push_back(std::string(field) + ": shell='" +
+                          std::string(s, ::strnlen(s, capacity)) + "' logic='" +
+                          std::string(l, ::strnlen(l, capacity)) + "'");
     };
     auto cmp_int = [&](const char* field, long s, long l) {
         if (s != l)
