@@ -1908,6 +1908,14 @@ if(Python3_Interpreter_FOUND)
             WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}/tools/scripts")
         set_tests_properties(clean-build-cov-selftest PROPERTIES TIMEOUT 300)
 
+        # Offline discovery of the /design, /import-design and /inspect plug-in
+        # commands: reads the plug-in manifest, the command files and the CLI
+        # manifest only, so it links no view sources.
+        add_test(NAME claude-plugin-command-discovery-selftest
+            COMMAND ${Python3_EXECUTABLE} -m unittest test_claude_plugin_command_discovery
+            WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}/tools/scripts")
+        set_tests_properties(claude-plugin-command-discovery-selftest PROPERTIES TIMEOUT 60)
+
         # The post-merge capability regeneration helper: a planted merge in a
         # throwaway repository must resolve generated conflicts by main's side,
         # refuse source conflicts, and fail on an empty or shrunken diff.

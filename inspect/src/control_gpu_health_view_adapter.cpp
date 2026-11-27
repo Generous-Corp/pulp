@@ -2,7 +2,6 @@
 
 #include <pulp/inspect/control_gpu_health_provider.hpp>
 #include <pulp/runtime/crypto.hpp>
-#include <pulp/view/screenshot_compare.hpp>
 
 #include <utility>
 
@@ -16,7 +15,8 @@ struct ControlGpuHealthViewAdapter::Impl {
 
 std::unique_ptr<ControlGpuHealthViewAdapter>
 ControlGpuHealthViewAdapter::create(Config config) {
-    if (!config.provider || !config.capture_back_buffer_png || !config.frame_evidence)
+    if (!config.provider || !config.analyze_png || !config.capture_back_buffer_png ||
+        !config.frame_evidence)
         return {};
     if (!config.capture_completed_at)
         config.capture_completed_at = [] { return std::chrono::steady_clock::now(); };
@@ -45,10 +45,10 @@ void ControlGpuHealthViewAdapter::poll(std::chrono::steady_clock::time_point now
         // therefore over-reports first-visible latency; it is not a substitute
         // for a presented-drawable timestamp in either direction.
         const auto capture_completed_at = impl_->config.capture_completed_at();
-        const auto stats = view::analyze_screenshot_content(png);
+        const auto stats = impl_->config.analyze_png(png);
         auto frame = impl_->config.frame_evidence();
         frame.capture_valid = stats.valid;
-        frame.content_floor_passed = stats.passes_content_floor();
+        frame.content_floor_passed = stats.passes_content_floor;
         frame.non_transparent_pixel_count = static_cast<std::uint64_t>(
             stats.total_pixels * stats.opaque_coverage);
         frame.distinct_color_count = stats.unique_colors;

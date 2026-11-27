@@ -1471,11 +1471,10 @@ TEST_CASE("doctor WidgetBridge generated API reports stale generated files",
                "print('generator')\r\n");
     write_file(repo / "core" / "view" / "src" / "widget_bridge_api_manifest.tsv",
                "name\tkind\r\ncreatePanel\tfunction\r\n");
-    write_file(repo / "core" / "view" / "include" / "pulp" / "view"
-                   / "reload_autocaps.hpp",
+    write_file(repo / "core" / "runtime" / "include" / "pulp" / "runtime" / "reload_autocaps.hpp",
                "#pragma once\rclass ReloadAutocaps {};\r");
-    write_file(repo / "core" / "view" / "include" / "pulp" / "view"
-                   / "reload_capabilities.hpp",
+    write_file(repo / "core" / "runtime" / "include" / "pulp" / "runtime" /
+                   "reload_capabilities.hpp",
                "#pragma once\nclass ReloadCapability {};\n");
 
     write_file(repo / "packages" / "pulp-react" / "src"
@@ -1516,11 +1515,10 @@ TEST_CASE("doctor WidgetBridge generated API reports missing inputs and outputs"
 
     write_file(repo / "tools" / "scripts" / "generate_widget_bridge_api.py",
                "print('generator')\n");
-    write_file(repo / "core" / "view" / "include" / "pulp" / "view"
-                   / "reload_autocaps.hpp",
+    write_file(repo / "core" / "runtime" / "include" / "pulp" / "runtime" / "reload_autocaps.hpp",
                "#pragma once\n");
-    write_file(repo / "core" / "view" / "include" / "pulp" / "view"
-                   / "reload_capabilities.hpp",
+    write_file(repo / "core" / "runtime" / "include" / "pulp" / "runtime" /
+                   "reload_capabilities.hpp",
                "#pragma once\n");
 
     auto missing_output_checks = run_doctor_checks(repo, false, "WidgetBridge");

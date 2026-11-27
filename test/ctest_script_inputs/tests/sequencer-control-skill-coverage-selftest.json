@@ -3,6 +3,8 @@
  "record": {
   "entry": "tools/scripts/test_sequencer_control_skill_check.py",
   "inputs": [
+   ".claude/commands/inspect.md",
+   ".claude/commands/trace.md",
    ".github/workflows",
    "docs/status/cli-commands.yaml",
    "experimental/pulp-rs/src/cmd/trace.rs",

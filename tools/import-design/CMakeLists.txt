@@ -67,6 +67,18 @@ add_executable(pulp-import-design
 target_include_directories(pulp-import-design PRIVATE
     ${CMAKE_SOURCE_DIR}
     ${CMAKE_SOURCE_DIR}/external/miniz)
+# The CLI lowers browser-captured text through SkParagraph, which needs ICU data
+# beside the executable on Windows.
+pulp_stage_skia_icu_data(pulp-import-design)
+if(WIN32 AND SKIA_FOUND)
+    add_test(NAME windows-icu-beside-import-design
+        COMMAND ${CMAKE_COMMAND}
+            "-DEXE_DIR=$<TARGET_FILE_DIR:pulp-import-design>"
+            -P ${CMAKE_SOURCE_DIR}/test/cmake/test_icu_beside_executable.cmake)
+    set_tests_properties(windows-icu-beside-import-design PROPERTIES
+        LABELS "cmake;skia;windows;runtime" TIMEOUT 30
+        PASS_REGULAR_EXPRESSION "icu_beside_executable_verified=true")
+endif()
 # Lets the CLI locate the offline .fig decoder (a Node subtool) in a dev build.
 # Installed builds fall back to $PULP_FIG_DECODE or an upward tools/ search.
 target_compile_definitions(pulp-import-design PRIVATE
