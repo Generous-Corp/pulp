@@ -11,8 +11,10 @@
 #
 #   provider   the resolved view picks: Pulp's targets in pulp mode, none in
 #              vellum mode (Pulp's editor adapters cannot compile against it).
-#   editor     pulp_add_plugin() with the default editor configures in pulp
-#              mode and is refused in vellum mode with the editors that apply.
+#   editor     pulp_add_plugin() with the default editor configures on Pulp's
+#              view in pulp mode and view-free in vellum mode, where its editor
+#              is Processor::editor_factory()'s; a keyword that selects Pulp's
+#              own view editor is refused in vellum mode.
 #   no-editor  an editor-less plug-in and a UI <package> plug-in configure in
 #              both modes.
 #   bundle     pulp_add_plugin_bundle() shares Pulp's view editor host, so it
@@ -131,7 +133,18 @@ elseif(SCENARIO STREQUAL "editor")
     set(_call "pulp_add_plugin(Peditor BUNDLE_ID dev.pulp.editor)\nmessage(STATUS \"view-target=[\${PULP_Peditor_VIEW_TARGET}]\")")
     _expect_pass(pulp plugin "${_call}")
     _expect_text("view-target=[Pulp::view]" "the default editor on Pulp's view")
-    _expect_refused(vellum plugin "${_call}" "pulp_add_plugin(Peditor): ${_vellum_refusal}")
+    # In vellum mode the default editor builds view-free: its editor is the one
+    # Processor::editor_factory() returns, with no Pulp view target picked.
+    set(_default "pulp_add_plugin(Pdefault BUNDLE_ID dev.pulp.default)\nmessage(STATUS \"view-target=[\${PULP_Pdefault_VIEW_TARGET}] no-editor=[\${PULP_Pdefault_NO_EDITOR}]\")")
+    _expect_pass(vellum default "${_default}")
+    _expect_text("view-target=[] no-editor=[TRUE]" "the default editor building view-free in vellum mode")
+    # Control: the same call in pulp mode keeps Pulp's own editor.
+    _expect_pass(pulp default "${_default}")
+    _expect_text("view-target=[Pulp::view] no-editor=[FALSE]" "the default editor on Pulp's view in pulp mode")
+    foreach(_kw LITE_EDITOR FULL_EDITOR GPU_UI)
+        _expect_refused(vellum ${_kw} "pulp_add_plugin(P${_kw} BUNDLE_ID dev.pulp.kw ${_kw})"
+            "pulp_add_plugin(P${_kw}): ${_vellum_refusal}")
+    endforeach()
     _expect_refused(vellum native "pulp_add_plugin(Pnative BUNDLE_ID dev.pulp.native NATIVE_UI)"
         "pulp_add_plugin(Pnative): ${_vellum_refusal}")
     # The format helper refuses on its own too, past its SDK check.

@@ -2435,6 +2435,14 @@ construct, so the slot can only return null or do nothing. Gotchas:
   mode-0 `format.cpp` ahead of the mode-1 `pulp-format-core` archive, which works
   only because the slot layout matches; a duplicate-symbol or missing
   `reserved_legacy_view_*` link error there means a slot or a name drifted.
+- **In an SDK whose UI is Vellum, the default editor builds view-free.**
+  `pulp_add_plugin` with no editor keyword takes the Vellum generated editor
+  when the bridge is installed and `NO_EDITOR` otherwise, so a `ViewProcessor<>`
+  or any `editor_factory()` override opens through the contract. The VST3 and
+  CLAP contract tests also build at macro 0 with every adapter source
+  (`ui-free.` prefix); `format-adapters-ui-free-symbols` nm-checks those
+  binaries against the mode-1 builds, because a mode-0 claim that silently
+  linked mode-1 objects would pass every behavioural case.
 - **A new view-named virtual goes through the macro too.** `node_abi_gate.py`
   reads `PULP_FORMAT_LEGACY_VIEW_NAME(x)` as `x` and expands no other macro.
 - **The hot-reload fingerprint carries the mode** (`legacyview=` in

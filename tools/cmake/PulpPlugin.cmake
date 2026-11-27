@@ -190,6 +190,35 @@ function(pulp_add_plugin target)
         endif()
     endif()
 
+    # An SDK that serves its UI from Vellum has no Pulp view layer to link. A
+    # plug-in that names no editor there gets what Pulp's default editor was:
+    # the generated parameter editor, on Vellum (as UI_ENGINE vellum without
+    # UI_SCRIPT), or no editor when the SDK has no Vellum bridge. Either way its
+    # modules build view-free and a Processor::editor_factory() override, such as
+    # pulp::vellum::ViewProcessor<>, opens instead. A keyword that selects
+    # Pulp's own view editor is refused further down.
+    set(_pulp_vellum_default_no_editor FALSE)
+    if(NOT DEFINED PLUGIN_UI AND NOT PLUGIN_NO_EDITOR)
+        _pulp_ui_provider(_pulp_plugin_ui_provider)
+        set(_pulp_view_keywords "")
+        foreach(_kw NATIVE_UI UI_SCRIPT GPU_UI FULL_EDITOR LITE_EDITOR)
+            if(PLUGIN_${_kw})
+                list(APPEND _pulp_view_keywords ${_kw})
+            endif()
+        endforeach()
+        if(_pulp_plugin_ui_provider STREQUAL "vellum" AND NOT _pulp_view_keywords)
+            if(NOT COMMAND _pulp_vellum_auto_ui_package)
+                include("${CMAKE_CURRENT_FUNCTION_LIST_DIR}/PulpVellumEditorPackage.cmake" OPTIONAL)
+            endif()
+            if(COMMAND _pulp_vellum_auto_ui_package)
+                _pulp_vellum_auto_ui_package("pulp_add_plugin(${target})" PLUGIN_UI)
+            else()
+                set(PLUGIN_NO_EDITOR TRUE)
+                set(_pulp_vellum_default_no_editor TRUE)
+            endif()
+        endif()
+    endif()
+
     # Defaults
     if(NOT PLUGIN_PLUGIN_NAME)
         set(PLUGIN_PLUGIN_NAME "${target}")
@@ -238,6 +267,9 @@ function(pulp_add_plugin target)
     # contradict that and are a configure error. `UI none` selects no package
     # and leaves the link as it would be without UI.
     set(_pulp_no_editor_reason "NO_EDITOR")
+    if(_pulp_vellum_default_no_editor)
+        set(_pulp_no_editor_reason "editor from Processor::editor_factory()")
+    endif()
     # Read by format helpers that build a contract editor of their own (the AU
     # v2 Cocoa view factory); always refreshed so a removed UI leaves nothing.
     set(PULP_${target}_UI_PACKAGE "" CACHE INTERNAL "")

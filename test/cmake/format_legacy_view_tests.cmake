@@ -116,3 +116,66 @@ if(TARGET pulp-view-core)
         FAIL_REGULAR_EXPRESSION "file not found|No such file or directory"
         PULP_SELECT_WITH_TARGETS "pulp-format-core")
 endif()
+
+# The format adapters in the same mode. The VST3 and CLAP editor-host contract
+# tests are compiled again with every adapter source and format.cpp at
+# PULP_FORMAT_LEGACY_VIEW=0, under the view poison, with no pulp/view header
+# reachable: the adapters an SDK with Vellum UI ships, opening a
+# Processor::editor_factory() editor with nothing of Pulp's view behind them.
+# format-adapters-ui-free-symbols checks each binary really holds the mode-0
+# Processor (its reserved create_view slot, not the legacy one), with the
+# mode-1 build of the same test as the control.
+set(_ui_free_adapter_pairs "")
+function(_pulp_ui_free_adapter_test target)
+    cmake_parse_arguments(PARSE_ARGV 1 _arg "" "TEST;LEGACY" "SOURCES;LIBRARIES;DEFINITIONS")
+    add_executable(${target} "${CMAKE_SOURCE_DIR}/test/${_arg_TEST}"
+        "${CMAKE_SOURCE_DIR}/core/format/src/format.cpp" ${_arg_SOURCES})
+    target_include_directories(${target} PRIVATE "${CMAKE_SOURCE_DIR}/test")
+    target_link_libraries(${target} PRIVATE ${_arg_LIBRARIES} Catch2::Catch2WithMain)
+    target_compile_definitions(${target} PRIVATE
+        PULP_FORMAT_LEGACY_VIEW=0 PULP_TEST_REQUIRE_NO_VIEW_INCLUDE_PATH=1 ${_arg_DEFINITIONS})
+    target_compile_options(${target} PRIVATE -include "${_legacy_view_poison}")
+    catch_discover_tests(${target} TEST_PREFIX "ui-free." PROPERTIES LABELS "format")
+    set(_ui_free_adapter_pairs ${_ui_free_adapter_pairs}
+        "$<TARGET_FILE:${target}>|$<TARGET_FILE:${_arg_LEGACY}>" PARENT_SCOPE)
+endfunction()
+
+set(_ui_free_format_src "${CMAKE_SOURCE_DIR}/core/format/src")
+if(PULP_HAS_VST3 AND TARGET pulp-test-vst3-contract-editor)
+    set(_vst3_sources
+        "${_ui_free_format_src}/vst3_adapter.cpp"
+        "${_ui_free_format_src}/vst3_contract_view.cpp")
+    if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+        list(APPEND _vst3_sources "${_ui_free_format_src}/vst3_host_run_loop.cpp")
+    endif()
+    _pulp_ui_free_adapter_test(pulp-test-vst3-contract-editor-ui-free
+        TEST test_vst3_contract_editor.cpp
+        LEGACY pulp-test-vst3-contract-editor
+        SOURCES ${_vst3_sources}
+        LIBRARIES pulp::format-core
+        DEFINITIONS PULP_VST3=1 PULP_VST3_GUI=1)
+endif()
+if(PULP_HAS_CLAP AND TARGET pulp-test-clap-contract-editor)
+    _pulp_ui_free_adapter_test(pulp-test-clap-contract-editor-ui-free
+        TEST test_clap_contract_editor.cpp
+        LEGACY pulp-test-clap-contract-editor
+        SOURCES
+            "${_ui_free_format_src}/clap_adapter.cpp"
+            "${_ui_free_format_src}/clap_contract_gui.cpp"
+            "${_ui_free_format_src}/clap_host_run_loop.cpp"
+            "${_ui_free_format_src}/clap_remote_controls.cpp"
+            "${_ui_free_format_src}/clap_note_name.cpp"
+        LIBRARIES pulp::format-core clap
+        DEFINITIONS PULP_CLAP=1)
+    if(PULP_HAS_AUSDK)
+        set_target_properties(pulp-test-clap-contract-editor-ui-free PROPERTIES CXX_STANDARD 23)
+    endif()
+endif()
+if(_ui_free_adapter_pairs AND CMAKE_NM)
+    add_test(NAME format-adapters-ui-free-symbols
+        COMMAND ${CMAKE_COMMAND} -DNM=${CMAKE_NM} "-DPAIRS=${_ui_free_adapter_pairs}"
+            -P "${_legacy_view_dir}/check_ui_free_symbols.cmake")
+    set_tests_properties(format-adapters-ui-free-symbols PROPERTIES
+        LABELS "format"
+        PULP_SELECT_WITH_TARGETS "pulp-format-core")
+endif()
