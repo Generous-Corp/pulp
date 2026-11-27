@@ -431,3 +431,21 @@ TEST_CASE("PropertyPanel: retired callbacks are not resurrected; NaN slider reje
     panel.set_slider("s", std::numeric_limits<float>::quiet_NaN());
     CHECK(panel.get_slider("s").value_or(-1.0f) == 0.0f);
 }
+
+TEST_CASE("PropertyPanel: replacement then nested event on the same key keeps the new observer",
+          "[property-panel][lifetime]") {
+    PropertyPanel panel;
+    int old_hits = 0;
+    int new_hits = 0;
+    panel.add_text("t", "T", "", [&](const std::string&) {
+        ++old_hits;
+        panel.add_text("t", "T", "", [&](const std::string&) { ++new_hits; });
+        panel.set_text("t", "nested");
+    });
+    panel.set_text("t", "1");
+    CHECK(old_hits == 1);
+    CHECK(new_hits == 1);
+    panel.set_text("t", "2");
+    CHECK(old_hits == 1);
+    CHECK(new_hits == 2);
+}

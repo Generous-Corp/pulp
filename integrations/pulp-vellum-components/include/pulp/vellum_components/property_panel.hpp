@@ -314,13 +314,9 @@ class PropertyPanel : public View {
             const std::string k(key);
             std::function<void()> action;
             action.swap(p->on_click); // swap, not move: a moved-from std::function need not be empty
-            firing_keys_.push_back(k);
-            struct Guard {
-                std::vector<std::string>& keys;
-                ~Guard() { keys.pop_back(); }
-            } guard{firing_keys_};
+            ActiveScope scope(active_, k);
             action();
-            if (!take_replaced(k))
+            if (!scope.replaced())
                 if (Property* cur = find_mut(k))
                     cur->on_click = std::move(action);
         }
@@ -388,8 +384,9 @@ class PropertyPanel : public View {
         for (auto& existing : properties_) {
             if (existing.key == p.key) {
                 existing = std::move(p);
-                if (is_firing(existing.key))
-                    replaced_keys_.push_back(existing.key);
+                for (auto& a : active_)
+                    if (a.key == existing.key)
+                        a.replaced = true;
                 // A re-registration from inside this key's own observer must
                 // not reload the stale persisted value over the pending change.
                 if (props_ && !is_firing(existing.key))
@@ -402,18 +399,27 @@ class PropertyPanel : public View {
             load_from_props(properties_.back());
     }
 
-    /// True (and forgets it) when `key` was re-registered while its callback ran.
-    bool take_replaced(std::string_view key) {
-        const auto it = std::find(replaced_keys_.begin(), replaced_keys_.end(), key);
-        if (it == replaced_keys_.end())
-            return false;
-        replaced_keys_.erase(std::remove(replaced_keys_.begin(), replaced_keys_.end(), key),
-                             replaced_keys_.end());
-        return true;
-    }
+    /// One in-flight observer/action. `replaced` is set when its key is
+    /// re-registered while it runs, so only that invocation drops its callback.
+    struct Active {
+        std::string key;
+        bool replaced = false;
+    };
+    struct ActiveScope {
+        std::vector<Active>& stack;
+        std::size_t index;
+        ActiveScope(std::vector<Active>& s, std::string key) : stack(s), index(s.size()) {
+            stack.push_back({std::move(key), false});
+        }
+        ~ActiveScope() { stack.pop_back(); }
+        bool replaced() const { return stack[index].replaced; }
+    };
 
     bool is_firing(std::string_view key) const {
-        return std::find(firing_keys_.begin(), firing_keys_.end(), key) != firing_keys_.end();
+        for (const auto& a : active_)
+            if (a.key == key)
+                return true;
+        return false;
     }
 
     Property* find_mut(std::string_view key) {
@@ -435,14 +441,10 @@ class PropertyPanel : public View {
             std::function<void(const Value&)> callback;
             callback.swap(find_mut(key)->on_change); // swap, not move: moved-from need not be empty
             const Value arg = p.value;
-            firing_keys_.push_back(key);
-            struct Guard {
-                std::vector<std::string>& keys;
-                ~Guard() { keys.pop_back(); }
-            } guard{firing_keys_};
+            ActiveScope scope(active_, key);
             callback(arg);
             // Restore only if the slot survived un-replaced.
-            if (!take_replaced(key))
+            if (!scope.replaced())
                 if (Property* cur = find_mut(key))
                     cur->on_change = std::move(callback);
         }
@@ -581,8 +583,7 @@ class PropertyPanel : public View {
     }
 
     std::vector<Property> properties_;
-    std::vector<std::string> replaced_keys_; ///< keys re-registered during their own callback
-    std::vector<std::string> firing_keys_; ///< keys whose observers are running (outer to inner)
+    std::vector<Active> active_; ///< in-flight observers/actions (outer to inner)
     pulp::state::PropertiesFile* props_ = nullptr;
 };
 
