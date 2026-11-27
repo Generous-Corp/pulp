@@ -3,6 +3,7 @@
  "record": {
   "entry": "tools/scripts/test_classify_changes.py",
   "inputs": [
+   ".claude-plugin/plugin.json",
    ".githooks/lib/gate-supervisor.py",
    ".githooks/pre-push",
    ".github/workflows/build.yml",
