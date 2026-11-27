@@ -346,3 +346,43 @@ if(APPLE)
     # Some format headers declare Objective-C classes for the AU adapters.
     set_source_files_properties(${_header_tus} PROPERTIES COMPILE_OPTIONS "-xobjective-c++")
 endif()
+
+# ReloadableEditorShell at mode 0 against logic fixtures built in each mode:
+# two generations at mode 0 (a swap rebuilds the editor and never calls the
+# retired logic) and one at mode 1 (refused by the build fingerprint).
+if(NOT WIN32 AND TARGET pulp-format-core)
+    function(_pulp_reload_editor_fixture target generation legacy_view)
+        add_library(${target} MODULE "${CMAKE_SOURCE_DIR}/test/fixtures/reload_logic_editor.cpp")
+        set_target_properties(${target} PROPERTIES PREFIX "" POSITION_INDEPENDENT_CODE ON)
+        target_link_libraries(${target} PRIVATE pulp::format-core)
+        target_compile_definitions(${target} PRIVATE
+            PULP_RELOAD_FIXTURE_GEN=${generation} PULP_FORMAT_LEGACY_VIEW=${legacy_view})
+        if(NOT legacy_view)
+            # Processor's mode-0 slots are defined by format.cpp built in that mode.
+            target_sources(${target} PRIVATE "${CMAKE_SOURCE_DIR}/core/format/src/format.cpp")
+        endif()
+    endfunction()
+    _pulp_reload_editor_fixture(pulp-reload-logic-editor-gen1 1 0)
+    _pulp_reload_editor_fixture(pulp-reload-logic-editor-gen2 2 0)
+    _pulp_reload_editor_fixture(pulp-reload-logic-editor-legacy 1 1)
+
+    add_executable(pulp-test-reloadable-editor-shell
+        "${CMAKE_SOURCE_DIR}/test/test_reloadable_editor_shell.cpp"
+        "${CMAKE_SOURCE_DIR}/core/format/src/format.cpp")
+    target_link_libraries(pulp-test-reloadable-editor-shell PRIVATE
+        pulp::format-core Catch2::Catch2WithMain ${CMAKE_DL_LIBS})
+    find_package(Threads REQUIRED)
+    target_link_libraries(pulp-test-reloadable-editor-shell PRIVATE Threads::Threads)
+    target_compile_definitions(pulp-test-reloadable-editor-shell PRIVATE
+        PULP_FORMAT_LEGACY_VIEW=0 PULP_TEST_REQUIRE_NO_VIEW_INCLUDE_PATH=1
+        RELOAD_EDITOR_GEN1="$<TARGET_FILE:pulp-reload-logic-editor-gen1>"
+        RELOAD_EDITOR_GEN2="$<TARGET_FILE:pulp-reload-logic-editor-gen2>"
+        RELOAD_EDITOR_LEGACY_MODE="$<TARGET_FILE:pulp-reload-logic-editor-legacy>"
+        # In the build tree: macOS dyld refuses an unsigned image from a
+        # world-writable temp directory.
+        RELOAD_WATCH_DIR="${CMAKE_CURRENT_BINARY_DIR}")
+    target_compile_options(pulp-test-reloadable-editor-shell PRIVATE -include "${_legacy_view_poison}")
+    add_dependencies(pulp-test-reloadable-editor-shell
+        pulp-reload-logic-editor-gen1 pulp-reload-logic-editor-gen2 pulp-reload-logic-editor-legacy)
+    catch_discover_tests(pulp-test-reloadable-editor-shell PROPERTIES LABELS "format;reload")
+endif()

@@ -190,6 +190,29 @@ logic loaded. `integrations/pulp-vellum/tests/test_reloadable_shell_editor.cpp`
 drives real logic swaps through the shell's watcher under the Vellum scripted
 editor root.
 
+## A logic library that brings its own editor (no Pulp view)
+
+`ReloadableEditorShell` (`reloadable_editor_shell.hpp`) is the shell for a logic
+library whose editor comes from its own `Processor::editor_factory()`, such as a
+`pulp::vellum::ViewProcessor<>` logic, in an SDK built without Pulp's view layer
+(`PULP_FORMAT_LEGACY_VIEW=0`). It is view-free, like `ReloadableShellCore`:
+
+- the shell's `editor_factory()` hands each `create()` to the active logic's
+  factory through the `Processor` vtable both images share, and never casts the
+  logic to a concrete type across the library boundary;
+- each editor it returns holds the logic processor it was built from, so a hot
+  swap parks that processor (`ProcessorHotSwapSlot::hold()`) instead of freeing
+  it, and the library image is retained as every reload image is;
+- on the editor's next idle tick after a swap, it detaches and destroys the old
+  logic's editor, releases the hold, then builds the new logic's editor and
+  attaches it to the same parent at the same size; nothing calls the retired
+  logic after that tick, and the next reclaim frees it;
+- a logic built in the other `PULP_FORMAT_LEGACY_VIEW` mode is refused by the
+  build fingerprint (`legacyview=` in its ABI flags), at load and on a swap.
+
+`test/test_reloadable_editor_shell.cpp` swaps real logic fixtures built in each
+mode.
+
 ## Hot-reloading the UI too (thin logic)
 
 A reload can swap the **editor** as well as the DSP: `ReloadableShell::create_view()`
