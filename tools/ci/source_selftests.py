@@ -1153,6 +1153,9 @@ def _entry_from_command(name: str, argv: list[str], props: dict[str, Any],
         value = props["ENVIRONMENT"]
         pairs = value if isinstance(value, list) else str(value).split(";")
         entry["env"] = dict(p.split("=", 1) for p in pairs if "=" in p)
+    if props.get("LABELS"):
+        value = props["LABELS"]
+        entry["labels"] = value if isinstance(value, list) else str(value).split(";")
     if props.get("RESOURCE_LOCK"):
         value = props["RESOURCE_LOCK"]
         entry["resource_lock"] = value if isinstance(value, list) else str(value).split(";")
@@ -1555,6 +1558,17 @@ def _resolve_members(names, commands, props, substitutions, repo):
                 member_props.pop("WORKING_DIRECTORY")
             else:
                 member_props["WORKING_DIRECTORY"] = wd
+        # ENVIRONMENT names the checkout the same way (PYTHONPATH=${CMAKE_SOURCE_DIR}); left
+        # literal it breaks any suite that imports from the repo root. `{repo}` is expanded
+        # at run time, so a base re-run points at the base checkout.
+        if member_props.get("ENVIRONMENT"):
+            def _in_repo(text: str) -> str:
+                for var in _CMAKE_SOURCE_VARS:
+                    text = text.replace("${" + var + "}", "{repo}")
+                return text
+            env_value = member_props["ENVIRONMENT"]
+            member_props["ENVIRONMENT"] = ([_in_repo(v) for v in env_value] if isinstance(env_value, list)
+                                           else _in_repo(str(env_value)))
         # A TIMEOUT computed at configure time (pulp_scaled_test_timeout's
         # output variable) has no value here; ctest's default stands in.
         if "${" in str(member_props.get("TIMEOUT", "")):
@@ -1563,7 +1577,17 @@ def _resolve_members(names, commands, props, substitutions, repo):
     return entries, not_checked
 
 
-def python_ctest_entries(repo: pathlib.Path = REPO_ROOT) -> list[dict[str, Any]]:
+def shared_host_labels() -> frozenset[str]:
+    """The labels the required `macos` gate leaves out (ctest_gate_args.SHARED_HOST_LABEL_EXCLUDE):
+    timing, performance and hardware-evidence tests that measure runner load."""
+    sys.path.insert(0, str(REPO_ROOT / "tools" / "ci"))
+    import ctest_gate_args  # noqa: PLC0415
+
+    return frozenset(ctest_gate_args.SHARED_HOST_LABEL_EXCLUDE.split("|"))
+
+
+def python_ctest_entries(repo: pathlib.Path = REPO_ROOT,
+                         exclude_labels: frozenset[str] = frozenset()) -> list[dict[str, Any]]:
     """Every registered ctest that hands a checkout Python script to Python.
 
     The pr-fast tier and the source-selftest manifest are left out: gates.sh
@@ -1583,6 +1607,8 @@ def python_ctest_entries(repo: pathlib.Path = REPO_ROOT) -> list[dict[str, Any]]
         if not (argv[1].startswith("{repo}/") and argv[1].endswith(".py")):
             continue
         if pathlib.Path(expand(argv[1], repo)).resolve() in manifest_scripts:
+            continue
+        if exclude_labels & set(entry.get("labels", [])):
             continue
         python.append(entry)
     return python
@@ -1999,6 +2025,13 @@ def main(argv: list[str] | None = None) -> int:
     )
     p_run.add_argument("--build-dir", type=pathlib.Path)
     p_run.add_argument(
+        "--shared-host-labels",
+        action="store_true",
+        help="with --ctest-python, leave out the tests carrying a label the required macos gate "
+        "excludes (validation, slow, performance, bench, quality-lab, gpu-proof): load-sensitive "
+        "timing tests that must not decide a gate-host run",
+    )
+    p_run.add_argument(
         "--no-compile",
         action="store_true",
         help="leave out the suites that configure or compile something and list them NOT CHECKED "
@@ -2099,7 +2132,13 @@ def main(argv: list[str] | None = None) -> int:
             print(f"source-selftests: {len(entries)} sync-job command(s) read from "
                   f"{LANE_WORKFLOW.relative_to(REPO_ROOT)}", flush=True)
         elif args.ctest_python:
-            entries = python_ctest_entries()
+            exclude = shared_host_labels() if args.shared_host_labels else frozenset()
+            entries = python_ctest_entries(exclude_labels=exclude)
+            if exclude:
+                left = len(python_ctest_entries())
+                print(f"source-selftests: {left - len(entries)} of {left} ctest-registered Python "
+                      f"test(s) carry a label ({'|'.join(sorted(exclude))}) the required gate leaves "
+                      "out, so they are not run here either", flush=True)
         else:
             entries = (workflow_entries(args.workflow.resolve()) if args.workflow
                        else load_manifest(args.manifest))

@@ -177,7 +177,7 @@ if pulp_gate_host_builds_reserved; then
         gate_host_jobs=2
         case "${PULP_BUILD_JOBS:-}" in 1) gate_host_jobs=1 ;; esac
         gate_python_runner=("$PYTHON" "$ROOT/tools/scripts/run_capped.py" --seconds "$gate_host_cap_s" --nice 19 --background --)
-        gate_python_jobs=(--jobs "$gate_host_jobs" --no-compile)
+        gate_python_jobs=(--jobs "$gate_host_jobs" --no-compile --shared-host-labels)
     fi
     pulp_gate_host_skip_line "$gate_host_skipped_what" "tools/scripts/gates.sh $BASE"
 fi

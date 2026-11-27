@@ -155,13 +155,14 @@ class GateHostPythonLanes(unittest.TestCase):
 
     def test_a_gate_host_never_runs_a_compiling_suite_and_honours_a_lower_job_count(self) -> None:
         _, calls = self.run_blocks("dev-overflow")
-        self.assertTrue(all(call.endswith("--jobs 2 --no-compile") for call in calls), calls)
+        self.assertTrue(all(call.endswith("--jobs 2 --no-compile --shared-host-labels") for call in calls), calls)
         self.record.unlink(missing_ok=True)
         _, calls = self.run_blocks("dev-overflow", PULP_BUILD_JOBS="1")
-        self.assertTrue(all(call.endswith("--jobs 1 --no-compile") for call in calls), calls)
+        self.assertTrue(all(call.endswith("--jobs 1 --no-compile --shared-host-labels") for call in calls), calls)
         self.record.unlink(missing_ok=True)
         _, calls = self.run_blocks("light")
-        self.assertTrue(all("--no-compile" not in call for call in calls), "a light host may run them")
+        self.assertTrue(all("--no-compile" not in call and "--shared-host-labels" not in call for call in calls),
+                        "a light host may run them")
 
     def test_the_old_refusal_remains_available_and_is_listed(self) -> None:
         proc, calls = self.run_blocks("dev-overflow", PULP_GATES_GATE_HOST_PYTHON="0")

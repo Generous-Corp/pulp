@@ -1226,6 +1226,36 @@ class GateHostSafetyTests(unittest.TestCase):
             "test_ccache_pch_isolation.py", "test_check_installed_rpaths.py", "test_object_deps.py",
             "test_vellum_sdk_consumer.py"])
 
+    def test_the_lane_leaves_out_the_labels_the_required_gate_leaves_out(self) -> None:
+        sys.path.insert(0, str(HERE))
+        import ctest_gate_args  # noqa: PLC0415
+        self.assertEqual(lane.shared_host_labels(), frozenset(ctest_gate_args.SHARED_HOST_LABEL_EXCLUDE.split("|")))
+        self.assertTrue({"validation", "slow", "performance", "bench", "quality-lab"} <= lane.shared_host_labels())
+        # And the gate's own set is the shared one plus source-selftest, so the lane never excludes less.
+        self.assertTrue(lane.shared_host_labels() <= frozenset(ctest_gate_args.GATE_LABEL_EXCLUDE.split("|")))
+
+    def test_a_performance_labelled_timing_test_is_excluded_on_the_real_tree_and_kept_without_the_filter(self) -> None:
+        name = "graph-paced-timing-matrix-wall-clock"
+        everything = [e["name"] for e in lane.python_ctest_entries()]
+        filtered = [e["name"] for e in lane.python_ctest_entries(exclude_labels=lane.shared_host_labels())]
+        self.assertIn(name, everything, "control: the unfiltered lane does contain it")
+        self.assertNotIn(name, filtered)
+        entry = next(e for e in lane.python_ctest_entries() if e["name"] == name)
+        self.assertIn("performance", entry["labels"])
+        # An unlabelled-for-load test stays.
+        self.assertTrue(set(filtered) < set(everything) and len(filtered) > 100)
+
+    def test_a_registration_environment_that_names_the_source_dir_points_at_the_checkout_being_run(self) -> None:
+        # PYTHONPATH=${CMAKE_SOURCE_DIR} stayed literal, so the suite could not import from the repo
+        # root: it failed in this lane (and on origin/main) while passing on its own.
+        entry = next(e for e in lane.python_ctest_entries() if e["name"] == "harness-differential-contract-selftest")
+        self.assertEqual(entry["env"], {"PYTHONPATH": "{repo}"})
+        result = lane.run([entry], stream=__import__("io").StringIO())[0]
+        self.assertEqual(result["returncode"], 0, result.get("output"))
+        # Control: the literal the lane used to pass really does fail this suite.
+        broken = {**entry, "env": {"PYTHONPATH": "${CMAKE_SOURCE_DIR}"}}
+        self.assertNotEqual(lane.run([broken], stream=__import__("io").StringIO())[0]["returncode"], 0)
+
     def _repo(self, tmp: pathlib.Path) -> pathlib.Path:
         repo = tmp / "repo"
         repo.mkdir()
