@@ -48,6 +48,10 @@ WORD_RE = re.compile(r"[A-Za-z0-9_+.@/-]+")
 # Only Pulp's own names are inferred to be targets; a third-party `ns::name` may be an
 # imported target that CMake keeps in a directory scope the writer cannot see, so the
 # writer's REFS field is what names the rest.
+# Third-party package namespaces that are leaf libraries to Pulp's layering: they never
+# link a Pulp target, so a directory-scoped import of one the writer cannot see is safe
+# to leave uninspected. Any other unseen `ns::name` is INCONCLUSIVE (or `--external-ok`).
+LEAF_EXTERNAL_DEFAULT = ["threads::*", "skia::*", "v8::*", "sdl3::*", "catch2::*"]
 EXTERNAL_NS_RE = re.compile(r"^[a-z0-9_+-]+::[a-z0-9_+:-]+$")
 TARGET_SHAPED_RE = re.compile(r"^pulp-[a-z0-9_+-]+$")
 EXPLICIT_TARGET_RE = re.compile(
@@ -163,9 +167,11 @@ def find_paths(graph: Graph, root: str, forbidden: list[str],
 
 
 def check(graph: Graph, roots: list[str], forbidden: list[str],
-          allowed_edges: set[tuple[str, str]]) -> tuple[list[str], list[str]]:
+          allowed_edges: set[tuple[str, str]],
+          external_ok: list[str] | None = None) -> tuple[list[str], list[str]]:
     errors: list[str] = []
     notes: list[str] = []
+    ok_patterns = [canonical(p) for p in LEAF_EXTERNAL_DEFAULT + (external_ok or [])]
     for root in roots:
         if root not in graph.edges:
             errors.append(f"INCONCLUSIVE root {root} is not in the link graph")
@@ -173,15 +179,23 @@ def check(graph: Graph, roots: list[str], forbidden: list[str],
         unresolved: list[str] = []
         external: list[str] = []
         paths = find_paths(graph, root, forbidden, allowed_edges, unresolved, external)
-        if external:
-            notes.append(f"{root}: NOT INSPECTED (third-party imported targets with no "
-                         f"record, not visible to the writer): {sorted(set(external))}")
+        leaf = [e for e in dict.fromkeys(external) if matches(e, ok_patterns)]
+        for target in dict.fromkeys(external):
+            if target not in leaf:
+                errors.append(f"INCONCLUSIVE root {root} reaches imported target {target}, "
+                              "which has no record (a directory-scoped import the writer "
+                              "cannot see); its closure was not inspected. If it is a leaf "
+                              f"third-party library, pass --external-ok '{target}'")
+        if leaf:
+            notes.append(f"{root}: NOT INSPECTED (leaf third-party imported targets with no "
+                         f"record): {leaf}")
         for target in unresolved:
             errors.append(f"INCONCLUSIVE root {root} reaches {target}, which has no "
                           "record in the link graph, so its closure was not inspected")
         for path in paths:
             errors.append(f"FAIL {root} reaches {path[-1]}: {' -> '.join(path)}")
-        if not paths and not unresolved:
+        if not paths and not unresolved and not any(
+                e.startswith("INCONCLUSIVE root " + root + " ") for e in errors):
             notes.append(f"{root}: closure holds none of {forbidden}")
     return errors, notes
 
@@ -195,6 +209,9 @@ def main(argv: list[str] | None = None) -> int:
                         help="canonical name or glob such as pulp-view* (repeatable)")
     parser.add_argument("--allow", action="append", default=[],
                         help="edge exempted for a named reason, `from>to` (repeatable)")
+    parser.add_argument("--external-ok", action="append", default=[],
+                        help="leaf third-party imported target (or glob) that may stay "
+                             "uninspected (repeatable)")
     args = parser.parse_args(argv)
 
     try:
@@ -224,7 +241,7 @@ def main(argv: list[str] | None = None) -> int:
 
     roots = [canonical(root) for root in args.root]
     forbidden = [canonical(pattern) for pattern in args.forbid]
-    errors, notes = check(graph, roots, forbidden, allowed)
+    errors, notes = check(graph, roots, forbidden, allowed, args.external_ok)
     for source, target in sorted(allowed):
         print(f"link-closure: allowed edge {source} -> {target}")
     for note in notes:

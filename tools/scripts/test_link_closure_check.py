@@ -227,6 +227,23 @@ class ClosureWalk(unittest.TestCase):
         self.assertEqual(code, 2)
         self.assertIn("malformed", err)
 
+    def test_unseen_non_leaf_imported_target_is_inconclusive(self) -> None:
+        records = {"pulp-root": ("Vendor::Bridge", "$<LINK_ONLY:Vendor::Bridge>")}
+        code, _, err = self.run_check(records, ["pulp-root"], ["pulp-view*"])
+        self.assertEqual(code, 2)
+        self.assertIn("vendor::bridge", err)
+        self.assertIn("--external-ok", err)
+
+    def test_external_ok_exempts_a_named_leaf(self) -> None:
+        records = {"pulp-root": ("Vendor::Bridge", "")}
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "graph.tsv"
+            path.write_text(graph_text(records), encoding="utf-8")
+            with redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
+                code = lcc.main(["--graph", str(path), "--root", "pulp-root", "--forbid",
+                                 "pulp-view*", "--external-ok", "Vendor::Bridge"])
+        self.assertEqual(code, 0)
+
     def test_paths_flags_and_generator_tokens_are_not_unresolved_targets(self) -> None:
         records = {"pulp-root": ("-lm;/opt/x/libfoo.a;$<BUILD_INTERFACE:/src/include>;"
                                  "$<LINK_ONLY:pthread>;src/pulp-thing.cpp", "")}
