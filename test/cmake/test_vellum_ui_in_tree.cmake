@@ -13,10 +13,12 @@
 #           SDK (-DVELLUM_DIR=<dir with VellumConfig.cmake>), tests and
 #           examples off. With the option off it configures and generates with
 #           Pulp's own UI. With it on it leaves out exactly the listed
-#           directories, serves all six names from Vellum, and the only
-#           generate errors are the consumers listed in _unported below, which
-#           still link Pulp's view core. That list only shrinks: a consumer
-#           that is ported must leave it, and a new one fails the test. Without
+#           directories, serves all six names from Vellum, and the module's
+#           scan of every target's link, include and definition properties
+#           reports exactly the consumers listed in _unported below, which still
+#           name a UI target the mode does not define; every CMake error must be
+#           one of those. The list only shrinks: a consumer that is ported must
+#           leave it, and a new one, by any spelling, fails the test. Without
 #           VELLUM_DIR it prints SKIP, unless REQUIRE_VELLUM is on.
 #
 # Inputs: PULP_SOURCE_DIR, FIXTURE_DIR, SCENARIO, and for `real` VELLUM_DIR.
@@ -143,16 +145,22 @@ elseif(SCENARIO STREQUAL "real")
         return()
     endif()
 
-    # The directories the mode leaves out. Edit with the module's list.
-    set(_skipped core/canvas core/view core/timeline_view)
-    # Consumers that still reach Pulp's view core, as "<target or file> -> <name>".
-    # Each leaves this list when it is ported; the test then fails until the
-    # entry is removed, so the list cannot go stale.
+    # The directories the mode leaves out, read from the module itself.
+    include("${_module}")
+    set(_skipped "")
+    foreach(_entry IN LISTS PULP_VELLUM_IN_TREE_SKIPPED_UI_DIRS)
+        string(REGEX REPLACE "\\|.*" "" _dir "${_entry}")
+        list(APPEND _skipped "${_dir}")
+    endforeach()
+    # Targets that still name a UI target this mode does not define, as the
+    # module's scan reports them ("<target> -> <name>"). Each leaves this list
+    # when it is ported; the test then fails until the entry is removed, so the
+    # list cannot go stale, and any entry not listed fails it.
     set(_unported
-        "core/format/CMakeLists.txt -> pulp-view-core"
+        "pulp-format-core -> pulp-view-core"
         "pulp-format-view -> pulp::view-core"
+        "pulp-format-view -> pulp::view-script"
         "pulp-inspect-telemetry -> pulp::view-core")
-
     set(_generator)
     find_program(_ninja ninja)
     if(_ninja)
@@ -199,20 +207,20 @@ elseif(SCENARIO STREQUAL "real")
     endforeach()
     _expect("${_text}" "pulp::view-tooling -> [^\n]*Pulp::editor-bridge" "view-tooling on the editor bridge")
 
-    # Every other configure or generate error is a consumer that still links a
-    # target the mode does not define.
-    string(REGEX MATCHALL "Target \"[^\"]+\" links to:[ \n]+[^ \n]+" _links "${_text}")
-    string(REGEX MATCHALL "CMake Error at [^:]+:[0-9]+ \\(target_[a-z_]+\\):[ \n]+Error evaluating generator expression:[ \n]+[^\n]+[ \n]+Target \"[^\"]+\" not found" _genex "${_text}")
+    # The module's scan is the list of record. It reads every target's link,
+    # include and definition properties, so it sees plain names (which CMake
+    # links as -l<name> without an error) and every missing name of a target,
+    # not only the first one CMake reports.
+    string(REGEX MATCHALL "Pulp UI from Vellum \\(in tree\\): unported [^\n]+" _scan "${_text}")
     set(_found "")
-    foreach(_link IN LISTS _links)
-        string(REGEX REPLACE "Target \"([^\"]+)\" links to:[ \n]+([^ \n]+)" "\\1 -> \\2" _entry "${_link}")
+    foreach(_line IN LISTS _scan)
+        string(REGEX REPLACE "^.*unported " "" _entry "${_line}")
         list(APPEND _found "${_entry}")
     endforeach()
-    foreach(_expr IN LISTS _genex)
-        string(REGEX REPLACE "CMake Error at ([^:]+):[0-9]+ .*Target \"([^\"]+)\" not found" "\\1 -> \\2" _entry "${_expr}")
-        list(APPEND _found "${_entry}")
-    endforeach()
-    list(REMOVE_DUPLICATES _found)
+    # Every CMake error must be one the scan explains: a link to, or a generator
+    # expression naming, a target it reported as unported.
+    string(REGEX MATCHALL "Target \"[^\"]+\" links to:[ \n]+[^ \n]+" _links "${_text}")
+    string(REGEX MATCHALL "Error evaluating generator expression:[ \n]+[^\n]+[ \n]+Target \"[^\"]+\" not found" _genex "${_text}")
     string(REGEX MATCHALL "CMake Error at [^\n]+" _errors "${_text}")
     list(LENGTH _errors _error_count)
     list(LENGTH _links _link_count)
@@ -221,6 +229,18 @@ elseif(SCENARIO STREQUAL "real")
     if(NOT _error_count EQUAL _explained)
         message(FATAL_ERROR "real: errors other than unported consumers:\n${_text}")
     endif()
+    foreach(_link IN LISTS _links)
+        string(REGEX REPLACE "Target \"([^\"]+)\" links to:[ \n]+([^ \n]+)" "\\1 -> \\2" _entry "${_link}")
+        if(NOT _entry IN_LIST _found)
+            message(FATAL_ERROR "real: CMake reports '${_entry}', which the scan missed:\n${_text}")
+        endif()
+    endforeach()
+    foreach(_expr IN LISTS _genex)
+        string(REGEX REPLACE ".*Target \"([^\"]+)\" not found" "\\1" _name "${_expr}")
+        if(NOT _found MATCHES "-> ${_name}(;|$)")
+            message(FATAL_ERROR "real: a generator expression names ${_name}, which the scan missed:\n${_text}")
+        endif()
+    endforeach()
     foreach(_entry IN LISTS _found)
         if(NOT _entry IN_LIST _unported)
             message(FATAL_ERROR "real: a new consumer links a target this mode leaves out: ${_entry}\n${_text}")

@@ -21,7 +21,7 @@ include("${CMAKE_CURRENT_LIST_DIR}/PulpVellumUiCompat.cmake")
 # <dir>|<reason>. Vellum provides what each directory provides.
 set(PULP_VELLUM_IN_TREE_SKIPPED_UI_DIRS
     "core/canvas|Vellum::MirrorCanvas serves pulp::canvas"
-    "core/view|Vellum::MirrorView_core and its script and import layers serve pulp::view; the editor bridge lives in core/editor_bridge"
+    "core/view|Vellum::MirrorView_core and its script and import layers serve pulp::view, and the editor bridge lives in core/editor_bridge"
     "core/timeline_view|its views build on pulp::view-core, which this mode does not define"
 )
 
@@ -100,7 +100,55 @@ function(pulp_vellum_in_tree_define_ui_targets)
         get_target_property(_links "Pulp::${_name}" INTERFACE_LINK_LIBRARIES)
         message(STATUS "Pulp UI from Vellum (in tree): pulp::${_name} -> ${_links}")
     endforeach()
+    cmake_language(DEFER DIRECTORY "${CMAKE_SOURCE_DIR}"
+        CALL _pulp_vellum_in_tree_report_unported "${CMAKE_SOURCE_DIR}")
     set(PULP_SDK_VELLUM_UI_COMPAT_TARGETS "${PULP_SDK_VELLUM_UI_COMPAT_TARGETS}" PARENT_SCOPE)
+endfunction()
+
+# A name Pulp's own UI directories define: pulp-<x>, pulp::<x> or Pulp::<x> for
+# a canvas, design-ir, design-import, view or timeline-view target.
+set(_PULP_VELLUM_IN_TREE_UI_NAME
+    "^(pulp-|pulp::|Pulp::)(canvas|design-ir|design-import|view|timeline-view)(-[a-z0-9-]+)?$")
+
+# Reports, once the whole tree is configured, every target that still names a
+# UI target this mode does not define, as
+#   Pulp UI from Vellum (in tree): unported <target> -> <name>
+# It reads link libraries, include directories and compile definitions, raw
+# names and generator expressions alike, so it sees what CMake's own generate
+# errors do not: a plain name such as pulp-canvas (which CMake would pass to
+# the linker as -lpulp-canvas) and every missing name of a target, not only
+# the first.
+function(_pulp_vellum_in_tree_report_unported dir)
+    _pulp_vellum_directories("${dir}" _dirs)
+    set(_found "")
+    foreach(_dir IN LISTS _dirs)
+        get_property(_targets DIRECTORY "${_dir}" PROPERTY BUILDSYSTEM_TARGETS)
+        foreach(_target IN LISTS _targets)
+            foreach(_property IN ITEMS LINK_LIBRARIES INTERFACE_LINK_LIBRARIES
+                    INCLUDE_DIRECTORIES INTERFACE_INCLUDE_DIRECTORIES
+                    COMPILE_DEFINITIONS INTERFACE_COMPILE_DEFINITIONS
+                    LINK_OPTIONS INTERFACE_LINK_OPTIONS)
+                get_target_property(_value "${_target}" ${_property})
+                if(NOT _value)
+                    continue()
+                endif()
+                foreach(_item IN LISTS _value)
+                    _pulp_vellum_link_tokens("${_item}" _tokens)
+                    foreach(_token IN LISTS _tokens)
+                        if(_token MATCHES "${_PULP_VELLUM_IN_TREE_UI_NAME}"
+                                AND NOT TARGET "${_token}")
+                            list(APPEND _found "${_target} -> ${_token}")
+                        endif()
+                    endforeach()
+                endforeach()
+            endforeach()
+        endforeach()
+    endforeach()
+    list(REMOVE_DUPLICATES _found)
+    list(SORT _found)
+    foreach(_entry IN LISTS _found)
+        message(STATUS "Pulp UI from Vellum (in tree): unported ${_entry}")
+    endforeach()
 endfunction()
 
 # Removes the UI targets the skipped directories would have defined from the
