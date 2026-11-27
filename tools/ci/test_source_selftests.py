@@ -1245,7 +1245,7 @@ class GateHostSafetyTests(unittest.TestCase):
                 f"with l.base_checkout('HEAD', pathlib.Path({str(repo)!r})) as b:\n"
                 "    print('ready', flush=True)\n"
                 "    time.sleep(60)\n")
-        proc = subprocess.Popen([sys.executable, "-c", code], stdout=subprocess.PIPE, text=True)
+        proc = subprocess.Popen([sys.executable, "-c", code], stdout=subprocess.PIPE, text=True, encoding="utf-8")
         self.assertEqual(proc.stdout.readline().strip(), "ready")
         return proc
 
@@ -1258,7 +1258,8 @@ class GateHostSafetyTests(unittest.TestCase):
             proc.terminate()
             proc.wait(timeout=30)
             self.assertEqual(self._holders(root), [])
-            listed = subprocess.run(["git", "worktree", "list"], cwd=repo, capture_output=True, text=True).stdout
+            listed = subprocess.run(["git", "worktree", "list"], cwd=repo, capture_output=True, text=True,
+                                encoding="utf-8").stdout
             self.assertEqual(len(listed.strip().splitlines()), 1, listed)
 
     def test_control_a_leaked_checkout_is_what_the_old_code_left(self) -> None:

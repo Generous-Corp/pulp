@@ -1679,7 +1679,7 @@ def base_checkout(ref: str, repo: pathlib.Path = REPO_ROOT) -> Iterator[pathlib.
     try:
         subprocess.run(
             ["git", "worktree", "add", "--quiet", "--detach", str(checkout), merge_base],
-            cwd=repo, capture_output=True, text=True, check=True,
+            cwd=repo, capture_output=True, text=True, encoding="utf-8", check=True,
         )
         yield checkout
     finally:
@@ -1688,7 +1688,8 @@ def base_checkout(ref: str, repo: pathlib.Path = REPO_ROOT) -> Iterator[pathlib.
         subprocess.run(["git", "worktree", "remove", "--force", str(checkout)],
                        cwd=repo, capture_output=True, text=True, check=False)
         shutil.rmtree(holder, ignore_errors=True)
-        subprocess.run(["git", "worktree", "prune"], cwd=repo, capture_output=True, text=True, check=False)
+        subprocess.run(["git", "worktree", "prune"], cwd=repo, capture_output=True, text=True, encoding="utf-8",
+                       check=False)
 
 
 def rerun_on_base(

@@ -58,6 +58,7 @@ def main(argv: list[str]) -> int:
     command = args.command[1:] if args.command[:1] == ["--"] else args.command
     if not command:
         ap.error("a command is required after --")
+    shown = command[0]
     taskpolicy = shutil.which("taskpolicy") if args.background else None
     if taskpolicy:
         command = [taskpolicy, "-b", *command]
@@ -70,7 +71,7 @@ def main(argv: list[str]) -> int:
         proc = subprocess.Popen(command, preexec_fn=lower_priority,  # noqa: PLW1509 (POSIX only, by design)
                                 start_new_session=True)
     except OSError as exc:
-        print(f"run_capped: {command[0]} could not run: {exc}", file=sys.stderr)
+        print(f"run_capped: {shown} could not run: {exc}", file=sys.stderr)
         return 127
 
     def on_signal(signum: int, _frame: object) -> None:
@@ -81,7 +82,7 @@ def main(argv: list[str]) -> int:
     try:
         return proc.wait(timeout=args.seconds)
     except subprocess.TimeoutExpired:
-        print(f"run_capped: wall-time cap of {args.seconds:g}s expired; stopping {command[0]}", file=sys.stderr)
+        print(f"run_capped: wall-time cap of {args.seconds:g}s expired; stopping {shown}", file=sys.stderr)
         stop_group(proc)
         return TIMED_OUT
     except BaseException:

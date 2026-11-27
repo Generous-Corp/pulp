@@ -269,7 +269,7 @@ class PreflightTests(unittest.TestCase):
         self.assertTrue((root / JSX / "node_modules/esbuild/package.json").is_file())
         self.assertTrue(sh(root, "git", "config", "--get", "merge.pulp-gpu-ledger.driver").strip())
         shared = subprocess.run(["git", "config", "--local", "--get-regexp", "core.hookspath|merge.pulp"], cwd=root,
-                                capture_output=True, text=True, check=False).stdout
+                                capture_output=True, text=True, encoding="utf-8", check=False).stdout
         self.assertEqual(shared.strip(), "", "the shared .git/config must stay untouched")
         self.assertTrue(pre.has_codemodel_reply(root / "build"))
         self.assertEqual(self.run_cli(root).returncode, 0)
@@ -314,7 +314,7 @@ class PreflightTests(unittest.TestCase):
         self.assertEqual(sh(linked, "git", "config", "--get", "core.hooksPath").strip(), ".githooks")
         for other in (main, sibling):
             proc = subprocess.run(["git", "config", "--get", "core.hooksPath"], cwd=other, capture_output=True,
-                                  text=True, check=False)
+                                  text=True, encoding="utf-8", check=False)
             self.assertEqual(proc.stdout.strip(), "", f"{other.name} must not inherit the hook path")
 
     def test_configure_prerequisites_are_advisory_when_the_diff_needs_no_configure(self) -> None:

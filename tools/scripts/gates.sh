@@ -773,6 +773,8 @@ if [ "$gate_host_python_lanes" -eq 1 ] && [ -f "$ROOT/tools/ci/source_selftests.
             tail -n 5 "$src_selftest_log" >&2
             echo "[$src_lane] NOT CHECKED: exceeded the ${gate_host_cap_s}s gate-host wall-time cap; CI runs it" >>"$not_checked_log"
         else
+            [ "$src_rc" -eq 124 ] && echo "  $src_lane: hit the ${gate_host_cap_s}s cap with failures already seen (not yet judged against the base):" >&2 \
+                && grep -E '\*\*\*Failed|^FAIL:' "$src_selftest_log" | head -n 20 >&2
             tail -n 40 "$src_selftest_log" >&2
             echo "  $src_lane: failing — CI runs these; fix before pushing." >&2
             gate_fail "$src_lane"
