@@ -12,7 +12,12 @@
 // rebuild_logic.sh refreshes. Resolving it here (not leaving it empty) means the
 // plugin works the moment the host loads it, with no environment setup.
 
+#include <pulp/format/legacy_view.hpp>
+#if PULP_FORMAT_LEGACY_VIEW
 #include <pulp/format/reload/reloadable_shell.hpp>
+#else
+#include <pulp/format/reload/reloadable_editor_shell.hpp>
+#endif
 
 #include <cstdlib>
 #include <memory>
@@ -29,7 +34,13 @@ inline std::string hot_reload_demo_logic_path() {
 }
 
 inline std::unique_ptr<format::Processor> create_hot_reload_shell() {
+#if PULP_FORMAT_LEGACY_VIEW
     return std::make_unique<format::reload::ReloadableShell>(hot_reload_demo_logic_path());
+#else
+    // An SDK whose UI is Vellum has no create_view() to forward, so the
+    // shell forwards the active logic's editor_factory() editor instead.
+    return format::reload::make_reloadable_editor_shell(hot_reload_demo_logic_path());
+#endif
 }
 
 }  // namespace pulp::examples
