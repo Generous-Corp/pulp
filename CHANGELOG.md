@@ -9,6 +9,20 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
      release's bullet block. See docs/guides/versioning.md § Release pipeline
      for the full end-to-end flow. -->
 
+<a id="v12270"></a>
+## [1.227.0] - 2026-11-27
+
+- release/version bump ([#13008](https://github.com/Generous-Corp/pulp/pull/13008))
+- feature/vellum components d4 property panel ([#12882](https://github.com/Generous-Corp/pulp/pull/12882))
+
+<a id="v12260"></a>
+## [1.226.0] - 2026-11-27
+
+- feature/h7 editor bridge tooling ([#12975](https://github.com/Generous-Corp/pulp/pull/12975))
+- release/version bump ([#13007](https://github.com/Generous-Corp/pulp/pull/13007))
+- feature/vellum view editor factory ([#12986](https://github.com/Generous-Corp/pulp/pull/12986))
+- feature/g2 au vellum editor ([#12893](https://github.com/Generous-Corp/pulp/pull/12893))
+
 <a id="v12250"></a>
 ## [1.225.0] - 2026-11-27
 
@@ -13881,6 +13895,8 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/Generous-Corp/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/Generous-Corp/pulp/pull/2))
 
+[1.227.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.227.0
+[1.226.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.226.0
 [1.225.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.225.0
 [1.224.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.224.0
 [1.223.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.223.0
