@@ -194,14 +194,18 @@ class Graph:
                                   "compileDependencies", "interfaceCompileDependencies",
                                   "objectDependencies"):
                 for dependency in target.get(property_name, []):
-                    dependency_name = (names.get(dependency.get("id"))
-                                       if dependency.get("id") else dependency.get("fragment"))
+                    dependency_id = dependency.get("id")
+                    dependency_name = (names.get(dependency_id)
+                                       if dependency_id else dependency.get("fragment"))
                     if not dependency_name:
                         continue
                     dependency_name = canonical(dependency_name)
                     for target_name in referenced_targets(dependency_name):
                         if target_name != name and target_name not in graph.edges[name]:
                             graph.edges[name].append(target_name)
+                        if dependency_id:
+                            graph.explicit.add(target_name)
+                            graph.link_edges.add((name, target_name))
             for source in target.get("sources", []):
                 source_name = source.get("path")
                 if source_name:
