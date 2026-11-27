@@ -41,7 +41,7 @@ in a second window through its own `ContractEditorSession`
 it and closes it before the main editor detaches. This is where a plug-in's
 settings sections show once its editor comes from a factory: the
 `settings_sections()` tabs exist only in the create_view() window. Tests open it
-with `StandaloneConfig::test_open_plugin_settings_frame`.
+with `StandaloneApp::set_test_hooks({.open_plugin_settings_frame = N})`; the contract window's test controls live in `detail/standalone_test_hooks.hpp`, never in the public `StandaloneConfig`.
 
 Fixed user sizing does not forbid an editor-origin resize: preserve the
 `EditorContext::request_resize` acknowledgment even when `can_resize` is false.
@@ -2437,6 +2437,11 @@ construct, so the slot can only return null or do nothing. Gotchas:
   binary built in the other mode would call the wrong one without any error.
   `format-legacy-view-slot-layout` compares the slot positions of both modes
   and of a header with one slot removed; it fails if they drift.
+- **A ViewProcessor offers what `has_view(role)` says**, answered without
+  building anything (default: the editor only); `create_view()` is pure, and a
+  plug-in whose view can be null overrides `has_view`. It cannot be adopted
+  before the switch: in a mode-1 SDK its header `#error`s with the reason, and
+  docs/guides/editor-host-contract.md lists each downstream's changes.
 - **A plug-in keeps `create_view()` by deriving from `pulp::vellum::ViewProcessor<>`**
   (`view_processor.hpp`), which `#error`s unless the macro is 0. Its factory is
   one static per `Base`, shared by every processor; it reaches the processor
@@ -2471,7 +2476,18 @@ construct, so the slot can only return null or do nothing. Gotchas:
   (`pulp-test-format-core-ui-free-all`, built with the tests). A core source or
   header that names `pulp::view` fails that build before any SDK sees it.
 - **A new view-named virtual goes through the macro too.** `node_abi_gate.py`
-  reads `PULP_FORMAT_LEGACY_VIEW_NAME(x)` as `x` and expands no other macro.
+  reads `PULP_FORMAT_LEGACY_VIEW_NAME(x)` as `x`, expands no other macro, and
+  fails when the macro's default definition is anything but the plain name.
+- **The layout probe covers the whole vtable.** It also reports the first
+  virtual a subclass adds, whose slot is Processor's vtable length, so a
+  virtual one mode adds at the end moves it too.
+- **A macro-0 caller linked against a mode-1 pulp-format-core fails on a named
+  marker.** processor.hpp makes every macro-0 TU refer to
+  `pulp_format_core_was_built_with_PULP_FORMAT_LEGACY_VIEW_0`, which only a
+  macro-0 format.cpp defines; `format-core-mode-mismatch-link` checks the link
+  error names it. A mode-0 test that builds no format.cpp defines it itself.
+- **`Processor::SettingsSection` is private at macro 0**: it only fills the
+  reserved slot there, and has no view to adopt.
 - **The hot-reload fingerprint carries the mode** (`legacyview=` in
   `abi_flags`), so a logic library from the other mode is refused rather than
   dispatched through renamed slots.
@@ -2501,6 +2517,10 @@ is `docs/guides/editor-host-contract.md`. Things that are easy to get wrong:
   touched, so a gesture the view opened directly stays for the host's own
   teardown. The root sizes the view in `layout_children()`, not `on_resized()`:
   Vellum's flex layout runs after `on_resized()` and would replace the bounds.
+  The header only declares; the root lives in `src/view_editor.cpp`. A view
+  anywhere in the hosted tree that implements `EditorIdleTarget` gets the
+  editor's idle tick while attached, and each editor shares its hooks with the
+  factory, so it keeps them if it outlives the factory.
 - **The header must stay view-free.** It names no `pulp::view`, canvas, render,
   Dawn or Vellum type, and `format_header_view_boundary.py` classifies it as a
   `pulp-format-core` header automatically, so an include that reaches the view

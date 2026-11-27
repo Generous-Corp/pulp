@@ -229,8 +229,33 @@ def _canonical_virtual_signature(raw_decl: str) -> tuple[str, str]:
 _LEGACY_VIEW_NAME = re.compile(r"\bPULP_FORMAT_LEGACY_VIEW_NAME\(\s*([A-Za-z_]\w*)\s*\)")
 
 
+_LEGACY_VIEW_DEFINE = re.compile(
+    r"^[ \t]*#[ \t]*define[ \t]+PULP_FORMAT_LEGACY_VIEW_NAME\(([^)]*)\)[ \t]*(.*?)[ \t]*$",
+    re.MULTILINE)
+
+
+def check_legacy_view_macro(text: str) -> None:
+    """The normalization above is sound only while the macro's default
+    (PULP_FORMAT_LEGACY_VIEW=1) expansion is the plain name: the first
+    definition in the file, the `#if PULP_FORMAT_LEGACY_VIEW` branch, must be
+    exactly `name`. Raises ValueError otherwise, so a changed expansion fails
+    the gate instead of renaming every slot behind it."""
+    defines = _LEGACY_VIEW_DEFINE.findall(text)
+    if not defines:
+        raise ValueError("PULP_FORMAT_LEGACY_VIEW_NAME is used but not defined in this header")
+    param, expansion = defines[0]
+    param = param.strip()
+    if not param or expansion != param:
+        raise ValueError(
+            "PULP_FORMAT_LEGACY_VIEW_NAME's default expansion must be the plain name "
+            f"(`#define PULP_FORMAT_LEGACY_VIEW_NAME({param}) {param}`), found "
+            f"`({param}) {expansion}`")
+
+
 def virtual_order(text: str, class_name: str) -> list[VirtualDecl]:
     body = class_body(strip_c_comments(text), class_name)
+    if _LEGACY_VIEW_NAME.search(body):
+        check_legacy_view_macro(strip_c_comments(text))
     body = _LEGACY_VIEW_NAME.sub(r"\1", body)
     decls: list[VirtualDecl] = []
     for match in re.finditer(r"\bvirtual\b(?P<decl>.*?)(?:;|{)", body, re.DOTALL):

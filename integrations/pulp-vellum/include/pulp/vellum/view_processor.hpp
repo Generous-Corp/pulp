@@ -17,7 +17,7 @@
 /// };
 /// ```
 ///
-/// `editor_factory()` returns a `ViewEditorFactory` over these hooks, so the
+/// `editor_factory()` returns this processor's factory over these hooks, so the
 /// editor opens through the editor-host contract in every format adapter, with
 /// the ViewBridge protocol: `on_view_opened` after a native attach,
 /// `on_view_resized` while attached, `on_view_closed` once per attach, and no
@@ -25,15 +25,24 @@
 /// over a `pulp_add_plugin(... UI <package>)` editor.
 ///
 /// `create_view()` builds the main editor. `create_view(role)` builds any role
-/// the factory offers (editor, inspector and settings); its default calls
-/// `create_view()` for the editor, builds the settings editor from
-/// `settings_sections()`, and returns null otherwise, so a second window is
-/// opt-in. Every call is on the host's main thread.
+/// the factory offers; its default calls `create_view()` for the editor, builds
+/// the settings editor from `settings_sections()`, and returns null otherwise.
+/// `has_view(role)` says which roles the factory offers, without building
+/// anything: the editor by default, so a second window is opt-in. A plug-in
+/// whose `create_view()` can return null overrides `has_view`. Hosts ask it
+/// whenever they query an editor, so it must be cheap. Every call is on the
+/// host's main thread.
 ///
 /// `settings_sections()` is the Vellum form of Processor's legacy settings
 /// tabs. A host that offers the settings role (the standalone's
 /// "<name> Settings…" window) shows them, one tab per section, or the single
 /// section's view alone.
+///
+/// Availability: this needs an SDK built with `PULP_FORMAT_LEGACY_VIEW=0`, which
+/// is the SDK that serves its UI from Vellum. Until a plug-in builds against
+/// one, it keeps overriding `format::Processor::create_view()`; the two cannot
+/// coexist in one build, because they differ only in return type. The changes
+/// to make at the switch are listed in docs/guides/editor-host-contract.md.
 
 #include <pulp/format/editor_host.hpp>
 #include <pulp/format/processor.hpp>
@@ -49,8 +58,10 @@
 #include <vector>
 
 #if PULP_FORMAT_LEGACY_VIEW
-#error "pulp/vellum/view_processor.hpp is for an SDK built with PULP_FORMAT_LEGACY_VIEW=0; \
-with Pulp's own view layer, override format::Processor::create_view() directly"
+#error "pulp/vellum/view_processor.hpp needs a Pulp SDK built with PULP_FORMAT_LEGACY_VIEW=0 \
+(its UI served from Vellum). This SDK keeps Pulp's own view layer: override \
+format::Processor::create_view() instead, and move to ViewProcessor<> when you \
+build against a Vellum-UI SDK (docs/guides/editor-host-contract.md)."
 #endif
 
 namespace pulp::vellum {
@@ -61,14 +72,13 @@ struct ViewSettingsSection {
     std::unique_ptr<::vellum::view::View> view;
 };
 
+
 template <class Base = format::Processor> class ViewProcessor : public Base {
   public:
     using Base::Base;
 
-    /// The main editor's view tree, or null for no editor.
-    virtual std::unique_ptr<::vellum::view::View> create_view() {
-        return nullptr;
-    }
+    /// The main editor's view tree.
+    virtual std::unique_ptr<::vellum::view::View> create_view() = 0;
 
     /// The view tree for `role`. Default: `create_view()` for the editor, the
     /// `settings_sections()` for settings, null for any other role.
@@ -81,9 +91,15 @@ template <class Base = format::Processor> class ViewProcessor : public Base {
     }
 
     /// The settings tabs, built each time the settings editor opens. Default:
-    /// none, so no settings editor.
+    /// none.
     virtual std::vector<ViewSettingsSection> settings_sections() {
         return {};
+    }
+
+    /// Whether `create_view(role)` builds a view, answered without building one.
+    /// Default: the editor only.
+    virtual bool has_view(format::EditorRole role) const {
+        return role == format::EditorRole::editor;
     }
 
     /// After the view attached to a native window.
@@ -97,7 +113,7 @@ template <class Base = format::Processor> class ViewProcessor : public Base {
                                  std::uint32_t /*h*/) {}
 
     format::EditorFactory* editor_factory() override {
-        return &factory();
+        return &factory_;
     }
 
   private:
@@ -114,10 +130,28 @@ template <class Base = format::Processor> class ViewProcessor : public Base {
         return tabs;
     }
 
-    // One factory per Base. It holds no processor: each call reaches the
-    // processor the host passes to create(), which is the one whose
-    // editor_factory() returned it.
-    static ViewEditorFactory& factory() {
+    // This processor's factory: offers what has_view() says, and builds
+    // through the shared builder below. Owned by the processor, as the
+    // contract asks.
+    class Factory final : public format::EditorFactory {
+      public:
+        explicit Factory(ViewProcessor& owner) : owner_(owner) {}
+        bool supports(format::EditorRole role) const override {
+            return owner_.has_view(role);
+        }
+        std::unique_ptr<format::Editor> create(format::Processor& processor,
+                                               format::EditorContext& context,
+                                               format::EditorRole role) override {
+            return supports(role) ? builder().create(processor, context, role) : nullptr;
+        }
+
+      private:
+        ViewProcessor& owner_;
+    };
+
+    // One building factory per Base. It holds no processor: each call reaches
+    // the processor the host passes to create(), the one whose factory asked.
+    static ViewEditorFactory& builder() {
         static ViewEditorFactory instance(
             [](format::Processor& processor,
                format::EditorRole role) -> std::unique_ptr<::vellum::view::View> {
@@ -146,6 +180,8 @@ template <class Base = format::Processor> class ViewProcessor : public Base {
              format::EditorRole::settings});
         return instance;
     }
+
+    Factory factory_{*this};
 };
 
 } // namespace pulp::vellum

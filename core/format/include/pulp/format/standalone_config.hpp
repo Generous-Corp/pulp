@@ -100,9 +100,6 @@ struct StandaloneConfig {
     double test_screen_visible_height = 0.0;
     std::function<void(void* native_window)> test_on_editor_window;
     std::function<void()> test_on_editor_frame;
-    // The contract editor window opens the plug-in's settings editor
-    // (EditorRole::settings) at this loop frame, as its menu item would; -1 never.
-    int test_open_plugin_settings_frame = -1;
     // When non-empty, capture a PNG into this directory after every key,
     // named "key-<NN>-<name>.png", plus "key-00-initial.png" before the first
     // press. That per-press series is what turns "the sequence ran" into
