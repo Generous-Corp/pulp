@@ -388,7 +388,8 @@ TEST_CASE("PropertyPanel: stored Choice index beyond int range clamps, not wraps
     CHECK(panel.get_choice("n").value_or(-1) == 0);
 }
 
-TEST_CASE("PropertyPanel: mutable callback state survives across events and nested rebuild keeps pending key",
+TEST_CASE("PropertyPanel: mutable callback state survives across events and nested rebuild keeps "
+          "pending key",
           "[property-panel][lifetime]") {
     pulp::state::PropertiesFile props;
     props.set_string("a", "old");
@@ -400,9 +401,7 @@ TEST_CASE("PropertyPanel: mutable callback state survives across events and nest
     panel.click("b");
     CHECK(clicks == 2);
     panel.add_text("a", "A", "x", [&](const std::string&) { panel.set_text("b2", "go"); });
-    panel.add_text("b2", "B2", "", [&](const std::string&) {
-        panel.add_text("a", "A", "new");
-    });
+    panel.add_text("b2", "B2", "", [&](const std::string&) { panel.add_text("a", "A", "new"); });
     REQUIRE(panel.set_text("a", "new"));
     CHECK(panel.get_text("a").value_or("") == "new");
     CHECK(props.get_string("a").value_or("") == "new");

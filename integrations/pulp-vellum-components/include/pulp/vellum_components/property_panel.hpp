@@ -313,7 +313,8 @@ class PropertyPanel : public View {
         if (p->on_click) {
             const std::string k(key);
             std::function<void()> action;
-            action.swap(p->on_click); // swap, not move: a moved-from std::function need not be empty
+            action.swap(
+                p->on_click); // swap, not move: a moved-from std::function need not be empty
             ActiveScope scope(active_, k);
             action();
             if (!scope.replaced())
@@ -411,8 +412,12 @@ class PropertyPanel : public View {
         ActiveScope(std::vector<Active>& s, std::string key) : stack(s), index(s.size()) {
             stack.push_back({std::move(key), false});
         }
-        ~ActiveScope() { stack.pop_back(); }
-        bool replaced() const { return stack[index].replaced; }
+        ~ActiveScope() {
+            stack.pop_back();
+        }
+        bool replaced() const {
+            return stack[index].replaced;
+        }
     };
 
     bool is_firing(std::string_view key) const {
