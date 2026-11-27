@@ -24,7 +24,10 @@
 #           name a UI target the mode does not define; every CMake error must be
 #           one of those. The list only shrinks: a consumer that is ported must
 #           leave it, and a new one, by any spelling, fails the test. Without
-#           VELLUM_DIR it prints SKIP, unless REQUIRE_VELLUM is on.
+#           VELLUM_DIR it prints SKIP, unless REQUIRE_VELLUM is on. A third
+#           configure, with the inspector off, has no unported consumer and
+#           builds pulp-format-core, pulp-format-view and pulp-vellum; nm
+#           confirms format-core is the PULP_FORMAT_LEGACY_VIEW=0 build.
 #
 # Inputs: PULP_SOURCE_DIR, FIXTURE_DIR, SCENARIO, and for `real` VELLUM_DIR.
 
@@ -358,6 +361,48 @@ elseif(SCENARIO STREQUAL "real")
     endif()
     list(LENGTH _unported _unported_count)
     message(STATUS "real: six names served from Vellum, ${_skip_count} directories left out, ${_unported_count} consumers still to port")
+
+    # Build: the same profile with the inspector off, which leaves out every
+    # consumer still listed above, must configure and generate cleanly, and
+    # pulp-format-core, pulp-format-view and the Vellum editor adapter that
+    # serves the view half must build. format-core must be the UI-free one:
+    # its archive holds the reserved create_view slot and the mode marker,
+    # and no create_view under its plain name.
+    file(REMOVE_RECURSE "${FIXTURE_DIR}/real-build")
+    execute_process(COMMAND "${CMAKE_COMMAND}" -S "${PULP_SOURCE_DIR}"
+            -B "${FIXTURE_DIR}/real-build" ${_common} -DPULP_UI_FROM_VELLUM_IN_TREE=ON
+            -DPULP_ENABLE_INSPECTOR=OFF
+        RESULT_VARIABLE _rc OUTPUT_VARIABLE _out ERROR_VARIABLE _err)
+    if(NOT _rc EQUAL 0)
+        message(FATAL_ERROR "real: the inspector-off configure failed:\n${_out}${_err}")
+    endif()
+    _reject("${_out}${_err}" "unported " "an unported consumer with the inspector off")
+    execute_process(COMMAND "${CMAKE_COMMAND}" --build "${FIXTURE_DIR}/real-build"
+            --target pulp-format-core pulp-format-view pulp-vellum
+        RESULT_VARIABLE _rc OUTPUT_VARIABLE _out ERROR_VARIABLE _err)
+    if(NOT _rc EQUAL 0)
+        message(FATAL_ERROR "real: format-core, format-view or pulp-vellum did not build in the mode:\n${_out}${_err}")
+    endif()
+    find_program(_nm NAMES nm llvm-nm)
+    if(NOT _nm)
+        message(FATAL_ERROR "real: nm is required to read pulp-format-core's archive")
+    endif()
+    file(GLOB_RECURSE _core_archive "${FIXTURE_DIR}/real-build/core/format/*pulp-format-core.a")
+    list(LENGTH _core_archive _core_archive_count)
+    if(NOT _core_archive_count EQUAL 1)
+        message(FATAL_ERROR "real: expected one pulp-format-core archive, found [${_core_archive}]")
+    endif()
+    execute_process(COMMAND "${_nm}" "${_core_archive}"
+        RESULT_VARIABLE _rc OUTPUT_VARIABLE _symbols ERROR_QUIET)
+    if(NOT _rc EQUAL 0)
+        message(FATAL_ERROR "real: nm could not read ${_core_archive}")
+    endif()
+    _expect("${_symbols}" " [ABCDGRST] _?pulp_format_core_was_built_with_PULP_FORMAT_LEGACY_VIEW_0\n"
+        "the UI-free mode marker defined in pulp-format-core")
+    _expect("${_symbols}" " T _?_ZN4pulp6format9Processor[0-9]+reserved_legacy_view_create_view_Ev\n"
+        "the reserved create_view slot defined in pulp-format-core")
+    _reject("${_symbols}" "9Processor11create_viewE" "Processor::create_view under its plain name")
+    message(STATUS "real: format-core, format-view and pulp-vellum build in the mode; format-core is UI-free")
     message(STATUS "real: ok")
 
 else()

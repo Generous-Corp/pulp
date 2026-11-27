@@ -1793,8 +1793,10 @@ add_test(NAME cmake-vellum-ui-in-tree-real
         -DSCENARIO=real
         ${_vellum_ui_in_tree_args}
         -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/test_vellum_ui_in_tree.cmake)
+# TIMEOUT covers three configures and a build of format-core, format-view and
+# pulp-vellum with their dependencies in the in-tree mode.
 set_tests_properties(cmake-vellum-ui-in-tree-real PROPERTIES
-    LABELS "${_vellum_ui_in_tree_labels}" TIMEOUT 120
+    LABELS "${_vellum_ui_in_tree_labels}" TIMEOUT 1800
     SKIP_REGULAR_EXPRESSION "SKIP: no installed Vellum SDK")
 unset(_vellum_ui_in_tree_args)
 unset(_vellum_ui_in_tree_labels)
