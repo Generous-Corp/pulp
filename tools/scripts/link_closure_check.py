@@ -38,6 +38,7 @@ from __future__ import annotations
 
 import argparse
 import fnmatch
+import hashlib
 import json
 import re
 import sys
@@ -108,6 +109,7 @@ class Graph:
         self.archive_derived: set[str] = set()
         self.path_derived: set[str] = set()
         self.opaque: set[str] = set()
+        self.display_names: dict[str, str] = {}
 
     @classmethod
     def parse(cls, text: str) -> "Graph":
@@ -120,6 +122,7 @@ class Graph:
                 graph.malformed.append(line.strip()[:80])
                 continue
             name = canonical(fields[0].strip())
+            graph.display_names[name] = name
             if len(fields) >= 6:
                 # The writer lists the words CMake resolved to a target.
                 graph.explicit.update(canonical(w) for w in re.split(r"[;\s]+", fields[5]) if w)
@@ -167,12 +170,24 @@ class Graph:
                              "dependency records are incomplete")
         configuration = model["configurations"][0]
         entries = configuration.get("targets", []) + configuration.get("abstractTargets", [])
-        names = {entry["id"]: canonical(entry["name"]) for entry in entries}
+        counts: dict[str, int] = {}
+        for entry in entries:
+            display = canonical(entry["name"])
+            counts[display] = counts.get(display, 0) + 1
+        names: dict[str, str] = {}
+        for entry in entries:
+            display = canonical(entry["name"])
+            identity = display
+            if counts[display] > 1:
+                suffix = hashlib.sha1(entry["id"].encode()).hexdigest()[:10]
+                identity = f"{display}@{suffix}"
+            names[entry["id"]] = identity
         graph = cls()
         for entry in entries:
             target_path = reply_dir / entry["jsonFile"]
             target = json.loads(target_path.read_text(encoding="utf-8"))
-            name = canonical(target["name"])
+            name = names.get(target.get("id"), canonical(target["name"]))
+            graph.display_names[name] = canonical(target["name"])
             graph.types[name] = target.get("type", "")
             graph.edges.setdefault(name, [])
             for property_name in ("linkLibraries", "interfaceLinkLibraries",
@@ -199,7 +214,16 @@ class Graph:
                 if name not in graph.edges or not graph.edges[name]:
                     graph.edges[name] = edges
                     graph.types[name] = padding.types.get(name, "")
+                    graph.display_names[name] = padding.display_names.get(name, name)
         return graph
+
+    def display(self, name: str) -> str:
+        return self.display_names.get(name, name)
+
+    def resolve_roots(self, requested: str) -> list[str]:
+        canonical_name = canonical(requested)
+        return [name for name in self.edges
+                if name == canonical_name or self.display(name) == canonical_name]
 
 
 def matches(name: str, patterns: list[str]) -> bool:
@@ -228,10 +252,11 @@ def find_paths(graph: Graph, root: str, forbidden: list[str],
     while queue:
         current = queue.popleft()
         for target in graph.edges.get(current, []):
-            if (current, target) in allowed_edges or target in parent:
+            if ((graph.display(current), graph.display(target)) in allowed_edges
+                    or target in parent):
                 continue
             parent[target] = current
-            if matches(target, forbidden):
+            if matches(graph.display(target), forbidden):
                 path = [target]
                 while parent[path[-1]] is not None:
                     path.append(parent[path[-1]])  # type: ignore[arg-type]
@@ -245,7 +270,8 @@ def find_paths(graph: Graph, root: str, forbidden: list[str],
                 if external is not None and EXTERNAL_NS_RE.match(target):
                     external.append(target)
                 elif (unresolved is not None
-                      and (TARGET_SHAPED_RE.match(target) or target in graph.explicit
+                      and (TARGET_SHAPED_RE.match(graph.display(target))
+                           or target in graph.explicit
                            or ((current, target) in graph.link_edges
                                and target not in graph.archive_derived
                                and target not in graph.path_derived
@@ -262,16 +288,24 @@ def check(graph: Graph, roots: list[str], forbidden: list[str],
     notes: list[str] = []
     ok_patterns = [canonical(p) for p in LEAF_EXTERNAL_DEFAULT + (external_ok or [])]
     for root in roots:
-        if root not in graph.edges:
+        root_candidates = graph.resolve_roots(root)
+        if not root_candidates:
             errors.append(f"INCONCLUSIVE root {root} is not in the link graph")
             continue
+        if len(root_candidates) > 1:
+            errors.append(f"INCONCLUSIVE root {root} is ambiguous across directory scopes: "
+                          f"{root_candidates}")
+            continue
+        root_id = root_candidates[0]
         unresolved: list[str] = []
         external: list[str] = []
-        paths = find_paths(graph, root, forbidden, allowed_edges, unresolved, external)
-        leaf = [e for e in dict.fromkeys(external) if matches(e, ok_patterns)]
+        paths = find_paths(graph, root_id, forbidden, allowed_edges, unresolved, external)
+        leaf = [e for e in dict.fromkeys(external)
+                if matches(graph.display(e), ok_patterns)]
         for target in dict.fromkeys(external):
             if target not in leaf:
-                errors.append(f"INCONCLUSIVE root {root} reaches imported target {target}, "
+                errors.append(f"INCONCLUSIVE root {root} reaches imported target "
+                              f"{graph.display(target)}, "
                               "which has no record (a directory-scoped import the writer "
                               "cannot see); its closure was not inspected. If it is a leaf "
                               f"third-party library, pass --external-ok '{target}'")
@@ -279,10 +313,11 @@ def check(graph: Graph, roots: list[str], forbidden: list[str],
             notes.append(f"{root}: NOT INSPECTED (leaf third-party imported targets with no "
                          f"record): {leaf}")
         for target in unresolved:
-            errors.append(f"INCONCLUSIVE root {root} reaches {target}, which has no "
+            errors.append(f"INCONCLUSIVE root {root} reaches {graph.display(target)}, which has no "
                           "record in the link graph, so its closure was not inspected")
         for path in paths:
-            errors.append(f"FAIL {root} reaches {path[-1]}: {' -> '.join(path)}")
+            shown = [graph.display(name) for name in path]
+            errors.append(f"FAIL {root} reaches {shown[-1]}: {' -> '.join(shown)}")
         if not paths and not unresolved and not any(
                 e.startswith("INCONCLUSIVE root " + root + " ") for e in errors):
             notes.append(f"{root}: closure holds none of {forbidden}")
@@ -311,10 +346,13 @@ def main(argv: list[str] | None = None) -> int:
             try:
                 graph = Graph.from_codemodel(build_dir, raw_graph)
             except ValueError as error:
-                if "codemodel is not available" not in str(error):
+                if not ("codemodel is not available" in str(error)
+                        or "unsupported CMake codemodel version" in str(error)):
                     raise
-                # File API replies are produced after the first configure. The
-                # native writer remains the safe fallback until the next one.
+                # File API replies are produced after the first configure, and
+                # older supported CMake versions lack dependency records. The
+                # native writer remains the safe fallback; opaque imports still
+                # fail closed until a capable codemodel is available.
                 graph = Graph.parse(raw_graph)
         else:
             graph = Graph.parse(raw_graph)
