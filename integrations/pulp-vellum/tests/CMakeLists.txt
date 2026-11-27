@@ -156,6 +156,12 @@ if(PULP_BUILD_TESTS AND TARGET Catch2::Catch2WithMain)
         target_link_libraries(pulp-test-pulp-vellum-about-notices PRIVATE
             pulp::vellum Vellum::MirrorView_core Catch2::Catch2WithMain Threads::Threads)
         catch_discover_tests(pulp-test-pulp-vellum-about-notices PROPERTIES LABELS pulp-vellum-editor)
+        # A macOS AUv3 plug-in with a Vellum editor package: the appex stub
+        # must link, and the editor code must live in the framework.
+        if(APPLE AND NOT PULP_IOS)
+            add_subdirectory(auv3_editor_package)
+        endif()
+
 
         # An AU v2 host opening a Vellum editor. The target defines a test-only
         # macro, so its definition lives under test/ with the other test targets.
