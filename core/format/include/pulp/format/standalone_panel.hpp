@@ -28,6 +28,10 @@ struct StandalonePanelContext {
     /// Queues a MIDI event for the processor through the standalone's
     /// lock-free UI MIDI path. Main thread. False when the queue is full.
     std::function<bool(const midi::MidiEvent&)> midi_sink;
+    /// True while an editable text field in any of the app's windows has
+    /// keyboard focus. A panel that listens for keys app-wide leaves them to
+    /// the field. Main thread. Empty means the standalone cannot tell.
+    std::function<bool()> text_input_focused;
 };
 
 class StandalonePanel {

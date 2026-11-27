@@ -4096,6 +4096,10 @@ installs at static init. Things that are easy to get wrong:
   `performKeyEquivalent:`, not only from the menu. A headless run has no menu,
   and the key driver offers `performKeyEquivalent:` first, so
   `PULP_TEST_KEY_SEQUENCE=cmd+k` reaches it.
+- A panel that listens for keys app-wide must leave them to a text field.
+  `StandalonePanelContext::text_input_focused` answers whether an editable
+  field in any app window has focus (macOS: the first responders' field
+  editors); without that check typing into a field also plays notes.
 - `drain_midi_into` runs on the audio thread until the standalone destroys the
   panel, which happens after audio stops. A panel must not free what drain reads
   in `shutdown()`.
