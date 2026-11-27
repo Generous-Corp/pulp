@@ -18,14 +18,14 @@ from pathlib import Path
 # Targets and include roots the integration packages publish.
 FORBIDDEN = (
     (re.compile(r"integrations/"), "a path under integrations/"),
-    (re.compile(r"(?<![\w-])pulp::(?:native|rmlui-native|rmlui-native-metal|vellum|vellum-audio|vellum-components|vellum-graph|vellum-renderer3d)(?![\w-])"),
+    (re.compile(r"(?<![\w-])pulp::(?:native|rmlui-native|rmlui-native-metal|vellum|vellum-audio|vellum-components|vellum-graph|vellum-renderer3d|vellum-scene)(?![\w-])"),
      "an integration target alias"),
-    (re.compile(r"(?<![\w:-])pulp-(?:native|rmlui-native|rmlui-native-metal|vellum|vellum-audio|vellum-components|vellum-graph|vellum-renderer3d)(?![\w-])"),
+    (re.compile(r"(?<![\w:-])pulp-(?:native|rmlui-native|rmlui-native-metal|vellum|vellum-audio|vellum-components|vellum-graph|vellum-renderer3d|vellum-scene)(?![\w-])"),
      "an integration target"),
-    (re.compile(r"[<\"]pulp/(?:native|rmlui_native|vellum|vellum_audio|vellum_components|vellum_graph|vellum_renderer3d)/"), "an integration header"),
+    (re.compile(r"[<\"]pulp/(?:native|rmlui_native|vellum|vellum_audio|vellum_components|vellum_graph|vellum_renderer3d|vellum_scene)/"), "an integration header"),
     (re.compile(r"[<\"]vellum/"), "a Vellum header"),
     (re.compile(r"\bVellum(?:RmlUi)?::"), "a Vellum SDK target"),
-    (re.compile(r"\bPULP_ENABLE_(?:PULP_NATIVE|RMLUI_ADAPTER|PULP_VELLUM(?:_AUDIO|_COMPONENTS|_GRAPH|_RENDERER3D)?)\b"),
+    (re.compile(r"\bPULP_ENABLE_(?:PULP_NATIVE|RMLUI_ADAPTER|PULP_VELLUM(?:_AUDIO|_COMPONENTS|_GRAPH|_RENDERER3D|_SCENE)?)\b"),
      "an integration build option"),
 )
 SCANNED_NAMES = ("CMakeLists.txt",)

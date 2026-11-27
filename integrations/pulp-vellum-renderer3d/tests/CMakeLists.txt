@@ -1,11 +1,17 @@
 find_package(Threads REQUIRED)
 if(PULP_BUILD_TESTS AND TARGET Catch2::Catch2WithMain)
     add_executable(pulp-test-pulp-vellum-renderer3d
-        ${CMAKE_CURRENT_SOURCE_DIR}/renderer3d_cube_test.cpp)
+        ${CMAKE_CURRENT_SOURCE_DIR}/renderer3d_cube_test.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/renderer3d_materials_test.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/renderer3d_scene_test.cpp)
+    # The CPU module tests include the package's private headers.
+    target_include_directories(pulp-test-pulp-vellum-renderer3d PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/../src ${SKIA_INCLUDE_DIRS} "${SKIA_INCLUDE_DIRS}/dawn")
     target_link_libraries(pulp-test-pulp-vellum-renderer3d PRIVATE
         pulp::vellum-renderer3d Catch2::Catch2WithMain Threads::Threads)
     target_compile_definitions(pulp-test-pulp-vellum-renderer3d PRIVATE
-        PULP_VELLUM_RENDERER3D_PNG_DIR="${CMAKE_CURRENT_BINARY_DIR}/renderer3d-png")
+        PULP_VELLUM_RENDERER3D_PNG_DIR="${CMAKE_CURRENT_BINARY_DIR}/renderer3d-png"
+        PULP_VELLUM_RENDERER3D_FIXTURE_DIR="${PULP_ROOT_DIR}/test/fixtures/scene3d")
     # While core/render still carries the legacy renderer, the parity case runs
     # its probe out of process (no legacy header in this binary), decodes the
     # PNG it writes and compares it with the ported frame pixel for pixel.

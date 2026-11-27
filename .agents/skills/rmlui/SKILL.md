@@ -33,6 +33,15 @@ view tree in one editor without a stated reason.
 | Pulp `pulp/view/rmlui_host_bridge.hpp`, `rmlui_importer_adapter.hpp` | Pulp `core/view` | A frozen seam behind `PULP_ENABLE_RMLUI_IMPORTER_ADAPTER=OFF`. It duplicates Vellum's `vellum/rmlui/host_bridge.hpp` and leaves Pulp along with `core/view`. Don't build new work on it or extend it. |
 | How an RmlUi editor reaches the host | Pulp editor-host contract (`pulp/format/editor_host.hpp`) | A UI package's `EditorFactory`. It doesn't use `create_view()` or `ViewBridge`. |
 
+An RmlUi editor that can be resized must override `Editor::size_hints()` and
+declare its minimum size. An editor that declares no minimum is fixed-size. The
+VST3, CLAP and AU v2 hosts then keep it at one size: the host's resize call
+still succeeds, but `set_size()` is never called. The editor-host slice editors
+hit this. A resize check should read `editor->size()` back, not just the host
+call's return value. The slice's fixed-size control (`run_*_fixed` in
+`test/editor_host_slice/format_hosts_main.mm`) runs a no-minimum editor through
+each of the three hosts and checks both facts.
+
 A change to RmlUi support is Vellum work. Route the paths with the
 `pulp-vellum-change-routing` skill before writing anything that crosses the two
 repositories.

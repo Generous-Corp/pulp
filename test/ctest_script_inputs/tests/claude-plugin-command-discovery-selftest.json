@@ -1,0 +1,16 @@
+{
+ "name": "claude-plugin-command-discovery-selftest",
+ "record": {
+  "entry": "tools/scripts/test_claude_plugin_command_discovery.py",
+  "inputs": [
+   ".claude-plugin/plugin.json",
+   ".claude/commands",
+   ".claude/commands/design.md",
+   ".claude/commands/import-design.md",
+   ".claude/commands/inspect.md",
+   "docs/status/cli-commands.yaml",
+   "tools/scripts/test_claude_plugin_command_discovery.py"
+  ],
+  "kind": "python"
+ }
+}
