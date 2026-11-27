@@ -39,4 +39,21 @@ execute_process(
 if(NOT _rc EQUAL 0)
     message(FATAL_ERROR "clean_root must pass (rc=${_rc})\n${_out}\n${_err}")
 endif()
-message(STATUS "link-closure-graph-writer: 4 routes reported, control passes")
+
+# An incomplete dump must never pass: drop the gpu_helper record, which route_name
+# reaches by an ordinary (non-pulp, non-namespaced) target name.
+file(READ "${_graph}" _full)
+string(REGEX REPLACE "(^|\n)gpu_helper\t[^\n]*" "" _gutted "${_full}")
+if(_gutted STREQUAL _full)
+    message(FATAL_ERROR "the graph has no gpu_helper record to remove")
+endif()
+file(WRITE "${BINARY_DIR}/gutted.tsv" "${_gutted}")
+execute_process(
+    COMMAND "${PYTHON}" "${CHECKER}" --graph "${BINARY_DIR}/gutted.tsv" --root route_name
+            --forbid "pulp::canvas"
+    RESULT_VARIABLE _rc OUTPUT_VARIABLE _out ERROR_VARIABLE _err)
+if(NOT _rc EQUAL 2 OR NOT _err MATCHES "gpu_helper")
+    message(FATAL_ERROR "a missing intermediate record must be INCONCLUSIVE "
+                        "(rc=${_rc})\n${_out}\n${_err}")
+endif()
+message(STATUS "link-closure-graph-writer: 4 routes reported, control passes, gutted graph inconclusive")

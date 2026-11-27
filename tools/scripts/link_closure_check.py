@@ -4,7 +4,8 @@
 Input is a link graph written at generate time by
 test/cmake/link_closure_graph.cmake: one record per target (every buildsystem
 target, plus the imported targets, aliases and object libraries they name),
-`name<TAB>type<TAB>LINK_LIBRARIES<TAB>INTERFACE_LINK_LIBRARIES<TAB>SOURCES`,
+`name<TAB>type<TAB>LINK_LIBRARIES<TAB>INTERFACE_LINK_LIBRARIES<TAB>SOURCES<TAB>REFS`
+(REFS: the words CMake resolved to a target; absent in older dumps),
 with the values as CMake stored them (generator expressions unevaluated). An
 edge is any word of those values that names a node, so a link, a
 `$<TARGET_OBJECTS:objs>` source and an imported target are all followed, and a
@@ -22,7 +23,8 @@ still owes; every allowed edge is printed, so an exemption never goes unseen.
 
 A graph that cannot be trusted is never a PASS: a record with fewer than four
 fields (a truncated dump) and a reachable target-shaped name (`pulp-*` or a
-`ns::name` target, or any name a `$<TARGET_OBJECTS:x>`-style expression names) that
+`ns::name` target, a name the writer's REFS field or a `$<TARGET_OBJECTS:x>`-style
+expression names as a target) that
 has no record are both INCONCLUSIVE. Paths, flags and
 generator-expression tokens are not target-shaped, so they are not held against
 the graph.
@@ -100,9 +102,12 @@ class Graph:
                 graph.malformed.append(line.strip()[:80])
                 continue
             name = canonical(fields[0].strip())
+            if len(fields) >= 6:
+                # The writer lists the words CMake resolved to a target.
+                graph.explicit.update(canonical(w) for w in re.split(r"[;\s]+", fields[5]) if w)
             graph.types[name] = fields[1].strip()
             targets: list[str] = []
-            for value in fields[2:]:
+            for value in fields[2:5]:
                 if value.endswith("-NOTFOUND"):
                     continue
                 graph.explicit.update(canonical(m) for m in EXPLICIT_TARGET_RE.findall(value))

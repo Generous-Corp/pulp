@@ -201,6 +201,20 @@ class ClosureWalk(unittest.TestCase):
         self.assertEqual(code, 1)
         self.assertIn("reaches pulp-view-core", err)
 
+    def test_missing_ordinary_named_target_record_is_inconclusive(self) -> None:
+        # The writer's REFS field says gpu_helper is a CMake target.
+        text = graph_text({"pulp-root": ("gpu_helper", "", "", "gpu_helper")})
+        code, err = self.run_raw(text, ["pulp-root"])
+        self.assertEqual(code, 2)
+        self.assertIn("gpu_helper", err)
+
+    def test_ordinary_named_target_with_record_is_walked(self) -> None:
+        records = {"pulp-root": ("gpu_helper", "", "", "gpu_helper"),
+                   "gpu_helper": ("pulp::view-core", "")}
+        code, _, err = self.run_check(records, ["pulp-root"], ["pulp-view*"])
+        self.assertEqual(code, 1)
+        self.assertIn("gpu_helper -> pulp-view-core", err)
+
     def test_truncated_record_is_inconclusive_not_a_pass(self) -> None:
         text = graph_text({"pulp-root": ("pulp::mid", "")})
         text += "pulp-mid\tSTATIC_LIBRARY\n"
