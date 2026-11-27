@@ -4,9 +4,12 @@
 // A signed content pack declares capabilities by wire name. Pulp's format layer
 // validates those names for a remote update, and Vellum's scripted-UI bridge
 // enforces the grant, so both sides must agree on every name. This target links
-// format-core and Vellum only, so it also proves the remote-update gate builds
-// and runs with no Pulp view headers present.
+// format-core and Vellum only, so it also proves pack building, signing,
+// installing and the remote-update gate build and run with no Pulp view headers
+// present.
 #include <catch2/catch_test_macros.hpp>
+#include <pulp/format/reload/pack_build.hpp>
+#include <pulp/format/reload/pack_install.hpp>
 #include <pulp/format/reload/remote_update.hpp>
 #include <pulp/runtime/crypto.hpp>
 #include <pulp/runtime/reload_capabilities.hpp>
@@ -142,4 +145,61 @@ TEST_CASE("Remote UX update validation runs without the Pulp view layer",
                                                       4, granted({}), true, &srl);
         CHECK(result.verdict == RemoteUpdateVerdict::RejectSignature);
     }
+}
+
+TEST_CASE("A UX pack is built, signed, installed and accepted without the Pulp view layer",
+          "[pulp-vellum][reload][signed-pack]") {
+    static std::atomic<int> counter{0};
+    const auto base = fs::temp_directory_path() /
+                      ("pulp-vellum-signed-pack-" + std::to_string(counter.fetch_add(1)) + "-" +
+                       std::to_string(reinterpret_cast<std::uintptr_t>(&counter)));
+    const auto bundle = base / "bundle";
+    const auto installs = base / "installed";
+    fs::create_directories(bundle / "assets");
+    std::ofstream(bundle / "ui.js", std::ios::binary)
+        << "createLabel('v', 'A', '');\nstorageSetItem('last', 'A');\n";
+    std::ofstream(bundle / "assets" / "knob.svg", std::ios::binary) << "<svg/>";
+
+    // Capabilities are inferred from the bundle's JS, least privilege first.
+    auto built = build_signable_manifest(bundle, "com.pulp.demo", 7, "stable");
+    REQUIRE(built.ok);
+    auto& manifest = built.manifest;
+    CHECK(manifest.declared_capabilities == std::vector<std::string>{"storage"});
+    REQUIRE(manifest.files.size() == 2);
+
+    auto keys = pulp::runtime::ed25519_keypair_generate();
+    REQUIRE(keys.has_value());
+    manifest.signer_public_key = keys->public_key;
+    const auto message = swap_pack_signed_message(manifest);
+    auto signature = pulp::runtime::ed25519_sign(keys->private_key.data(), keys->private_key.size(),
+                                                 message.data(), message.size());
+    REQUIRE(signature.has_value());
+    manifest.signature = *signature;
+    REQUIRE(verify_swap_pack(bundle, manifest, keys->public_key).ok());
+
+    const auto installed = install_verified_pack(bundle, manifest, keys->public_key, installs);
+    REQUIRE(installed.ok());
+    CHECK(fs::exists(installed.installed_root / "assets" / "knob.svg"));
+
+    SignedRevocationList srl;
+    srl.epoch = 1;
+    CHECK(evaluate_remote_ux_update(installed.installed_root, manifest, keys->public_key, 6,
+                                    granted({"storage"}), true, &srl)
+              .verdict == RemoteUpdateVerdict::Accept);
+    CHECK(evaluate_remote_ux_update(installed.installed_root, manifest, keys->public_key, 6,
+                                    granted({}), true, &srl)
+              .verdict == RemoteUpdateVerdict::RejectCapabilityEscalation);
+
+    // A byte changed after signing is refused at install.
+    std::ofstream(bundle / "ui.js", std::ios::binary | std::ios::app) << "exec('rm');\n";
+    const auto tampered =
+        install_verified_pack(bundle, manifest, keys->public_key, base / "installed-tampered");
+    CHECK(tampered.status == PackInstall::NotTrusted);
+
+    std::error_code ec;
+    fs::permissions(installs, fs::perms::owner_all, fs::perm_options::add, ec);
+    for (auto it = fs::recursive_directory_iterator(installs, ec);
+         !ec && it != fs::recursive_directory_iterator(); it.increment(ec))
+        fs::permissions(it->path(), fs::perms::owner_all, fs::perm_options::add, ec);
+    fs::remove_all(base, ec);
 }

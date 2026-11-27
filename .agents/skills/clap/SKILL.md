@@ -160,19 +160,19 @@ struct. It owns:
   consistent with that ordering.
 - `ara_controller` — lazily created on the first host query for the
   ARA companion-factory extension.
-- `bridge` + `editor_host` + `editor_visible` — gated on
-  `PULP_CLAP_GUI`. Editor lifecycle flows through `ViewBridge`; see the
-  `view-bridge` skill for the open/attach/close protocol.
+- `legacy_gui`: the `create_view()` editor's state (`LegacyClapGui`:
+  `bridge`, `editor_host`, GPU-surface subscription, frame timer,
+  visibility), held behind a type-erased `unique_ptr` with a function-pointer
+  deleter and created on the first GUI call. Editor lifecycle flows through
+  `ViewBridge`; see the `view-bridge` skill for the open/attach/close protocol.
 
-`PulpClapPlugin` is consumed from two translation units: the per-plugin
-`clap_entry.cpp` and the shared `clap_adapter.cpp` in `pulp-format`.
-They must see the same GUI define. Desktop plugin builds compile both
-with `PULP_CLAP_GUI=1`; WCLAP/non-GUI builds compile both with
-`PULP_CLAP_GUI=0`. Do not add GUI-only fields under a preprocessor
-condition unless the shared adapter target receives the same condition.
-A layout mismatch presents as random CLAP lifecycle corruption, often a
-REAPER crash in `gui_create()` or `clap_activate()` touching a bogus
-`bridge`/`editor_host` pointer.
+`PulpClapPlugin` has one layout whatever `PULP_CLAP_GUI` says: no field sits
+under that define, and `clap_adapter.hpp` names no view type. Keep it that
+way. A GUI-only field goes in `LegacyClapGui`
+(`core/format/src/clap_legacy_gui_state.hpp`), not in `PulpClapPlugin` under a
+preprocessor condition: the per-plugin entry and the shared adapter would
+then need to agree on the define, and a mismatch presents as random lifecycle
+corruption (a REAPER crash in `gui_create()` or `clap_activate()`).
 
 ### Parameters
 
@@ -501,9 +501,14 @@ current mode. Test: `test_clap_midi_events.cpp` `[clap][render][offline]`.
 
 ### Editor
 
-Gated on `PULP_CLAP_GUI`; for desktop CLAP, both the shared
-`pulp-format` adapter TU and the per-plugin entry TU must compile with
-the same value. Lifecycle flows through
+Gated on `PULP_CLAP_GUI`. The callbacks compile at the end of
+`clap_adapter.cpp` under that define, which only `pulp-format` sets
+(`pulp-format-clap-core` carries none of it), and the entry reaches them
+through two view-free declarations in `clap_entry.hpp`
+(`legacy_gui_extension`, `legacy_timer_extension`). Neither `clap_entry.hpp` nor
+`clap_adapter.hpp` includes a view header, even conditionally:
+`header_fanout_guard` counts conditional includes, and one such include put
+every CLAP entry TU in the canvas and view fan-out. Lifecycle flows through
 `pulp::format::ViewBridge`, constructed from
 `ViewBridge::Options::hosted_editor()` (never a hand-assembled `Options` — see
 the `view-bridge` skill for why, and for the test that enforces it):
@@ -538,9 +543,8 @@ straight:
   `PULP_CLAP_GUI` build) or none.
 - Per-instance state is `PulpClapPlugin::contract_gui`, a type-erased
   `std::shared_ptr<void>`, so `clap_adapter.hpp` and `clap_adapter.cpp` need no
-  contract types. It is declared after `processor` and outside the
-  `PULP_CLAP_GUI` block, so its offset does not depend on that define, and a
-  GUI the host never destroyed goes before the processor that owns its factory.
+  contract types. It is declared after `processor`, so a GUI the host never
+  destroyed goes before the processor that owns its factory.
 - Idle: when the host offers `timer-support`, a timer is registered at
   `set_parent()` and ticked through this plug-in's `timer-support` extension. The
   plug-in only exposes that extension when the contract applies. Without host
@@ -990,9 +994,10 @@ C-locale `strtod` wrapper shared with the `.pulpset` parser.
 Do not use `#ifdef PULP_CLAP_GUI` for CLAP GUI fields or extension
 dispatch; use `#if defined(PULP_CLAP_GUI) && PULP_CLAP_GUI`. The WCLAP
 path may define `PULP_CLAP_GUI=0`, and `#ifdef` treats that as enabled.
-The desktop shared adapter and the per-plugin entry must agree on
-whether GUI fields exist in `PulpClapPlugin`, or later lifecycle fields
-shift and hosts crash when opening or activating the editor.
+`PulpClapPlugin` keeps one layout under either value (GUI state lives in
+the type-erased `legacy_gui`), so do not reintroduce a GUI field under the
+define: the entry and the adapter would have to agree on it, or later
+lifecycle fields shift and hosts crash when opening or activating the editor.
 
 ### ARA CLAP lives outside `CLAP_EXT_*`
 

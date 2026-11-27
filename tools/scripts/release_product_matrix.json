@@ -80,6 +80,7 @@
         "pulp-dawproject-import",
         "pulp-design-import",
         "pulp-design-import-audio-pack",
+        "pulp-editor-bridge",
         "pulp-events",
         "pulp-format",
         "pulp-format-clap-core",
