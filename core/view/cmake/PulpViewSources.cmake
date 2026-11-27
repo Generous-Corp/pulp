@@ -142,6 +142,9 @@ target_sources(pulp-view-core PRIVATE
 # The attach_native_runtime overloads below name view-script types, so they
 # stay in pulp-view-tooling, which links the core.
 target_link_libraries(pulp-view-tooling PUBLIC pulp::editor-bridge)
+# Consumers of the tooling layer, where the attachments are defined, see their
+# declarations through pulp/view/editor_bridge.hpp too.
+target_compile_definitions(pulp-view-tooling PUBLIC PULP_EDITOR_BRIDGE_VIEW_ATTACHMENTS=1)
 
 # Pulp-kept plugin-host and editor facilities: the component inspector and the
 # editor bridge attachments. They stay outside pulp-view-core's extractable closure; their
