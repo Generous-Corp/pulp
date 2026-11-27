@@ -120,8 +120,8 @@ class PresetProgramEditor : public View {
     /// The host's answer to `on_bank_text_request`. A rename may be empty; a
     /// renumber must be a bank number that is free and in range.
     bool complete_bank_text(BankTextKind kind, const std::string& text) {
-        auto& pending = kind == BankTextKind::rename ? pending_rename_bank_
-                                                      : pending_renumber_bank_;
+        auto& pending =
+            kind == BankTextKind::rename ? pending_rename_bank_ : pending_renumber_bank_;
         const auto number = pending;
         pending.reset();
         refresh();
