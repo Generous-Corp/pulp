@@ -1796,11 +1796,11 @@ set_tests_properties(cmake-vellum-ui-in-tree-real PROPERTIES
     SKIP_REGULAR_EXPRESSION "SKIP: no installed Vellum SDK")
 if(Vellum_DIR)
     # With a Vellum SDK it configures the tree three times and builds
-    # format-core, format-view and pulp-vellum in the in-tree mode, so it runs
-    # in the Vellum SDK consumer lane (pulp-vellum) and not on the required
-    # gate (slow).
+    # format-core, format-view, pulp-vellum and the retained examples in the
+    # in-tree mode, so it runs in the Vellum SDK consumer lane (pulp-vellum)
+    # and not on the required gate (slow).
     set_tests_properties(cmake-vellum-ui-in-tree-real PROPERTIES
-        LABELS "cmake;sdk;pulp-vellum;slow" TIMEOUT 1800)
+        LABELS "cmake;sdk;pulp-vellum;slow" TIMEOUT 3600)
 endif()
 unset(_vellum_ui_in_tree_args)
 

@@ -75,6 +75,16 @@ on:
       - 'core/**/CMakeLists.txt'
       - 'inspect/CMakeLists.txt'
       - 'tools/cli/cmake/PulpCliForceLoad.cmake'
+      # The plug-in packaging the `real` scenario builds in the mode: the
+      # helpers, the link floor, the examples it configures there and the
+      # NO_EDITOR link floor fixture it runs.
+      - 'tools/cmake/PulpPlugin.cmake'
+      - 'tools/cmake/PulpPluginFormats.cmake'
+      - 'tools/cmake/PulpLinkFloor.cmake'
+      - 'examples/CMakeLists.txt'
+      - 'examples/vellum_in_tree.cmake'
+      - 'examples/collect_example_targets.cmake'
+      - 'test/fixtures/no_editor_link_floor/**'
       - '.github/workflows/vellum-sdk-consumer.yml'
   workflow_dispatch:
     inputs:

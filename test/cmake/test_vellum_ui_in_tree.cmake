@@ -25,9 +25,13 @@
 #           one of those. The list only shrinks: a consumer that is ported must
 #           leave it, and a new one, by any spelling, fails the test. Without
 #           VELLUM_DIR it prints SKIP, unless REQUIRE_VELLUM is on. A third
-#           configure, with the inspector off, has no unported consumer and
-#           builds pulp-format-core, pulp-format-view and pulp-vellum; nm
-#           confirms format-core is the PULP_FORMAT_LEGACY_VIEW=0 build. A
+#           configure, with the inspector off and the examples on, has no
+#           unported consumer and builds pulp-format-core, pulp-format-view,
+#           pulp-vellum, every retained example and the NO_EDITOR link floor
+#           fixture; nm confirms format-core is the PULP_FORMAT_LEGACY_VIEW=0
+#           build, that each plug-in module sits in its bundle with pulp::format
+#           and no pulp::view or pulp::canvas symbol and no scripted editor,
+#           and the fixture's tests pass. A
 #           probe plug-in added to that tree builds its CLAP module without
 #           PULP_CLAP_GUI, each Pulp view editor keyword is refused, and a
 #           program linking pulp::format-view alone reaches both adapters.
@@ -365,29 +369,74 @@ elseif(SCENARIO STREQUAL "real")
     list(LENGTH _unported _unported_count)
     message(STATUS "real: six names served from Vellum, ${_skip_count} directories left out, ${_unported_count} consumers still to port")
 
-    # Build: the same profile with the inspector off, which leaves out every
-    # consumer still listed above, must configure and generate cleanly, and
-    # pulp-format-core, pulp-format-view and the Vellum editor adapter that
-    # serves the view half must build. format-core must be the UI-free one:
-    # its archive holds the reserved create_view slot and the mode marker,
-    # and no create_view under its plain name.
-    file(REMOVE_RECURSE "${FIXTURE_DIR}/real-build")
+    # Build: the same profile with the inspector off and the examples on, which
+    # leaves out every consumer still listed above, must configure and generate
+    # cleanly. pulp-format-core, pulp-format-view and the Vellum editor adapter
+    # that serves the view half must build, and so must every retained example
+    # (examples/vellum_in_tree.cmake) and the NO_EDITOR link floor fixture.
+    # format-core must be the UI-free one: its archive holds the reserved
+    # create_view slot and the mode marker, and no create_view under its plain
+    # name. A deferred include (registered by a project include, so no file in
+    # the source tree changes) writes the list of plug-in modules the examples
+    # define, with their source directories, and adds an object that defines a
+    # pulp::view symbol as the control for the symbol scan below.
+    set(_plugins_src "${FIXTURE_DIR}/real-plugins-src")
+    file(REMOVE_RECURSE "${FIXTURE_DIR}/real-build" "${_plugins_src}")
+    file(WRITE "${_plugins_src}/view_marker.cpp"
+        "namespace pulp::view { int in_tree_plugin_scan_marker() { return 6; } }\n")
+    file(WRITE "${_plugins_src}/plugins.cmake"
+        "add_library(pulp-in-tree-view-marker OBJECT \"${_plugins_src}/view_marker.cpp\")\n"
+        "add_custom_target(pulp-in-tree-plugin-proof)\n"
+        "add_dependencies(pulp-in-tree-plugin-proof pulp-in-tree-view-marker pulp-examples-all\n"
+        "    pulp-format-core pulp-format-view pulp-vellum)\n"
+        "foreach(_t PulpNoEditorLinkFloor_VST3 PulpNoEditorLinkFloor_CLAP PulpNoEditorLinkFloor_AU\n"
+        "        PulpNoEditorLinkFloorControl_CLAP)\n"
+        "    if(TARGET \${_t})\n"
+        "        add_dependencies(pulp-in-tree-plugin-proof \${_t})\n"
+        "    endif()\n"
+        "endforeach()\n"
+        "include(\"\${CMAKE_SOURCE_DIR}/tools/cmake/PulpCollectTargets.cmake\")\n"
+        "pulp_collect_targets_recursive(_targets \"\${CMAKE_SOURCE_DIR}/examples\"\n"
+        "    TYPES MODULE_LIBRARY SHARED_LIBRARY EXECUTABLE)\n"
+        "get_property(_dirs DIRECTORY \"\${CMAKE_SOURCE_DIR}/examples\" PROPERTY SUBDIRECTORIES)\n"
+        "set(_lines \"\")\n"
+        "foreach(_dir IN LISTS _dirs)\n"
+        "    string(APPEND _lines \"dir|\${_dir}\\n\")\n"
+        "endforeach()\n"
+        "foreach(_t IN LISTS _targets)\n"
+        "    if(_t MATCHES \"_(VST3|CLAP|AU|Standalone|AUv3Framework)$\")\n"
+        "        get_target_property(_src \${_t} SOURCE_DIR)\n"
+        "        string(APPEND _lines \"module|\${_t}|\${_src}|$<TARGET_FILE:\${_t}>\\n\")\n"
+        "    endif()\n"
+        "endforeach()\n"
+        "string(APPEND _lines \"marker|$<TARGET_OBJECTS:pulp-in-tree-view-marker>\\n\")\n"
+        "file(GENERATE OUTPUT \"\${CMAKE_BINARY_DIR}/pulp-in-tree-plugin-modules.txt\"\n"
+        "    CONTENT \"\${_lines}\")\n")
+    set(_plugins_include "${FIXTURE_DIR}/real-plugins-include.cmake")
+    file(WRITE "${_plugins_include}"
+        "if(CMAKE_CURRENT_SOURCE_DIR STREQUAL CMAKE_SOURCE_DIR)\n"
+        "    cmake_language(DEFER DIRECTORY \"\${CMAKE_SOURCE_DIR}\" CALL include\n"
+        "        \"${_plugins_src}/plugins.cmake\")\n"
+        "endif()\n")
     execute_process(COMMAND "${CMAKE_COMMAND}" -S "${PULP_SOURCE_DIR}"
             -B "${FIXTURE_DIR}/real-build" ${_common} -DPULP_UI_FROM_VELLUM_IN_TREE=ON
-            -DPULP_ENABLE_INSPECTOR=OFF
+            -DPULP_ENABLE_INSPECTOR=OFF -DPULP_BUILD_EXAMPLES=ON
+            -DPULP_VELLUM_IN_TREE_LINK_FLOOR_FIXTURE=ON
+            -DCMAKE_PROJECT_Pulp_INCLUDE=${_plugins_include}
         RESULT_VARIABLE _rc OUTPUT_VARIABLE _out ERROR_VARIABLE _err)
     if(NOT _rc EQUAL 0)
-        message(FATAL_ERROR "real: the inspector-off configure failed:\n${_out}${_err}")
+        message(FATAL_ERROR "real: the inspector-off, examples-on configure failed:\n${_out}${_err}")
     endif()
     _reject("${_out}${_err}" "unported " "an unported consumer with the inspector off")
     # Through the build governor, so the build takes a share of a shared host
     # rather than every core.
     execute_process(COMMAND "${PULP_SOURCE_DIR}/tools/ci/governed-build.sh"
             "${CMAKE_COMMAND}" --build "${FIXTURE_DIR}/real-build"
-            --target pulp-format-core pulp-format-view pulp-vellum
+            --target pulp-in-tree-plugin-proof
         RESULT_VARIABLE _rc OUTPUT_VARIABLE _out ERROR_VARIABLE _err)
     if(NOT _rc EQUAL 0)
-        message(FATAL_ERROR "real: format-core, format-view or pulp-vellum did not build in the mode:\n${_out}${_err}")
+        message(FATAL_ERROR "real: format-core, format-view, pulp-vellum, the retained examples or "
+            "the link floor fixture did not build in the mode:\n${_out}${_err}")
     endif()
     find_program(_nm NAMES nm llvm-nm)
     if(NOT _nm)
@@ -409,6 +458,165 @@ elseif(SCENARIO STREQUAL "real")
         "the reserved create_view slot defined in pulp-format-core")
     _reject("${_symbols}" "9Processor11create_viewE" "Processor::create_view under its plain name")
     message(STATUS "real: format-core, format-view and pulp-vellum build in the mode; format-core is UI-free")
+
+    # Every retained example builds, and every plug-in module it defines is a
+    # bundle that carries the format adapter and none of Pulp's view.
+    #   - Count: each example vellum_in_tree.cmake adds without a guard must
+    #     have been configured, and each configured example that calls
+    #     pulp_add_plugin must contribute a module, so an example that silently
+    #     drops out fails here.
+    #   - Bundle: each VST3, CLAP, AU, Standalone and AU v3 framework module
+    #     lies inside its bundle, next to the bundle's Info.plist.
+    #   - Symbols: nm finds no pulp::view or pulp::canvas symbol in a module,
+    #     and at least one pulp::format symbol, so a near-empty symbol table
+    #     cannot pass as clean. The same nm and pattern must find the
+    #     pulp::view symbol the marker object defines.
+    #   - Scripted editors stay opt-in: no module loads Vellum's view-script
+    #     library or names its script engine; the pattern is shown to match
+    #     the engine in the Vellum provider library that defines it.
+    set(_manifest_file "${FIXTURE_DIR}/real-build/pulp-in-tree-plugin-modules.txt")
+    if(NOT EXISTS "${_manifest_file}")
+        message(FATAL_ERROR "real: the plug-in module list was not written: ${_manifest_file}")
+    endif()
+    file(STRINGS "${_manifest_file}" _manifest)
+    set(_configured_dirs "")
+    set(_modules "")
+    set(_marker "")
+    foreach(_line IN LISTS _manifest)
+        if(_line MATCHES "^dir\\|(.+)$")
+            list(APPEND _configured_dirs "${CMAKE_MATCH_1}")
+        elseif(_line MATCHES "^module\\|")
+            list(APPEND _modules "${_line}")
+        elseif(_line MATCHES "^marker\\|(.+)$")
+            set(_marker "${CMAKE_MATCH_1}")
+        endif()
+    endforeach()
+    file(STRINGS "${PULP_SOURCE_DIR}/examples/vellum_in_tree.cmake" _example_lines
+        REGEX "^add_subdirectory\\(")
+    if(NOT _example_lines)
+        message(FATAL_ERROR "real: examples/vellum_in_tree.cmake adds no example")
+    endif()
+    foreach(_line IN LISTS _example_lines)
+        string(REGEX REPLACE "^add_subdirectory\\(([^)]+)\\).*$" "\\1" _example "${_line}")
+        if(NOT "${PULP_SOURCE_DIR}/examples/${_example}" IN_LIST _configured_dirs)
+            message(FATAL_ERROR "real: the retained example ${_example} was not configured in the mode")
+        endif()
+    endforeach()
+    foreach(_required IN ITEMS pulp-gain pulp-tone PulpSynth)
+        if(NOT "${PULP_SOURCE_DIR}/examples/${_required}" IN_LIST _configured_dirs)
+            message(FATAL_ERROR "real: ${_required} is not among the examples the mode builds")
+        endif()
+    endforeach()
+    set(_plugin_examples 0)
+    foreach(_dir IN LISTS _configured_dirs)
+        file(READ "${_dir}/CMakeLists.txt" _example_cmake)
+        if(NOT _example_cmake MATCHES "pulp_add_plugin")
+            continue()
+        endif()
+        math(EXPR _plugin_examples "${_plugin_examples} + 1")
+        set(_contributed FALSE)
+        foreach(_module IN LISTS _modules)
+            string(REPLACE "|" ";" _fields "${_module}")
+            list(GET _fields 2 _module_dir)
+            string(FIND "${_module_dir}/" "${_dir}/" _at)
+            if(_at EQUAL 0)
+                set(_contributed TRUE)
+            endif()
+        endforeach()
+        if(NOT _contributed)
+            message(FATAL_ERROR "real: the plug-in example ${_dir} built no module in the mode")
+        endif()
+    endforeach()
+
+    set(_view_pattern "[A-Za-z] pulp::(view|canvas)::")
+    set(_format_pattern "[A-Za-z] pulp::format::")
+    set(_script_pattern "[A-Za-z] (pulp::vellum::scripted_|vellum::view::Script(Engine|edUiSession))")
+    if(NOT _marker OR NOT EXISTS "${_marker}")
+        message(FATAL_ERROR "real: the pulp::view marker object was not built: '${_marker}'")
+    endif()
+    execute_process(COMMAND "${_nm}" -C "${_marker}" OUTPUT_VARIABLE _symbols RESULT_VARIABLE _rc ERROR_QUIET)
+    string(REGEX MATCHALL "${_view_pattern}" _hits "${_symbols}")
+    if(NOT _rc EQUAL 0 OR NOT _hits)
+        message(FATAL_ERROR "real: nm finds no pulp::view symbol in the marker object, so the module scan is blind:\n${_symbols}")
+    endif()
+    file(GLOB _provider "${VELLUM_DIR}/../../libvellum-skia-dawn-provider-*.dylib")
+    file(GLOB _view_script "${VELLUM_DIR}/../../../mirror/lib/libvellum-mirror-view-script-*.dylib")
+    if(NOT _provider OR NOT _view_script)
+        message(FATAL_ERROR "real: the Vellum provider or view-script library is missing from ${VELLUM_DIR}/../../..")
+    endif()
+    list(GET _provider 0 _provider)
+    execute_process(COMMAND "${_nm}" -C "${_provider}" OUTPUT_VARIABLE _symbols ERROR_QUIET)
+    string(REGEX MATCHALL "${_script_pattern}" _hits "${_symbols}")
+    if(NOT _hits)
+        message(FATAL_ERROR "real: nm finds no script engine in ${_provider}, so the scripted-editor scan is blind")
+    endif()
+
+    set(_counts "")
+    set(_total_bytes 0)
+    foreach(_module IN LISTS _modules)
+        string(REPLACE "|" ";" _fields "${_module}")
+        list(GET _fields 1 _target)
+        list(GET _fields 3 _file)
+        if(NOT EXISTS "${_file}")
+            message(FATAL_ERROR "real: ${_target} did not produce ${_file}")
+        endif()
+        if(_file MATCHES "^(.*\\.(clap|vst3|component|app))/Contents/MacOS/[^/]+$")
+            set(_plist "${CMAKE_MATCH_1}/Contents/Info.plist")
+        elseif(_file MATCHES "^(.*\\.framework)/Versions/A/[^/]+$")
+            set(_plist "${CMAKE_MATCH_1}/Versions/A/Resources/Info.plist")
+        else()
+            message(FATAL_ERROR "real: ${_target}'s module is not inside a bundle: ${_file}")
+        endif()
+        if(NOT EXISTS "${_plist}")
+            message(FATAL_ERROR "real: ${_target}'s bundle has no Info.plist: ${_plist}")
+        endif()
+        execute_process(COMMAND "${_nm}" -C "${_file}" OUTPUT_VARIABLE _symbols RESULT_VARIABLE _rc ERROR_QUIET)
+        if(NOT _rc EQUAL 0)
+            message(FATAL_ERROR "real: nm could not read ${_file}")
+        endif()
+        string(REGEX MATCHALL "${_view_pattern}" _hits "${_symbols}")
+        if(_hits)
+            list(REMOVE_DUPLICATES _hits)
+            message(FATAL_ERROR "real: ${_target} carries Pulp view symbols in the mode (${_hits}): ${_file}")
+        endif()
+        string(REGEX MATCHALL "${_format_pattern}" _hits "${_symbols}")
+        if(NOT _hits)
+            message(FATAL_ERROR "real: nm finds no pulp::format symbol in ${_target}, so its scan proves nothing: ${_file}")
+        endif()
+        string(REGEX MATCHALL "${_script_pattern}" _hits "${_symbols}")
+        execute_process(COMMAND otool -L "${_file}" OUTPUT_VARIABLE _deps ERROR_QUIET)
+        if(_hits OR _deps MATCHES "libvellum-mirror-view-script")
+            message(FATAL_ERROR "real: ${_target} carries a scripted editor although no example selects one: ${_file}")
+        endif()
+        file(SIZE "${_file}" _bytes)
+        math(EXPR _total_bytes "${_total_bytes} + ${_bytes}")
+        string(REGEX REPLACE "^.*_" "" _format "${_target}")
+        list(APPEND _counts "${_format}")
+    endforeach()
+    list(LENGTH _modules _module_count)
+    set(_summary "")
+    foreach(_format IN ITEMS VST3 CLAP AU Standalone AUv3Framework)
+        set(_n 0)
+        foreach(_seen IN LISTS _counts)
+            if(_seen STREQUAL _format)
+                math(EXPR _n "${_n} + 1")
+            endif()
+        endforeach()
+        string(APPEND _summary " ${_format}=${_n}")
+    endforeach()
+    math(EXPR _total_kib "${_total_bytes} / 1024")
+    message(STATUS "real: ${_plugin_examples} plug-in examples built ${_module_count} modules in their bundles "
+        "(${_summary} ), ${_total_kib} KiB of module code, none with a Pulp view symbol or a scripted editor")
+
+    # The NO_EDITOR link floor in the mode: its editor-less modules carry
+    # neither Pulp's view nor Vellum's, and its control carries Vellum's.
+    execute_process(COMMAND "${CMAKE_CTEST_COMMAND}" --test-dir "${FIXTURE_DIR}/real-build"
+            --output-on-failure -R "^(no-editor-plugin-link-floor-artifacts|no-editor-link-floor-runtime-pattern|plugin-third-party-notices)$"
+        RESULT_VARIABLE _rc OUTPUT_VARIABLE _out ERROR_VARIABLE _err)
+    if(NOT _rc EQUAL 0 OR NOT _out MATCHES "100% tests passed[^\n]* out of 3")
+        message(FATAL_ERROR "real: the NO_EDITOR link floor fixture failed in the mode:\n${_out}${_err}")
+    endif()
+    message(STATUS "real: the NO_EDITOR link floor holds in the mode")
 
     # Plug-ins in the mode, through the real pulp_add_plugin. The probe runs
     # at the end of the top-level directory, after every Pulp target exists,
