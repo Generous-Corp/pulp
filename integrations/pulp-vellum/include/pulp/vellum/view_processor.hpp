@@ -17,7 +17,7 @@
 /// };
 /// ```
 ///
-/// `editor_factory()` returns a `ViewEditorFactory` over these hooks, so the
+/// `editor_factory()` returns a factory over these hooks, so the
 /// editor opens through the editor-host contract in every format adapter, with
 /// the ViewBridge protocol: `on_view_opened` after a native attach,
 /// `on_view_resized` while attached, `on_view_closed` once per attach, and no
@@ -96,11 +96,44 @@ template <class Base = format::Processor> class ViewProcessor : public Base {
     virtual void on_view_resized(::vellum::view::View& /*view*/, std::uint32_t /*w*/,
                                  std::uint32_t /*h*/) {}
 
+    /// This processor's editor factory. It offers the settings role only while
+    /// `settings_sections()` returns a section with a view, so a host shows no
+    /// settings item for a plug-in that has none.
     format::EditorFactory* editor_factory() override {
-        return &factory();
+        return &advertised_;
     }
 
   private:
+    // Answers supports() for its own processor, then builds through the
+    // shared factory below. Owned by the processor, as the contract asks.
+    class AdvertisedFactory final : public format::EditorFactory {
+      public:
+        explicit AdvertisedFactory(ViewProcessor& owner) : owner_(owner) {}
+
+        bool supports(format::EditorRole role) const override {
+            if (role == format::EditorRole::settings) {
+                for (const auto& section : owner_.settings_sections())
+                    if (section.view != nullptr)
+                        return true;
+                return false;
+            }
+            return factory().supports(role);
+        }
+
+        std::unique_ptr<format::Editor> create(format::Processor& processor,
+                                               format::EditorContext& context,
+                                               format::EditorRole role) override {
+            return supports(role) ? factory().create(processor, context, role) : nullptr;
+        }
+
+        void prewarm() override {
+            factory().prewarm();
+        }
+
+      private:
+        ViewProcessor& owner_;
+    };
+
     static std::unique_ptr<::vellum::view::View>
     settings_view(std::vector<ViewSettingsSection> sections) {
         std::erase_if(sections, [](const ViewSettingsSection& s) { return s.view == nullptr; });
@@ -114,9 +147,9 @@ template <class Base = format::Processor> class ViewProcessor : public Base {
         return tabs;
     }
 
-    // One factory per Base. It holds no processor: each call reaches the
-    // processor the host passes to create(), which is the one whose
-    // editor_factory() returned it.
+    // One building factory per Base. It holds no processor: each call reaches
+    // the processor the host passes to create(), which is the one whose
+    // editor_factory() returned this processor's AdvertisedFactory.
     static ViewEditorFactory& factory() {
         static ViewEditorFactory instance(
             [](format::Processor& processor,
@@ -146,6 +179,8 @@ template <class Base = format::Processor> class ViewProcessor : public Base {
              format::EditorRole::settings});
         return instance;
     }
+
+    AdvertisedFactory advertised_{*this};
 };
 
 } // namespace pulp::vellum

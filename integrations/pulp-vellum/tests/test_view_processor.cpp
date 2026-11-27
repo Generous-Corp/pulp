@@ -242,7 +242,8 @@ TEST_CASE("Two ViewProcessors share one factory and each opens its own tree",
     Host h;
     Plugin first(1);
     Plugin second(2);
-    CHECK(first.editor_factory() == second.editor_factory());
+    // Each processor owns its factory, as the editor-host contract asks.
+    CHECK(first.editor_factory() != second.editor_factory());
     auto a = h.open(first);
     auto* host_a = h.host;
     auto b = h.open(second);
@@ -274,11 +275,15 @@ TEST_CASE("A ViewProcessor offers an inspector window only when it builds one",
 TEST_CASE("A ViewProcessor's settings sections are its settings editor",
           "[pulp-vellum][view-processor][settings]") {
     Host h;
+    // No sections: the settings role is not offered at all, so a host shows no
+    // settings item, and asking anyway builds nothing.
     SettingsPlugin none(0);
-    REQUIRE(none.editor_factory()->supports(EditorRole::settings));
+    CHECK_FALSE(none.editor_factory()->supports(EditorRole::settings));
+    CHECK(none.editor_factory()->supports(EditorRole::editor));
     CHECK(h.open(none, EditorRole::settings) == nullptr);
 
     SettingsPlugin one(1);
+    CHECK(one.editor_factory()->supports(EditorRole::settings));
     auto single = h.open(one, EditorRole::settings);
     REQUIRE(single != nullptr);
     REQUIRE(single->attach(h.parent()));
