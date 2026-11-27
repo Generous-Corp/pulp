@@ -19,8 +19,22 @@ namespace pulp::inspect {
 /// completion never substitutes for their presentation endpoint.
 class ControlGpuHealthViewAdapter final {
   public:
+    /// What the adapter needs to know about a captured frame's pixels. Any
+    /// UI library can supply it, so the adapter itself links none.
+    struct ContentStats {
+        bool valid = false;
+        /// True when the capture clears the acceptance floor for real content
+        /// (not blank, not a single flat colour, essentially opaque).
+        bool passes_content_floor = false;
+        std::uint32_t total_pixels = 0;
+        double opaque_coverage = 0.0;
+        std::uint32_t unique_colors = 0;
+    };
+
     struct Config {
         std::shared_ptr<ControlGpuHealthProvider> provider;
+        /// Decodes a captured PNG and reports its content statistics.
+        std::function<ContentStats(const std::vector<std::uint8_t>&)> analyze_png;
         std::function<std::vector<std::uint8_t>()> capture_back_buffer_png;
         /// Returns optional native lifecycle evidence without making this
         /// Pulp-owned adapter depend on the generic GPU surface implementation.
