@@ -308,10 +308,16 @@ class PropertyPanel : public View {
         auto* p = find_mut(key);
         if (!p || p->kind != Kind::Button)
             return false;
-        // Copy the action: it may re-register properties (reallocating
+        // Take the action out: it may re-register properties (reallocating
         // properties_) or replace this very Button, destroying the functor.
-        if (auto action = p->on_click)
+        if (p->on_click) {
+            const std::string k(key);
+            std::function<void()> action;
+            action.swap(p->on_click); // swap, not move: a moved-from std::function need not be empty
             action();
+            if (Property* cur = find_mut(k); cur && !cur->on_click)
+                cur->on_click = std::move(action);
+        }
         return true;
     }
 
@@ -378,7 +384,7 @@ class PropertyPanel : public View {
                 existing = std::move(p);
                 // A re-registration from inside this key's own observer must
                 // not reload the stale persisted value over the pending change.
-                if (props_ && !(firing_ && *firing_ == existing.key))
+                if (props_ && !is_firing(existing.key))
                     load_from_props(existing);
                 return;
             }
@@ -386,6 +392,10 @@ class PropertyPanel : public View {
         properties_.push_back(std::move(p));
         if (props_)
             load_from_props(properties_.back());
+    }
+
+    bool is_firing(std::string_view key) const {
+        return std::find(firing_keys_.begin(), firing_keys_.end(), key) != firing_keys_.end();
     }
 
     Property* find_mut(std::string_view key) {
@@ -397,20 +407,25 @@ class PropertyPanel : public View {
     }
 
     // The observer may call add_* (reallocating properties_ or replacing this
-    // slot), so keep the key, callback and argument alive independently of the
-    // registry and reacquire the property by key before persisting.
+    // slot), so move the callback out (keeping any mutable captured state),
+    // keep the argument and key alive independently of the registry, and
+    // reacquire the property by key afterwards. A re-entrant fire of the same
+    // property from inside its own observer sees no callback and skips it.
     void fire(const Property& p) {
         const std::string key = p.key;
         if (p.on_change) {
-            const auto callback = p.on_change;
+            std::function<void(const Value&)> callback;
+            callback.swap(find_mut(key)->on_change); // swap, not move: moved-from need not be empty
             const Value arg = p.value;
+            firing_keys_.push_back(key);
             struct Guard {
-                const std::string*& slot;
-                const std::string* outer;
-                ~Guard() { slot = outer; }
-            } guard{firing_, firing_};
-            firing_ = &key;
+                std::vector<std::string>& keys;
+                ~Guard() { keys.pop_back(); }
+            } guard{firing_keys_};
             callback(arg);
+            // Restore only if the slot survived un-replaced.
+            if (Property* cur = find_mut(key); cur && !cur->on_change)
+                cur->on_change = std::move(callback);
         }
         if (const Property* current = find(key))
             persist(*current);
@@ -545,7 +560,7 @@ class PropertyPanel : public View {
     }
 
     std::vector<Property> properties_;
-    const std::string* firing_ = nullptr; ///< key whose observer is running
+    std::vector<std::string> firing_keys_; ///< keys whose observers are running (outer to inner)
     pulp::state::PropertiesFile* props_ = nullptr;
 };
 
