@@ -29,6 +29,8 @@
 ///
 /// Size hints come from `Processor::view_size()`, as ViewBridge reads them.
 ///
+/// Each editor copies the hooks, so it may outlive the factory that made it.
+///
 /// A hosted view (or any view below it) that implements `EditorIdleTarget`
 /// gets `editor_idle()` on every editor idle tick while attached, so a view
 /// that mirrors outside state (an update check, a meter) stays live.
@@ -94,9 +96,7 @@ class ViewEditorFactory final : public format::EditorFactory {
 
   private:
     ViewFactory make_;
-    // Shared with every editor this factory builds, so an editor keeps its
-    // hooks even if it outlives the factory.
-    std::shared_ptr<const ViewEditorHooks> hooks_;
+    ViewEditorHooks hooks_;
     std::vector<format::EditorRole> roles_;
 };
 

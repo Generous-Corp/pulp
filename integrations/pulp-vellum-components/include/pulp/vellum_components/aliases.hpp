@@ -12,6 +12,7 @@
 namespace pulp::vellum_components {
 
 namespace canvas = ::vellum::canvas;
+namespace view = ::vellum::view;
 using ::vellum::view::FlexAlign;
 using ::vellum::view::FlexDirection;
 using ::vellum::view::Label;

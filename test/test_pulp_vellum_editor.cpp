@@ -2442,6 +2442,32 @@ TEST_CASE("One view editor factory serves several editors at once",
     CHECK(f.events.closing == 2);
 }
 
+TEST_CASE("A view editor keeps its hooks after the factory that made it is destroyed",
+          "[pulp-vellum][view-editor][lifetime]") {
+    Fixture f;
+    auto token = std::make_shared<int>(0);
+    std::weak_ptr<int> alive = token;
+    auto factory = std::make_unique<pulp::vellum::ViewEditorFactory>(
+        [](pulp::format::Processor&, EditorRole) -> std::unique_ptr<::vellum::view::View> {
+            return std::make_unique<PluginView>();
+        },
+        pulp::vellum::ViewEditorHooks{
+            .opened = [token](pulp::format::Processor&, ::vellum::view::View&) { ++*token; },
+            .closing = [token](pulp::format::Processor&, ::vellum::view::View&) { ++*token; }});
+    auto editor = factory->create(f.processor, *f.context, EditorRole::editor);
+    REQUIRE(editor != nullptr);
+    factory.reset();
+    token.reset();
+    // The editor, not the factory, now owns the callbacks' captures.
+    REQUIRE_FALSE(alive.expired());
+    REQUIRE(editor->attach(f.parent()));
+    editor->detach();
+    CHECK(*alive.lock() == 2);
+    editor.reset();
+    CHECK(alive.expired());
+}
+
+
 // A view below the hosted root that mirrors outside state on each tick.
 class IdleCounter final : public ::vellum::view::View, public pulp::vellum::EditorIdleTarget {
   public:
@@ -2477,27 +2503,6 @@ TEST_CASE("A view editor ticks every idle target in the hosted tree while attach
     editor->detach();
     editor->idle();
     CHECK(nested->ticks == 2);
-}
-
-TEST_CASE("A view editor keeps its hooks after its factory is gone",
-          "[pulp-vellum][view-editor][lifetime]") {
-    Fixture f;
-    std::unique_ptr<pulp::format::Editor> editor;
-    {
-        auto factory = std::make_unique<pulp::vellum::ViewEditorFactory>(f.factory());
-        editor = factory->create(f.processor, *f.context, EditorRole::editor);
-        REQUIRE(editor != nullptr);
-        // Overwrite the factory's storage before it is freed, so a root that
-        // still pointed into it would read the poisoned bytes.
-        auto* bytes = reinterpret_cast<unsigned char*>(factory.get());
-        factory->~ViewEditorFactory();
-        std::fill(bytes, bytes + sizeof(pulp::vellum::ViewEditorFactory), 0xA5);
-        ::operator delete(factory.release());
-    }
-    REQUIRE(editor->attach(f.parent()));
-    CHECK(f.events.opened == 1);
-    editor->detach();
-    CHECK(f.events.closing == 1);
 }
 
 } // namespace view_editor_test
