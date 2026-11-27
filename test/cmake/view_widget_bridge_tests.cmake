@@ -1146,6 +1146,18 @@ pulp_test_spawns(pulp-test-group-view-widgets NONE REASON "its only spawn runs t
 # include path.
 pulp_add_test_suite(pulp-test-editor-bridge-core NO_PCH
     LIBRARIES pulp::editor-bridge)
+# The deprecated attachment members compile with editor_bridge_attach.hpp and
+# fail to compile without it, instead of failing to link.
+if(CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
+    add_test(NAME editor-bridge-deprecated-forwarders
+        COMMAND ${CMAKE_COMMAND}
+            -DCXX=${CMAKE_CXX_COMPILER}
+            -DPULP_SOURCE_DIR=${CMAKE_SOURCE_DIR}
+            -DCHOC_DIR=${choc_SOURCE_DIR}
+            -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/test_editor_bridge_forwarders.cmake)
+    set_tests_properties(editor-bridge-deprecated-forwarders PROPERTIES
+        LABELS "editor-bridge" TIMEOUT 60)
+endif()
 
 # Input events tests
 pulp_add_test_suite(pulp-test-input-events GROUP pulp-test-group-view-widgets LIBRARIES pulp::view)

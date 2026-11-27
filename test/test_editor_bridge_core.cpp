@@ -4,10 +4,11 @@
 // The target links pulp::editor-bridge and nothing else, so these cases prove
 // that an SDK without Pulp's view libraries (one that serves its UI names from
 // Vellum) still gets a working bridge, and that the bridge's include closure
-// exposes none of Pulp's legacy view headers next to Vellum's. The header must
-// declare only what the library defines: every member is called below, so a
-// declaration without a definition fails this target's link, and the attach
-// members that need view types must not be declared at all.
+// exposes none of Pulp's legacy view headers next to Vellum's. Every
+// non-template function the header declares is called below, so a declaration
+// the library does not define fails this target's link. The deprecated
+// attachment members are templates that forward to editor_bridge_attach.hpp;
+// test_editor_bridge_forwarders.cmake proves a use without it fails to compile.
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -25,30 +26,6 @@
 #endif
 
 using pulp::view::EditorBridge;
-
-namespace pulp::view {
-class WebViewPanel;
-class ScriptEngine;
-class ScriptedUiSession;
-class JsRuntime;
-} // namespace pulp::view
-
-// The view-side attachments live in pulp/view/editor_bridge_attach.hpp, which
-// pulp::view-tooling defines. A member of the same name here would compile in a
-// core-only consumer and fail only at link time.
-namespace {
-template <class Bridge>
-concept HasViewAttachments =
-    requires(Bridge& b, pulp::view::WebViewPanel& p) { b.attach_webview(p); } ||
-    requires(Bridge& b, pulp::view::WebViewPanel& p) { b.detach_webview(p); } ||
-    requires(Bridge& b, pulp::view::JsRuntime& r) { b.attach_native_runtime(r, "x"); } ||
-    requires(Bridge& b, pulp::view::ScriptEngine& e) { b.attach_native_runtime(e, "x"); } ||
-    requires(Bridge& b, pulp::view::ScriptedUiSession& s) { b.attach_native_runtime(s, "x"); } ||
-    requires(Bridge& b, pulp::view::ScriptedUiSession& s) { b.detach_native_runtime(s, "x"); };
-} // namespace
-
-static_assert(!HasViewAttachments<EditorBridge>,
-              "EditorBridge's header must not declare the view-side attachments");
 
 TEST_CASE("EditorBridge core dispatches a registered handler",
           "[editor_bridge][editor-bridge-core]") {

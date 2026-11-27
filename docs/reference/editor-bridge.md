@@ -117,6 +117,14 @@ dispatch core: a consumer that links only `pulp::editor-bridge` (for example
 through a Vellum-backed `Pulp::view-tooling`) sees no declaration it cannot
 link.
 
+The earlier member spellings (`bridge.attach_webview(panel)` and the rest)
+remain as deprecated member templates that forward to these functions. They
+compile wherever the free functions are declared: in a target that links
+`pulp::view-tooling` (which defines `PULP_EDITOR_BRIDGE_VIEW_ATTACHMENTS`, so
+`editor_bridge.hpp` brings the declarations in) or after including
+`editor_bridge_attach.hpp`. Anywhere else a use is a compile error, not a link
+error.
+
 ### `attach_webview`
 
 Routes a `WebViewPanel`'s structured message channel through this

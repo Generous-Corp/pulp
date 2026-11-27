@@ -54,6 +54,29 @@
 
 namespace pulp::view {
 
+// The deprecated member spellings on EditorBridge forward through these. Each
+// call names the free function unqualified with arguments that depend on the
+// source's type, so argument-dependent lookup resolves it where the member is
+// used, to the function in pulp/view/editor_bridge_attach.hpp. Without that
+// header the use is a compile error, never an undefined symbol: this header
+// names no view type and the bridge library defines none of the attachments.
+namespace editor_bridge_forward {
+template <class Bridge, class Panel> void to_attach_webview(Bridge& bridge, Panel& panel) {
+    attach_webview(bridge, panel);
+}
+template <class Bridge, class Panel> void to_detach_webview(Bridge& bridge, Panel& panel) {
+    detach_webview(bridge, panel);
+}
+template <class Bridge, class Source>
+void to_attach_native_runtime(Bridge& bridge, Source& source, std::string_view handler_name) {
+    attach_native_runtime(bridge, source, handler_name);
+}
+template <class Bridge, class Session>
+void to_detach_native_runtime(Bridge& bridge, Session& session, std::string_view handler_name) {
+    detach_native_runtime(bridge, session, handler_name);
+}
+} // namespace editor_bridge_forward
+
 /// Renderer-agnostic dispatcher for editor↔processor JSON messages.
 ///
 /// Typical usage from a plugin editor:
@@ -140,6 +163,41 @@ public:
     std::string dispatch_webview_message(std::string_view type,
                                          std::string_view payload_json) const noexcept;
 
+    // ── Deprecated attachment spellings ──────────────────────────────
+    //
+    // The attachments are free functions in pulp/view/editor_bridge_attach.hpp,
+    // defined by pulp::view-tooling. These members keep the earlier spelling
+    // compiling; they are templates so this header names no view type, and a
+    // use still needs that header included.
+
+    template <class Panel>
+    [[deprecated(
+        "include <pulp/view/editor_bridge_attach.hpp> and call attach_webview(bridge, panel)")]]
+    void attach_webview(Panel& panel) {
+        editor_bridge_forward::to_attach_webview(*this, panel);
+    }
+
+    template <class Panel>
+    [[deprecated(
+        "include <pulp/view/editor_bridge_attach.hpp> and call detach_webview(bridge, panel)")]]
+    void detach_webview(Panel& panel) {
+        editor_bridge_forward::to_detach_webview(*this, panel);
+    }
+
+    template <class Source>
+    [[deprecated("include <pulp/view/editor_bridge_attach.hpp> and call "
+                 "attach_native_runtime(bridge, source, name)")]]
+    void attach_native_runtime(Source& source, std::string_view handler_name) {
+        editor_bridge_forward::to_attach_native_runtime(*this, source, handler_name);
+    }
+
+    template <class Session>
+    [[deprecated("include <pulp/view/editor_bridge_attach.hpp> and call "
+                 "detach_native_runtime(bridge, session, name)")]]
+    void detach_native_runtime(Session& session, std::string_view handler_name) {
+        editor_bridge_forward::to_detach_native_runtime(*this, session, handler_name);
+    }
+
     // ── Static value-coercion helpers for handler authors ────────────
     //
     // ValueView's typed getters throw on type mismatch. These helpers
@@ -174,3 +232,12 @@ private:
 };
 
 } // namespace pulp::view
+
+// A target that links pulp::view-tooling, which defines the attachments, gets
+// this definition and so the attachment declarations with this header, which
+// keeps the deprecated member spellings compiling for it. A target that links
+// only the dispatch core does not, and a use of an attachment there is a
+// compile error rather than an undefined symbol.
+#if defined(PULP_EDITOR_BRIDGE_VIEW_ATTACHMENTS) && PULP_EDITOR_BRIDGE_VIEW_ATTACHMENTS
+#include <pulp/view/editor_bridge_attach.hpp>
+#endif

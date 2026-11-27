@@ -1986,7 +1986,13 @@ and view-script types, so they are free functions declared in
 links the core; `render_claude_bridge_scaffold` is in
 `pulp/view/editor_bridge_scaffold.hpp`. A member declared in the core header
 but defined in view-tooling compiles for a core-only consumer and fails only at
-link time; `pulp-test-editor-bridge-core` refuses that shape at compile time. Keep any new
+link time. The old member spellings survive as deprecated member templates
+that forward through argument-dependent lookup, so the core header names no
+view type: `pulp::view-tooling` defines `PULP_EDITOR_BRIDGE_VIEW_ATTACHMENTS`,
+which makes `editor_bridge.hpp` include the attach header for its consumers,
+and a core-only consumer gets a compile error instead of an undefined symbol
+(`editor-bridge-deprecated-forwarders` proves both). Do not turn a forwarder
+back into a non-template member: that reintroduces the link-time trap. Keep any new
 dispatch code free of view-script includes; in an SDK that serves its UI names
 from Vellum, `Pulp::view-tooling` links the core and nothing else of Pulp's
 view, so a WebView editor's bridge comes from it.
