@@ -1,9 +1,7 @@
 #pragma once
 
 // PNG encoding for the `pulp audio` image verbs, defined in cmd_audio.cpp
-// beside the scope renderer that already owns the render-layer include.
-// Keeping the include there means the image sources do not pull the canvas
-// and render headers into their translation units.
+// beside the scope renderer. The encoder itself is audio_png_encoder.hpp.
 
 #include <cstdint>
 #include <string>

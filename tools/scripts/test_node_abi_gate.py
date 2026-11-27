@@ -185,6 +185,204 @@ class NodeAbiSurfaceUnitTests(unittest.TestCase):
                     nag.check_surface(root, "origin/main", "Processor", "processor.hpp") or "",
                 )
 
+    def test_legacy_view_name_macro_is_the_plain_slot(self) -> None:
+        base = textwrap.dedent(
+            """\
+            class Processor {
+            public:
+              virtual std::unique_ptr<view::View> create_view();
+              virtual void on_view_opened(view::View& /*view*/) {}
+              virtual void* editor_factory();
+            };
+            """
+        )
+        spelled = textwrap.dedent(
+            """\
+            #if PULP_FORMAT_LEGACY_VIEW
+            #define PULP_FORMAT_LEGACY_VIEW_NAME(name) name
+            #else
+            #define PULP_FORMAT_LEGACY_VIEW_NAME(name) reserved_legacy_view_##name##_
+            #endif
+            class Processor {
+            public:
+              virtual std::unique_ptr<view::View> PULP_FORMAT_LEGACY_VIEW_NAME(create_view)();
+              virtual void PULP_FORMAT_LEGACY_VIEW_NAME( on_view_opened )(view::View& /*view*/) {}
+              virtual void* editor_factory();
+            };
+            """
+        )
+        self.assertEqual(
+            nag.virtual_order(spelled, "Processor"), nag.virtual_order(base, "Processor")
+        )
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            (root / "processor.hpp").write_text(spelled, encoding="utf-8")
+            with mock.patch.object(nag, "git_show", return_value=base):
+                self.assertIsNone(nag.check_surface(root, "origin/main", "Processor", "processor.hpp"))
+
+    def test_legacy_view_name_macro_default_expansion_is_pinned(self) -> None:
+        identity = textwrap.dedent(
+            """\
+            #if PULP_FORMAT_LEGACY_VIEW
+            #define PULP_FORMAT_LEGACY_VIEW_NAME(name) name
+            #else
+            #define PULP_FORMAT_LEGACY_VIEW_NAME(name) reserved_legacy_view_##name##_
+            #endif
+            class Processor {
+            public:
+              virtual std::unique_ptr<view::View> PULP_FORMAT_LEGACY_VIEW_NAME(create_view)();
+            };
+            """
+        )
+        self.assertEqual(len(nag.virtual_order(identity, "Processor")), 1)
+        # A default expansion other than the plain name renames every slot
+        # behind the macro in the default build: refused.
+        renamed = identity.replace(
+            "#define PULP_FORMAT_LEGACY_VIEW_NAME(name) name\n",
+            "#define PULP_FORMAT_LEGACY_VIEW_NAME(name) name##_v2\n",
+        )
+        with self.assertRaisesRegex(ValueError, "exactly its two definitions"):
+            nag.virtual_order(renamed, "Processor")
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            (root / "processor.hpp").write_text(renamed, encoding="utf-8")
+            with mock.patch.object(nag, "git_show", return_value=identity):
+                self.assertIn(
+                    "exactly its two definitions",
+                    nag.check_surface(root, "origin/main", "Processor", "processor.hpp") or "",
+                )
+        # Used but never defined is refused too.
+        undefined = identity.split("class Processor", 1)[1]
+        with self.assertRaisesRegex(ValueError, "not defined"):
+            nag.virtual_order("class Processor" + undefined, "Processor")
+
+    def test_legacy_view_name_macro_still_flags_a_signature_change(self) -> None:
+        base = textwrap.dedent(
+            """\
+            class Processor {
+            public:
+              virtual void on_view_opened(view::View& /*view*/) {}
+              virtual void* editor_factory();
+            };
+            """
+        )
+        changed = textwrap.dedent(
+            """\
+            #if PULP_FORMAT_LEGACY_VIEW
+            #define PULP_FORMAT_LEGACY_VIEW_NAME(name) name
+            #else
+            #define PULP_FORMAT_LEGACY_VIEW_NAME(name) reserved_legacy_view_##name##_
+            #endif
+            class Processor {
+            public:
+              virtual void PULP_FORMAT_LEGACY_VIEW_NAME(on_view_opened)(const view::View& /*view*/) {}
+              virtual void* editor_factory();
+            };
+            """
+        )
+        renamed = textwrap.dedent(
+            """\
+            #if PULP_FORMAT_LEGACY_VIEW
+            #define PULP_FORMAT_LEGACY_VIEW_NAME(name) name
+            #else
+            #define PULP_FORMAT_LEGACY_VIEW_NAME(name) reserved_legacy_view_##name##_
+            #endif
+            class Processor {
+            public:
+              virtual void PULP_FORMAT_LEGACY_VIEW_NAME(on_view_shown)(view::View& /*view*/) {}
+              virtual void* editor_factory();
+            };
+            """
+        )
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            for text, expected in (
+                (changed, "virtual order is not additive-only"),
+                (renamed, "not a legacy view hook"),
+            ):
+                (root / "processor.hpp").write_text(text, encoding="utf-8")
+                with mock.patch.object(nag, "git_show", return_value=base):
+                    self.assertIn(
+                        expected,
+                        nag.check_surface(root, "origin/main", "Processor", "processor.hpp") or "",
+                    )
+
+    def test_legacy_view_name_macro_cannot_hide_an_injected_slot(self) -> None:
+        defines = textwrap.dedent(
+            """\
+            #if PULP_FORMAT_LEGACY_VIEW
+            #define PULP_FORMAT_LEGACY_VIEW_NAME(name) name
+            #else
+            #define PULP_FORMAT_LEGACY_VIEW_NAME(name) reserved_legacy_view_##name##_
+            #endif
+            """
+        )
+        processor = textwrap.dedent(
+            """\
+            class Processor {
+            public:
+              virtual void PULP_FORMAT_LEGACY_VIEW_NAME(on_view_opened)(view::View& /*view*/) {}
+              virtual void* editor_factory();
+            };
+            """
+        )
+        # Control: the pinned definitions normalize.
+        self.assertEqual(len(nag.virtual_order(defines + processor, "Processor")), 2)
+        # A default expansion that inserts a virtual before the slot.
+        injected = defines.replace(
+            "#define PULP_FORMAT_LEGACY_VIEW_NAME(name) name\n",
+            "#define PULP_FORMAT_LEGACY_VIEW_NAME(name) injected(); virtual void name\n",
+        )
+        # A third definition, an undef, or a guard that lets another header win.
+        third = defines + "#undef PULP_FORMAT_LEGACY_VIEW_NAME\n" \
+            "#define PULP_FORMAT_LEGACY_VIEW_NAME(name) injected(); virtual void name\n"
+        guarded = "#ifndef PULP_FORMAT_LEGACY_VIEW_NAME\n" + defines + "#endif\n"
+        for text, message in (
+            (injected, "exactly its two definitions"),
+            (third, "exactly its two definitions"),
+            (guarded, "may not be undefined or tested"),
+        ):
+            with self.assertRaisesRegex(ValueError, message):
+                nag.virtual_order(text + processor, "Processor")
+
+    def test_legacy_view_name_macro_is_refused_outside_processor(self) -> None:
+        defines = textwrap.dedent(
+            """\
+            #if PULP_FORMAT_LEGACY_VIEW
+            #define PULP_FORMAT_LEGACY_VIEW_NAME(name) name
+            #else
+            #define PULP_FORMAT_LEGACY_VIEW_NAME(name) reserved_legacy_view_##name##_
+            #endif
+            """
+        )
+        frozen = textwrap.dedent(
+            """\
+            class Editor {
+            public:
+              virtual void PULP_FORMAT_LEGACY_VIEW_NAME(idle)();
+            };
+            """
+        )
+        base = "class Editor {\npublic:\n  virtual void idle();\n};\n"
+        self.assertEqual(len(nag.virtual_order(base, "Editor")), 1)
+        with self.assertRaisesRegex(ValueError, "reserved for Processor"):
+            nag.virtual_order(defines + frozen, "Editor")
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            (root / "editor_host.hpp").write_text(defines + frozen, encoding="utf-8")
+            with mock.patch.object(nag, "git_show", return_value=base):
+                self.assertIn(
+                    "reserved for Processor",
+                    nag.check_surface(root, "origin/main", "Editor", "editor_host.hpp") or "",
+                )
+        # In Processor, a name that is not a legacy view hook is refused.
+        with self.assertRaisesRegex(ValueError, "not a legacy view hook: process"):
+            nag.virtual_order(
+                defines + "class Processor {\npublic:\n"
+                "  virtual void PULP_FORMAT_LEGACY_VIEW_NAME(process)();\n};\n",
+                "Processor",
+            )
+
     def test_check_surface_reports_parse_errors(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)

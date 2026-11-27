@@ -66,3 +66,29 @@ if(PULP_ENABLE_PULP_VELLUM_COMPONENTS)
     set_property(GLOBAL APPEND PROPERTY PULP_INTEGRATION_TEST_DIRS
         "${CMAKE_CURRENT_SOURCE_DIR}/pulp-vellum-components/tests")
 endif()
+
+option(PULP_ENABLE_PULP_VELLUM_SCENE
+    "Build integrations/pulp-vellum-scene (Vellum's Draco decoder behind the glTF loader hook; needs PULP_ENABLE_SCENE3D)" OFF)
+if(PULP_ENABLE_PULP_VELLUM_SCENE)
+    add_subdirectory(pulp-vellum-scene)
+    set_property(GLOBAL APPEND PROPERTY PULP_INTEGRATION_TEST_DIRS
+        "${CMAKE_CURRENT_SOURCE_DIR}/pulp-vellum-scene/tests")
+endif()
+
+# The native scene3d renderer on gpu-runtime, Vellum's GPU device layer. Off by
+# default; it needs PULP_ENABLE_SCENE3D and a macOS build with gpu-runtime.
+option(PULP_ENABLE_PULP_VELLUM_RENDERER3D
+    "Build integrations/pulp-vellum-renderer3d (the scene3d renderer on gpu-runtime's device; needs PULP_ENABLE_SCENE3D)" OFF)
+if(PULP_ENABLE_PULP_VELLUM_RENDERER3D)
+    add_subdirectory(pulp-vellum-renderer3d)
+    set_property(GLOBAL APPEND PROPERTY PULP_INTEGRATION_TEST_DIRS
+        "${CMAKE_CURRENT_SOURCE_DIR}/pulp-vellum-renderer3d/tests")
+endif()
+
+option(PULP_ENABLE_PULP_VELLUM_GRAPH
+    "Build integrations/pulp-vellum-graph (the SignalGraph node editor as a Vellum view; links pulp::host)" OFF)
+if(PULP_ENABLE_PULP_VELLUM_GRAPH)
+    add_subdirectory(pulp-vellum-graph)
+    set_property(GLOBAL APPEND PROPERTY PULP_INTEGRATION_TEST_DIRS
+        "${CMAKE_CURRENT_SOURCE_DIR}/pulp-vellum-graph/tests")
+endif()

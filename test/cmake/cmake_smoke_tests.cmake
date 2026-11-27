@@ -1720,6 +1720,9 @@ foreach(_vellum_ui_compat_scenario
     if(_vellum_ui_compat_scenario STREQUAL "real" OR _vellum_ui_compat_scenario STREQUAL "wrong-version")
         if(Vellum_DIR)
             set(_vellum_ui_compat_args -DVELLUM_DIR=${Vellum_DIR} -DREQUIRE_VELLUM=ON)
+            if(_vellum_ui_compat_scenario STREQUAL "real")
+                list(APPEND _vellum_ui_compat_args -DCHOC_DIR=${choc_SOURCE_DIR})
+            endif()
             set(_vellum_ui_compat_labels "cmake;sdk;pulp-vellum")
         endif()
     elseif(_vellum_ui_compat_scenario STREQUAL "gpu-owner-real")
@@ -1749,7 +1752,7 @@ unset(_vellum_ui_compat_labels)
 
 # The consumer modules read PULP_UI_PROVIDER, so a Vellum-backed Pulp::view
 # never has Pulp's view, render or editor-adapter sources compiled against it.
-foreach(_ui_provider_scenario provider editor no-editor bundle reload objc bytecode)
+foreach(_ui_provider_scenario provider editor no-editor bundle reload objc bytecode standalone)
     add_test(NAME cmake-ui-provider-${_ui_provider_scenario}
         COMMAND ${CMAKE_COMMAND}
             -DPULP_SOURCE_DIR=${CMAKE_SOURCE_DIR}
