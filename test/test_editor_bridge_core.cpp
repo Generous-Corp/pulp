@@ -20,7 +20,8 @@
 
 using pulp::view::EditorBridge;
 
-TEST_CASE("EditorBridge core dispatches a registered handler", "[editor_bridge][editor-bridge-core]") {
+TEST_CASE("EditorBridge core dispatches a registered handler",
+          "[editor_bridge][editor-bridge-core]") {
     EditorBridge bridge;
     int calls = 0;
     bridge.add_handler("ping", [&calls](const choc::value::ValueView&) {
@@ -31,7 +32,8 @@ TEST_CASE("EditorBridge core dispatches a registered handler", "[editor_bridge][
     CHECK(calls == 1);
 }
 
-TEST_CASE("EditorBridge core reports an unknown message type", "[editor_bridge][editor-bridge-core]") {
+TEST_CASE("EditorBridge core reports an unknown message type",
+          "[editor_bridge][editor-bridge-core]") {
     EditorBridge bridge;
     const std::string reply = bridge.dispatch_json(R"({"type":"missing"})");
     CHECK(reply.find("unknown message type") != std::string::npos);

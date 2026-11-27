@@ -282,6 +282,12 @@ python3 tools/scripts/gpu_handoff_provenance.py write --receipt             # re
 Pass `--receipt`. The published receipt is asserted against the ledger's bytes,
 so regenerating without it leaves a second gate red for the next reader.
 
+Renaming a pinned path has two more traps. The validator wants each entry's
+`pulp_paths` rows and its `retained_paths` bytewise sorted, so a moved path
+usually changes position and `write` refuses until you re-sort it. And
+`test_gpu_handoff_provenance.py` keeps a floor baseline that names every pinned
+path, so rename the path there in the same commit as the ledger edit.
+
 When a stale identity *does* surface, it surfaces through
 `gpu-recipe-catalog-selftest`, far from the file you edited:
 
