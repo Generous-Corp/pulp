@@ -1747,7 +1747,8 @@
       "pulp/vellum_components/model_manager_view.hpp",
       "pulp/vellum_components/panic_button.hpp",
       "pulp/vellum_components/panic_target.hpp",
-      "pulp/vellum_components/preferences_panel.hpp"
+      "pulp/vellum_components/preferences_panel.hpp",
+      "pulp/vellum_components/property_panel.hpp"
     ],
     "tools/audio/analysis/include": [
       "pulp/audio/analysis/audio_artifacts.hpp",
