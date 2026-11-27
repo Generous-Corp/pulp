@@ -14,6 +14,7 @@
 
 #include <pulp/format/app_updates.hpp>
 #include <pulp/format/processor.hpp>
+#include <pulp/format/detail/standalone_test_hooks.hpp>
 #include <pulp/format/standalone.hpp>
 #include <pulp/format/standalone_panel.hpp>
 #include <pulp/state/store.hpp>
@@ -35,6 +36,13 @@ using pulp::test_support::contract_log;
 using pulp::test_support::EditorEnvironment;
 using pulp::test_support::RecordingContractFactory;
 using pulp::test_support::reset_contract_recording;
+
+// The contract window's test controls live in detail::StandaloneTestHooks,
+// not in the public StandaloneConfig an app fills in.
+template <class C>
+concept ConfigCarriesWindowTestHooks = requires(C c) { c.test_open_plugin_settings_frame; };
+static_assert(!ConfigCarriesWindowTestHooks<pulp::format::StandaloneConfig>,
+              "StandaloneConfig must not carry the contract window's test hooks");
 
 namespace {
 
@@ -489,7 +497,7 @@ TEST_CASE("a standalone contract window opens the plug-in's settings editor in i
 
     pulp::format::StandaloneApp app(create_contract_processor);
     auto config = headless_config(png);
-    config.test_open_plugin_settings_frame = 1;
+    app.set_test_hooks({.open_plugin_settings_frame = 1});
     int max_live = 0;
     config.test_on_editor_frame = [&] { max_live = std::max(max_live, contract_log().live); };
     app.set_config(config);
@@ -521,7 +529,7 @@ TEST_CASE("a standalone contract window builds no settings editor the factory do
 
     pulp::format::StandaloneApp app(create_contract_processor);
     auto config = headless_config(png);
-    config.test_open_plugin_settings_frame = 1;
+    app.set_test_hooks({.open_plugin_settings_frame = 1});
     app.set_config(config);
     REQUIRE(app.run_with_editor(false));
     REQUIRE(contract_log().settings_created == 0);

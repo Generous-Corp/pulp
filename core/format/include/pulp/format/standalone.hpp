@@ -52,6 +52,10 @@ class PresetManager;
 class PresetLibrary;
 } // namespace pulp::state
 
+namespace pulp::format::detail {
+struct StandaloneTestHooks;
+}
+
 namespace pulp::format {
 
 class PresetProgramRouter;
@@ -201,6 +205,10 @@ public:
 
     void set_config(const StandaloneConfig& config) { config_ = config; }
     const StandaloneConfig& config() const { return config_; }
+
+    /// Test-only controls for the editor-host contract window
+    /// (detail/standalone_test_hooks.hpp). An app never calls this.
+    void set_test_hooks(const detail::StandaloneTestHooks& hooks);
 
     bool start();
     void stop();
@@ -437,6 +445,7 @@ public:
     // explicitly links and registers a canonical control host adapter.
     std::unique_ptr<StandaloneControlHost> control_host_;
     StandaloneConfig config_;
+    std::unique_ptr<detail::StandaloneTestHooks> test_hooks_;
     bool persisted_config_loaded_ = false;  // overlay persisted settings once, not on soft restarts
 
     // Plug-in state persistence. Main thread only.

@@ -6,6 +6,7 @@
 #include <pulp/format/detail/standalone_persistence.hpp>
 #include <pulp/format/detail/standalone_contract_editor.hpp>
 #include <pulp/format/detail/standalone_updater.hpp>
+#include <pulp/format/detail/standalone_test_hooks.hpp>
 #include <pulp/format/detail/standalone_settings_window.hpp>
 #include <pulp/format/detail/standalone_key_driver.hpp>
 #include <pulp/format/detail/standalone_key_sequence.hpp>
@@ -921,6 +922,10 @@ void StandaloneApp::shutdown_panels() noexcept {
     panels_.clear();
 }
 
+void StandaloneApp::set_test_hooks(const detail::StandaloneTestHooks& hooks) {
+    test_hooks_ = std::make_unique<detail::StandaloneTestHooks>(hooks);
+}
+
 bool StandaloneApp::run_contract_editor(EditorFactory& factory) {
     if (!detail::standalone_contract_editor_supported()) {
         runtime::log_error(
@@ -936,7 +941,8 @@ bool StandaloneApp::run_contract_editor(EditorFactory& factory) {
     options.screen_visible_width = config_.test_screen_visible_width;
     options.screen_visible_height = config_.test_screen_visible_height;
     options.on_window_ready = config_.test_on_editor_window;
-    options.test_open_plugin_settings_frame = config_.test_open_plugin_settings_frame;
+    if (test_hooks_)
+        options.test_open_plugin_settings_frame = test_hooks_->open_plugin_settings_frame;
     if (!config_.test_key_sequence.empty()) {
         std::string error;
         if (!detail::parse_key_sequence(config_.test_key_sequence, options.key_steps, error)) {

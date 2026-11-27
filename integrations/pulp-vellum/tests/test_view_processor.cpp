@@ -142,9 +142,37 @@ class InspectedPlugin final : public pulp::vellum::ViewProcessor<> {
     void process(pulp::audio::BufferView<float>&, const pulp::audio::BufferView<const float>&,
                  pulp::midi::MidiBuffer&, pulp::midi::MidiBuffer&,
                  const pulp::format::ProcessContext&) override {}
+    std::unique_ptr<::vellum::view::View> create_view() override {
+        return std::make_unique<Panel>(1);
+    }
     std::unique_ptr<::vellum::view::View> create_view(EditorRole role) override {
         return std::make_unique<Panel>(role == EditorRole::inspector ? 2 : 1);
     }
+    bool has_view(EditorRole role) const override {
+        return role == EditorRole::editor || role == EditorRole::inspector;
+    }
+};
+
+// A plug-in whose editor view exists only some of the time says so.
+class SometimesPlugin final : public pulp::vellum::ViewProcessor<> {
+  public:
+    pulp::format::PluginDescriptor descriptor() const override {
+        return {};
+    }
+    void define_parameters(pulp::state::StateStore&) override {}
+    void prepare(const pulp::format::PrepareContext&) override {}
+    void process(pulp::audio::BufferView<float>&, const pulp::audio::BufferView<const float>&,
+                 pulp::midi::MidiBuffer&, pulp::midi::MidiBuffer&,
+                 const pulp::format::ProcessContext&) override {}
+    std::unique_ptr<::vellum::view::View> create_view() override {
+        ++built;
+        return available ? std::make_unique<Panel>(5) : nullptr;
+    }
+    bool has_view(EditorRole role) const override {
+        return role == EditorRole::editor && available;
+    }
+    bool available = false;
+    int built = 0;
 };
 
 // Settings sections as a create_view() plug-in contributes them.
@@ -163,16 +191,21 @@ class SettingsPlugin final : public pulp::vellum::ViewProcessor<> {
         return std::make_unique<Panel>(0);
     }
     std::vector<pulp::vellum::ViewSettingsSection> settings_sections() override {
+        ++section_builds;
         std::vector<pulp::vellum::ViewSettingsSection> out;
         for (int i = 0; i < sections; ++i)
             out.push_back({"Section " + std::to_string(i), std::make_unique<Panel>(100 + i)});
         return out;
+    }
+    bool has_settings() const override {
+        return sections > 0;
     }
     void on_view_opened(::vellum::view::View& view) override {
         opened_view = &view;
     }
 
     int sections;
+    int section_builds = 0;
     ::vellum::view::View* opened_view = nullptr;
 };
 
@@ -237,6 +270,27 @@ TEST_CASE("A ViewProcessor whose create_view() returns null has no editor",
     CHECK(plugin.created == 1);
 }
 
+TEST_CASE("A ViewProcessor offers only the roles has_view names, and builds nothing to answer",
+          "[pulp-vellum][view-processor][roles]") {
+    Host h;
+    SometimesPlugin plugin;
+    plugin.set_state_store(&h.store);
+    auto* factory = plugin.editor_factory();
+    REQUIRE(factory != nullptr);
+    CHECK_FALSE(factory->supports(EditorRole::editor));
+    CHECK_FALSE(factory->supports(EditorRole::inspector));
+    CHECK_FALSE(factory->supports(EditorRole::settings));
+    CHECK(plugin.built == 0);
+    CHECK(factory->create(plugin, h.context, EditorRole::editor) == nullptr);
+    CHECK(plugin.built == 0);
+
+    plugin.available = true;
+    CHECK(factory->supports(EditorRole::editor));
+    CHECK(plugin.built == 0);
+    CHECK(factory->create(plugin, h.context, EditorRole::editor) != nullptr);
+    CHECK(plugin.built == 1);
+}
+
 TEST_CASE("Two ViewProcessors share one factory and each opens its own tree",
           "[pulp-vellum][view-processor]") {
     Host h;
@@ -275,15 +329,17 @@ TEST_CASE("A ViewProcessor offers an inspector window only when it builds one",
 TEST_CASE("A ViewProcessor's settings sections are its settings editor",
           "[pulp-vellum][view-processor][settings]") {
     Host h;
-    // No sections: the settings role is not offered at all, so a host shows no
-    // settings item, and asking anyway builds nothing.
+    // No sections: the settings role is not offered, and asking builds no view.
     SettingsPlugin none(0);
     CHECK_FALSE(none.editor_factory()->supports(EditorRole::settings));
     CHECK(none.editor_factory()->supports(EditorRole::editor));
-    CHECK(h.open(none, EditorRole::settings) == nullptr);
+    CHECK(none.section_builds == 0);
+
+    SettingsPlugin offered(2);
+    CHECK(offered.editor_factory()->supports(EditorRole::settings));
+    CHECK(offered.section_builds == 0);
 
     SettingsPlugin one(1);
-    CHECK(one.editor_factory()->supports(EditorRole::settings));
     auto single = h.open(one, EditorRole::settings);
     REQUIRE(single != nullptr);
     REQUIRE(single->attach(h.parent()));
