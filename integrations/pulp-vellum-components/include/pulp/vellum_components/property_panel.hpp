@@ -314,9 +314,15 @@ class PropertyPanel : public View {
             const std::string k(key);
             std::function<void()> action;
             action.swap(p->on_click); // swap, not move: a moved-from std::function need not be empty
+            firing_keys_.push_back(k);
+            struct Guard {
+                std::vector<std::string>& keys;
+                ~Guard() { keys.pop_back(); }
+            } guard{firing_keys_};
             action();
-            if (Property* cur = find_mut(k); cur && !cur->on_click)
-                cur->on_click = std::move(action);
+            if (!take_replaced(k))
+                if (Property* cur = find_mut(k))
+                    cur->on_click = std::move(action);
         }
         return true;
     }
@@ -382,6 +388,8 @@ class PropertyPanel : public View {
         for (auto& existing : properties_) {
             if (existing.key == p.key) {
                 existing = std::move(p);
+                if (is_firing(existing.key))
+                    replaced_keys_.push_back(existing.key);
                 // A re-registration from inside this key's own observer must
                 // not reload the stale persisted value over the pending change.
                 if (props_ && !is_firing(existing.key))
@@ -392,6 +400,16 @@ class PropertyPanel : public View {
         properties_.push_back(std::move(p));
         if (props_)
             load_from_props(properties_.back());
+    }
+
+    /// True (and forgets it) when `key` was re-registered while its callback ran.
+    bool take_replaced(std::string_view key) {
+        const auto it = std::find(replaced_keys_.begin(), replaced_keys_.end(), key);
+        if (it == replaced_keys_.end())
+            return false;
+        replaced_keys_.erase(std::remove(replaced_keys_.begin(), replaced_keys_.end(), key),
+                             replaced_keys_.end());
+        return true;
     }
 
     bool is_firing(std::string_view key) const {
@@ -424,8 +442,9 @@ class PropertyPanel : public View {
             } guard{firing_keys_};
             callback(arg);
             // Restore only if the slot survived un-replaced.
-            if (Property* cur = find_mut(key); cur && !cur->on_change)
-                cur->on_change = std::move(callback);
+            if (!take_replaced(key))
+                if (Property* cur = find_mut(key))
+                    cur->on_change = std::move(callback);
         }
         if (const Property* current = find(key))
             persist(*current);
@@ -505,6 +524,8 @@ class PropertyPanel : public View {
     static float clamp(float v, float lo, float hi) {
         if (hi < lo)
             return v;
+        if (v != v) // NaN compares false below and would escape the range
+            return lo;
         if (v < lo)
             return lo;
         if (v > hi)
@@ -560,6 +581,7 @@ class PropertyPanel : public View {
     }
 
     std::vector<Property> properties_;
+    std::vector<std::string> replaced_keys_; ///< keys re-registered during their own callback
     std::vector<std::string> firing_keys_; ///< keys whose observers are running (outer to inner)
     pulp::state::PropertiesFile* props_ = nullptr;
 };

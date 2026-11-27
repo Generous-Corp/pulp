@@ -18,6 +18,7 @@
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
+#include <limits>
 #include <regex>
 #include <set>
 #include <sstream>
@@ -405,4 +406,28 @@ TEST_CASE("PropertyPanel: mutable callback state survives across events and nest
     REQUIRE(panel.set_text("a", "new"));
     CHECK(panel.get_text("a").value_or("") == "new");
     CHECK(props.get_string("a").value_or("") == "new");
+}
+
+TEST_CASE("PropertyPanel: retired callbacks are not resurrected; NaN slider rejected",
+          "[property-panel][lifetime]") {
+    PropertyPanel panel;
+    int old_hits = 0;
+    int click_hits = 0;
+    panel.add_text("t", "T", "", [&](const std::string&) {
+        panel.add_text("t", "T", "replaced"); // replacement has no observer
+        ++old_hits;
+    });
+    panel.set_text("t", "1");
+    panel.set_text("t", "2");
+    CHECK(old_hits == 1);
+    panel.add_button("b", "B", [&] {
+        panel.add_button("b", "B", {});
+        ++click_hits;
+    });
+    panel.click("b");
+    panel.click("b");
+    CHECK(click_hits == 1);
+    panel.add_slider("s", "S", 0.0f, 1.0f, 0.5f);
+    panel.set_slider("s", std::numeric_limits<float>::quiet_NaN());
+    CHECK(panel.get_slider("s").value_or(-1.0f) == 0.0f);
 }
