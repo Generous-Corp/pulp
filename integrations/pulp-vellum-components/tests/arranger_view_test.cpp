@@ -13,6 +13,7 @@
 
 #include <cmath>
 #include <cstdint>
+#include <limits>
 #include <memory>
 #include <string>
 #include <vector>
@@ -267,6 +268,24 @@ struct PublishingHost final : EditIntentHost {
 };
 
 } // namespace
+
+TEST_CASE("Arranger tick_for_x saturates at the ends of the tick domain",
+          "[timeline][arranger][tick-saturation]") {
+    constexpr auto kMax = std::numeric_limits<std::int64_t>::max();
+    auto layout = unit_layout();
+    layout.origin_tick = {kMax - 10};
+    // 20 px past the lane edge at 1 px/tick is 10 ticks past the domain end.
+    CHECK(layout.tick_for_x(layout.lane_left_px + 20.0f).value == kMax);
+    CHECK(layout.tick_for_x(layout.lane_left_px + 5.0f).value == kMax - 5);
+    CHECK(layout.tick_for_x(layout.lane_left_px - 1.0e30f).value == 0);
+
+    // A scale so small the tick count leaves llround's domain saturates too.
+    layout.origin_tick = {100};
+    layout.px_per_tick = 1.0e-300;
+    CHECK(layout.tick_for_x(layout.lane_left_px + 1.0f).value == kMax);
+    CHECK(layout.tick_for_x(layout.lane_left_px - 1.0f).value == 0);
+    CHECK(layout.tick_for_x(layout.lane_left_px).value == 100);
+}
 
 TEST_CASE("Arranger track-header drags reorder authored tracks for mouse and touch",
           "[timeline][arranger][parity]") {

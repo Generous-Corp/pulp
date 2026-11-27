@@ -35,6 +35,29 @@ timebase::TickPosition clamp_tick(std::int64_t value) noexcept {
     return timebase::TickPosition{std::max<std::int64_t>(0, value)};
 }
 
+/// Signed tick arithmetic that saturates instead of overflowing. Pointer
+/// positions are untrusted input, so a far-off pointer against an origin
+/// near the end of the tick domain must clamp, not wrap.
+std::int64_t saturating_add(std::int64_t a, std::int64_t b) noexcept {
+    constexpr auto kMax = std::numeric_limits<std::int64_t>::max();
+    constexpr auto kMin = std::numeric_limits<std::int64_t>::min();
+    if (b > 0 && a > kMax - b)
+        return kMax;
+    if (b < 0 && a < kMin - b)
+        return kMin;
+    return a + b;
+}
+
+std::int64_t saturating_sub(std::int64_t a, std::int64_t b) noexcept {
+    constexpr auto kMax = std::numeric_limits<std::int64_t>::max();
+    constexpr auto kMin = std::numeric_limits<std::int64_t>::min();
+    if (b < 0 && a > kMax + b)
+        return kMax;
+    if (b > 0 && a < kMin + b)
+        return kMin;
+    return a - b;
+}
+
 bool is_nested_sequence(const Clip& clip) noexcept {
     return std::holds_alternative<SequenceRef>(clip.content());
 }
@@ -49,8 +72,16 @@ float ArrangerLayout::x_for_tick(timebase::TickPosition tick) const noexcept {
 timebase::TickPosition ArrangerLayout::tick_for_x(float x) const noexcept {
     if (px_per_tick == 0.0)
         return origin_tick;
-    const auto ticks = static_cast<double>(x - lane_left_px) / px_per_tick;
-    return clamp_tick(origin_tick.value + static_cast<std::int64_t>(std::llround(ticks)));
+    const auto ticks = std::round(static_cast<double>(x - lane_left_px) / px_per_tick);
+    if (std::isnan(ticks))
+        return origin_tick;
+    // Saturate before converting: llround and the addition are both undefined
+    // outside the int64 range, which a tiny scale or a far pointer reaches.
+    if (ticks >= kFirstOutOfRangeTickDuration)
+        return timebase::TickPosition{std::numeric_limits<std::int64_t>::max()};
+    if (ticks < -kFirstOutOfRangeTickDuration)
+        return clamp_tick(0);
+    return clamp_tick(saturating_add(origin_tick.value, static_cast<std::int64_t>(ticks)));
 }
 
 float ArrangerLayout::y_for_track_index(std::size_t index) const noexcept {
@@ -296,7 +327,8 @@ void ArrangerView::on_mouse_down(view::Point position) {
         drag.clip_id = clip->id();
         drag.duration = clip->duration();
         drag.believed = MusicalTimeRange{clip->start(), clip->duration()};
-        drag.grab_offset_ticks = layout_.tick_for_x(position.x).value - clip->start().value;
+        drag.grab_offset_ticks =
+            saturating_sub(layout_.tick_for_x(position.x).value, clip->start().value);
         drag_ = drag;
         return;
     }
@@ -339,7 +371,8 @@ void ArrangerView::on_mouse_drag(view::Point position) {
     }
     if (!drag_)
         return;
-    const auto target = clamp_tick(layout_.tick_for_x(position.x).value - drag_->grab_offset_ticks);
+    const auto target = clamp_tick(
+        saturating_sub(layout_.tick_for_x(position.x).value, drag_->grab_offset_ticks));
     if (target.value == drag_->believed.start.value)
         return;
 
@@ -400,7 +433,8 @@ void ArrangerView::on_mouse_up(view::Point position) {
     }
     if (!drag_)
         return;
-    const auto target = clamp_tick(layout_.tick_for_x(position.x).value - drag_->grab_offset_ticks);
+    const auto target = clamp_tick(
+        saturating_sub(layout_.tick_for_x(position.x).value, drag_->grab_offset_ticks));
     const MusicalTimeRange replacement{target, drag_->duration};
 
     if (!drag_->opened && target.value == drag_->believed.start.value) {
