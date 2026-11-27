@@ -418,6 +418,8 @@ class Tests(unittest.TestCase):
         if value is None:
             value = event("render-assets-and-backends", event_id=event_id)
             value["rationale"] = f"Record the {event_id} render change; no authority moves."
+            # Real events differ in more than event_id and rationale.
+            value["tests"] = [f"vellum-expansion-watch {event_id}"]
         write_json(repo / watch.EVENT_ROOT / f"{event_id}.json", value)
         return self.commit(repo, f"record {event_id}")
 
@@ -464,6 +466,20 @@ class Tests(unittest.TestCase):
         self.claim(repo, "core/render/a.cpp", "20261127-render-watch", value=first)
         copy_of = dict(first, event_id="20261127-render-copy-watch")
         head = self.claim(repo, "core/render/b.cpp", "20261127-render-copy-watch", value=copy_of)
+        report = self.active_verify(repo, base, head)
+        self.assertEqual(report["status"], "fail")
+        self.assertIn("record the same change", report["errors"][0])
+
+    def test_event_differing_only_in_id_and_rationale_fails(self) -> None:
+        temporary, repo = self.git_repo()
+        del temporary
+        base = run(repo, "git", "rev-parse", "HEAD").stdout.strip()
+        first = event("render-assets-and-backends", event_id="20261127-render-watch")
+        self.claim(repo, "core/render/a.cpp", "20261127-render-watch", value=first)
+        reworded = dict(first, event_id="20261127-render-reworded-watch",
+                        rationale="Reworded record of the same watched render change.")
+        head = self.claim(repo, "core/render/b.cpp", "20261127-render-reworded-watch",
+                          value=reworded)
         report = self.active_verify(repo, base, head)
         self.assertEqual(report["status"], "fail")
         self.assertIn("record the same change", report["errors"][0])

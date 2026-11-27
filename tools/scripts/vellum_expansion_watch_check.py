@@ -591,7 +591,10 @@ def _shared_claim_errors(
         rationales: dict[str, str] = {}
         duplicate = None
         for event in claiming:
-            body = {k: v for k, v in contents[event].items() if k != "event_id"}
+            body = {
+                k: v for k, v in contents[event].items()
+                if k not in {"event_id", "rationale"}
+            }
             key = json.dumps(body, sort_keys=True)
             rationale = " ".join(contents[event]["rationale"].split())
             twin = bodies.get(key) or rationales.get(rationale)
