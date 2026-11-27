@@ -508,6 +508,11 @@ the number sooner. The pending-intent liveness alarm's grace (210 minutes)
 sits above that window. Details: `docs/guides/version-at-land-cutover.md`,
 "Coalescing".
 
+The standing PR description is reconciled with its bump commit whenever the
+drain keeps or replaces that head. A failed description read or REST update is
+reported as an Actions error and fails the drain, so the next scheduled run
+retries instead of leaving reviewers with stale assigned versions.
+
 **The changelog trails by one release.** The bump for vX.Y.Z is written before its tag exists, so vX.Y.Z's section reaches `CHANGELOG.md` with the next bump. A separate post-tag PR would close that gap but pay the required gate a second time per release for one docs file; the GitHub Release page is current the moment the tag lands.
 
 **CHANGELOG.md source of truth:** `shipyard changelog regenerate` (shipyard v0.11+), configured via `[release.changelog]` in `.shipyard/config.toml`. With no args it rewrites `CHANGELOG.md` from the full tag graph and is idempotent. If a bump run logs `derived regenerator failed, leaving CHANGELOG.md stale`, the next bump retries it; to catch up by hand, run it locally and open a docs PR.

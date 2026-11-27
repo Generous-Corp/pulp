@@ -197,6 +197,12 @@ on a real PR. Do them in order.
    `git fetch origin main -q && git merge-base --is-ancestor <merge-sha> origin/main`.
    A `wait` exit code is not merge proof.
 
+The PR route of `version-at-land` keeps the standing bump description aligned
+with its commit. It compares the complete normalized body, filters the bump
+branch to this repository's head owner, and emits an Actions error plus a
+failing status when the description GET or PATCH fails; the next drain retries
+the reconciliation.
+
 ## A `run:` step stops at the first failing command
 
 GitHub's default shell for `run:` is `bash -e {0}` (no pipefail), so a step
@@ -3378,7 +3384,8 @@ Without the second line a zero is ambiguous between "not wired" and "bad grep".
 `.github/workflows/scene3d-advisory.yml` now covers that surface: path-filtered,
 advisory, `macos-15`, SCENE3D ON, not on `merge_group`. The `Vellum SDK
 consumer` lane also turns SCENE3D ON, for `integrations/pulp-vellum-renderer3d`
-(the scene3d renderer on gpu-runtime's device): that package refuses to
+(the scene3d renderer on gpu-runtime's device) and `integrations/pulp-vellum-scene`
+(Vellum's Draco decoder behind the glTF loader hook): those packages refuse to
 configure without `pulp::scene`. Three things about the scene3d lane
 generalize to any lane you add:
 
@@ -13950,6 +13957,13 @@ with `-k 0`, and uploads a JSON report grouped by capability-ledger row. Notes:
   (`cmake-vellum-ui-compat-real`, `-wrong-version`) take the label only when the
   configure found Vellum, and with `REQUIRE_VELLUM` they fail instead of
   printing SKIP, which ctest reports as skipped and leaves the lane green.
+- **The installed-SDK smoke is a separate configure and build.** `cmake
+  --install` aborts on any unbuilt target, and the labelled build above builds
+  only test targets, so the smoke step configures `build-vellum-install` with
+  the release profile and builds everything before running
+  `test/cmake/test_vellum_installed_sdk_smoke.cmake` (an install to an empty
+  prefix, then a from-scratch consumer). Its control configures the same
+  consumer with Vellum unfindable and must be refused.
 
 ## Exporting a platform's Vellum closure
 
