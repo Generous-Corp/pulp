@@ -162,6 +162,43 @@ class ClosureWalk(unittest.TestCase):
         self.assertEqual(code, 2)
         self.assertIn("not a real build graph", err)
 
+    def run_raw(self, text: str, roots: list[str]) -> tuple[int, str]:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "graph.tsv"
+            path.write_text(text, encoding="utf-8")
+            argv = ["--graph", str(path), "--forbid", "pulp-view*"]
+            for root in roots:
+                argv += ["--root", root]
+            err = io.StringIO()
+            with redirect_stdout(io.StringIO()), redirect_stderr(err):
+                code = lcc.main(argv)
+            return code, err.getvalue()
+
+    def test_missing_intermediate_record_is_inconclusive_not_a_pass(self) -> None:
+        records = {"pulp-root": ("pulp::mid", "pulp::mid")}
+        code, _, err = self.run_check(records, ["pulp-root"], ["pulp-view*"])
+        self.assertEqual(code, 2)
+        self.assertIn("pulp-mid", err)
+        self.assertIn("no record", err)
+
+    def test_missing_namespaced_target_record_is_inconclusive(self) -> None:
+        records = {"pulp-root": ("vendor::lib", "")}
+        code, _, _ = self.run_check(records, ["pulp-root"], ["pulp-view*"])
+        self.assertEqual(code, 2)
+
+    def test_truncated_record_is_inconclusive_not_a_pass(self) -> None:
+        text = graph_text({"pulp-root": ("pulp::mid", "")})
+        text += "pulp-mid\tSTATIC_LIBRARY\n"
+        code, err = self.run_raw(text, ["pulp-root"])
+        self.assertEqual(code, 2)
+        self.assertIn("malformed", err)
+
+    def test_paths_flags_and_generator_tokens_are_not_unresolved_targets(self) -> None:
+        records = {"pulp-root": ("-lm;/opt/x/libfoo.a;$<BUILD_INTERFACE:/src/include>;"
+                                 "$<LINK_ONLY:pthread>;src/pulp-thing.cpp", "")}
+        code, _, _ = self.run_check(records, ["pulp-root"], ["pulp-view*"])
+        self.assertEqual(code, 0)
+
     def test_malformed_allow_is_inconclusive(self) -> None:
         code, _, _ = self.run_check({"pulp-a": ("", "")}, ["pulp-a"], ["pulp-view*"],
                                     allow=["nonsense"])

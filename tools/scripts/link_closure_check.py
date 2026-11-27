@@ -20,9 +20,16 @@ normalised so `pulp::x`, `Pulp::x` and `pulp-x` are one target.
 A root may name an `--allow` edge (`from>to`) for a dependency the layering
 still owes; every allowed edge is printed, so an exemption never goes unseen.
 
+A graph that cannot be trusted is never a PASS: a record with fewer than four
+fields (a truncated dump) and a reachable target-shaped name (`pulp-*` or a
+`ns::name` target) that has no record are both INCONCLUSIVE. Paths, flags and
+generator-expression tokens are not target-shaped, so they are not held against
+the graph.
+
 Exit codes: 0 no root reaches a forbidden target, 1 a root does (each path is
-printed), 2 the input could not be read, a root is absent from the graph, or the
-graph is too small to be a real one.
+printed), 2 the input could not be read, the graph holds a malformed record, a
+root is absent, a reachable target has no record, or the graph is too small to
+be a real one.
 """
 
 from __future__ import annotations
@@ -36,6 +43,7 @@ from pathlib import Path
 
 MIN_GRAPH_TARGETS = 20
 WORD_RE = re.compile(r"[A-Za-z0-9_+.@/-]+")
+TARGET_SHAPED_RE = re.compile(r"^(?:pulp-[a-z0-9_+-]+|[a-z0-9_+-]+::[a-z0-9_+:-]+)$")
 ARCHIVE_RE = re.compile(r"^(?:lib)?(.+?)\.(?:a|so|dylib|lib|dll)(?:\.[0-9.]+)?$")
 
 
@@ -73,6 +81,7 @@ class Graph:
     def __init__(self) -> None:
         self.edges: dict[str, list[str]] = {}
         self.types: dict[str, str] = {}
+        self.malformed: list[str] = []
 
     @classmethod
     def parse(cls, text: str) -> "Graph":
@@ -81,7 +90,8 @@ class Graph:
             if not line.strip():
                 continue
             fields = line.split("\t")
-            if len(fields) < 4:
+            if len(fields) < 4 or not fields[0].strip():
+                graph.malformed.append(line.strip()[:80])
                 continue
             name = canonical(fields[0].strip())
             graph.types[name] = fields[1].strip()
@@ -104,8 +114,13 @@ def matches(name: str, patterns: list[str]) -> bool:
 
 
 def find_paths(graph: Graph, root: str, forbidden: list[str],
-               allowed_edges: set[tuple[str, str]]) -> list[list[str]]:
-    """Shortest path from root to each forbidden target it reaches."""
+               allowed_edges: set[tuple[str, str]],
+               unresolved: list[str] | None = None) -> list[list[str]]:
+    """Shortest path from root to each forbidden target it reaches.
+
+    A reachable, target-shaped name with no record is appended to `unresolved`:
+    its own closure was never inspected.
+    """
     parent: dict[str, str | None] = {root: None}
     queue: deque[str] = deque([root])
     found: list[list[str]] = []
@@ -121,6 +136,9 @@ def find_paths(graph: Graph, root: str, forbidden: list[str],
                     path.append(parent[path[-1]])  # type: ignore[arg-type]
                 found.append(list(reversed(path)))
                 continue
+            if (target not in graph.edges and unresolved is not None
+                    and TARGET_SHAPED_RE.match(target)):
+                unresolved.append(target)
             queue.append(target)
     return found
 
@@ -133,10 +151,14 @@ def check(graph: Graph, roots: list[str], forbidden: list[str],
         if root not in graph.edges:
             errors.append(f"INCONCLUSIVE root {root} is not in the link graph")
             continue
-        paths = find_paths(graph, root, forbidden, allowed_edges)
+        unresolved: list[str] = []
+        paths = find_paths(graph, root, forbidden, allowed_edges, unresolved)
+        for target in unresolved:
+            errors.append(f"INCONCLUSIVE root {root} reaches {target}, which has no "
+                          "record in the link graph, so its closure was not inspected")
         for path in paths:
             errors.append(f"FAIL {root} reaches {path[-1]}: {' -> '.join(path)}")
-        if not paths:
+        if not paths and not unresolved:
             notes.append(f"{root}: closure holds none of {forbidden}")
     return errors, notes
 
@@ -156,6 +178,11 @@ def main(argv: list[str] | None = None) -> int:
         graph = Graph.parse(args.graph.read_text(encoding="utf-8"))
     except OSError as error:
         print(f"link-closure: INCONCLUSIVE: {error}", file=sys.stderr)
+        return 2
+    if graph.malformed:
+        print(f"link-closure: INCONCLUSIVE: {len(graph.malformed)} malformed graph "
+              f"record(s), the dump is truncated or corrupt: {graph.malformed[:3]}",
+              file=sys.stderr)
         return 2
     if len(graph.edges) < MIN_GRAPH_TARGETS:
         print(f"link-closure: INCONCLUSIVE: the graph holds {len(graph.edges)} targets, "
