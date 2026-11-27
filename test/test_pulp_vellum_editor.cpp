@@ -2467,7 +2467,6 @@ TEST_CASE("A view editor keeps its hooks after the factory that made it is destr
     CHECK(alive.expired());
 }
 
-
 // A view below the hosted root that mirrors outside state on each tick.
 class IdleCounter final : public ::vellum::view::View, public pulp::vellum::EditorIdleTarget {
   public:
