@@ -6,7 +6,7 @@
 // for the signing step to confirm + sign.
 
 #include <pulp/format/reload/swap_pack.hpp>
-#include <pulp/view/reload_autocaps.hpp>
+#include <pulp/runtime/reload_autocaps.hpp>
 #include <pulp/runtime/crypto.hpp>
 
 #include <algorithm>
@@ -81,7 +81,7 @@ inline PackBuildResult build_signable_manifest(const std::filesystem::path& bund
         if (ext == ".js" || ext == ".mjs") { all_js += bytes; all_js += '\n'; }
     }
 
-    m.declared_capabilities = view::infer_capability_names_from_js(all_js);
+    m.declared_capabilities = runtime::infer_capability_names_from_js(all_js);
     r.ok = true;
     r.manifest = std::move(m);
     return r;

@@ -3,6 +3,7 @@
  "record": {
   "entry": "tools/scripts/test_gpu_trace_overhead_acceptance.py",
   "inputs": [
+   ".claude/commands/trace.md",
    "core/render",
    "core/view/platform/mac/window_host_mac.mm",
    "core/view/src/editor_bridge.cpp",
