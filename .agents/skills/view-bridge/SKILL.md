@@ -2455,10 +2455,21 @@ construct, so the slot can only return null or do nothing. Gotchas:
 `ParamPort`, `VisualPort`) is the toolkit-free way to open an editor; the guide
 is `docs/guides/editor-host-contract.md`. Things that are easy to get wrong:
 
-- **No adapter consumes `Processor::editor_factory()` yet.** A processor that
-  returns a factory still opens through `has_editor()` / `create_view()` /
-  `ViewBridge` in every format. Do not assume a factory changes what a DAW
-  shows until an adapter is wired to it.
+- **Every adapter except AAX prefers `Processor::editor_factory()`.** VST3,
+  AU v2, AU v3, CLAP and standalone open a non-null factory's editor through
+  `ContractEditorSession` and fall back to `has_editor()` / `create_view()` /
+  `ViewBridge` only when it is null. That fallback is what keeps a default
+  build's legacy editors unchanged; do not route `create_view()` through a
+  default factory in format-core.
+- **A `create_view()`-shaped tree on Vellum is `pulp::vellum::ViewEditorFactory`**
+  (`integrations/pulp-vellum/include/pulp/vellum/view_editor.hpp`). Its hooks
+  follow the ViewBridge protocol, with two differences worth knowing. An
+  offscreen `NativeParentKind::none` attach fires no opened hook, as for any
+  `pulp::vellum::Editor`. After the editor's `StateStoreParamPort` is
+  disconnected (the instance went away), no hook runs and the store is not
+  touched, so a gesture the view opened directly stays for the host's own
+  teardown. The root sizes the view in `layout_children()`, not `on_resized()`:
+  Vellum's flex layout runs after `on_resized()` and would replace the bounds.
 - **The header must stay view-free.** It names no `pulp::view`, canvas, render,
   Dawn or Vellum type, and `format_header_view_boundary.py` classifies it as a
   `pulp-format-core` header automatically, so an include that reaches the view
