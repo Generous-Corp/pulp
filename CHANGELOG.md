@@ -9,6 +9,91 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
      release's bullet block. See docs/guides/versioning.md § Release pipeline
      for the full end-to-end flow. -->
 
+<a id="v12210"></a>
+## [1.221.0] - 2026-11-27
+
+- release/version bump ([#12983](https://github.com/Generous-Corp/pulp/pull/12983))
+- feature/h7 view audio tooling compat ([#12950](https://github.com/Generous-Corp/pulp/pull/12950))
+
+<a id="v12200"></a>
+## [1.220.0] - 2026-11-27
+
+- release/version bump ([#12981](https://github.com/Generous-Corp/pulp/pull/12981))
+- lane/gpu adapter probe vellum ([#12927](https://github.com/Generous-Corp/pulp/pull/12927))
+- feature/vellum waveform gpu primitives ([#12974](https://github.com/Generous-Corp/pulp/pull/12974))
+
+<a id="v12190"></a>
+## [1.219.0] - 2026-11-27
+
+- release/version bump ([#12980](https://github.com/Generous-Corp/pulp/pull/12980))
+- feature/vellum components d4 ab compare ([#12953](https://github.com/Generous-Corp/pulp/pull/12953))
+- feature/vellum route census checker ([#12951](https://github.com/Generous-Corp/pulp/pull/12951))
+- test/slice editors declare size hints ([#12895](https://github.com/Generous-Corp/pulp/pull/12895))
+- feature/vellum widget gallery ([#12957](https://github.com/Generous-Corp/pulp/pull/12957))
+- fix/vellum resolver follow reuse ([#12967](https://github.com/Generous-Corp/pulp/pull/12967))
+- feature/h7 installed sdk smoke ([#12954](https://github.com/Generous-Corp/pulp/pull/12954))
+
+<a id="v12180"></a>
+## [1.218.0] - 2026-11-26
+
+- release/version bump ([#12979](https://github.com/Generous-Corp/pulp/pull/12979))
+
+<a id="v12170"></a>
+## [1.217.0] - 2026-11-26
+
+- release/version bump ([#12977](https://github.com/Generous-Corp/pulp/pull/12977))
+- feature/vellum plugin manager panel ([#12966](https://github.com/Generous-Corp/pulp/pull/12966))
+- lane/claude plugin command discovery ([#12888](https://github.com/Generous-Corp/pulp/pull/12888))
+- feature/vellum hosted editor attachment ([#12964](https://github.com/Generous-Corp/pulp/pull/12964))
+
+<a id="v12160"></a>
+## [1.216.0] - 2026-11-26
+
+- fix/version at land bump pr body ([#12906](https://github.com/Generous-Corp/pulp/pull/12906))
+- release/version bump ([#12973](https://github.com/Generous-Corp/pulp/pull/12973))
+- feature/vellum piano roll ([#12918](https://github.com/Generous-Corp/pulp/pull/12918))
+- lane/w b7 reconcile ([#12866](https://github.com/Generous-Corp/pulp/pull/12866))
+- feature/reload pack build view free ([#12963](https://github.com/Generous-Corp/pulp/pull/12963))
+- feature/vellum renderer3d scene cpu ([#12968](https://github.com/Generous-Corp/pulp/pull/12968))
+
+<a id="v12150"></a>
+## [1.215.0] - 2026-11-26
+
+- release/version bump ([#12969](https://github.com/Generous-Corp/pulp/pull/12969))
+- feature/vellum scene draco consumer ([#12932](https://github.com/Generous-Corp/pulp/pull/12932))
+- feature/vellum reload adapter swap ([#12965](https://github.com/Generous-Corp/pulp/pull/12965))
+- lane/w codex vellum evidence ([#12947](https://github.com/Generous-Corp/pulp/pull/12947))
+
+<a id="v12140"></a>
+## [1.214.0] - 2026-11-26
+
+- release/version bump ([#12940](https://github.com/Generous-Corp/pulp/pull/12940))
+- feature/census regenerate remaining profiles ([#12945](https://github.com/Generous-Corp/pulp/pull/12945))
+- feature/vellum reload shell core ([#12907](https://github.com/Generous-Corp/pulp/pull/12907))
+- feature/vellum audio d3 displays ([#12944](https://github.com/Generous-Corp/pulp/pull/12944))
+- lane/w cutover inspect window ([#12924](https://github.com/Generous-Corp/pulp/pull/12924))
+- chore/vellum graph host closure ([#12943](https://github.com/Generous-Corp/pulp/pull/12943))
+- feature/vellum renderer3d cube ([#12934](https://github.com/Generous-Corp/pulp/pull/12934))
+- feature/vellum ux swap unit ([#12915](https://github.com/Generous-Corp/pulp/pull/12915))
+- feature/host links format core ([#12936](https://github.com/Generous-Corp/pulp/pull/12936))
+
+<a id="v12131"></a>
+## [1.213.1] - 2026-11-26
+
+- fix/windows stage icu for tools ([#12865](https://github.com/Generous-Corp/pulp/pull/12865))
+- release/version bump ([#12938](https://github.com/Generous-Corp/pulp/pull/12938))
+- feature/vellum graph editor port ([#12931](https://github.com/Generous-Corp/pulp/pull/12931))
+- feature/reload host ui refuse vellum ([#12917](https://github.com/Generous-Corp/pulp/pull/12917))
+
+<a id="v12130"></a>
+## [1.213.0] - 2026-11-26
+
+- release/version bump ([#12935](https://github.com/Generous-Corp/pulp/pull/12935))
+- lane/mcp ui tools vellum host ([#12925](https://github.com/Generous-Corp/pulp/pull/12925))
+- perf/prepush faster ([#12828](https://github.com/Generous-Corp/pulp/pull/12828))
+- feature/vellum auto ui ([#12903](https://github.com/Generous-Corp/pulp/pull/12903))
+- test/f2 vellum host pixels ([#12923](https://github.com/Generous-Corp/pulp/pull/12923))
+
 <a id="v12120"></a>
 ## [1.212.0] - 2026-11-26
 
@@ -13770,6 +13855,16 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/Generous-Corp/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/Generous-Corp/pulp/pull/2))
 
+[1.221.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.221.0
+[1.220.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.220.0
+[1.219.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.219.0
+[1.218.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.218.0
+[1.217.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.217.0
+[1.216.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.216.0
+[1.215.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.215.0
+[1.214.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.214.0
+[1.213.1]: https://github.com/Generous-Corp/pulp/releases/tag/v1.213.1
+[1.213.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.213.0
 [1.212.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.212.0
 [1.211.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.211.0
 [1.210.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.210.0

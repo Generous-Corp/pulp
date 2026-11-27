@@ -1,5 +1,5 @@
 # Fails when the graph editor's link closure (one target name per line in
-# CLOSURE_FILE; pulp::host is a leaf, see CMakeLists.txt) reaches Pulp's own
+# CLOSURE_FILE, walked through pulp::host) reaches Pulp's own
 # view stack or lacks the two edges it exists to join. Run with: cmake -DCLOSURE_FILE=<file> -P check_link_edges.cmake
 if(NOT CLOSURE_FILE OR NOT EXISTS "${CLOSURE_FILE}")
     message(FATAL_ERROR "link-edge check: CLOSURE_FILE is missing: '${CLOSURE_FILE}'")
