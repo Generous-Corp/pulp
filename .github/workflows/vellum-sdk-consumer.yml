@@ -53,6 +53,9 @@ on:
       # Yoga layout fixtures run on Vellum's layout through the SDK's app host.
       - 'tools/harness/visual/vellum_layout.py'
       - 'tools/harness/visual/runner.py'
+      - 'tools/harness/visual/fixtures/yoga/**'
+      - 'tools/harness/visual/goldens/yoga/**'
+      - 'tools/harness/visual/tests/test_vellum_layout.py'
       # The GPU adapter probe built by the bridge configure.
       - 'tools/cli/gpu_probe/src/adapter_probe.cpp'
       - 'tools/cli/gpu_probe/include/pulp_tooling/gpu_probe/adapter_probe.hpp'
