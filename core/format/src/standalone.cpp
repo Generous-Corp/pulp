@@ -5,6 +5,7 @@
 #include <pulp/format/detail/standalone_environment.hpp>
 #include <pulp/format/detail/standalone_persistence.hpp>
 #include <pulp/format/detail/standalone_contract_editor.hpp>
+#include <pulp/format/detail/standalone_updater.hpp>
 #include <pulp/format/detail/standalone_settings_window.hpp>
 #include <pulp/format/detail/standalone_key_driver.hpp>
 #include <pulp/format/detail/standalone_key_sequence.hpp>
@@ -951,6 +952,29 @@ bool StandaloneApp::run_contract_editor(EditorFactory& factory) {
         config_.transport_playing = playing;
     };
     options.on_open_settings = [this] { return open_settings_window(); };
+    // In-app updates, as the view standalone installs them: Sparkle when the
+    // app embeds it, or the development stub. Installed before the editor
+    // opens, so an editor's update bridge reads a live service at once.
+    bool offer_updates = false;
+    if (config_.test_update_service) {
+        set_app_update_service(config_.test_update_service);
+        offer_updates = true;
+    } else {
+        offer_updates = detail::install_standalone_updater(detail::plan_standalone_updater(
+            detail::probe_standalone_updater_environment(config_.headless)));
+    }
+    if (offer_updates)
+        options.on_check_for_updates = [] { check_for_app_updates(); };
+    if (config_.test_on_app_menu) {
+        options.test_on_app_menu =
+            [hook = config_.test_on_app_menu](
+                const std::vector<detail::StandaloneContractMenuItem>& items) {
+                std::vector<std::pair<std::string, std::function<void()>>> view;
+                for (const auto& item : items)
+                    view.emplace_back(item.title, item.action);
+                hook(view);
+            };
+    }
     for (const auto& panel : panels_)
         options.panels.push_back(panel.get());
     options.on_idle = [this] {

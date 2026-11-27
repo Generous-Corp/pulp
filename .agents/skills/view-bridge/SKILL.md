@@ -43,6 +43,12 @@ settings sections show once its editor comes from a factory: the
 `settings_sections()` tabs exist only in the create_view() window. Tests open it
 with `StandaloneConfig::test_open_plugin_settings_frame`.
 
+The window's app menu is a model (`StandaloneContractMenuItem`) that AppKit
+and tests both read: `StandaloneConfig::test_on_app_menu` sees the items in a
+headless run, which installs no menu, and `test_update_service` plans an
+updater there so "Check for Updates…" can be asserted and invoked. A new menu
+item goes into `build_app_menu_model()`, never straight into the NSMenu.
+
 Fixed user sizing does not forbid an editor-origin resize: preserve the
 `EditorContext::request_resize` acknowledgment even when `can_resize` is false.
 Install the pending request before calling the host because an acknowledgment
@@ -2472,6 +2478,14 @@ construct, so the slot can only return null or do nothing. Gotchas:
 - **All of pulp-format-core builds at macro 0 under the poison**
   (`pulp-test-format-core-ui-free-all`, built with the tests). A core source or
   header that names `pulp::view` fails that build before any SDK sees it.
+- **The in-app updater runs in every standalone.** `install_standalone_updater()`
+  (standalone_updater.hpp, now view-free) installs the plan's service in both
+  the view and the contract standalone; only the WindowHost menu command lives
+  in `standalone_updater_menu.hpp`. The contract window adds "Check for
+  Updates…" itself. `app_update_message_response()` answers the four
+  `pulp_updates_*` messages with no UI type, so a Vellum editor's bridge
+  registers them without Pulp's EditorBridge; `add_app_update_handlers()` is a
+  loop over it. `pulp::vellum::AppUpdatesSettingsView` is the Settings group.
 - **A new view-named virtual goes through the macro too.** `node_abi_gate.py`
   reads `PULP_FORMAT_LEGACY_VIEW_NAME(x)` as `x` and expands no other macro.
 - **The hot-reload fingerprint carries the mode** (`legacyview=` in

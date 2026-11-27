@@ -283,3 +283,42 @@ TEST_CASE("The standalone Settings panel offers an Updates tab only when the app
         CHECK(panel_has_tab(*chrome.settings_panel(), "Updates"));
     }
 }
+
+TEST_CASE("App-update messages are answered without a UI type", "[updates][messages]") {
+    using pulp::format::app_update_message_response;
+    auto respond = [](std::string_view type, std::string_view payload = {}) {
+        return choc::json::parse(app_update_message_response(type, payload));
+    };
+
+    SECTION("plug-in: ok, but not available, and a check starts nothing") {
+        set_app_update_service(nullptr);
+        CHECK(respond(kAppUpdatesGetMessage)["ok"].getBool());
+        CHECK_FALSE(respond(kAppUpdatesGetMessage)["available"].getBool());
+        CHECK_FALSE(respond(kAppUpdatesCheckMessage)["started"].getBool());
+        CHECK_FALSE(respond(kAppUpdatesOpenReleasesMessage)["opened"].getBool());
+    }
+
+    SECTION("standalone: status, check, automatic toggle, releases") {
+        ScopedService scope(spectr_like());
+        auto got = respond(kAppUpdatesGetMessage);
+        CHECK(got["available"].getBool());
+        CHECK(got["appName"].getString() == "Spectr");
+        auto checked = respond(kAppUpdatesCheckMessage, "{}");
+        CHECK(checked["started"].getBool());
+        CHECK(scope.service->checks == 1);
+        auto on = respond(kAppUpdatesSetAutomaticMessage, R"({"on":true})");
+        CHECK(on["applied"].getBool());
+        CHECK(on["automaticChecks"].getBool());
+        auto bad = respond(kAppUpdatesSetAutomaticMessage, R"({"on":"yes"})");
+        CHECK_FALSE(bad["ok"].getBool());
+        CHECK(scope.service->automatic_writes == 1);
+        // No payload reads as {}, which has no "on".
+        CHECK_FALSE(respond(kAppUpdatesSetAutomaticMessage)["ok"].getBool());
+        CHECK(respond(kAppUpdatesOpenReleasesMessage)["opened"].getBool());
+        CHECK(scope.service->releases_opened == 1);
+    }
+
+    SECTION("a type that is not an app-update message is an error") {
+        CHECK_FALSE(respond("pulp_updates_nope")["ok"].getBool());
+    }
+}

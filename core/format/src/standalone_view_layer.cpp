@@ -12,7 +12,7 @@
 #include <pulp/format/detail/standalone_key_schedule.hpp>
 #include <pulp/format/detail/standalone_key_sequence.hpp>
 #include <pulp/format/detail/standalone_musical_typing.hpp>
-#include <pulp/format/detail/standalone_updater.hpp>
+#include <pulp/format/detail/standalone_updater_menu.hpp>
 #include <pulp/format/detail/standalone_window_factory.hpp>
 #include <pulp/format/editor_idle_pump.hpp>
 #include <pulp/format/editor_ui.hpp>

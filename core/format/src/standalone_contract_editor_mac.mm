@@ -187,39 +187,19 @@
 }
 @end
 
-// The target of the app menu's items.
+// The target of the app menu's items: each item's tag indexes the menu model.
 @interface PulpStandaloneContractMenuTarget : NSObject {
   @public
-    std::function<bool()> openSettings;
-    std::function<bool()> openPluginSettings;
-    std::vector<pulp::format::StandalonePanel*> panels;
-    NSWindow* editorWindow;
+    std::vector<pulp::format::detail::StandaloneContractMenuItem> items;
 }
-- (void)openSettings:(id)sender;
-- (void)openPluginSettings:(id)sender;
-- (void)togglePanel:(id)sender;
-- (void)closeEditor:(id)sender;
+- (void)invokeItem:(NSMenuItem*)sender;
 @end
 
 @implementation PulpStandaloneContractMenuTarget
-- (void)openSettings:(id)sender {
-    (void)sender;
-    if (openSettings)
-        openSettings();
-}
-- (void)openPluginSettings:(id)sender {
-    (void)sender;
-    if (openPluginSettings)
-        openPluginSettings();
-}
-- (void)closeEditor:(id)sender {
-    (void)sender;
-    [editorWindow performClose:nil];
-}
-- (void)togglePanel:(NSMenuItem*)sender {
+- (void)invokeItem:(NSMenuItem*)sender {
     const auto index = static_cast<std::size_t>(sender.tag);
-    if (index < panels.size() && panels[index] != nullptr)
-        panels[index]->toggle();
+    if (index < items.size() && items[index].action)
+        items[index].action();
 }
 @end
 
@@ -227,10 +207,35 @@ namespace pulp::format::detail {
 
 namespace {
 
-// The app menu a standalone with Audio/MIDI settings or panels shows:
-// "Audio/MIDI Settings…" (Cmd+,), one item per panel on its shortcut, and a
-// Quit that closes the editor window, so the editor detaches in order. Skipped
-// when the process already has a main menu.
+// The app menu as a model: "Check for Updates…" when the updater offers it,
+// "Audio/MIDI Settings…" (Cmd+,), "<name> Settings…" (Cmd+Option+,) for the
+// plug-in's settings editor, one item per panel on its shortcut, and a Quit
+// that closes the editor window, so the editor detaches in order. Built for
+// every run, headless included, so a test reads the same items the window
+// installs.
+std::vector<StandaloneContractMenuItem>
+build_app_menu_model(const StandaloneContractEditorOptions& options,
+                     std::function<bool()> open_plugin_settings, const std::string& name,
+                     NSWindow* window) {
+    std::vector<StandaloneContractMenuItem> items;
+    if (options.on_check_for_updates)
+        items.push_back({"Check for Updates\u2026", "", false, options.on_check_for_updates});
+    if (options.on_open_settings) {
+        auto open = options.on_open_settings;
+        items.push_back({"Audio/MIDI Settings\u2026", ",", false, [open] { open(); }});
+    }
+    if (open_plugin_settings)
+        items.push_back({name + " Settings\u2026", ",", true,
+                         [open = std::move(open_plugin_settings)] { open(); }});
+    for (auto* panel : options.panels)
+        items.push_back({panel->menu_title(), std::string(1, panel->shortcut()), false,
+                         [panel] { panel->toggle(); }});
+    items.push_back({"Quit " + name, "q", false, [window] { [window performClose:nil]; }});
+    return items;
+}
+
+// Install the model as the app's main menu. Skipped when the process already
+// has one.
 bool install_app_menu(PulpStandaloneContractMenuTarget* target, NSString* title) {
     if ([NSApp mainMenu] != nil)
         return false;
@@ -238,39 +243,24 @@ bool install_app_menu(PulpStandaloneContractMenuTarget* target, NSString* title)
     NSMenuItem* appItem = [[[NSMenuItem alloc] init] autorelease];
     [bar addItem:appItem];
     NSMenu* appMenu = [[[NSMenu alloc] initWithTitle:title] autorelease];
-    if (target->openSettings) {
-        NSMenuItem* settings = [[[NSMenuItem alloc] initWithTitle:@"Audio/MIDI Settings\u2026"
-                                                           action:@selector(openSettings:)
-                                                    keyEquivalent:@","] autorelease];
-        settings.target = target;
-        [appMenu addItem:settings];
-    }
-    if (target->openPluginSettings) {
-        NSMenuItem* plugin =
-            [[[NSMenuItem alloc] initWithTitle:[title stringByAppendingString:@" Settings\u2026"]
-                                        action:@selector(openPluginSettings:)
-                                 keyEquivalent:@","] autorelease];
-        plugin.keyEquivalentModifierMask = NSEventModifierFlagCommand | NSEventModifierFlagOption;
-        plugin.target = target;
-        [appMenu addItem:plugin];
-    }
-    for (std::size_t i = 0; i < target->panels.size(); ++i) {
-        auto* panel = target->panels[i];
-        const char key[2] = {panel->shortcut(), '\0'};
+    for (std::size_t i = 0; i < target->items.size(); ++i) {
+        const auto& model = target->items[i];
+        // Quit, always last, sits below a separator.
+        if (i + 1 == target->items.size())
+            [appMenu addItem:[NSMenuItem separatorItem]];
         NSMenuItem* item = [[[NSMenuItem alloc]
-            initWithTitle:[NSString stringWithUTF8String:panel->menu_title().c_str()]
-                   action:@selector(togglePanel:)
-            keyEquivalent:[NSString stringWithUTF8String:key]] autorelease];
+            initWithTitle:[NSString stringWithUTF8String:model.title.c_str()]
+                   action:@selector(invokeItem:)
+            keyEquivalent:[NSString stringWithUTF8String:model.key.c_str()]] autorelease];
+        if (model.option_modifier)
+            item.keyEquivalentModifierMask = NSEventModifierFlagCommand | NSEventModifierFlagOption;
         item.tag = static_cast<NSInteger>(i);
         item.target = target;
         [appMenu addItem:item];
+        // So does the updater's item from what follows it.
+        if (i == 0 && model.title.rfind("Check for Updates", 0) == 0 && target->items.size() > 2)
+            [appMenu addItem:[NSMenuItem separatorItem]];
     }
-    [appMenu addItem:[NSMenuItem separatorItem]];
-    NSMenuItem* quit = [[[NSMenuItem alloc] initWithTitle:[@"Quit " stringByAppendingString:title]
-                                                   action:@selector(closeEditor:)
-                                            keyEquivalent:@"q"] autorelease];
-    quit.target = target;
-    [appMenu addItem:quit];
     appItem.submenu = appMenu;
     [NSApp setMainMenu:bar];
     return true;
@@ -542,18 +532,21 @@ bool run_standalone_contract_editor(Processor& processor, state::StateStore& sto
         plugin_settings = std::make_unique<PluginSettingsWindow>(
             processor, store, factory, processor.descriptor().name + " Settings", options.headless);
     }
+    std::function<bool()> open_plugin_settings;
+    if (plugin_settings) {
+        auto* settings_window = plugin_settings.get();
+        open_plugin_settings = [settings_window] { return settings_window->open(); };
+    }
+    auto menu_items = build_app_menu_model(options, std::move(open_plugin_settings),
+                                           processor.descriptor().name, window);
+    if (options.test_on_app_menu)
+        options.test_on_app_menu(menu_items);
     PulpStandaloneContractMenuTarget* menu_target = nil;
     bool installed_menu = false;
-    if (!options.headless &&
-        (options.on_open_settings || !options.panels.empty() || plugin_settings)) {
+    // A Quit alone is no reason to take over the app's menu.
+    if (!options.headless && menu_items.size() > 1) {
         menu_target = [[PulpStandaloneContractMenuTarget alloc] init];
-        menu_target->openSettings = options.on_open_settings;
-        if (plugin_settings) {
-            auto* settings_window = plugin_settings.get();
-            menu_target->openPluginSettings = [settings_window] { return settings_window->open(); };
-        }
-        menu_target->panels = options.panels;
-        menu_target->editorWindow = window;
+        menu_target->items = std::move(menu_items);
         installed_menu = install_app_menu(
             menu_target, [NSString stringWithUTF8String:processor.descriptor().name.c_str()]);
     }
@@ -632,8 +625,7 @@ bool run_standalone_contract_editor(Processor& processor, state::StateStore& sto
     if (menu_target != nil) {
         if (installed_menu)
             [NSApp setMainMenu:nil];
-        menu_target->editorWindow = nil;
-        menu_target->panels.clear();
+        menu_target->items.clear();
         [menu_target release];
     }
     [window orderOut:nil];

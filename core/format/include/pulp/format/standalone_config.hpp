@@ -7,10 +7,13 @@
 /// the whole standalone app (standalone.hpp includes this header).
 
 #include <functional>
+#include <memory>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace pulp::format {
+class AppUpdateService;
 
 struct StandaloneConfig {
     /// `midi_input_id` value that opens no MIDI input at all. An empty id opens
@@ -103,6 +106,14 @@ struct StandaloneConfig {
     // The contract editor window opens the plug-in's settings editor
     // (EditorRole::settings) at this loop frame, as its menu item would; -1 never.
     int test_open_plugin_settings_frame = -1;
+    // The contract editor window installs this service in place of the one its
+    // updater plan picks, and offers "Check for Updates…" for it, headless
+    // runs included. Null: the plan decides, as in a shipped app.
+    std::shared_ptr<AppUpdateService> test_update_service;
+    // Called once with the contract window's app-menu items (title, then an
+    // action that runs the item), before the loop, headless runs included.
+    std::function<void(const std::vector<std::pair<std::string, std::function<void()>>>&)>
+        test_on_app_menu;
     // When non-empty, capture a PNG into this directory after every key,
     // named "key-<NN>-<name>.png", plus "key-00-initial.png" before the first
     // press. That per-press series is what turns "the sequence ran" into

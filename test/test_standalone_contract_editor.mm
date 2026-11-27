@@ -12,6 +12,7 @@
 
 #include "support/recording_contract_editor.hpp"
 
+#include <pulp/format/app_updates.hpp>
 #include <pulp/format/processor.hpp>
 #include <pulp/format/standalone.hpp>
 #include <pulp/format/standalone_panel.hpp>
@@ -26,6 +27,7 @@
 #include <memory>
 #include <string>
 #include <unistd.h>
+#include <utility>
 #include <vector>
 
 using pulp::test_support::contract_config;
@@ -524,5 +526,98 @@ TEST_CASE("a standalone contract window builds no settings editor the factory do
     REQUIRE(app.run_with_editor(false));
     REQUIRE(contract_log().settings_created == 0);
     REQUIRE(contract_log().live == 0);
+    std::filesystem::remove(png);
+}
+
+namespace {
+
+class CountingUpdateService final : public pulp::format::AppUpdateService {
+  public:
+    int checks = 0;
+    pulp::format::AppUpdateStatus status() const override {
+        pulp::format::AppUpdateStatus status;
+        status.available = true;
+        status.can_check_now = true;
+        status.app_name = "Contract Standalone";
+        return status;
+    }
+    bool check_for_updates() override {
+        ++checks;
+        return true;
+    }
+    bool set_automatic_checks(bool) override {
+        return true;
+    }
+};
+
+using MenuItems = std::vector<std::pair<std::string, std::function<void()>>>;
+
+const std::function<void()>* find_item(const MenuItems& items, const std::string& title) {
+    for (const auto& [name, action] : items)
+        if (name == title)
+            return &action;
+    return nullptr;
+}
+
+} // namespace
+
+TEST_CASE("the contract window offers Check for Updates and it drives the update service",
+          "[standalone][editor-host][standalone-contract][updater]") {
+    EditorEnvironment env;
+    reset_contract_recording();
+    const auto png = temp_png("pulp-standalone-contract-updater");
+    std::filesystem::remove(png);
+
+    auto service = std::make_shared<CountingUpdateService>();
+    pulp::format::StandaloneApp app(create_contract_processor);
+    auto config = headless_config(png);
+    config.test_update_service = service;
+    MenuItems items;
+    bool saw_service = false;
+    config.test_on_app_menu = [&](const MenuItems& menu) {
+        items = menu;
+        saw_service = pulp::format::app_update_status().available;
+    };
+    app.set_config(config);
+    REQUIRE(app.run_with_editor(false));
+
+    // The service was installed before the editor's menu was built.
+    CHECK(saw_service);
+    const auto* check = find_item(items, "Check for Updates\u2026");
+    REQUIRE(check != nullptr);
+    REQUIRE(static_cast<bool>(*check));
+    // The item runs a check on whatever service is installed; reinstall it,
+    // since the app removed it when it stopped.
+    pulp::format::set_app_update_service(service);
+    (*check)();
+    CHECK(service->checks == 1);
+    pulp::format::set_app_update_service(nullptr);
+    // Quit is always the last item.
+    REQUIRE_FALSE(items.empty());
+    CHECK(items.back().first == "Quit Contract Standalone");
+    std::filesystem::remove(png);
+}
+
+TEST_CASE("the contract window offers no Check for Updates when no updater is planned",
+          "[standalone][editor-host][standalone-contract][updater]") {
+    EditorEnvironment env;
+    reset_contract_recording();
+    const auto png = temp_png("pulp-standalone-contract-no-updater");
+    std::filesystem::remove(png);
+
+    // Headless, with no test service: the plan has no backend.
+    pulp::format::StandaloneApp app(create_contract_processor);
+    auto config = headless_config(png);
+    MenuItems items;
+    bool called = false;
+    config.test_on_app_menu = [&](const MenuItems& menu) {
+        items = menu;
+        called = true;
+    };
+    app.set_config(config);
+    REQUIRE(app.run_with_editor(false));
+    REQUIRE(called);
+    CHECK(find_item(items, "Check for Updates\u2026") == nullptr);
+    CHECK_FALSE(pulp::format::app_update_status().available);
     std::filesystem::remove(png);
 }

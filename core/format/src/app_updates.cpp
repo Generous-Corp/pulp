@@ -176,4 +176,73 @@ std::string app_update_status_json(const AppUpdateStatus& status) {
     return choc::json::toString(object);
 }
 
+namespace {
+
+// The editor bridge's response envelope: "ok" first, then `extras`' members.
+std::string ok_envelope(const choc::value::ValueView& extras) {
+    auto obj = choc::value::createObject("");
+    obj.addMember("ok", true);
+    if (extras.isObject()) {
+        for (std::uint32_t i = 0; i < extras.size(); ++i) {
+            const auto name = extras.getObjectMemberAt(i).name;
+            obj.addMember(std::string(name), extras[name]);
+        }
+    }
+    return choc::json::toString(obj, /*useLineBreaks=*/false);
+}
+
+std::string error_envelope(std::string_view message) {
+    auto obj = choc::value::createObject("");
+    obj.addMember("ok", false);
+    obj.addMember("error", std::string(message));
+    return choc::json::toString(obj, /*useLineBreaks=*/false);
+}
+
+// The status object, with one extra boolean member, as an ok response.
+std::string status_response(const char* extra_key = nullptr, bool extra_value = false) {
+    auto value = choc::json::parse(app_update_status_json(app_update_status()));
+    if (extra_key != nullptr)
+        value.addMember(extra_key, extra_value);
+    return ok_envelope(value);
+}
+
+bool read_on(const choc::value::ValueView& payload, bool& on) {
+    if (!payload.isObject() || !payload.hasObjectMember("on"))
+        return false;
+    const auto member = payload["on"];
+    if (!member.isBool())
+        return false;
+    on = member.getBool();
+    return true;
+}
+
+} // namespace
+
+std::string app_update_message_response(std::string_view type, std::string_view payload_json) {
+    try {
+        if (type == kAppUpdatesGetMessage)
+            return status_response();
+        if (type == kAppUpdatesCheckMessage) {
+            const bool started = check_for_app_updates();
+            return status_response("started", started);
+        }
+        if (type == kAppUpdatesSetAutomaticMessage) {
+            const auto payload = payload_json.empty() ? choc::value::createObject("")
+                                                      : choc::json::parse(payload_json);
+            bool on = false;
+            if (!read_on(payload, on))
+                return error_envelope("pulp_updates_set_automatic needs {on: true|false}");
+            const bool applied = set_app_update_automatic_checks(on);
+            return status_response("applied", applied);
+        }
+        if (type == kAppUpdatesOpenReleasesMessage) {
+            const bool opened = open_app_releases_page();
+            return status_response("opened", opened);
+        }
+        return error_envelope("unknown message type");
+    } catch (...) {
+        return error_envelope("internal error");
+    }
+}
+
 } // namespace pulp::format

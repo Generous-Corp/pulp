@@ -60,7 +60,7 @@ VIEW_HEADERS = {
     "pulp/format/detail/au_v2_editor_resize.hpp",
     "pulp/format/detail/standalone_editor_chrome.hpp",
     "pulp/format/detail/standalone_musical_typing.hpp",
-    "pulp/format/detail/standalone_updater.hpp",
+    "pulp/format/detail/standalone_updater_menu.hpp",
     "pulp/format/detail/standalone_window_factory.hpp",
     "pulp/format/editor_idle_pump.hpp",
     "pulp/format/editor_ui.hpp",

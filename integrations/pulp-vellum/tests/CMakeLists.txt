@@ -68,6 +68,12 @@ if(PULP_BUILD_TESTS AND TARGET Catch2::Catch2WithMain)
             pulp::vellum Vellum::MirrorView_core Catch2::Catch2WithMain Threads::Threads)
         catch_discover_tests(pulp-test-pulp-vellum-view-processor
             PROPERTIES LABELS pulp-vellum-editor)
+        # The Updates settings group on Vellum views, over the format-core
+        # AppUpdateService.
+        add_executable(pulp-test-pulp-vellum-app-updates test_app_updates_settings_view.cpp)
+        target_link_libraries(pulp-test-pulp-vellum-app-updates PRIVATE
+            pulp::vellum Vellum::MirrorView_core Catch2::Catch2WithMain Threads::Threads)
+        catch_discover_tests(pulp-test-pulp-vellum-app-updates PROPERTIES LABELS pulp-vellum)
         if(TARGET Vellum::MirrorView_script)
             target_link_libraries(pulp-test-pulp-vellum-editor PRIVATE Vellum::MirrorView_script)
             target_compile_definitions(pulp-test-pulp-vellum-editor PRIVATE

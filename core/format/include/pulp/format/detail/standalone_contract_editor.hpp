@@ -35,6 +35,14 @@ class StandalonePanel;
 
 namespace pulp::format::detail {
 
+/// One item of the contract window's app menu, in order.
+struct StandaloneContractMenuItem {
+    std::string title;
+    std::string key;              ///< key equivalent with Command, "" for none
+    bool option_modifier = false; ///< Command+Option instead of Command alone
+    std::function<void()> action;
+};
+
 struct StandaloneContractEditorOptions {
     std::string title;
     bool headless = false;
@@ -54,6 +62,10 @@ struct StandaloneContractEditorOptions {
     /// an editor's `HostAction::open_settings` request is answered by its
     /// result. Unset: the action is declined and no menu item is added.
     std::function<bool()> on_open_settings;
+    /// "Check for Updates…": when set, a non-headless window's app menu gets
+    /// the item, first, which calls it (the standalone passes
+    /// check_for_app_updates() when its updater plan offers the command).
+    std::function<void()> on_check_for_updates;
     /// The usable area, in points, the window must fit into when it is not
     /// zero. Zero reads the main screen's visible frame.
     double screen_visible_width = 0.0;
@@ -68,6 +80,9 @@ struct StandaloneContractEditorOptions {
     /// settings editor in a second window. A test opens it at this loop frame
     /// instead; -1 never.
     int test_open_plugin_settings_frame = -1;
+    /// Called once with the app menu's items, before the loop, headless runs
+    /// included (a headless window installs no menu). For tests.
+    std::function<void(const std::vector<StandaloneContractMenuItem>&)> test_on_app_menu;
     /// Called once with the native window (an `NSWindow*` on macOS) before
     /// the loop runs, so a test can reach its delegate.
     std::function<void(void* native_window)> on_window_ready;

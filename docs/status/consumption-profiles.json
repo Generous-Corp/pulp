@@ -317,6 +317,7 @@
       "pulp/format/detail/standalone_persistence.hpp",
       "pulp/format/detail/standalone_settings_window.hpp",
       "pulp/format/detail/standalone_updater.hpp",
+      "pulp/format/detail/standalone_updater_menu.hpp",
       "pulp/format/detail/standalone_window_factory.hpp",
       "pulp/format/detail/vst3_bus_layout.hpp",
       "pulp/format/detail/vst3_frame_rate.hpp",
@@ -7770,6 +7771,7 @@
           },
           "direct_dependencies": [
             "framework:AppKit",
+            "framework:Security",
             "pulp-format-core"
           ]
         },

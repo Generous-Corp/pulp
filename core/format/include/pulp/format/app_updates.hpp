@@ -23,9 +23,11 @@
 // check_for_updates() opens `releases_url` or asks the standalone app to
 // update. The status shape already carries what such a notice needs.
 
+#include <array>
 #include <cstdint>
 #include <memory>
 #include <string>
+#include <string_view>
 
 namespace pulp::format {
 
@@ -109,5 +111,40 @@ bool open_app_releases_page();
 ///  appName, version, build, lastCheckUnixSeconds, releasesUrl, feedHost,
 ///  installer: "package"|"app"|"unknown", note, versionText, lastCheckText}
 [[nodiscard]] std::string app_update_status_json(const AppUpdateStatus& status);
+
+// ── Editor messages ─────────────────────────────────────────────────────────
+//
+// The messages a JS editor sends to show and drive updates, answered here with
+// no UI type, so any editor bridge registers them: Pulp's EditorBridge does
+// through add_app_update_handlers() (app_updates_bridge.hpp), and a Vellum
+// editor's bridge does by calling app_update_message_response(). Payload ->
+// response, each `ok: true` plus the status object of app_update_status_json():
+//
+//   pulp_updates_get            {}            -> status
+//   pulp_updates_check          {}            -> status + started: bool
+//   pulp_updates_set_automatic  {on: bool}    -> status + applied: bool
+//   pulp_updates_open_releases  {}            -> status + opened: bool
+//
+// A plug-in answers `available: false` (no service is installed there), so the
+// editor hides its update controls. The JS side is `appUpdatesClient(dispatch)`
+// in @pulp/react.
+
+inline constexpr const char* kAppUpdatesGetMessage = "pulp_updates_get";
+inline constexpr const char* kAppUpdatesCheckMessage = "pulp_updates_check";
+inline constexpr const char* kAppUpdatesSetAutomaticMessage = "pulp_updates_set_automatic";
+inline constexpr const char* kAppUpdatesOpenReleasesMessage = "pulp_updates_open_releases";
+
+/// Every app-update message type, for a bridge to register.
+inline constexpr std::array<const char*, 4> kAppUpdatesMessages = {
+    kAppUpdatesGetMessage, kAppUpdatesCheckMessage, kAppUpdatesSetAutomaticMessage,
+    kAppUpdatesOpenReleasesMessage};
+
+/// The JSON response to one app-update message, `payload_json` being the
+/// message's payload object as JSON text (empty reads as `{}`). In the editor
+/// bridge's envelope: `{"ok":true,...}`, or `{"ok":false,"error":"..."}` for a
+/// malformed payload or a type that is not an app-update message. Runs the
+/// action the message asks for on the installed service.
+[[nodiscard]] std::string app_update_message_response(std::string_view type,
+                                                      std::string_view payload_json);
 
 } // namespace pulp::format
