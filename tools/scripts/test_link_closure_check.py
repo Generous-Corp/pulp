@@ -184,6 +184,22 @@ class ClosureWalk(unittest.TestCase):
             self.assertEqual(code, 2)
             self.assertIn("malformed", err.getvalue())
 
+    def test_missing_record_of_a_recorded_target_reference_is_inconclusive(self) -> None:
+        # `gpu_helper` is an ordinary name; only the writer's refs field says it is a target.
+        records = {"pulp-a": ("gpu_helper", "", "", "gpu_helper")}
+        code, _, err = self.run_check(records, ["pulp-a"], ["pulp-view*"])
+        self.assertEqual(code, 2)
+        self.assertIn("no record", err)
+
+    def test_unrecorded_plain_word_is_a_leaf(self) -> None:
+        records = {"pulp-a": ("gpu_helper", "", "", "")}
+        self.assertEqual(self.run_check(records, ["pulp-a"], ["pulp-view*"])[0], 0)
+
+    def test_clean_archive_path_passes(self) -> None:
+        records = {"pulp-a": ("C:/build/pulp-runtime.lib", ""), "pulp-runtime": ("", "")}
+        code, _, err = self.run_check(records, ["pulp-a"], ["pulp-view*"])
+        self.assertEqual((code, err), (0, ""))
+
     def test_cross_directory_scope_markers_are_not_targets(self) -> None:
         link = "pulp::b;::@(0x5581c0);pulp::platform;::@"
         records = {"pulp-a": (link, link), "pulp-b": ("", ""), "pulp-platform": ("", "")}

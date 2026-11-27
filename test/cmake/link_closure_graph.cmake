@@ -38,7 +38,9 @@ endfunction()
 # targets, aliases and the targets of $<TARGET_OBJECTS:...>), with the
 # properties a closure walk follows: LINK_LIBRARIES, INTERFACE_LINK_LIBRARIES,
 # SOURCES and INTERFACE_SOURCES, unevaluated. An alias records one edge to the
-# target it names. The record is `name<TAB>type<TAB>link<TAB>iface<TAB>sources`.
+# target it names. The record is `name<TAB>type<TAB>link<TAB>iface<TAB>sources<TAB>refs`, where refs lists
+# the words that were targets when written, so a checker can tell a target with
+# a missing record from an external library name.
 function(_pulp_link_closure_write_graph)
     _pulp_link_closure_collect("${CMAKE_SOURCE_DIR}" _queue)
     list(REMOVE_DUPLICATES _queue)
@@ -70,18 +72,23 @@ function(_pulp_link_closure_write_graph)
             endforeach()
             set(_sources "${_src};${_isrc}")
         endif()
+        set(_refs "")
         foreach(_value IN ITEMS "${_link}" "${_iface}" "${_sources}")
             _pulp_link_closure_words("${_value}" _words)
             foreach(_word IN LISTS _words)
-                if(TARGET "${_word}" AND NOT _word IN_LIST _seen)
-                    list(APPEND _queue "${_word}")
+                if(TARGET "${_word}")
+                    list(APPEND _refs "${_word}")
+                    if(NOT _word IN_LIST _seen)
+                        list(APPEND _queue "${_word}")
+                    endif()
                 endif()
             endforeach()
         endforeach()
+        list(REMOVE_DUPLICATES _refs)
         string(REGEX REPLACE "[\t\n\r]+" ";" _link "${_link}")
         string(REGEX REPLACE "[\t\n\r]+" ";" _iface "${_iface}")
         string(REGEX REPLACE "[\t\n\r]+" ";" _sources "${_sources}")
-        string(APPEND _content "${_target}\t${_type}\t${_link}\t${_iface}\t${_sources}\n")
+        string(APPEND _content "${_target}\t${_type}\t${_link}\t${_iface}\t${_sources}\t${_refs}\n")
     endwhile()
     file(WRITE "${CMAKE_BINARY_DIR}/link-closure-graph.tsv" "${_content}")
 endfunction()

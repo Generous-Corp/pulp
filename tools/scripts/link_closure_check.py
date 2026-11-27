@@ -78,6 +78,8 @@ class Graph:
         self.edges: dict[str, list[str]] = {}
         self.types: dict[str, str] = {}
         self.malformed: list[str] = []
+        # Words the writer saw as targets (sixth field); absent in older dumps.
+        self.refs: dict[str, set[str]] = {}
 
     @classmethod
     def parse(cls, text: str) -> "Graph":
@@ -92,12 +94,14 @@ class Graph:
             name = canonical(fields[0].strip())
             graph.types[name] = fields[1].strip()
             targets: list[str] = []
-            for value in fields[2:]:
+            for value in fields[2:5]:
                 if value.endswith("-NOTFOUND"):
                     continue
                 for target in referenced_targets(value):
                     if target != name and target not in targets:
                         targets.append(target)
+            if len(fields) > 5:
+                graph.refs[name] = {canonical(ref) for ref in fields[5].split(";") if ref.strip()}
             graph.edges.setdefault(name, [])
             for target in targets:
                 if target not in graph.edges[name]:
@@ -116,6 +120,8 @@ def names_a_target(name: str) -> bool:
     record is a plain word (a flag, a source file) unless it is spelled like a
     target. A target-shaped name with no record was never inspected.
     """
+    if "." in name or "/" in name:
+        return False  # an archive file name or path, not a target
     return name.startswith("pulp-") or "::" in name
 
 
@@ -141,7 +147,8 @@ def find_paths(graph: Graph, root: str, forbidden: list[str],
                     path.append(parent[path[-1]])  # type: ignore[arg-type]
                 found.append(list(reversed(path)))
                 continue
-            if target not in graph.edges and unresolved is not None and names_a_target(target):
+            if (target not in graph.edges and unresolved is not None
+                    and (target in graph.refs.get(current, ()) or names_a_target(target))):
                 unresolved.add(target)
             queue.append(target)
     return found
