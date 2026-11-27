@@ -797,8 +797,23 @@ endfunction()
 #   )
 function(pulp_add_plugin_bundle target)
     _pulp_resolve_consumer_targets()
-    # A bundle's plug-ins share Pulp's view editor host.
-    _pulp_refuse_view_editor_from_vellum("pulp_add_plugin_bundle(${target})")
+    # A bundle's plug-ins share Pulp's view editor host. An SDK whose UI is
+    # Vellum has none, so there each format binary builds view-free, as
+    # pulp_add_plugin does with no editor keyword, and every bundled plug-in
+    # opens the editor its Processor::editor_factory() returns.
+    _pulp_ui_provider(_pulp_bundle_ui_provider)
+    set(_pulp_bundle_view_free FALSE)
+    if(_pulp_bundle_ui_provider STREQUAL "vellum")
+        if(NOT _PULP_FORMAT_CORE_TARGET OR NOT _PULP_FORMAT_CLAP_CORE_TARGET)
+            message(FATAL_ERROR
+                "pulp_add_plugin_bundle(${target}): this Pulp SDK serves its UI from Vellum "
+                "but does not export Pulp::format-core and Pulp::format-clap-core")
+        endif()
+        set(_pulp_bundle_view_free TRUE)
+        set(_pulp_bundle_format_target "${_PULP_FORMAT_CORE_TARGET}")
+    else()
+        set(_pulp_bundle_format_target "${_PULP_FORMAT_TARGET}")
+    endif()
     cmake_parse_arguments(BUNDLE
         ""
         "BUNDLE_NAME;BUNDLE_ID;VERSION;MANUFACTURER"
@@ -847,7 +862,7 @@ function(pulp_add_plugin_bundle target)
         add_library(${target}_Core OBJECT ${BUNDLE_SOURCES})
         # Linked into shared modules; see pulp_add_plugin's Core library.
         set_target_properties(${target}_Core PROPERTIES POSITION_INDEPENDENT_CODE ON)
-        target_link_libraries(${target}_Core PUBLIC ${_PULP_FORMAT_TARGET})
+        target_link_libraries(${target}_Core PUBLIC ${_pulp_bundle_format_target})
         target_include_directories(${target}_Core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
         target_compile_definitions(${target}_Core PRIVATE
             PULP_PLUGIN_NAME="${BUNDLE_BUNDLE_NAME}"
@@ -855,10 +870,14 @@ function(pulp_add_plugin_bundle target)
             PULP_PLUGIN_VERSION="${BUNDLE_VERSION}")
     else()
         add_library(${target}_Core INTERFACE)
-        target_link_libraries(${target}_Core INTERFACE ${_PULP_FORMAT_TARGET})
+        target_link_libraries(${target}_Core INTERFACE ${_pulp_bundle_format_target})
         target_include_directories(${target}_Core INTERFACE ${CMAKE_CURRENT_SOURCE_DIR})
     endif()
     set(PULP_${target}_CORE_OBJECTS "" CACHE INTERNAL "")
+    # Read by the format helpers, as pulp_add_plugin sets them.
+    set(PULP_${target}_NO_EDITOR "${_pulp_bundle_view_free}" CACHE INTERNAL "")
+    set(PULP_${target}_EDITOR_FROM_FACTORY "${_pulp_bundle_view_free}" CACHE INTERNAL "")
+    set(PULP_${target}_UI_PACKAGE "" CACHE INTERNAL "")
     # Bundle formats use the same editor host as ordinary non-native plugins.
     # Keep this per-target selection in lockstep with pulp_add_plugin(): format
     # helpers no longer consult the process-global _PULP_VIEW_TARGET directly.
