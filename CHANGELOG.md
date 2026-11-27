@@ -9,6 +9,13 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
      release's bullet block. See docs/guides/versioning.md § Release pipeline
      for the full end-to-end flow. -->
 
+<a id="v12220"></a>
+## [1.222.0] - 2026-11-27
+
+- release/version bump ([#12993](https://github.com/Generous-Corp/pulp/pull/12993))
+- feature/gpu health adapter content seam ([#12992](https://github.com/Generous-Corp/pulp/pull/12992))
+- release/version bump ([#12991](https://github.com/Generous-Corp/pulp/pull/12991))
+
 <a id="v12210"></a>
 ## [1.221.0] - 2026-11-27
 
@@ -13855,6 +13862,7 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/Generous-Corp/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/Generous-Corp/pulp/pull/2))
 
+[1.222.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.222.0
 [1.221.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.221.0
 [1.220.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.220.0
 [1.219.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.219.0
