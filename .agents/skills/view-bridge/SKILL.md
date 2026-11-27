@@ -2709,10 +2709,10 @@ this boundary. Parameter text and custom state have matching containment in
   unchanged — that include is the compatibility contract, not an incidental
   one. The same split moved `ProcessContext` to `process_context.hpp` and
   `PrepareContext` to `prepare_resources.hpp`.
-- `core/editor_bridge/include/pulp/view/editor_bridge.hpp` — EditorBridge API
+- `core/editor_bridge/include/pulp/view/editor_bridge.hpp`: EditorBridge API
 - `core/view/include/pulp/view/scripted_ui.hpp` — session-owned native message
   attachment and realm-replacement persistence
-- `core/editor_bridge/src/editor_bridge.cpp` — EditorBridge implementation
+- `core/editor_bridge/src/editor_bridge.cpp`: EditorBridge implementation
 - `docs/guides/view-bridge.md` — user-facing guide
 - `docs/reference/editor-bridge.md` — EditorBridge reference
 - `examples/view-bridge-demo/main.cpp` — runnable headless demo
