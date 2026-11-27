@@ -14,10 +14,12 @@ pulp_add_vellum_editor_package(pulp-test-auv3-editor-package
     VIEW_TYPE ::pulp::test_fixtures::Auv3EditorView
     VIEW_INCLUDE_DIRS ${CMAKE_CURRENT_SOURCE_DIR})
 
+# The processor and the AUv3 entry are PulpGain's: pulp_add_plugin reads
+# au_v3_entry.cpp from this directory, where it is a link to that example's
+# entry, which includes pulp_gain.hpp from the include path below.
 pulp_add_plugin(PulpAuv3VellumEditor
     UI                pulp-test-auv3-editor-package
     FORMATS           AUv3
-    SOURCES           processor.cpp
     PLUGIN_NAME       "Pulp AUv3 Vellum Editor"
     BUNDLE_ID         "dev.pulp.test.auv3-vellum-editor"
     MANUFACTURER      "Pulp"
@@ -25,7 +27,9 @@ pulp_add_plugin(PulpAuv3VellumEditor
     CATEGORY          Effect
     PLUGIN_CODE       "PAvE"
     MANUFACTURER_CODE "PlEu")
-target_link_libraries(PulpAuv3VellumEditor_Core PUBLIC pulp-test-auv3-editor-view)
+target_link_libraries(PulpAuv3VellumEditor_Core INTERFACE pulp-test-auv3-editor-view)
+target_include_directories(PulpAuv3VellumEditor_Core INTERFACE
+    ${PULP_ROOT_DIR}/examples/pulp-gain)
 
 if(CMAKE_NM AND TARGET PulpAuv3VellumEditor_AUv3 AND TARGET PulpAuv3VellumEditor_AUv3Framework)
     add_test(NAME vellum-auv3-appex-editor-package
