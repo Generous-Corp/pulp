@@ -3,8 +3,14 @@
 
 from __future__ import annotations
 
+import json
+import os
 import pathlib
+import re
+import subprocess
 import sys
+import tempfile
+import textwrap
 import unittest
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[2]
@@ -122,9 +128,8 @@ class CoverageWorkflowTests(unittest.TestCase):
             barrier.index("Require every native coverage leg to succeed"),
             barrier.index("Download Linux native coverage artifact"),
         )
-        # Windows is best-effort, so its failure never reaches
-        # needs.coverage.result; a dispatch that names a Windows runner
-        # requires its report through the artifact instead.
+        # Default events omit Windows. An explicit Windows dispatch must
+        # pass its job and produce its report artifact before publishing.
         self.assertIn(
             "WINDOWS_REQUIRED: ${{ (inputs.windows_runner_selector_json || '') != '' }}",
             barrier,
@@ -132,7 +137,7 @@ class CoverageWorkflowTests(unittest.TestCase):
         self.assertIn("if: env.WINDOWS_REQUIRED == 'true'", barrier)
         self.assertIn("coverage-cobertura-windows-${{ github.sha }}", barrier)
         self.assertIn("reports+=(native-coverage/windows/coverage.cobertura.xml)", barrier)
-        self.assertIn("continue-on-error: ${{ matrix.os == 'windows' }}", self.coverage)
+        self.assertNotIn("continue-on-error: ${{ matrix.os == 'windows' }}", self.coverage)
 
     def test_required_native_lanes_skip_slow_proofs_and_fail_on_budget_miss(self) -> None:
         self.assertIn("scripts/run_coverage.sh owns the bounded CTest policy", self.coverage)
@@ -383,6 +388,149 @@ class CoverageWorkflowTests(unittest.TestCase):
                 count,
                 name,
             )
+
+
+class CoverageRoutingExecutionTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.workflow = (WORKFLOWS / "coverage.yml").read_text(encoding="utf-8")
+
+    def workflow_shell(self, job: str, step: str) -> str:
+        # Execute the checked-in workflow shell, not a reimplementation.
+        start = self.workflow.index(f"\n  {job}:\n")
+        section = re.split(r"\n  \S", self.workflow[start + 1 :], maxsplit=1)[0]
+        start = section.index(f"\n      - {step}\n")
+        step_body = section[start:].split("\n      - ", 2)[1]
+        run = re.search(r"(?m)^        run: \|\n((?:          [^\n]*\n|\n)+)", step_body)
+        self.assertIsNotNone(run, step)
+        return textwrap.dedent(run.group(1))
+
+    def test_windows_opt_in_is_wired_to_dispatch_input(self) -> None:
+        expression = "WINDOWS_REQUIRED: ${{ (inputs.windows_runner_selector_json || '') != '' }}"
+        # The matrix, queue watchdog, and publish barrier share the input.
+        self.assertEqual(self.workflow.count(expression), 3)
+
+    def execute_matrix(self, event: str, requested: bool, route: str) -> tuple:
+        script = self.workflow_shell("matrix-config", "id: build")
+        with tempfile.TemporaryDirectory() as tmp:
+            output = pathlib.Path(tmp) / "output"
+            proc = subprocess.run(
+                ["bash", "-c", script],
+                env={
+                    "PATH": os.environ["PATH"],
+                    "GITHUB_OUTPUT": str(output),
+                    "EVENT_NAME": event,
+                    "LINUX_RUNS_ON_JSON": '"ubuntu-latest"',
+                    "MACOS_RUNS_ON_JSON": '["self-hosted", "pulp-coverage-vm-macos"]',
+                    "WINDOWS_RUNS_ON_JSON": '{"group":"windows-proof","labels":"clang"}',
+                    "WINDOWS_REQUIRED": str(requested).lower(),
+                    "WINDOWS_ROUTE": route,
+                },
+                capture_output=True,
+                text=True,
+                timeout=10,
+                check=False,
+            )
+            recorded = output.read_text(encoding="utf-8") if output.exists() else ""
+            return proc, json.loads(recorded.removeprefix("matrix=")) if recorded else None
+
+    def test_default_coverage_events_omit_windows(self) -> None:
+        for event, route in (
+            ("schedule", "self-hosted"),
+            ("pull_request", "skip"),
+            ("workflow_dispatch", "github-hosted"),
+        ):
+            with self.subTest(event=event):
+                proc, matrix = self.execute_matrix(event, False, route)
+                self.assertEqual(proc.returncode, 0, proc.stderr)
+                self.assertEqual([leg["os"] for leg in matrix["include"]], ["linux", "macos"])
+                self.assertEqual(json.loads(matrix["include"][0]["runs_on_json"]), "ubuntu-latest")
+                self.assertEqual(
+                    json.loads(matrix["include"][1]["runs_on_json"]),
+                    ["self-hosted", "pulp-coverage-vm-macos"],
+                )
+
+    def test_explicit_windows_dispatch_adds_windows_with_resolved_selector(self) -> None:
+        proc, matrix = self.execute_matrix("workflow_dispatch", True, "self-hosted")
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertEqual([leg["os"] for leg in matrix["include"]], ["linux", "macos", "windows"])
+        self.assertEqual(
+            json.loads(matrix["include"][-1]["runs_on_json"]),
+            {"group": "windows-proof", "labels": "clang"},
+        )
+
+    def test_explicit_windows_dispatch_without_a_route_fails_closed(self) -> None:
+        proc, matrix = self.execute_matrix("workflow_dispatch", True, "skip")
+        self.assertEqual(proc.returncode, 1, proc.stderr)
+        self.assertIn("no Windows runner route resolved", proc.stdout)
+        self.assertIsNone(matrix)
+
+    def test_queue_watchdog_cancels_only_for_required_native_legs(self) -> None:
+        script = self.workflow_shell(
+            "coverage-queue-watchdog", "name: Reap a coverage leg stuck in the runner queue"
+        )
+        self.assertIn("QUEUED_GRACE_MINUTES: '150'", self.workflow)
+        # Record POST attempts offline, with no token. Age from run start.
+        stub = r"""
+        gh() {
+          case "$*" in
+            *--method\ POST*"runs/123/cancel") printf 'cancel\n' > "$CANCEL_LOG" ;;
+            *"runs/123/jobs?per_page=100"*) printf '%s\n' "$JOBS_TSV" ;;
+            *"runs/123 --jq"*) printf '1970-01-01T00:00:00Z\n' ;;
+            *) printf 'Unexpected gh call: %s\n' "$*" >&2; return 1 ;;
+          esac
+        }
+        date() {
+          case "$*" in
+            '-u +%s') printf '%s\n' "$NOW_EPOCH" ;;
+            '-u -d 1970-01-01T00:00:00Z +%s') printf '0\n' ;;
+            *) return 1 ;;
+          esac
+        }
+        sleep() { :; }
+        """
+        for label, requested, age, should_cancel in (
+            ("Windows", False, 151, False),
+            ("Linux", False, 151, True),
+            ("macOS", False, 151, True),
+            ("Windows", True, 151, True),
+            ("Linux", False, 149, False),
+        ):
+            with self.subTest(label=label, requested=requested, age=age), tempfile.TemporaryDirectory() as tmp:
+                cancel_log = pathlib.Path(tmp) / "cancel"
+                name = f"Coverage report ({label}, Clang)"
+                proc = subprocess.run(
+                    ["bash", "-c", textwrap.dedent(stub) + "\n" + script],
+                    env={
+                        "PATH": os.environ["PATH"],
+                        "REPO": "example/test",
+                        "RUN_ID": "123",
+                        "SELF_JOB_NAME": "Coverage queue watchdog",
+                        "WINDOWS_REQUIRED": str(requested).lower(),
+                        "QUEUED_GRACE_MINUTES": "150",
+                        "POLL_SECONDS": "0",
+                        "MAX_POLLS": "1",
+                        "NOW_EPOCH": str(age * 60),
+                        "CANCEL_LOG": str(cancel_log),
+                        "JOBS_TSV": (
+                            "Coverage queue watchdog\tin_progress\n"
+                            "Coverage report (macOS, Clang)\tin_progress\n"
+                            f"{name}\tqueued"
+                        ),
+                    },
+                    capture_output=True,
+                    text=True,
+                    timeout=10,
+                    check=False,
+                )
+                self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+                self.assertEqual(cancel_log.exists(), should_cancel, proc.stdout)
+                if should_cancel:
+                    self.assertIn(f"'{name}' has been queued", proc.stdout)
+                elif age >= 150:
+                    self.assertIn("Watchdog done.", proc.stdout)
+                else:
+                    self.assertIn("nothing reaped.", proc.stdout)
 
 
 if __name__ == "__main__":
