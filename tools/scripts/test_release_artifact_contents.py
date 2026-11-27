@@ -124,6 +124,11 @@ def installed_sdk_targets(text: str | None = None) -> set[str]:
             "PULP_SDK_TARGETS",
         ]:
             continue
+        elif command == "PULP_VELLUM_IN_TREE_DROP_UI_TARGETS" and tokens == [
+            "PULP_SDK_TARGETS"
+        ]:
+            # The in-tree Vellum mode only ever removes targets from the set.
+            continue
         elif (
             command == "INSTALL"
             and len(tokens) >= 2
@@ -791,9 +796,25 @@ class ReleaseArtifactContentsTests(unittest.TestCase):
             {"pulp-one", "pulp-two"},
         )
 
+    def test_sdk_target_parser_accepts_the_in_tree_drop_of_ui_targets(self) -> None:
+        self.assertEqual(
+            installed_sdk_targets(
+                """
+                set(PULP_SDK_TARGETS pulp-one pulp-two)
+                if(PULP_UI_FROM_VELLUM_IN_TREE)
+                    pulp_vellum_in_tree_drop_ui_targets(PULP_SDK_TARGETS)
+                endif()
+                install(TARGETS ${PULP_SDK_TARGETS})
+                """
+            ),
+            {"pulp-one", "pulp-two"},
+        )
+
     def test_sdk_target_parser_rejects_noncanonical_mutations(self) -> None:
         for mutation in (
             "list(PREPEND PULP_SDK_TARGETS pulp-two)",
+            "pulp_vellum_in_tree_drop_ui_targets(PULP_SDK_TARGETS pulp-two)",
+            "pulp_other_helper(PULP_SDK_TARGETS)",
             "set(pulp_sdk_targets pulp-two)",
             "list(APPEND pulp_sdk_targets pulp-two)",
             "unset(PULP_SDK_TARGETS)",
