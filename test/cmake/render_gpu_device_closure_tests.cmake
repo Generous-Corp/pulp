@@ -48,6 +48,8 @@ foreach(_pulp_gpu_entry IN ITEMS
         "render.interface_link;pulp-render;INTERFACE_LINK_LIBRARIES"
         "gpu_audio.link;pulp-gpu-audio;LINK_LIBRARIES"
         "gpu_audio.source_dir;pulp-gpu-audio;SOURCE_DIR"
+        "compute.type;pulp-gpu-compute;TYPE"
+        "compute.interface_link;pulp-gpu-compute;INTERFACE_LINK_LIBRARIES"
         "api_consumer.link;pulp-test-gpu-device-api-only-consumer;LINK_LIBRARIES"
         "device_consumer.link;pulp-test-gpu-device-only-consumer;LINK_LIBRARIES")
     list(GET _pulp_gpu_entry 0 _pulp_gpu_key)
@@ -73,13 +75,59 @@ if(Python3_Interpreter_FOUND)
         COMMAND ${Python3_EXECUTABLE}
                 ${CMAKE_SOURCE_DIR}/tools/scripts/gpu_device_link_closure_check.py
                 --properties "${_pulp_gpu_device_props_file}"
-                --render-include "${CMAKE_SOURCE_DIR}/core/render/include")
+                --render-include "${CMAKE_SOURCE_DIR}/core/render/include"
+                --cutover-inputs "${CMAKE_SOURCE_DIR}/tools/scripts/cutover_trial_inputs.json"
+                --repo-root "${CMAKE_SOURCE_DIR}")
     add_test(NAME gpu-device-link-closure-rules
         COMMAND ${Python3_EXECUTABLE}
                 ${CMAKE_SOURCE_DIR}/tools/scripts/test_gpu_device_link_closure_check.py)
     set_tests_properties(gpu-device-link-closure gpu-device-link-closure-rules
         PROPERTIES LABELS "render;gpu-device;link-closure" TIMEOUT 60)
 endif()
+
+# pulp-gpu-compute is the consumption target for compute and diagnostics code:
+# the device layer plus the provider usage requirements pulp-render exports,
+# with no canvas, view or renderer behind it. The walk is transitive, so a
+# forbidden layer that arrives through an intermediate archive, or through a
+# PRIVATE static link, is found too. Also checked: no device-layer header or
+# source is on the cutover deletion list, which is how the carve fails when the
+# list drifts from the layering.
+set(_pulp_link_closure_checker "${CMAKE_SOURCE_DIR}/tools/scripts/link_closure_check.py")
+set(_pulp_gpu_compute_forbidden
+    --forbid "pulp-view*" --forbid "pulp-canvas*" --forbid "pulp-render"
+    --forbid "pulp-design*" --forbid "pulp-bundled*" --forbid "pulp-vellum*")
+if(Python3_Interpreter_FOUND)
+    add_test(NAME gpu-compute-link-closure
+        COMMAND ${Python3_EXECUTABLE}
+                "${_pulp_link_closure_checker}"
+                --graph "${CMAKE_BINARY_DIR}/link-closure-graph.tsv"
+                --root pulp-gpu-compute --root pulp-gpu-device
+                --root pulp-gpu-device-api --root pulp-gpu-audio
+                ${_pulp_gpu_compute_forbidden})
+    # The same walk over a control chain that reaches pulp::canvas the way the
+    # failure it guards would: through an intermediate static archive, by a
+    # PRIVATE link. The control must be reported, or the walk is blind to
+    # transitive and PRIVATE edges and the pass above proves nothing.
+    add_library(pulp-gpu-compute-closure-control-leaf STATIC EXCLUDE_FROM_ALL
+        ${CMAKE_CURRENT_SOURCE_DIR}/fixtures/link_closure_control/empty.cpp)
+    target_link_libraries(pulp-gpu-compute-closure-control-leaf PRIVATE pulp::canvas)
+    add_library(pulp-gpu-compute-closure-control INTERFACE)
+    target_link_libraries(pulp-gpu-compute-closure-control INTERFACE
+        pulp::gpu-compute pulp-gpu-compute-closure-control-leaf)
+    add_test(NAME gpu-compute-link-closure-control
+        COMMAND ${Python3_EXECUTABLE}
+                "${_pulp_link_closure_checker}"
+                --graph "${CMAKE_BINARY_DIR}/link-closure-graph.tsv"
+                --root pulp-gpu-compute-closure-control
+                ${_pulp_gpu_compute_forbidden})
+    set_tests_properties(gpu-compute-link-closure-control PROPERTIES
+        PASS_REGULAR_EXPRESSION
+            "FAIL pulp-gpu-compute-closure-control reaches pulp-canvas: .*-> pulp-gpu-compute-closure-control-leaf -> pulp-canvas")
+    set_tests_properties(gpu-compute-link-closure gpu-compute-link-closure-control
+        PROPERTIES LABELS "render;gpu-device;link-closure" TIMEOUT 60)
+endif()
+unset(_pulp_gpu_compute_forbidden)
+unset(_pulp_link_closure_checker)
 
 # The device-layer mode is one fact for every consumer: PULP_GPU_RUNTIME sits
 # on pulp::platform and pulp::gpu-device-api exactly when this build forwards to
