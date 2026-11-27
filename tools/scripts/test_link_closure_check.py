@@ -22,9 +22,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import link_closure_check as lcc  # noqa: E402
 
 
-def graph_text(records: dict[str, tuple[str, str]], padding: int = 25) -> str:
-    """records: name -> (LINK_LIBRARIES, INTERFACE_LINK_LIBRARIES)."""
-    lines = [f"{name}\tSTATIC_LIBRARY\t{link}\t{iface}" for name, (link, iface) in records.items()]
+def graph_text(records: dict[str, tuple[str, ...]], padding: int = 25) -> str:
+    """records: name -> (LINK_LIBRARIES, INTERFACE_LINK_LIBRARIES[, SOURCES])."""
+    lines = [f"{name}\tSTATIC_LIBRARY\t" + "\t".join(fields) for name, fields in records.items()]
     lines += [f"pulp-pad-{index}\tSTATIC_LIBRARY\t\t" for index in range(padding)]
     return "\n".join(lines) + "\n"
 
@@ -111,6 +111,46 @@ class ClosureWalk(unittest.TestCase):
     def test_cycles_terminate(self) -> None:
         records = {"pulp-a": ("pulp::b", ""), "pulp-b": ("pulp::a", "")}
         self.assertEqual(self.run_check(records, ["pulp-a"], ["pulp-view*"])[0], 0)
+
+    # The routes below each reached pulp-canvas past an earlier version of the
+    # check and its graph writer.
+
+    def test_target_not_named_pulp_is_walked(self) -> None:
+        records = {"pulp-a": ("gpu_helper", ""), "gpu_helper": ("pulp::canvas", ""),
+                   "pulp-canvas": ("", "")}
+        code, _, err = self.run_check(records, ["pulp-a"], ["pulp-canvas"])
+        self.assertEqual(code, 1)
+        self.assertIn("pulp-a -> gpu_helper -> pulp-canvas", err)
+
+    def test_raw_archive_path_names_its_target(self) -> None:
+        for path in ("/x/build/core/canvas/libpulp-canvas.a", "C:/b/pulp-canvas.lib",
+                     "/x/libpulp-canvas.dylib", "/x/libpulp-canvas.so.1"):
+            with self.subTest(path=path):
+                records = {"pulp-a": (path, ""), "pulp-canvas": ("", "")}
+                code, _, err = self.run_check(records, ["pulp-a"], ["pulp-canvas"])
+                self.assertEqual(code, 1)
+                self.assertIn("pulp-a -> pulp-canvas", err)
+
+    def test_target_objects_source_is_an_edge(self) -> None:
+        records = {"pulp-a": ("", "", "$<TARGET_OBJECTS:objs>;x.cpp"),
+                   "objs": ("pulp::canvas", ""), "pulp-canvas": ("", "")}
+        code, _, err = self.run_check(records, ["pulp-a"], ["pulp-canvas"])
+        self.assertEqual(code, 1)
+        self.assertIn("pulp-a -> objs -> pulp-canvas", err)
+
+    def test_forbid_patterns_are_spelled_like_roots(self) -> None:
+        records = {"pulp-a": ("pulp::canvas", ""), "pulp-canvas": ("", "")}
+        for pattern in ("pulp::canvas", "Pulp::Canvas", "pulp::canv*"):
+            with self.subTest(pattern=pattern):
+                self.assertEqual(self.run_check(records, ["pulp-a"], [pattern])[0], 1)
+
+    def test_imported_target_is_walked(self) -> None:
+        records = {"pulp-a": ("", "VellumGpuRuntime::Device"),
+                   "VellumGpuRuntime::Device": ("", "pulp::canvas;skia::skia"),
+                   "pulp-canvas": ("", "")}
+        code, _, err = self.run_check(records, ["pulp-a"], ["pulp-canvas"])
+        self.assertEqual(code, 1)
+        self.assertIn("pulp-a -> vellumgpuruntime::device -> pulp-canvas", err)
 
     def test_missing_root_is_inconclusive_not_a_pass(self) -> None:
         code, _, err = self.run_check({"pulp-a": ("", "")}, ["pulp-gone"], ["pulp-view*"])
