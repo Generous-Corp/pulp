@@ -281,13 +281,11 @@ endif()
 
 # CLAP adapter
 #
-# View, not core: PulpClapPlugin embeds std::unique_ptr<ViewBridge>,
-# std::unique_ptr<view::PluginViewHost> and a GpuSurfaceSubscription by value
-# under PULP_CLAP_GUI, so clap_adapter.cpp needs those types complete for
-# sizeof and for `delete self`. Severing that would mean reworking the GUI
-# extension block in clap_entry.hpp, and clap_adapter.hpp would still have to
-# include pulp/view/plugin_view_host.hpp for sizeof afterwards -- moving the
-# dependency out of CMake and into the source rather than removing it.
+# pulp-format builds the adapter with PULP_CLAP_GUI, which compiles in the GUI
+# extension of the create_view() path (the end of clap_adapter.cpp) against
+# the view layer. PulpClapPlugin holds that GUI's state type-erased, so the
+# instance layout does not depend on PULP_CLAP_GUI and clap_adapter.hpp names
+# no view type.
 if(PULP_HAS_CLAP)
     target_sources(pulp-format-view PRIVATE
         src/clap_adapter.cpp
@@ -297,9 +295,7 @@ if(PULP_HAS_CLAP)
         src/clap_note_name.cpp
     )
     target_link_libraries(pulp-format-view PUBLIC clap)
-    # Keep PulpClapPlugin's layout identical between clap_adapter.cpp and the
-    # per-plugin clap_entry.cpp TU. The entry target defines PULP_CLAP_GUI=1;
-    # the shared adapter must do the same or GUI members shift later fields.
+    # PULP_CLAP_GUI compiles in the create_view() GUI extension.
     target_compile_definitions(pulp-format-view PRIVATE PULP_CLAP=1 PULP_CLAP_GUI=1)
 
     # The same adapter without the GUI extension, for editor-less plug-ins

@@ -110,8 +110,11 @@ class RmlUiEditor final : public format::Editor, public format::EditorAutomation
     format::EditorSize size() const override {
         return {width_, height_, 1.0};
     }
+    format::ViewSize size_hints() const override {
+        return slice_editor_size_hints(size());
+    }
     bool set_size(const format::EditorSize& size) override {
-        if (size.width < 120 || size.height < 80)
+        if (size.width < kEditorMinWidth || size.height < kEditorMinHeight)
             return false;
         width_ = size.width;
         height_ = size.height;
