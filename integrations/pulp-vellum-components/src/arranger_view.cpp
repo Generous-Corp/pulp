@@ -371,8 +371,8 @@ void ArrangerView::on_mouse_drag(view::Point position) {
     }
     if (!drag_)
         return;
-    const auto target = clamp_tick(
-        saturating_sub(layout_.tick_for_x(position.x).value, drag_->grab_offset_ticks));
+    const auto target =
+        clamp_tick(saturating_sub(layout_.tick_for_x(position.x).value, drag_->grab_offset_ticks));
     if (target.value == drag_->believed.start.value)
         return;
 
@@ -433,8 +433,8 @@ void ArrangerView::on_mouse_up(view::Point position) {
     }
     if (!drag_)
         return;
-    const auto target = clamp_tick(
-        saturating_sub(layout_.tick_for_x(position.x).value, drag_->grab_offset_ticks));
+    const auto target =
+        clamp_tick(saturating_sub(layout_.tick_for_x(position.x).value, drag_->grab_offset_ticks));
     const MusicalTimeRange replacement{target, drag_->duration};
 
     if (!drag_->opened && target.value == drag_->believed.start.value) {
