@@ -609,6 +609,17 @@ function(_pulp_add_aax target name bundle_id version manufacturer category manuf
 
     pulp_ensure_aax_sdk_targets()
 
+    # The AAX GUI glue (aax_effect_gui.cpp and the native view) hosts Pulp's own
+    # view editor and has no editor_factory() path. In an SDK whose UI is Vellum
+    # a plug-in that builds view-free therefore gets a processor-only AAX, so
+    # that glue is not compiled there.
+    if(NOT headless AND PULP_${target}_NO_EDITOR)
+        _pulp_ui_provider(_pulp_aax_ui_provider)
+        if(_pulp_aax_ui_provider STREQUAL "vellum")
+            set(headless TRUE)
+        endif()
+    endif()
+
     _pulp_plugin_entry_path(aax_entry aax_entry.cpp)
     if(NOT aax_entry)
         message(FATAL_ERROR
