@@ -16,7 +16,7 @@ namespace {
 // thread-local slot set around that construction reaches exactly that root.
 struct ViewEditorRequest {
     std::unique_ptr<::vellum::view::View> view;
-    std::shared_ptr<const ViewEditorHooks> hooks;
+    ViewEditorHooks hooks;
 };
 
 ViewEditorRequest*& pending_request() noexcept {
@@ -41,7 +41,7 @@ class ViewEditorRoot final : public ::vellum::view::View {
         auto* request = pending_request();
         if (request == nullptr)
             return;
-        hooks_ = request->hooks;
+        hooks_ = std::move(request->hooks);
         auto* view = request->view.get();
         // add_child() returns null once it has adopted the child.
         if (view != nullptr && add_child(std::move(request->view)) == nullptr)
@@ -57,8 +57,8 @@ class ViewEditorRoot final : public ::vellum::view::View {
         // The size at open is the starting point; `resized` reports changes.
         last_width_ = static_cast<std::uint32_t>(bounds().width);
         last_height_ = static_cast<std::uint32_t>(bounds().height);
-        if (child_ != nullptr && hooks_ && hooks_->opened && processor_reachable())
-            hooks_->opened(processor_, *child_);
+        if (child_ != nullptr && hooks_.opened && processor_reachable())
+            hooks_.opened(processor_, *child_);
     }
 
     void editor_closing() {
@@ -67,8 +67,8 @@ class ViewEditorRoot final : public ::vellum::view::View {
         if (!processor_reachable())
             return;
         processor_.state().release_open_gestures();
-        if (child_ != nullptr && hooks_ && hooks_->closing)
-            hooks_->closing(processor_, *child_);
+        if (child_ != nullptr && hooks_.closing)
+            hooks_.closing(processor_, *child_);
     }
 
     void editor_idle() {
@@ -99,7 +99,7 @@ class ViewEditorRoot final : public ::vellum::view::View {
     }
 
     void notify_resized() {
-        if (!open_ || child_ == nullptr || !hooks_ || !hooks_->resized || !processor_reachable())
+        if (!open_ || child_ == nullptr || !hooks_.resized || !processor_reachable())
             return;
         const auto b = bounds();
         const auto w = static_cast<std::uint32_t>(b.width);
@@ -108,12 +108,12 @@ class ViewEditorRoot final : public ::vellum::view::View {
             return;
         last_width_ = w;
         last_height_ = h;
-        hooks_->resized(processor_, *child_, w, h);
+        hooks_.resized(processor_, *child_, w, h);
     }
 
     EditorEnv& env_;
     format::Processor& processor_;
-    std::shared_ptr<const ViewEditorHooks> hooks_;
+    ViewEditorHooks hooks_;
     ::vellum::view::View* child_ = nullptr;
     bool open_ = false;
     std::uint32_t last_width_ = 0;
@@ -124,8 +124,7 @@ class ViewEditorRoot final : public ::vellum::view::View {
 
 ViewEditorFactory::ViewEditorFactory(ViewFactory make, ViewEditorHooks hooks,
                                      std::initializer_list<format::EditorRole> roles)
-    : make_(std::move(make)), hooks_(std::make_shared<const ViewEditorHooks>(std::move(hooks))),
-      roles_(roles) {}
+    : make_(std::move(make)), hooks_(std::move(hooks)), roles_(roles) {}
 
 ViewEditorFactory::~ViewEditorFactory() = default;
 
