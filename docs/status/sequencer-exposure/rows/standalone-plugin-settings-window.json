@@ -5,7 +5,7 @@
   "delivery_state": "pending",
   "claim_id": "standalone-plugin-settings-window-20261126",
   "owned_paths": [
-    "core/format/include/pulp/format/standalone_config.hpp",
+    "core/format/include/pulp/format/detail/standalone_test_hooks.hpp",
     "core/format/include/pulp/format/detail/standalone_contract_editor.hpp",
     "core/format/src/standalone_contract_editor_mac.mm",
     "test/test_standalone_contract_editor.mm",
@@ -13,18 +13,23 @@
   ],
   "evidence": [
     {
-      "path": "core/format/include/pulp/format/standalone_config.hpp",
-      "needles": ["int test_open_plugin_settings_frame = -1;"]
+      "path": "core/format/include/pulp/format/detail/standalone_test_hooks.hpp",
+      "needles": [
+        "int open_plugin_settings_frame = -1;"
+      ]
     },
     {
       "path": "core/format/src/standalone_contract_editor_mac.mm",
-      "needles": ["class PluginSettingsWindow", "EditorRole::settings"]
+      "needles": [
+        "class PluginSettingsWindow",
+        "EditorRole::settings"
+      ]
     }
   ],
   "surfaces": {
     "installed_sdk": {
       "disposition": "not_applicable",
-      "rationale": "StandaloneConfig gains a test-only frame hook that defaults to never; the standalone window gains a menu item only for a factory that offers EditorRole::settings. No sequencer type, transport or timing contract changes."
+      "rationale": "StandaloneApp gains set_test_hooks() over a detail test-hooks struct whose frame hook defaults to never; the standalone window gains a menu item only for a factory that offers EditorRole::settings. No sequencer type, transport or timing contract changes."
     },
     "offline_timeline_cli": {
       "disposition": "not_applicable",

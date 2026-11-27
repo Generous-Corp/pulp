@@ -97,7 +97,13 @@ function(_pulp_add_auv3_macos_framework target name bundle_id version auv3_entry
 
     # In an SDK whose UI is Vellum the controller is built without its
     # create_view() editor (PULP_FORMAT_LEGACY_VIEW=0), so it needs no view.
-    _pulp_ui_provider(_pulp_auv3_ui_provider)
+    # This module can be loaded on its own, without PulpUtils.cmake, so the
+    # provider is read only when that helper is defined; Pulp's own view is
+    # the answer otherwise.
+    set(_pulp_auv3_ui_provider "")
+    if(COMMAND _pulp_ui_provider)
+        _pulp_ui_provider(_pulp_auv3_ui_provider)
+    endif()
     if(_pulp_auv3_ui_provider STREQUAL "vellum")
         set(_pulp_auv3_format_link ${_PULP_FORMAT_CORE_TARGET})
     else()

@@ -16,9 +16,29 @@
 #include <cstdio>
 #include <cstring>
 
+#if !PULP_FORMAT_LEGACY_VIEW
+// The probe links no pulp-format-core; it stands in for one built with the
+// macro 0, which defines this marker (processor.hpp).
+extern "C" const char pulp_format_core_was_built_with_PULP_FORMAT_LEGACY_VIEW_0 = 0;
+#endif
+
 namespace {
 
 using pulp::format::Processor;
+
+// The first virtual a subclass adds takes the slot after Processor's last
+// one, so its position is Processor's whole vtable length: a virtual one mode
+// adds anywhere, the end included, moves it.
+struct EndOfProcessorVtable : Processor {
+    virtual void end_of_processor_vtable();
+};
+
+// The legacy settings tab type is Processor's public API with Pulp's view
+// layer and private without it, where it only fills the reserved slot.
+template <class P>
+concept PublicSettingsSection = requires { typename P::SettingsSection; };
+static_assert(PublicSettingsSection<Processor> == bool(PULP_FORMAT_LEGACY_VIEW),
+              "Processor::SettingsSection is public exactly when Pulp's view layer is");
 
 template <typename Member> void print_slot(const char* name, Member member) {
     static_assert(sizeof(member) == 2 * sizeof(std::uintptr_t),
@@ -39,6 +59,7 @@ int main() {
                &Processor::supports_in_place_scripted_ui_reload);
     print_slot("editor_factory", &Processor::editor_factory);
     print_slot("plugin_state_carries_parameters", &Processor::plugin_state_carries_parameters);
+    print_slot("end_of_vtable", &EndOfProcessorVtable::end_of_processor_vtable);
     std::printf("size %zu\n", sizeof(Processor));
     std::printf("abi_flags %s\n", pulp::format::reload::current_build_fingerprint().abi_flags);
     return 0;

@@ -90,13 +90,32 @@ target_compile_definitions(pulp-test-format-core-ui-free PRIVATE
     PULP_FORMAT_LEGACY_VIEW=0 PULP_TEST_REQUIRE_NO_VIEW_INCLUDE_PATH=1)
 target_compile_options(pulp-test-format-core-ui-free PRIVATE -include "${_legacy_view_poison}")
 
-# The object library is part of the default build of the tests, so a compile
-# failure fails the build; this test records that it compiled.
+# The object library builds with the tests, so a compile failure fails the
+# build. This test checks the build product: the object exists and is newer
+# than the sources it compiles, so a build that skipped the target fails here.
 add_test(NAME format-core-ui-free-compile
-    COMMAND ${CMAKE_COMMAND} -E echo
-        "pulp-format-core compiled with PULP_FORMAT_LEGACY_VIEW=0 under the view poison")
+    COMMAND ${CMAKE_COMMAND}
+        "-DOBJECTS=$<TARGET_OBJECTS:pulp-test-format-core-ui-free>"
+        "-DINPUTS=${CMAKE_SOURCE_DIR}/core/format/src/format.cpp;${CMAKE_SOURCE_DIR}/core/format/include/pulp/format/processor.hpp"
+        "-DPRESENT=$<TARGET_OBJECTS:pulp-test-format-core-ui-free-all>"
+        -P "${_legacy_view_dir}/check_objects_built.cmake")
 set_tests_properties(format-core-ui-free-compile PROPERTIES
     LABELS "format"
+    PULP_SELECT_WITH_TARGETS "pulp-format-core")
+
+# A macro-0 consumer linked against this build's pulp-format-core (built with
+# Pulp's view layer) must fail to link on the marker that names the mismatch.
+# Built only by the test, since its link is meant to fail.
+add_executable(pulp-test-format-mode-mismatch-consumer EXCLUDE_FROM_ALL
+    "${_legacy_view_dir}/mode_mismatch_consumer.cpp")
+target_link_libraries(pulp-test-format-mode-mismatch-consumer PRIVATE pulp::format-core)
+target_compile_definitions(pulp-test-format-mode-mismatch-consumer PRIVATE PULP_FORMAT_LEGACY_VIEW=0)
+add_test(NAME format-core-mode-mismatch-link
+    COMMAND ${CMAKE_COMMAND} --build "${CMAKE_BINARY_DIR}"
+        --target pulp-test-format-mode-mismatch-consumer -j 1)
+set_tests_properties(format-core-mode-mismatch-link PROPERTIES
+    LABELS "format"
+    PASS_REGULAR_EXPRESSION "pulp_format_core_was_built_with_PULP_FORMAT_LEGACY_VIEW_0"
     PULP_SELECT_WITH_TARGETS "pulp-format-core")
 
 if(TARGET pulp-view-core)
