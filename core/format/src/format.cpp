@@ -15,6 +15,13 @@
 namespace pulp::format {
 
 #if !PULP_FORMAT_LEGACY_VIEW
+} // namespace pulp::format
+
+// See processor.hpp: the marker a macro-0 caller links against.
+extern "C" const char pulp_format_core_was_built_with_PULP_FORMAT_LEGACY_VIEW_0 = 0;
+
+namespace pulp::format {
+
 // Completes the opaque stand-in for the reserved create_view() slot, which
 // libstdc++ needs to instantiate ~unique_ptr<View> below. No one can construct
 // one, so the reserved slot can only ever return null.

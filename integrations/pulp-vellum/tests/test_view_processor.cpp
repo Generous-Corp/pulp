@@ -140,9 +140,37 @@ class InspectedPlugin final : public pulp::vellum::ViewProcessor<> {
     void process(pulp::audio::BufferView<float>&, const pulp::audio::BufferView<const float>&,
                  pulp::midi::MidiBuffer&, pulp::midi::MidiBuffer&,
                  const pulp::format::ProcessContext&) override {}
+    std::unique_ptr<::vellum::view::View> create_view() override {
+        return std::make_unique<Panel>(1);
+    }
     std::unique_ptr<::vellum::view::View> create_view(EditorRole role) override {
         return std::make_unique<Panel>(role == EditorRole::inspector ? 2 : 1);
     }
+    bool has_view(EditorRole role) const override {
+        return role == EditorRole::editor || role == EditorRole::inspector;
+    }
+};
+
+// A plug-in whose editor view exists only some of the time says so.
+class SometimesPlugin final : public pulp::vellum::ViewProcessor<> {
+  public:
+    pulp::format::PluginDescriptor descriptor() const override {
+        return {};
+    }
+    void define_parameters(pulp::state::StateStore&) override {}
+    void prepare(const pulp::format::PrepareContext&) override {}
+    void process(pulp::audio::BufferView<float>&, const pulp::audio::BufferView<const float>&,
+                 pulp::midi::MidiBuffer&, pulp::midi::MidiBuffer&,
+                 const pulp::format::ProcessContext&) override {}
+    std::unique_ptr<::vellum::view::View> create_view() override {
+        ++built;
+        return available ? std::make_unique<Panel>(5) : nullptr;
+    }
+    bool has_view(EditorRole role) const override {
+        return role == EditorRole::editor && available;
+    }
+    bool available = false;
+    int built = 0;
 };
 
 struct Host {
@@ -206,12 +234,34 @@ TEST_CASE("A ViewProcessor whose create_view() returns null has no editor",
     CHECK(plugin.created == 1);
 }
 
+TEST_CASE("A ViewProcessor offers only the roles has_view names, and builds nothing to answer",
+          "[pulp-vellum][view-processor][roles]") {
+    Host h;
+    SometimesPlugin plugin;
+    plugin.set_state_store(&h.store);
+    auto* factory = plugin.editor_factory();
+    REQUIRE(factory != nullptr);
+    CHECK_FALSE(factory->supports(EditorRole::editor));
+    CHECK_FALSE(factory->supports(EditorRole::inspector));
+    CHECK_FALSE(factory->supports(EditorRole::settings));
+    CHECK(plugin.built == 0);
+    CHECK(factory->create(plugin, h.context, EditorRole::editor) == nullptr);
+    CHECK(plugin.built == 0);
+
+    plugin.available = true;
+    CHECK(factory->supports(EditorRole::editor));
+    CHECK(plugin.built == 0);
+    CHECK(factory->create(plugin, h.context, EditorRole::editor) != nullptr);
+    CHECK(plugin.built == 1);
+}
+
 TEST_CASE("Two ViewProcessors share one factory and each opens its own tree",
           "[pulp-vellum][view-processor]") {
     Host h;
     Plugin first(1);
     Plugin second(2);
-    CHECK(first.editor_factory() == second.editor_factory());
+    // Each processor owns its factory, as the editor-host contract asks.
+    CHECK(first.editor_factory() != second.editor_factory());
     auto a = h.open(first);
     auto* host_a = h.host;
     auto b = h.open(second);
