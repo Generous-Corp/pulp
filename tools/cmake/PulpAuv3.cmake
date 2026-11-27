@@ -57,6 +57,11 @@ function(_pulp_add_auv3 target name bundle_id version manufacturer category plug
     if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/au_v3_entry.cpp")
         set(auv3_entry "${CMAKE_CURRENT_SOURCE_DIR}/au_v3_entry.cpp")
     endif()
+    # A caller whose entry lives elsewhere sets PULP_AUV3_ENTRY_SOURCE to its
+    # absolute path before pulp_add_plugin().
+    if(PULP_AUV3_ENTRY_SOURCE)
+        set(auv3_entry "${PULP_AUV3_ENTRY_SOURCE}")
+    endif()
 
     if(PULP_IOS)
         _pulp_add_auv3_ios(${target}

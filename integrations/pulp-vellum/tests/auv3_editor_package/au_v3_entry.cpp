@@ -1,1 +1,0 @@
-../../../../examples/pulp-gain/au_v3_entry.cpp

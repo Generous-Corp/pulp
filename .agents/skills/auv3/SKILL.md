@@ -1848,7 +1848,7 @@ skips it when the framework target exists). The stub only `-force_load`s the
 framework, so the editor instantiation it would hold references the plug-in's
 editor code and fails to link (`undefined forge::...Editor::editor_idle()`), and
 the stub references no `@rpath/libvellum-*.dylib`, so it needs no rpath into the
-framework. `vellum-auv3-appex-editor-package` (integrations/pulp-vellum/tests/
+framework. `pulp_add_plugin` takes the AUv3 entry from `au_v3_entry.cpp` in the calling directory, or from `PULP_AUV3_ENTRY_SOURCE` when that is set. `vellum-auv3-appex-editor-package` (integrations/pulp-vellum/tests/
 auv3_editor_package) builds the pair and reads both symbol tables. The build leaves
 the dylibs ad-hoc signed, and `pulp ship sign` does not re-sign them with a real
 identity (it runs a single `codesign --force` on the path it is given, with no
