@@ -5,6 +5,7 @@
 #include <pulp/vellum/auto_ui.hpp>
 #include <pulp/vellum/editor.hpp>
 #include <pulp/vellum/interaction_adapter.hpp>
+#include <pulp/vellum/view_editor.hpp>
 
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
@@ -2139,3 +2140,306 @@ TEST_CASE("Vellum AutoUi editor opens at the fit size unless the processor decla
     CHECK(kept->size().width == 500);
     CHECK(kept->size().height == 260);
 }
+
+// ── ViewEditorFactory: a create_view()-shaped tree on the editor-host contract ──
+// Its own namespace: the fixtures above use the same short names.
+namespace view_editor_test {
+
+using pulp::format::EditorRole;
+using pulp::format::NativeParent;
+using pulp::format::NativeParentKind;
+using PluginViewHost = ::vellum::view::PluginViewHost;
+
+class Context final : public pulp::format::EditorContext {
+  public:
+    explicit Context(pulp::format::ParamPort& params) : params_(params) {}
+    pulp::format::ParamPort& params() override {
+        return params_;
+    }
+    pulp::format::VisualPort* visuals() override {
+        return nullptr;
+    }
+    bool request_resize(const pulp::format::EditorSize& size) override {
+        ++resize_requests;
+        requested = size;
+        return accept_resize;
+    }
+    bool host_action(const pulp::format::HostActionRequest&) override {
+        return false;
+    }
+    pulp::format::EditorHostKind host_kind() const override {
+        return pulp::format::EditorHostKind::plugin;
+    }
+
+    int resize_requests = 0;
+    pulp::format::EditorSize requested;
+    bool accept_resize = true;
+
+  private:
+    pulp::format::ParamPort& params_;
+};
+
+class Processor final : public pulp::format::Processor {
+  public:
+    pulp::format::PluginDescriptor descriptor() const override {
+        return {};
+    }
+    void define_parameters(pulp::state::StateStore&) override {}
+    void prepare(const pulp::format::PrepareContext&) override {}
+    void process(pulp::audio::BufferView<float>&, const pulp::audio::BufferView<const float>&,
+                 pulp::midi::MidiBuffer&, pulp::midi::MidiBuffer&,
+                 const pulp::format::ProcessContext&) override {}
+    pulp::format::ViewSize view_size() const override {
+        return hints;
+    }
+
+    pulp::format::ViewSize hints{.preferred_width = 640, .preferred_height = 360};
+};
+
+class StubHost final : public PluginViewHost {
+  public:
+    explicit StubHost(Size size) : size_(size) {}
+    ::vellum::view::NativeViewHandle native_handle() override {
+        return this;
+    }
+    void attach_to_parent(::vellum::view::NativeViewHandle parent) override {
+        attached_ = parent == this;
+    }
+    bool is_attached() const noexcept override {
+        return attached_;
+    }
+    void detach() override {
+        attached_ = false;
+    }
+    void repaint() override {}
+    void set_size(uint32_t width, uint32_t height) override {
+        size_ = {width, height};
+    }
+    Size get_size() const override {
+        return size_;
+    }
+
+  private:
+    Size size_;
+    bool attached_ = false;
+};
+
+struct Events {
+    int opened = 0;
+    int closing = 0;
+    std::vector<std::pair<std::uint32_t, std::uint32_t>> resized;
+    int open_gestures_at_closing = -1;
+    ::vellum::view::View* last_view = nullptr;
+    std::vector<::vellum::view::View*> open_views;
+};
+
+// Every role the factory builds gets this tree; tests count what it sees.
+class PluginView final : public ::vellum::view::View {};
+
+struct Fixture {
+    pulp::state::StateStore store;
+    Processor processor;
+    std::unique_ptr<pulp::format::StateStoreParamPort> port;
+    std::unique_ptr<Context> context;
+    Events events;
+    int makes = 0;
+    bool make_null = false;
+    StubHost* host = nullptr;
+
+    Fixture() {
+        pulp::state::ParamInfo info;
+        info.id = 1;
+        info.name = "Gain";
+        info.range = {0.0f, 1.0f, 0.5f};
+        store.add_parameter(info);
+        processor.set_state_store(&store);
+        port = std::make_unique<pulp::format::StateStoreParamPort>(store);
+        context = std::make_unique<Context>(*port);
+        PluginViewHost::set_factory(
+            [this](::vellum::view::View&, const PluginViewHost::Options& options) {
+                auto stub = std::make_unique<StubHost>(options.size);
+                host = stub.get();
+                return stub;
+            });
+    }
+    ~Fixture() {
+        PluginViewHost::clear_factory();
+    }
+
+    pulp::vellum::ViewEditorFactory factory() {
+        pulp::vellum::ViewEditorHooks hooks;
+        hooks.opened = [this](pulp::format::Processor& p, ::vellum::view::View& v) {
+            CHECK(&p == &processor);
+            ++events.opened;
+            events.last_view = &v;
+            events.open_views.push_back(&v);
+        };
+        hooks.resized = [this](pulp::format::Processor&, ::vellum::view::View&, std::uint32_t w,
+                               std::uint32_t h) { events.resized.emplace_back(w, h); };
+        hooks.closing = [this](pulp::format::Processor&, ::vellum::view::View& v) {
+            ++events.closing;
+            events.open_gestures_at_closing = static_cast<int>(store.open_gesture_count());
+            // The view that closes is one that opened and has not closed yet.
+            auto it = std::find(events.open_views.begin(), events.open_views.end(), &v);
+            CHECK(it != events.open_views.end());
+            if (it != events.open_views.end())
+                events.open_views.erase(it);
+        };
+        return pulp::vellum::ViewEditorFactory(
+            [this](pulp::format::Processor&, EditorRole) -> std::unique_ptr<::vellum::view::View> {
+                ++makes;
+                if (make_null)
+                    return nullptr;
+                return std::make_unique<PluginView>();
+            },
+            std::move(hooks));
+    }
+
+    NativeParent parent() const {
+        return {.kind = NativeParentKind::cocoa_view, .handle = host};
+    }
+};
+
+TEST_CASE("A view editor builds its view at create and reports no editor for a null view",
+          "[pulp-vellum][view-editor]") {
+    Fixture f;
+    auto factory = f.factory();
+    CHECK(factory.supports(EditorRole::editor));
+    CHECK(factory.supports(EditorRole::inspector));
+    CHECK_FALSE(factory.supports(EditorRole::settings));
+    CHECK(factory.create(f.processor, *f.context, EditorRole::settings) == nullptr);
+    CHECK(f.makes == 0);
+
+    f.make_null = true;
+    CHECK(factory.create(f.processor, *f.context, EditorRole::editor) == nullptr);
+    CHECK(f.makes == 1);
+
+    f.make_null = false;
+    auto editor = factory.create(f.processor, *f.context, EditorRole::editor);
+    REQUIRE(editor != nullptr);
+    CHECK(f.makes == 2);
+    CHECK(f.events.opened == 0);
+}
+
+TEST_CASE("A view editor fires opened only at a native attach, and closing once per attach",
+          "[pulp-vellum][view-editor][lifecycle]") {
+    Fixture f;
+    auto factory = f.factory();
+    auto editor = factory.create(f.processor, *f.context, EditorRole::editor);
+    REQUIRE(editor != nullptr);
+    REQUIRE(f.host != nullptr);
+
+    // Offscreen attach and a failed attach open nothing.
+    CHECK(editor->attach({.kind = NativeParentKind::none}));
+    CHECK_FALSE(editor->attach({.kind = NativeParentKind::cocoa_view, .handle = &f}));
+    CHECK(f.events.opened == 0);
+    editor->detach();
+    CHECK(f.events.closing == 0);
+
+    REQUIRE(editor->attach(f.parent()));
+    CHECK(f.events.opened == 1);
+    REQUIRE(f.events.last_view != nullptr);
+    editor->detach();
+    editor->detach();
+    CHECK(f.events.closing == 1);
+
+    REQUIRE(editor->attach(f.parent()));
+    CHECK(f.events.opened == 2);
+    editor->invalidate();
+    CHECK(f.events.closing == 2);
+    editor.reset();
+    CHECK(f.events.closing == 2);
+}
+
+TEST_CASE("A view editor takes its size hints from the processor and reports resizes",
+          "[pulp-vellum][view-editor][size]") {
+    Fixture f;
+    f.processor.hints = {.preferred_width = 640,
+                         .preferred_height = 360,
+                         .min_width = 320,
+                         .min_height = 180,
+                         .max_width = 1280,
+                         .max_height = 720};
+    auto factory = f.factory();
+    auto editor = factory.create(f.processor, *f.context, EditorRole::editor);
+    REQUIRE(editor != nullptr);
+    const auto hints = editor->size_hints();
+    CHECK(hints.preferred_width == 640);
+    CHECK(hints.min_width == 320);
+    CHECK(hints.max_height == 720);
+    CHECK(editor->size().width == 640);
+    CHECK(editor->size().height == 360);
+
+    // Before attach a size change opens nothing and reports nothing.
+    CHECK(editor->set_size({700, 400, 2.0}));
+    CHECK(f.events.resized.empty());
+
+    REQUIRE(editor->attach(f.parent()));
+    CHECK(editor->set_size({800, 450, 2.0}));
+    CHECK(editor->size().scale == 2.0);
+    // Clamped to the processor's maximum.
+    CHECK(editor->set_size({4000, 4000, 2.0}));
+    REQUIRE(f.events.resized.size() == 2);
+    CHECK(f.events.resized[0] == std::pair<std::uint32_t, std::uint32_t>{800, 450});
+    CHECK(f.events.resized[1] == std::pair<std::uint32_t, std::uint32_t>{1280, 720});
+    // The plug-in view fills the editor, both axes.
+    CHECK(f.events.last_view->bounds().width == 1280.0f);
+    CHECK(f.events.last_view->bounds().height == 720.0f);
+}
+
+TEST_CASE("A view editor releases gestures the view opened on the store directly",
+          "[pulp-vellum][view-editor][gestures]") {
+    Fixture f;
+    auto factory = f.factory();
+    auto editor = factory.create(f.processor, *f.context, EditorRole::editor);
+    REQUIRE(editor != nullptr);
+    REQUIRE(editor->attach(f.parent()));
+    f.store.begin_gesture(1);
+    REQUIRE(f.store.open_gesture_count() == 1);
+    editor->detach();
+    CHECK(f.events.closing == 1);
+    CHECK(f.events.open_gestures_at_closing == 0);
+    CHECK(f.store.open_gesture_count() == 0);
+}
+
+TEST_CASE("A view editor does not reach the processor once its port is disconnected",
+          "[pulp-vellum][view-editor][owner]") {
+    Fixture f;
+    auto factory = f.factory();
+    auto editor = factory.create(f.processor, *f.context, EditorRole::editor);
+    REQUIRE(editor != nullptr);
+    REQUIRE(editor->attach(f.parent()));
+    f.store.begin_gesture(1);
+    f.port->disconnect();
+    CHECK(editor->set_size({500, 300, 1.0}));
+    editor->invalidate();
+    editor.reset();
+    CHECK(f.events.opened == 1);
+    CHECK(f.events.closing == 0);
+    CHECK(f.events.resized.empty());
+    // The store is not touched either: the gesture the store holds stays open.
+    CHECK(f.store.open_gesture_count() == 1);
+    f.store.release_open_gestures();
+}
+
+TEST_CASE("One view editor factory serves several editors at once",
+          "[pulp-vellum][view-editor][roles]") {
+    Fixture f;
+    auto factory = f.factory();
+    auto main = factory.create(f.processor, *f.context, EditorRole::editor);
+    auto* main_host = f.host;
+    auto inspector = factory.create(f.processor, *f.context, EditorRole::inspector);
+    auto* inspector_host = f.host;
+    REQUIRE(main != nullptr);
+    REQUIRE(inspector != nullptr);
+    REQUIRE(main_host != inspector_host);
+    REQUIRE(main->attach({.kind = NativeParentKind::cocoa_view, .handle = main_host}));
+    REQUIRE(inspector->attach({.kind = NativeParentKind::cocoa_view, .handle = inspector_host}));
+    CHECK(f.events.opened == 2);
+    inspector->detach();
+    CHECK(f.events.closing == 1);
+    main->detach();
+    CHECK(f.events.closing == 2);
+}
+
+} // namespace view_editor_test
