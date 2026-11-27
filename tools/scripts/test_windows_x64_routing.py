@@ -133,7 +133,7 @@ class RoutedJobsTests(unittest.TestCase):
                 spec = load(workflow)["jobs"][job_name]
                 self.assertIn("--head-repo", selector_steps(spec)[0]["run"])
         coverage = load("coverage.yml")["jobs"]["resolve-runners"]
-        self.assertIn("--max-backlog 1", selector_steps(coverage)[0]["run"])
+        self.assertNotIn("--max-backlog", selector_steps(coverage)[0]["run"])
         self.assertEqual(coverage["permissions"].get("actions"), "read")
 
     def test_no_routed_job_is_a_required_context(self) -> None:
@@ -175,45 +175,36 @@ class CoverageRouteTests(unittest.TestCase):
         out = run_step(self.script, env, backlog)
         return json.loads(out["windows_runs_on"]), out["windows_route"]
 
-    def test_schedule_and_dispatch_take_the_lane(self) -> None:
-        for event in ("schedule", "workflow_dispatch"):
+    def test_default_events_ignore_windows_lane_and_hosted_settings(self) -> None:
+        for event in ("schedule", "workflow_dispatch", "pull_request"):
             with self.subTest(event=event):
-                self.assertEqual(self.resolve(event), (LANE, "self-hosted"))
-
-    def test_a_busy_lane_drops_the_scheduled_leg_but_not_a_dispatch(self) -> None:
-        self.assertEqual(self.resolve("schedule", backlog=1)[1], "skip")
-        self.assertEqual(self.resolve("workflow_dispatch", backlog=3)[1], "self-hosted")
-
-    def test_a_pull_request_leaves_windows_out_unless_hosted_is_opted_into(self) -> None:
-        self.assertEqual(self.resolve("pull_request")[1], "skip")
-        self.assertEqual(self.resolve("pull_request", PR_HEAD_REPO="fork/pulp")[1], "skip")
-        self.assertEqual(self.resolve("pull_request", PR_HEAD_REPO="")[1], "skip")
-        for head in ("Generous-Corp/pulp", "fork/pulp", ""):
-            with self.subTest(head=head):
                 self.assertEqual(
-                    self.resolve("pull_request", ALLOW_HOSTED_WINDOWS="1", PR_HEAD_REPO=head),
-                    ("windows-latest", "hosted"))
+                    self.resolve(event, ALLOW_HOSTED_WINDOWS="1", WINDOWS_X64_RUNS_ON_JSON=json.dumps(LANE)),
+                    ("windows-latest", "skip"),
+                )
 
-    def test_a_hosted_lane_variable_switches_coverage_back_to_hosted(self) -> None:
-        self.assertEqual(self.resolve("schedule", WINDOWS_X64_RUNS_ON_JSON='"windows-latest"'),
-                         ("windows-latest", "hosted"))
+    def test_schedule_and_pr_do_not_consume_a_dispatch_selector(self) -> None:
+        for event in ("schedule", "pull_request"):
+            for head in ("Generous-Corp/pulp", "fork/pulp", ""):
+                with self.subTest(event=event, head=head):
+                    self.assertEqual(
+                        self.resolve(event, PR_HEAD_REPO=head, EXPLICIT_WINDOWS_RUNNER_SELECTOR_JSON=json.dumps(LANE)),
+                        ("windows-latest", "skip"),
+                    )
 
-    def test_a_pull_request_never_reads_the_coverage_override(self) -> None:
-        override = json.dumps([*LANE, "pulp-host-macpro"])
-        self.assertEqual(self.resolve("pull_request", WINDOWS_RUNS_ON_JSON=override)[1], "skip")
-        self.assertEqual(self.resolve("schedule", WINDOWS_RUNS_ON_JSON=override),
-                         (json.loads(override), "self-hosted"))
+    def test_explicit_dispatch_uses_the_requested_route(self) -> None:
+        for selector, route in ((LANE, "self-hosted"), ("windows-latest", "hosted")):
+            with self.subTest(route=route):
+                self.assertEqual(
+                    self.resolve("workflow_dispatch", backlog=3,
+                                 EXPLICIT_WINDOWS_RUNNER_SELECTOR_JSON=json.dumps(selector)),
+                    (selector, route),
+                )
 
-    def test_the_matrix_drops_a_skipped_windows_leg(self) -> None:
-        script = next(step["run"] for step in load("coverage.yml")["jobs"]["matrix-config"]["steps"]
-                      if step.get("id") == "build")
-        base = {"EVENT_NAME": "schedule", "LINUX_RUNS_ON_JSON": '"ubuntu-latest"',
-                "MACOS_RUNS_ON_JSON": '"macos-latest"', "WINDOWS_RUNS_ON_JSON": json.dumps(LANE)}
-        kept = json.loads(run_step(script, {**base, "WINDOWS_ROUTE": "self-hosted"}, 0)["matrix"])
-        dropped = json.loads(run_step(script, {**base, "WINDOWS_ROUTE": "skip"}, 0)["matrix"])
-        self.assertEqual([leg["os"] for leg in kept["include"]], ["linux", "macos", "windows"])
-        self.assertEqual(json.loads(kept["include"][2]["runs_on_json"]), LANE)
-        self.assertEqual([leg["os"] for leg in dropped["include"]], ["linux", "macos"])
+    def test_explicit_dispatch_rejects_invalid_selector(self) -> None:
+        with self.assertRaisesRegex(AssertionError, "windows-runner-selector: refused"):
+            self.resolve("workflow_dispatch", EXPLICIT_WINDOWS_RUNNER_SELECTOR_JSON="{invalid")
+
 
 
 class ControlShippingRouteTests(unittest.TestCase):
