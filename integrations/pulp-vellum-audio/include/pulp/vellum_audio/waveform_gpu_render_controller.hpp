@@ -10,7 +10,6 @@
 /// code, not from live audio callbacks. It is not thread-safe; async GPU upload
 /// completions should marshal commits back to the owning render/control thread.
 
-#include <pulp/audio/waveform_overview.hpp>
 #include <pulp/vellum_audio/waveform_gpu_primitives.hpp>
 
 #include <cstddef>

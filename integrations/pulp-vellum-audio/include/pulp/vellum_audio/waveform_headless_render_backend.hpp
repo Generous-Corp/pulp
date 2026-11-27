@@ -10,7 +10,6 @@
 /// implement. It does not create GPU objects, perform file I/O, or wait on live
 /// audio threads.
 
-#include <pulp/audio/waveform_overview.hpp>
 #include <pulp/vellum_audio/waveform_gpu_render_controller.hpp>
 
 #include <cstddef>
