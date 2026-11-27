@@ -2480,6 +2480,10 @@ is `docs/guides/editor-host-contract.md`. Things that are easy to get wrong:
   touched, so a gesture the view opened directly stays for the host's own
   teardown. The root sizes the view in `layout_children()`, not `on_resized()`:
   Vellum's flex layout runs after `on_resized()` and would replace the bounds.
+  The header only declares; the root lives in `src/view_editor.cpp`, and the
+  `pulp-vellum-header-weight-view-editor` test keeps `editor.hpp` and the
+  Vellum view layer out of it. A view anywhere in the hosted tree that
+  implements `EditorIdleTarget` gets the editor's idle tick while attached.
 - **The header must stay view-free.** It names no `pulp::view`, canvas, render,
   Dawn or Vellum type, and `format_header_view_boundary.py` classifies it as a
   `pulp-format-core` header automatically, so an include that reaches the view
@@ -4092,6 +4096,10 @@ installs at static init. Things that are easy to get wrong:
   `performKeyEquivalent:`, not only from the menu. A headless run has no menu,
   and the key driver offers `performKeyEquivalent:` first, so
   `PULP_TEST_KEY_SEQUENCE=cmd+k` reaches it.
+- A panel that listens for keys app-wide must leave them to a text field.
+  `StandalonePanelContext::text_input_focused` answers whether an editable
+  field in any app window has focus (macOS: the first responders' field
+  editors); without that check typing into a field also plays notes.
 - `drain_midi_into` runs on the audio thread until the standalone destroys the
   panel, which happens after audio stops. A panel must not free what drain reads
   in `shutdown()`.

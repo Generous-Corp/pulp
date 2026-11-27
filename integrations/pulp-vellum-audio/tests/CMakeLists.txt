@@ -9,6 +9,7 @@ if(PULP_BUILD_TESTS AND TARGET Catch2::Catch2WithMain)
         ${CMAKE_CURRENT_SOURCE_DIR}/musical_typing_test.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/piano_roll_view_test.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/spectrogram_view_test.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/standalone_typing_panel_test.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/step_grid_view_test.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/waveform_editor_test.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/waveform_gpu_primitives_test.cpp
