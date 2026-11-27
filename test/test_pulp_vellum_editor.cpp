@@ -2467,4 +2467,42 @@ TEST_CASE("A view editor keeps its hooks after the factory that made it is destr
     CHECK(alive.expired());
 }
 
+
+// A view below the hosted root that mirrors outside state on each tick.
+class IdleCounter final : public ::vellum::view::View, public pulp::vellum::EditorIdleTarget {
+  public:
+    void editor_idle() override {
+        ++ticks;
+    }
+    int ticks = 0;
+};
+
+TEST_CASE("A view editor ticks every idle target in the hosted tree while attached",
+          "[pulp-vellum][view-editor][idle]") {
+    Fixture f;
+    IdleCounter* nested = nullptr;
+    pulp::vellum::ViewEditorFactory factory(
+        [&](pulp::format::Processor&, EditorRole) -> std::unique_ptr<::vellum::view::View> {
+            auto panel = std::make_unique<PluginView>();
+            auto box = std::make_unique<PluginView>();
+            auto counter = std::make_unique<IdleCounter>();
+            nested = counter.get();
+            box->add_child(std::move(counter));
+            panel->add_child(std::move(box));
+            return panel;
+        });
+    auto editor = factory.create(f.processor, *f.context, EditorRole::editor);
+    REQUIRE(editor != nullptr);
+    REQUIRE(nested != nullptr);
+    editor->idle();
+    CHECK(nested->ticks == 0); // not attached yet
+    REQUIRE(editor->attach(f.parent()));
+    editor->idle();
+    editor->idle();
+    CHECK(nested->ticks == 2);
+    editor->detach();
+    editor->idle();
+    CHECK(nested->ticks == 2);
+}
+
 } // namespace view_editor_test
