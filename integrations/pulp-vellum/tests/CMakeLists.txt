@@ -15,6 +15,23 @@ if(PULP_BUILD_TESTS AND TARGET Catch2::Catch2WithMain)
     include(Catch)
     catch_discover_tests(pulp-test-pulp-vellum PROPERTIES LABELS pulp-vellum)
 
+    # The adapter probe against the real GPU runtime: it must pass, and with the
+    # adapter name dropped it must fail for that reason.
+    if(TARGET pulp-vellum-gpu-adapter-probe)
+        add_test(NAME pulp-vellum-gpu-adapter-probe
+            COMMAND pulp-vellum-gpu-adapter-probe)
+        set_tests_properties(pulp-vellum-gpu-adapter-probe PROPERTIES
+            LABELS pulp-vellum TIMEOUT 60
+            ENVIRONMENT "MTL_DEBUG_LAYER=0"
+            PASS_REGULAR_EXPRESSION "\"verdict\":\"pass\".*\"swatches_mismatched\":0")
+        add_test(NAME pulp-vellum-gpu-adapter-probe-empty-adapter
+            COMMAND pulp-vellum-gpu-adapter-probe --simulate-empty-adapter)
+        set_tests_properties(pulp-vellum-gpu-adapter-probe-empty-adapter PROPERTIES
+            LABELS pulp-vellum TIMEOUT 60
+            ENVIRONMENT "MTL_DEBUG_LAYER=0"
+            PASS_REGULAR_EXPRESSION "\"verdict\":\"fail\",\"reason\":\"empty-adapter\"")
+    endif()
+
     # The SDK's imported targets can be scoped to the integration directory.
     get_property(_has_swift_motion TARGET pulp-vellum PROPERTY PULP_VELLUM_HAS_SWIFT_MOTION)
     if(_has_swift_motion)
