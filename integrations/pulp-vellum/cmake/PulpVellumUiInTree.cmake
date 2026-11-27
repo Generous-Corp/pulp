@@ -55,8 +55,9 @@ function(pulp_vellum_in_tree_skips dir out)
 endfunction()
 
 # Defines the Vellum-backed UI names for the whole source tree. Call it from the
-# top-level directory, after integrations/, so the IMPORTED targets it defines
-# are visible to every directory and the Pulp integration packages exist.
+# top-level directory, after integrations/, so the Pulp integration packages
+# exist. The names are IMPORTED GLOBAL, so directories configured earlier (all
+# of core/) resolve them at generate time.
 function(pulp_vellum_in_tree_define_ui_targets)
     if(TARGET pulp-view-core)
         message(FATAL_ERROR
@@ -77,6 +78,9 @@ function(pulp_vellum_in_tree_define_ui_targets)
             add_library("Pulp::${_name}" ALIAS "${_target}")
         endif()
     endforeach()
+    # Every core/ directory is configured before this call, so the names must be
+    # global for consumers there to resolve them at generate time.
+    set(_PULP_VELLUM_UI_COMPAT_GLOBAL TRUE)
     pulp_define_vellum_ui_compat_targets()
     # Every name must be Vellum-backed, and the lower-case alias in-tree
     # consumers spell must be that same target, not a leftover of Pulp's own.

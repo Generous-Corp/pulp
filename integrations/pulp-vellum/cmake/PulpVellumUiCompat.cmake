@@ -260,6 +260,12 @@ function(_pulp_vellum_ui_compat_define name)
         endif()
     endforeach()
     add_library("${_target}" INTERFACE IMPORTED)
+    # In a source tree (PulpVellumUiInTree.cmake) the names are defined after
+    # the directories that link them, so they must be global to resolve there;
+    # the alias below inherits that. An installed SDK leaves them directory-scoped.
+    if(_PULP_VELLUM_UI_COMPAT_GLOBAL)
+        set_property(TARGET "${_target}" PROPERTY IMPORTED_GLOBAL TRUE)
+    endif()
     set_target_properties("${_target}" PROPERTIES
         INTERFACE_LINK_LIBRARIES "${_links}"
         INTERFACE_COMPILE_FEATURES cxx_std_20

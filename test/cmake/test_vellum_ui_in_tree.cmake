@@ -44,16 +44,23 @@ function(_reject text pattern what)
 endfunction()
 
 # Configures a fixture project whose body is `body` and returns its result code
-# and combined output.
+# and combined output. `_fixture_languages` (default NONE) names the project's
+# languages; `_fixture_consumer` is written to consumer/CMakeLists.txt.
+set(_fixture_languages NONE)
+set(_fixture_consumer "")
 function(_fixture name body out_rc out_text)
     set(_dir "${FIXTURE_DIR}/${name}")
     file(REMOVE_RECURSE "${_dir}")
     file(WRITE "${_dir}/CMakeLists.txt"
         "cmake_minimum_required(VERSION 3.25)\n"
-        "project(pulp_vellum_ui_in_tree_${name} LANGUAGES NONE)\n"
+        "project(pulp_vellum_ui_in_tree_${name} LANGUAGES ${_fixture_languages})\n"
         "set(PULP_UI_FROM_VELLUM_IN_TREE ON)\n"
         "include(\"${_module}\")\n"
         "${body}")
+    if(_fixture_consumer)
+        file(WRITE "${_dir}/consumer/CMakeLists.txt" "${_fixture_consumer}")
+        file(WRITE "${_dir}/consumer/consumer.c" "int pulp_consumer(void) { return 0; }\n")
+    endif()
     execute_process(COMMAND "${CMAKE_COMMAND}" -S "${_dir}" -B "${_dir}/build"
         RESULT_VARIABLE _rc OUTPUT_VARIABLE _out ERROR_VARIABLE _err)
     set(${out_rc} "${_rc}" PARENT_SCOPE)
@@ -108,6 +115,22 @@ if(SCENARIO STREQUAL "guards")
         message(FATAL_ERROR "guards: configured without the editor bridge:\n${_text}")
     endif()
     _expect("${_text}" "Pulp::view-tooling is not Vellum-backed" "the view-tooling refusal")
+
+    # A consumer configured before the names are defined, as every core/
+    # directory is in the source tree, must still resolve them. The Vellum
+    # stand-ins here are directory-scoped, like an ordinary find_package.
+    string(REPLACE " INTERFACE IMPORTED GLOBAL)" " INTERFACE IMPORTED)" _vellum_local "${_vellum}")
+    set(_fixture_languages C)
+    set(_fixture_consumer
+        "add_library(consumer STATIC consumer.c)\n"
+        "target_link_libraries(consumer PRIVATE pulp::view pulp::view-tooling)\n")
+    string(JOIN "" _fixture_consumer ${_fixture_consumer})
+    _fixture(early-consumer "${_vellum_local}add_subdirectory(consumer)\n${_in_tree}${_define}" _rc _text)
+    set(_fixture_languages NONE)
+    set(_fixture_consumer "")
+    if(NOT _rc EQUAL 0)
+        message(FATAL_ERROR "guards: a consumer added before the names were defined did not resolve them:\n${_text}")
+    endif()
 
     message(STATUS "guards: ok")
 
