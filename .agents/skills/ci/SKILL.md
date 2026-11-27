@@ -8023,6 +8023,13 @@ configure. Moving `pulp-editor-bridge` into `core/editor_bridge` did this to
 `StepSequencer_CLAP` and `TimelinePluginProof_CLAP` through
 `pulp-view -> pulp-view-tooling`; the fix is a debt entry beside the module the
 edge comes through, not a wider tier.
+
+A ratchet test that pins consumers in other files only judges a change if its
+lane runs on that change. `cmake-vellum-ui-in-tree-real` runs only in the
+advisory Vellum SDK consumer lane (it needs a Vellum SDK), so that lane's
+`pull_request.paths` include `core/**/CMakeLists.txt` and
+`inspect/CMakeLists.txt`, where its pinned consumers live. Widen the paths when
+the pin list gains a consumer elsewhere.
 Run `tools/scripts/gates.sh <integration-branch>` locally first — the fast gates
 are sub-second and catch all of this before a multi-minute ship cycle. Reconciling
 config you didn't author trips skill-sync/version-bump (config maps to the `ci`
