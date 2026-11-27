@@ -457,6 +457,9 @@ TEST_CASE("VST3 opens, resizes and closes a contract editor, twice",
             Steinberg::kResultTrue);
     REQUIRE(g_log.saw("attach:cocoa_view"));
     REQUIRE(g_log.parent_handle == fake_parent());
+    // onKeyDown is the press's only delivery, outside the native event path.
+    REQUIRE(g_log.context->query_extension(
+                pulp::format::editor_keys_after_native_pass_extension_id) == nullptr);
 
     // Size negotiation: 4:3, clamped to the editor's bounds.
     REQUIRE(view->canResize() == Steinberg::kResultTrue);

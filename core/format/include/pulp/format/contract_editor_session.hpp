@@ -102,6 +102,10 @@ class ContractEditorSession : public std::enable_shared_from_this<ContractEditor
         std::function<bool(const EditorSize&)> request_resize;
         /// Take a host action. Null declines every action.
         std::function<bool(const HostActionRequest&)> host_action;
+        /// The keys this host offers have already been through the native
+        /// key-equivalent pass over the editor's view; the context then
+        /// answers `editor_keys_after_native_pass_extension_id`.
+        bool keys_after_native_pass = false;
     };
 
     /// Who calls `tick()` while attached.
