@@ -22,7 +22,8 @@ still owes; every allowed edge is printed, so an exemption never goes unseen.
 
 Exit codes: 0 no root reaches a forbidden target, 1 a root does (each path is
 printed), 2 the input could not be read, a root is absent from the graph, or the
-graph is too small to be a real one.
+graph is too small to be a real one, a record is malformed, or a target-shaped
+name (`pulp-*` or `ns::name`) reachable from a root has no record.
 """
 
 from __future__ import annotations
@@ -73,6 +74,7 @@ class Graph:
     def __init__(self) -> None:
         self.edges: dict[str, list[str]] = {}
         self.types: dict[str, str] = {}
+        self.malformed: list[str] = []
 
     @classmethod
     def parse(cls, text: str) -> "Graph":
@@ -81,7 +83,8 @@ class Graph:
             if not line.strip():
                 continue
             fields = line.split("\t")
-            if len(fields) < 4:
+            if len(fields) < 4 or not fields[0].strip():
+                graph.malformed.append(line[:80])
                 continue
             name = canonical(fields[0].strip())
             graph.types[name] = fields[1].strip()
@@ -103,9 +106,23 @@ def matches(name: str, patterns: list[str]) -> bool:
     return any(fnmatch.fnmatchcase(name, pattern) for pattern in patterns)
 
 
+def names_a_target(name: str) -> bool:
+    """A reference that must have a record: a Pulp target or a namespaced one.
+
+    The graph writer records every target a property names, so a leaf without a
+    record is a plain word (a flag, a source file) unless it is spelled like a
+    target. A target-shaped name with no record was never inspected.
+    """
+    return name.startswith("pulp-") or "::" in name
+
+
 def find_paths(graph: Graph, root: str, forbidden: list[str],
-               allowed_edges: set[tuple[str, str]]) -> list[list[str]]:
-    """Shortest path from root to each forbidden target it reaches."""
+               allowed_edges: set[tuple[str, str]],
+               unresolved: set[str] | None = None) -> list[list[str]]:
+    """Shortest path from root to each forbidden target it reaches.
+
+    Target-shaped names reached without a record are added to `unresolved`.
+    """
     parent: dict[str, str | None] = {root: None}
     queue: deque[str] = deque([root])
     found: list[list[str]] = []
@@ -121,6 +138,8 @@ def find_paths(graph: Graph, root: str, forbidden: list[str],
                     path.append(parent[path[-1]])  # type: ignore[arg-type]
                 found.append(list(reversed(path)))
                 continue
+            if target not in graph.edges and unresolved is not None and names_a_target(target):
+                unresolved.add(target)
             queue.append(target)
     return found
 
@@ -129,14 +148,20 @@ def check(graph: Graph, roots: list[str], forbidden: list[str],
           allowed_edges: set[tuple[str, str]]) -> tuple[list[str], list[str]]:
     errors: list[str] = []
     notes: list[str] = []
+    for line in graph.malformed:
+        errors.append(f"INCONCLUSIVE malformed link-graph record: {line!r}")
     for root in roots:
         if root not in graph.edges:
             errors.append(f"INCONCLUSIVE root {root} is not in the link graph")
             continue
-        paths = find_paths(graph, root, forbidden, allowed_edges)
+        unresolved: set[str] = set()
+        paths = find_paths(graph, root, forbidden, allowed_edges, unresolved)
+        for target in sorted(unresolved):
+            errors.append(f"INCONCLUSIVE {root} reaches target {target} "
+                          f"which has no record in the link graph")
         for path in paths:
             errors.append(f"FAIL {root} reaches {path[-1]}: {' -> '.join(path)}")
-        if not paths:
+        if not paths and not unresolved:
             notes.append(f"{root}: closure holds none of {forbidden}")
     return errors, notes
 

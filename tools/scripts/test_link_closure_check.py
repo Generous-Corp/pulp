@@ -147,7 +147,7 @@ class ClosureWalk(unittest.TestCase):
     def test_imported_target_is_walked(self) -> None:
         records = {"pulp-a": ("", "VellumGpuRuntime::Device"),
                    "VellumGpuRuntime::Device": ("", "pulp::canvas;skia::skia"),
-                   "pulp-canvas": ("", "")}
+                   "skia::skia": ("", ""), "pulp-canvas": ("", "")}
         code, _, err = self.run_check(records, ["pulp-a"], ["pulp-canvas"])
         self.assertEqual(code, 1)
         self.assertIn("pulp-a -> vellumgpuruntime::device -> pulp-canvas", err)
@@ -156,6 +156,33 @@ class ClosureWalk(unittest.TestCase):
         code, _, err = self.run_check({"pulp-a": ("", "")}, ["pulp-gone"], ["pulp-view*"])
         self.assertEqual(code, 2)
         self.assertIn("INCONCLUSIVE", err)
+
+    def test_missing_intermediate_record_is_inconclusive_not_a_pass(self) -> None:
+        for mid in ("pulp-mid", "Bridge::telemetry"):
+            with self.subTest(mid=mid):
+                records = {"pulp-a": (mid, mid)}
+                code, _, err = self.run_check(records, ["pulp-a"], ["pulp-view*"])
+                self.assertEqual(code, 2)
+                self.assertIn("INCONCLUSIVE", err)
+                self.assertIn("no record", err)
+
+    def test_recorded_external_leaves_and_plain_words_are_clean(self) -> None:
+        records = {"pulp-a": ("pthread;m;-Wl,-x", "Threads::Threads"),
+                   "Threads::Threads": ("", "")}
+        code, _, _ = self.run_check(records, ["pulp-a"], ["pulp-view*"])
+        self.assertEqual(code, 0)
+
+    def test_malformed_record_is_inconclusive(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "graph.tsv"
+            path.write_text(graph_text({"pulp-a": ("pulp-mid", "")}) + "pulp-mid\tSTATIC_LIBRARY\n",
+                            encoding="utf-8")
+            out, err = io.StringIO(), io.StringIO()
+            with redirect_stdout(out), redirect_stderr(err):
+                code = lcc.main(["--graph", str(path), "--root", "pulp-a",
+                                 "--forbid", "pulp-view*"])
+            self.assertEqual(code, 2)
+            self.assertIn("malformed", err.getvalue())
 
     def test_a_tiny_graph_is_inconclusive(self) -> None:
         code, _, err = self.run_check({"pulp-a": ("", "")}, ["pulp-a"], ["pulp-view*"], padding=0)
