@@ -33,6 +33,11 @@ set_property(TARGET Vendor::Device PROPERTY INTERFACE_LINK_LIBRARIES pulp::canva
 add_library(route_imported INTERFACE)
 target_link_libraries(route_imported INTERFACE Vendor::Device)
 
+# 5. a non-GLOBAL imported target in a child directory.  The graph writer runs
+# at the top level after this directory has ended, so it must retain the import
+# as an explicit reference instead of treating the ordinary name as a leaf.
+add_subdirectory(scoped_import)
+
 # control: the same shapes with the forbidden layer removed
 add_library(clean_helper STATIC "${_empty}")
 target_link_libraries(clean_helper PRIVATE pulp-clean)

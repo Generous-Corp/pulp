@@ -191,6 +191,14 @@ class ClosureWalk(unittest.TestCase):
         code, _, _ = self.run_check(records, ["pulp-root"], ["pulp-view*"])
         self.assertEqual(code, 0)
 
+    def test_unresolved_directory_scoped_import_is_inconclusive(self) -> None:
+        # The writer records a directory-scoped import in REFS even though its
+        # properties cannot be read from the top-level deferred callback.
+        text = graph_text({"pulp-root": ("helper_import", "", "", "helper_import")})
+        code, err = self.run_raw(text, ["pulp-root"])
+        self.assertEqual(code, 2)
+        self.assertIn("helper_import", err)
+
     def test_missing_target_objects_record_is_inconclusive(self) -> None:
         for expr in ("$<TARGET_OBJECTS:canvas_objs>", "$<TARGET_FILE:canvas_objs>",
                      "$<TARGET_PROPERTY:canvas_objs,INTERFACE_SOURCES>"):

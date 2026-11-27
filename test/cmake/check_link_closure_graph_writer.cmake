@@ -33,6 +33,14 @@ foreach(_root IN ITEMS route_name route_path route_objects route_imported)
     endif()
 endforeach()
 execute_process(
+    COMMAND "${PYTHON}" "${CHECKER}" --graph "${_graph}" --root route_scoped
+            --forbid "pulp::canvas"
+    RESULT_VARIABLE _rc OUTPUT_VARIABLE _out ERROR_VARIABLE _err)
+if(NOT _rc EQUAL 2 OR NOT _err MATCHES "helper_import")
+    message(FATAL_ERROR "a directory-scoped imported target must be inconclusive "
+                        "(rc=${_rc})\n${_out}\n${_err}")
+endif()
+execute_process(
     COMMAND "${PYTHON}" "${CHECKER}" --graph "${_graph}" --root clean_root
             --forbid "pulp::canvas"
     RESULT_VARIABLE _rc OUTPUT_VARIABLE _out ERROR_VARIABLE _err)
@@ -56,4 +64,4 @@ if(NOT _rc EQUAL 2 OR NOT _err MATCHES "gpu_helper")
     message(FATAL_ERROR "a missing intermediate record must be INCONCLUSIVE "
                         "(rc=${_rc})\n${_out}\n${_err}")
 endif()
-message(STATUS "link-closure-graph-writer: 4 routes reported, control passes, gutted graph inconclusive")
+message(STATUS "link-closure-graph-writer: 4 routes reported, scoped import inconclusive, control passes, gutted graph inconclusive")
