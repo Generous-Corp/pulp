@@ -66,6 +66,8 @@ TEST_CASE("program editor shows a bank's slots and navigates banks",
     REQUIRE(editor.current_bank()->number == 0);
     REQUIRE(editor.preset_in(0)->display_name == "Alpha");
     REQUIRE_FALSE(editor.preset_in(50).has_value());
+    REQUIRE_FALSE(editor.preset_in(-1).has_value());
+    REQUIRE_FALSE(editor.preset_in(128).has_value());
 
     RecordingCanvas canvas;
     editor.paint(canvas);
@@ -107,11 +109,16 @@ TEST_CASE("program editor edits slots through the library and the host's answers
     editor.on_mouse_event(click(60, 32 + 4 + 24 * 10 + 12, 2)); // double-click row 10
     REQUIRE(asked == std::vector<BankProgram>{{0, 10}});
 
+    // The answer applies to the slot that opened the picker, even if the
+    // selection moves while the host dialog is open.
+    editor.select_program(2);
+
     // The host picks Alpha for slot 10: it moves there from slot 0.
     REQUIRE(editor.complete_assign("factory:Alpha"));
     REQUIRE(rig.library->program_of("factory:Alpha") == BankProgram{0, 10});
     REQUIRE_FALSE(editor.preset_in(0).has_value());
     REQUIRE_FALSE(editor.complete_assign("factory:Missing"));
+    editor.select_program(10);
 
     // Keys: arrows move, Delete clears, Enter asks.
     KeyEvent down;
@@ -154,10 +161,18 @@ TEST_CASE("program editor renames and renumbers a bank",
     editor.on_mouse_event(click(150, 10, 2)); // double-click the title
     REQUIRE(asked.size() == 1);
     REQUIRE(asked[0].second == "Factory");
-    REQUIRE(editor.request_bank_text(PresetProgramEditor::BankTextKind::renumber));
-    REQUIRE(asked[1].second == "0");
-
+    editor.next_bank();
     REQUIRE(editor.complete_bank_text(PresetProgramEditor::BankTextKind::rename, "Stock"));
+    REQUIRE(editor.current_bank()->number == 4);
+    REQUIRE(editor.current_bank()->name.empty());
+    REQUIRE(editor.preset_in(0)->display_name == "Charlie");
+    REQUIRE(rig.library->program_map().find_bank(0)->name == "Stock");
+    editor.previous_bank();
+    REQUIRE(editor.current_bank()->number == 0);
+
+    REQUIRE(editor.request_bank_text(PresetProgramEditor::BankTextKind::renumber));
+    REQUIRE(asked.back().second == "0");
+
     REQUIRE(editor.current_bank()->name == "Stock");
     REQUIRE(editor.complete_bank_text(PresetProgramEditor::BankTextKind::renumber, "12"));
     REQUIRE(editor.current_bank()->number == 12); // still showing the same bank

@@ -49,6 +49,7 @@ class PresetProgramEditor : public View {
             bank_index_ = 0;
             bank_number_ = banks[0].number;
         }
+        request_repaint();
     }
 
     bool has_banks() const {
@@ -86,6 +87,8 @@ class PresetProgramEditor : public View {
     }
     /// The preset in a slot of the shown bank, or nullopt when empty or missing.
     std::optional<state::PresetSummary> preset_in(int program) const {
+        if (program < 0 || program > state::kMaxProgramNumber)
+            return std::nullopt;
         const auto* b = current_bank();
         if (!b)
             return std::nullopt;
@@ -105,8 +108,10 @@ class PresetProgramEditor : public View {
     }
     /// The host's answer to `on_assign_request`: put `key` in the selected slot.
     bool complete_assign(const std::string& key) {
-        const auto slot = selected_slot();
-        if (!slot)
+        const auto slot = pending_assign_slot_;
+        pending_assign_slot_.reset();
+        refresh();
+        if (!slot || !map_.find_bank(slot->bank))
             return false;
         const bool ok = library_.assign_program(*slot, key);
         refresh();
@@ -115,18 +120,21 @@ class PresetProgramEditor : public View {
     /// The host's answer to `on_bank_text_request`. A rename may be empty; a
     /// renumber must be a bank number that is free and in range.
     bool complete_bank_text(BankTextKind kind, const std::string& text) {
-        const auto* b = current_bank();
-        if (!b)
+        auto& pending = kind == BankTextKind::rename ? pending_rename_bank_
+                                                      : pending_renumber_bank_;
+        const auto number = pending;
+        pending.reset();
+        refresh();
+        if (!number || !map_.find_bank(*number))
             return false;
-        const auto number = b->number;
         bool ok = false;
         if (kind == BankTextKind::rename) {
-            ok = library_.set_bank_name(number, text);
+            ok = library_.set_bank_name(*number, text);
         } else {
             const auto parsed = state::parse_bank_program(text + ":0");
             if (!parsed)
                 return false;
-            ok = library_.renumber_bank(number, parsed->bank);
+            ok = library_.renumber_bank(*number, parsed->bank);
             if (ok)
                 bank_number_ = parsed->bank;
         }
@@ -138,6 +146,10 @@ class PresetProgramEditor : public View {
         const auto* b = current_bank();
         if (!b || !on_bank_text_request)
             return false;
+        if (kind == BankTextKind::rename)
+            pending_rename_bank_ = b->number;
+        else
+            pending_renumber_bank_ = b->number;
         on_bank_text_request(kind,
                              kind == BankTextKind::rename ? b->name : std::to_string(b->number));
         return true;
@@ -245,6 +257,7 @@ class PresetProgramEditor : public View {
         if (p < 0 || p > 127)
             return;
         selected_program_ = p;
+        request_repaint();
         if (event.click_count == 2)
             request_assign();
     }
@@ -289,6 +302,9 @@ class PresetProgramEditor : public View {
     int selected_program_ = 0;
     float row_height_ = 24.0f;
     float scroll_offset_ = 0.0f;
+    std::optional<state::BankProgram> pending_assign_slot_;
+    std::optional<std::uint16_t> pending_rename_bank_;
+    std::optional<std::uint16_t> pending_renumber_bank_;
 
     /// Keep the selected row inside the visible part of the list.
     void scroll_to_selected() {
@@ -305,6 +321,7 @@ class PresetProgramEditor : public View {
         const auto slot = selected_slot();
         if (!slot || !on_assign_request)
             return false;
+        pending_assign_slot_ = slot;
         on_assign_request(*slot);
         return true;
     }
@@ -316,6 +333,7 @@ class PresetProgramEditor : public View {
         const int n = static_cast<int>(banks.size());
         bank_index_ = (bank_index_ + delta % n + n) % n;
         bank_number_ = banks[static_cast<size_t>(bank_index_)].number;
+        request_repaint();
     }
 };
 
