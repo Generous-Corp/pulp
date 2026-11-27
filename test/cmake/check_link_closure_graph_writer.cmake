@@ -38,8 +38,22 @@ execute_process(
     COMMAND "${PYTHON}" "${CHECKER}" --graph "${_graph}" --root route_scoped
             --forbid "pulp::canvas"
     RESULT_VARIABLE _rc OUTPUT_VARIABLE _out ERROR_VARIABLE _err)
-if(NOT _rc EQUAL 1 OR NOT _err MATCHES "helper_import -> pulp-canvas")
-    message(FATAL_ERROR "a directory-scoped imported target must be traversed "
+file(GLOB _codemodel_replies "${BINARY_DIR}/.cmake/api/v1/reply/codemodel-v2-*.json")
+set(_scoped_expected 2)
+if(_codemodel_replies)
+    list(GET _codemodel_replies 0 _codemodel_reply)
+    file(READ "${_codemodel_reply}" _codemodel_text)
+    if(_codemodel_text MATCHES "\"minor\"[ \t\r\n]*:[ \t\r\n]*([0-9]+)" AND CMAKE_MATCH_1 GREATER_EQUAL 9)
+        set(_scoped_expected 1)
+    endif()
+endif()
+if(_scoped_expected EQUAL 1)
+    if(NOT _rc EQUAL 1 OR NOT _err MATCHES "helper_import -> pulp-canvas")
+        message(FATAL_ERROR "a directory-scoped imported target must be traversed "
+                            "(rc=${_rc})\n${_out}\n${_err}")
+    endif()
+elseif(NOT _rc EQUAL 2 OR NOT _err MATCHES "helper_alias")
+    message(FATAL_ERROR "an unavailable scoped-import model must fail closed "
                         "(rc=${_rc})\n${_out}\n${_err}")
 endif()
 execute_process(
