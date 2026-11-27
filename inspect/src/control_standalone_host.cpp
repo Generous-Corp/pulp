@@ -609,7 +609,8 @@ class CanonicalStandaloneControlHost final : public format::StandaloneControlHos
             if (gpu_health_provider_) {
                 gpu_health_view_adapter_ = ControlGpuHealthViewAdapter::create({
                     .provider = gpu_health_provider_,
-                    .analyze_png = [](const std::vector<std::uint8_t>& png) {
+                    .analyze_png =
+                        [](const std::vector<std::uint8_t>& png) {
                             const auto stats = view::analyze_screenshot_content(png);
                             return ControlGpuHealthViewAdapter::ContentStats{
                                 .valid = stats.valid,

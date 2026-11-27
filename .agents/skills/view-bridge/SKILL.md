@@ -4195,3 +4195,5 @@ is not reachable from a host that dlopens it. The opt-in CLAP extension
 `pulp.editor-automation/1` (`PULP_EDITOR_AUTOMATION_EXTENSION`, default OFF)
 forwards `capture_png` to the open session's `EditorAutomation`; it is a test
 seam and absent from release plug-ins. See the `clap` skill.
+
+`inspect::ControlGpuHealthViewAdapter` takes its captured-PNG analysis as `Config::analyze_png` rather than calling the view layer, so a host on Vellum views supplies `pulp::vellum_components::analyze_png_content`. The field order matters for designated initializers: `analyze_png` follows `provider`.

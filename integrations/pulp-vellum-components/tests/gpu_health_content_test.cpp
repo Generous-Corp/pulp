@@ -100,9 +100,9 @@ std::vector<std::uint8_t> make_capture(std::uint32_t colors, std::uint32_t overl
     std::vector<Rgba> px(kPixels, Rgba{200, 200, 200, 255});
     for (std::uint32_t i = 0; i < overlay_pixels; ++i) {
         const auto k = static_cast<std::uint8_t>(i % colors);
-        px[i] = Rgba{static_cast<std::uint8_t>(k * spread),
-                     static_cast<std::uint8_t>(255 - k * spread),
-                     static_cast<std::uint8_t>(40 + k * spread), 255};
+        px[i] =
+            Rgba{static_cast<std::uint8_t>(k * spread), static_cast<std::uint8_t>(255 - k * spread),
+                 static_cast<std::uint8_t>(40 + k * spread), 255};
     }
     for (std::uint32_t i = 0; i < transparent_pixels; ++i)
         px[kPixels - 1 - i] = Rgba{0, 0, 0, 0};
@@ -161,10 +161,8 @@ TEST_CASE("analyze_png_content reports coverage and colour counts",
     CHECK(stats.unique_colors == 18);
 }
 
-TEST_CASE("analyze_png_content refuses undecodable input",
-          "[pulp-vellum-components][gpu-health]") {
-    for (const auto& bytes : {std::vector<std::uint8_t>{},
-                              std::vector<std::uint8_t>{1, 2, 3, 4, 5},
+TEST_CASE("analyze_png_content refuses undecodable input", "[pulp-vellum-components][gpu-health]") {
+    for (const auto& bytes : {std::vector<std::uint8_t>{}, std::vector<std::uint8_t>{1, 2, 3, 4, 5},
                               std::vector<std::uint8_t>{0x89, 'P', 'N', 'G'}}) {
         const auto stats = analyze_png_content(bytes);
         CHECK_FALSE(stats.valid);
