@@ -8,10 +8,12 @@
 #   format-legacy-view-slot-layout   the vtable layout is the same in both
 #       modes. A probe prints slot positions built both ways, plus once against
 #       a processor.hpp with one legacy slot removed, which must move them.
-#   format-core-ui-free-compile      format.cpp and processor.hpp compile with
-#       the macro 0, a forced-include poison that rejects any use of the
-#       pulp::view namespace, and no pulp/view header on the include path. A
-#       compile failure fails the build of pulp-test-format-core-ui-free.
+#   format-core-ui-free-compile      every pulp-format-core source compiles
+#       with the macro 0, a forced-include poison that rejects any use of the
+#       pulp::view namespace, and no pulp/view header on the include path
+#       (pulp-test-format-core-ui-free for format.cpp alone, and
+#       pulp-test-format-core-ui-free-all for the whole library). A compile
+#       failure fails the build.
 #   format-core-poison-control       the same poison with the macro 1 must fail
 #       to compile, and must fail on the poison: the control's include path does
 #       have the view headers, so a missing include cannot pass it.
@@ -92,7 +94,7 @@ target_compile_options(pulp-test-format-core-ui-free PRIVATE -include "${_legacy
 # failure fails the build; this test records that it compiled.
 add_test(NAME format-core-ui-free-compile
     COMMAND ${CMAKE_COMMAND} -E echo
-        "format.cpp compiled with PULP_FORMAT_LEGACY_VIEW=0 under the view poison")
+        "pulp-format-core compiled with PULP_FORMAT_LEGACY_VIEW=0 under the view poison")
 set_tests_properties(format-core-ui-free-compile PROPERTIES
     LABELS "format"
     PULP_SELECT_WITH_TARGETS "pulp-format-core")
@@ -233,3 +235,40 @@ if(_ui_free_adapter_pairs AND CMAKE_NM)
         LABELS "format"
         PULP_SELECT_WITH_TARGETS "pulp-format-core")
 endif()
+
+# Every pulp-format-core source at PULP_FORMAT_LEGACY_VIEW=0, under the view
+# poison and with no pulp/view header reachable: the format-core an SDK with
+# Vellum UI builds. Same sources, private definitions and dependencies as
+# pulp-format-core, minus the view include directories format.cpp used.
+get_target_property(_core_sources pulp-format-core SOURCES)
+get_target_property(_core_source_dir pulp-format-core SOURCE_DIR)
+set(_core_ui_free_sources "")
+foreach(_source IN LISTS _core_sources)
+    if(_source MATCHES "^\\$<")
+        string(REGEX REPLACE ":src/" ":${_core_source_dir}/src/" _source "${_source}")
+    elseif(NOT IS_ABSOLUTE "${_source}")
+        set(_source "${_core_source_dir}/${_source}")
+    endif()
+    list(APPEND _core_ui_free_sources "${_source}")
+endforeach()
+add_library(pulp-test-format-core-ui-free-all OBJECT ${_core_ui_free_sources})
+get_target_property(_core_includes pulp-format-core INCLUDE_DIRECTORIES)
+list(FILTER _core_includes EXCLUDE REGEX "pulp-view-core")
+target_include_directories(pulp-test-format-core-ui-free-all PRIVATE ${_core_includes})
+get_target_property(_core_definitions pulp-format-core COMPILE_DEFINITIONS)
+if(_core_definitions)
+    target_compile_definitions(pulp-test-format-core-ui-free-all PRIVATE ${_core_definitions})
+endif()
+get_target_property(_core_links pulp-format-core LINK_LIBRARIES)
+if(_core_links)
+    target_link_libraries(pulp-test-format-core-ui-free-all PRIVATE ${_core_links})
+endif()
+foreach(_property IN ITEMS CXX_STANDARD OBJCXX_STANDARD)
+    get_target_property(_value pulp-format-core ${_property})
+    if(_value)
+        set_target_properties(pulp-test-format-core-ui-free-all PROPERTIES ${_property} ${_value})
+    endif()
+endforeach()
+target_compile_definitions(pulp-test-format-core-ui-free-all PRIVATE
+    PULP_FORMAT_LEGACY_VIEW=0 PULP_TEST_REQUIRE_NO_VIEW_INCLUDE_PATH=1)
+target_compile_options(pulp-test-format-core-ui-free-all PRIVATE -include "${_legacy_view_poison}")

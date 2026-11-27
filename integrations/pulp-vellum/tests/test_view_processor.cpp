@@ -9,10 +9,12 @@
 #include <pulp/state/store.hpp>
 
 #include <vellum/view/plugin_view_host.hpp>
+#include <vellum/view/ui_components.hpp>
 #include <vellum/view/view.hpp>
 
 #include <cstdint>
 #include <memory>
+#include <string>
 #include <type_traits>
 #include <utility>
 #include <vector>
@@ -145,6 +147,35 @@ class InspectedPlugin final : public pulp::vellum::ViewProcessor<> {
     }
 };
 
+// Settings sections as a create_view() plug-in contributes them.
+class SettingsPlugin final : public pulp::vellum::ViewProcessor<> {
+  public:
+    explicit SettingsPlugin(int sections) : sections(sections) {}
+    pulp::format::PluginDescriptor descriptor() const override {
+        return {};
+    }
+    void define_parameters(pulp::state::StateStore&) override {}
+    void prepare(const pulp::format::PrepareContext&) override {}
+    void process(pulp::audio::BufferView<float>&, const pulp::audio::BufferView<const float>&,
+                 pulp::midi::MidiBuffer&, pulp::midi::MidiBuffer&,
+                 const pulp::format::ProcessContext&) override {}
+    std::unique_ptr<::vellum::view::View> create_view() override {
+        return std::make_unique<Panel>(0);
+    }
+    std::vector<pulp::vellum::ViewSettingsSection> settings_sections() override {
+        std::vector<pulp::vellum::ViewSettingsSection> out;
+        for (int i = 0; i < sections; ++i)
+            out.push_back({"Section " + std::to_string(i), std::make_unique<Panel>(100 + i)});
+        return out;
+    }
+    void on_view_opened(::vellum::view::View& view) override {
+        opened_view = &view;
+    }
+
+    int sections;
+    ::vellum::view::View* opened_view = nullptr;
+};
+
 struct Host {
     pulp::state::StateStore store;
     pulp::format::StateStoreParamPort port{store};
@@ -238,4 +269,36 @@ TEST_CASE("A ViewProcessor offers an inspector window only when it builds one",
     auto inspector = h.open(inspected, EditorRole::inspector);
     CHECK(main != nullptr);
     CHECK(inspector != nullptr);
+}
+
+TEST_CASE("A ViewProcessor's settings sections are its settings editor",
+          "[pulp-vellum][view-processor][settings]") {
+    Host h;
+    SettingsPlugin none(0);
+    REQUIRE(none.editor_factory()->supports(EditorRole::settings));
+    CHECK(h.open(none, EditorRole::settings) == nullptr);
+
+    SettingsPlugin one(1);
+    auto single = h.open(one, EditorRole::settings);
+    REQUIRE(single != nullptr);
+    REQUIRE(single->attach(h.parent()));
+    auto* panel = dynamic_cast<Panel*>(one.opened_view);
+    REQUIRE(panel != nullptr);
+    CHECK(panel->id == 100);
+    single->detach();
+
+    SettingsPlugin two(2);
+    auto tabs = h.open(two, EditorRole::settings);
+    REQUIRE(tabs != nullptr);
+    REQUIRE(tabs->attach(h.parent()));
+    auto* tab_panel = dynamic_cast<::vellum::view::TabPanel*>(two.opened_view);
+    REQUIRE(tab_panel != nullptr);
+    CHECK(tab_panel->child_count() == 2);
+    tabs->detach();
+
+    // The main editor is unaffected.
+    auto editor = h.open(two, EditorRole::editor);
+    REQUIRE(editor != nullptr);
+    REQUIRE(editor->attach(h.parent()));
+    CHECK(dynamic_cast<Panel*>(two.opened_view) != nullptr);
 }

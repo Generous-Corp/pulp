@@ -2463,6 +2463,13 @@ construct, so the slot can only return null or do nothing. Gotchas:
   `standalone_control_host.hpp` declare their view types in `pulp::format::view`
   when it is 0. The poison found both only once the standalone sources were
   compiled at mode 0, so a new header-level view name shows up there first.
+- **A ViewProcessor's settings tabs are `settings_sections()`.** Its factory
+  offers the settings role for every ViewProcessor and builds nothing when the
+  sections are empty, so a host shows a settings item that opens no window for
+  such a plug-in; a `TabPanel` wraps two or more sections, one is shown alone.
+- **All of pulp-format-core builds at macro 0 under the poison**
+  (`pulp-test-format-core-ui-free-all`, built with the tests). A core source or
+  header that names `pulp::view` fails that build before any SDK sees it.
 - **A new view-named virtual goes through the macro too.** `node_abi_gate.py`
   reads `PULP_FORMAT_LEGACY_VIEW_NAME(x)` as `x` and expands no other macro.
 - **The hot-reload fingerprint carries the mode** (`legacyview=` in

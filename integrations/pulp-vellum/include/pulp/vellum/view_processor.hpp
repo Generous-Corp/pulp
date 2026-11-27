@@ -25,18 +25,28 @@
 /// over a `pulp_add_plugin(... UI <package>)` editor.
 ///
 /// `create_view()` builds the main editor. `create_view(role)` builds any role
-/// the factory offers (editor and inspector); its default calls
-/// `create_view()` for the editor and returns null otherwise, so a second
-/// window is opt-in. Every call is on the host's main thread.
+/// the factory offers (editor, inspector and settings); its default calls
+/// `create_view()` for the editor, builds the settings editor from
+/// `settings_sections()`, and returns null otherwise, so a second window is
+/// opt-in. Every call is on the host's main thread.
+///
+/// `settings_sections()` is the Vellum form of Processor's legacy settings
+/// tabs. A host that offers the settings role (the standalone's
+/// "<name> Settings…" window) shows them, one tab per section, or the single
+/// section's view alone.
 
 #include <pulp/format/editor_host.hpp>
 #include <pulp/format/processor.hpp>
 #include <pulp/vellum/view_editor.hpp>
 
+#include <vellum/view/ui_components.hpp>
 #include <vellum/view/view.hpp>
 
 #include <cstdint>
 #include <memory>
+#include <string>
+#include <utility>
+#include <vector>
 
 #if PULP_FORMAT_LEGACY_VIEW
 #error "pulp/vellum/view_processor.hpp is for an SDK built with PULP_FORMAT_LEGACY_VIEW=0; \
@@ -44,6 +54,12 @@ with Pulp's own view layer, override format::Processor::create_view() directly"
 #endif
 
 namespace pulp::vellum {
+
+/// One settings tab a ViewProcessor contributes.
+struct ViewSettingsSection {
+    std::string title;
+    std::unique_ptr<::vellum::view::View> view;
+};
 
 template <class Base = format::Processor> class ViewProcessor : public Base {
   public:
@@ -54,10 +70,20 @@ template <class Base = format::Processor> class ViewProcessor : public Base {
         return nullptr;
     }
 
-    /// The view tree for `role`. Default: `create_view()` for the editor, null
-    /// for any other role.
+    /// The view tree for `role`. Default: `create_view()` for the editor, the
+    /// `settings_sections()` for settings, null for any other role.
     virtual std::unique_ptr<::vellum::view::View> create_view(format::EditorRole role) {
-        return role == format::EditorRole::editor ? create_view() : nullptr;
+        if (role == format::EditorRole::editor)
+            return create_view();
+        if (role == format::EditorRole::settings)
+            return settings_view(settings_sections());
+        return nullptr;
+    }
+
+    /// The settings tabs, built each time the settings editor opens. Default:
+    /// none, so no settings editor.
+    virtual std::vector<ViewSettingsSection> settings_sections() {
+        return {};
     }
 
     /// After the view attached to a native window.
@@ -75,6 +101,19 @@ template <class Base = format::Processor> class ViewProcessor : public Base {
     }
 
   private:
+    static std::unique_ptr<::vellum::view::View>
+    settings_view(std::vector<ViewSettingsSection> sections) {
+        std::erase_if(sections, [](const ViewSettingsSection& s) { return s.view == nullptr; });
+        if (sections.empty())
+            return nullptr;
+        if (sections.size() == 1)
+            return std::move(sections.front().view);
+        auto tabs = std::make_unique<::vellum::view::TabPanel>();
+        for (auto& section : sections)
+            tabs->add_tab(std::move(section.title), std::move(section.view));
+        return tabs;
+    }
+
     // One factory per Base. It holds no processor: each call reaches the
     // processor the host passes to create(), which is the one whose
     // editor_factory() returned it.
@@ -102,7 +141,9 @@ template <class Base = format::Processor> class ViewProcessor : public Base {
                         if (auto* self = dynamic_cast<ViewProcessor*>(&processor))
                             self->on_view_closed(view);
                     },
-            });
+            },
+            {format::EditorRole::editor, format::EditorRole::inspector,
+             format::EditorRole::settings});
         return instance;
     }
 };
