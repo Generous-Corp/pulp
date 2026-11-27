@@ -2229,13 +2229,6 @@ it once the edge is cut tightens the gate with no other edit. The check rejects 
 debt entry that is no longer linked and one that duplicates its tier, so the list
 cannot outlive its subject.
 
-Module names come from each target's source directory, so giving a target its
-own `core/<dir>` adds a module to every closure that reaches it. Moving
-`pulp-editor-bridge` into `core/editor_bridge` put `editor_bridge` into
-`StepSequencer_CLAP` and `TimelinePluginProof_CLAP` through
-`pulp-view -> pulp-view-tooling`; it is recorded as debt beside `view`, by the
-same packaging edge.
-
 **Debt is declared per target but measured per CONFIGURE, and that asymmetry
 bites.** A closure is whatever *this* configure links, and the project does not
 have one: `core/render` is behind `PULP_ENABLE_GPU`, `core/host` is behind

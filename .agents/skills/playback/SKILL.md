@@ -1204,9 +1204,6 @@ today, and the outbound gate is right to stay green about it: nothing in
 editor row for what a *module* costs, and a link-floor report for what a
 *binary* costs; they are different claims and only one of them is about the
 artifact a host loads. The inbound side is documented in the `timeline` skill.
-The same view-stack edge also reaches `editor_bridge`, the module
-`pulp-view-tooling` links for EditorBridge's dispatch core; it sits in the
-link-floor debt beside `view`.
 
 **"Every Pulp plugin links `playback`" is true of a desktop configure only.**
 The chain runs through `pulp-host`, and `core/host` is behind `NOT IOS` — iOS

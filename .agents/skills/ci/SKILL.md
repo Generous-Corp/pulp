@@ -8011,6 +8011,10 @@ A new `core/<module>/` needs TWO entries even on a short-lived branch: the
 `codecov.yml` component, and the component's name in a producer's set in
 `ci/coverage-surfaces.yaml` (or an explicit `not_applicable` disposition) —
 `test_coverage_surface_contract.py` rejects a component no producer claims.
+The diff-coverage tiers in `ci/coverage-targets.yaml` want the new path too: a
+file no tier claims falls back to the global floor silently, so place it
+beside the module it was split from (`core/editor_bridge/**` sits with
+`core/view/**`).
 Run `tools/scripts/gates.sh <integration-branch>` locally first — the fast gates
 are sub-second and catch all of this before a multi-minute ship cycle. Reconciling
 config you didn't author trips skill-sync/version-bump (config maps to the `ci`
