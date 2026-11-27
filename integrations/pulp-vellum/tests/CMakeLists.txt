@@ -54,6 +54,20 @@ if(PULP_BUILD_TESTS AND TARGET Catch2::Catch2WithMain)
         target_link_libraries(pulp-test-pulp-vellum-editor PRIVATE
             pulp::vellum Vellum::MirrorView_core Catch2::Catch2WithMain
             Threads::Threads)
+        # ViewProcessor<> in the mode an SDK with Vellum UI builds:
+        # PULP_FORMAT_LEGACY_VIEW=0. format.cpp is compiled here in that mode
+        # and wins over the archive's copy; every other Processor slot keeps
+        # its position in both modes, which format-legacy-view-slot-layout
+        # proves, so the rest of pulp-format-core links as built.
+        add_executable(pulp-test-pulp-vellum-view-processor
+            test_view_processor.cpp
+            ${PULP_ROOT_DIR}/core/format/src/format.cpp)
+        target_compile_definitions(pulp-test-pulp-vellum-view-processor PRIVATE
+            PULP_FORMAT_LEGACY_VIEW=0)
+        target_link_libraries(pulp-test-pulp-vellum-view-processor PRIVATE
+            pulp::vellum Vellum::MirrorView_core Catch2::Catch2WithMain Threads::Threads)
+        catch_discover_tests(pulp-test-pulp-vellum-view-processor
+            PROPERTIES LABELS pulp-vellum-editor)
         if(TARGET Vellum::MirrorView_script)
             target_link_libraries(pulp-test-pulp-vellum-editor PRIVATE Vellum::MirrorView_script)
             target_compile_definitions(pulp-test-pulp-vellum-editor PRIVATE
