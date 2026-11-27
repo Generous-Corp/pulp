@@ -36,7 +36,7 @@ execute_process(
     COMMAND "${PYTHON}" "${CHECKER}" --graph "${_graph}" --root route_scoped
             --forbid "pulp::canvas"
     RESULT_VARIABLE _rc OUTPUT_VARIABLE _out ERROR_VARIABLE _err)
-if(NOT _rc EQUAL 2 OR NOT _err MATCHES "helper_import")
+if(NOT _rc EQUAL 2 OR NOT _err MATCHES "helper_alias")
     message(FATAL_ERROR "a directory-scoped imported target must be inconclusive "
                         "(rc=${_rc})\n${_out}\n${_err}")
 endif()

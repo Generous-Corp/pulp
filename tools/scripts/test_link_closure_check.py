@@ -187,7 +187,7 @@ class ClosureWalk(unittest.TestCase):
         self.assertEqual(code, 2)
 
     def test_directory_scoped_imported_target_the_writer_cannot_see_is_not_held_against(self) -> None:
-        records = {"pulp-root": ("Threads::Threads", "$<LINK_ONLY:Threads::Threads>")}
+        records = {"pulp-root": ("Threads::Threads", "$<LINK_ONLY:Threads::Threads>", "", "Threads::Threads")}
         code, _, _ = self.run_check(records, ["pulp-root"], ["pulp-view*"])
         self.assertEqual(code, 0)
 
@@ -198,6 +198,12 @@ class ClosureWalk(unittest.TestCase):
         code, err = self.run_raw(text, ["pulp-root"])
         self.assertEqual(code, 2)
         self.assertIn("helper_import", err)
+
+    def test_unresolved_directory_scoped_alias_is_inconclusive(self) -> None:
+        code, _, err = self.run_check({"pulp-root": ("helper_alias", "")}, ["pulp-root"],
+                                      ["pulp-view*"])
+        self.assertEqual(code, 2)
+        self.assertIn("helper_alias", err)
 
     def test_missing_target_objects_record_is_inconclusive(self) -> None:
         for expr in ("$<TARGET_OBJECTS:canvas_objs>", "$<TARGET_FILE:canvas_objs>",
@@ -243,7 +249,7 @@ class ClosureWalk(unittest.TestCase):
         self.assertIn("--external-ok", err)
 
     def test_external_ok_exempts_a_named_leaf(self) -> None:
-        records = {"pulp-root": ("Vendor::Bridge", "")}
+        records = {"pulp-root": ("Vendor::Bridge", "", "", "Vendor::Bridge")}
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "graph.tsv"
             path.write_text(graph_text(records), encoding="utf-8")

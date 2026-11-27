@@ -54,6 +54,12 @@ WORD_RE = re.compile(r"[A-Za-z0-9_+.@/-]+")
 LEAF_EXTERNAL_DEFAULT = ["threads::*", "skia::*", "v8::*", "sdl3::*", "catch2::*"]
 EXTERNAL_NS_RE = re.compile(r"^[a-z0-9_+-]+::[a-z0-9_+:-]+$")
 TARGET_SHAPED_RE = re.compile(r"^pulp-[a-z0-9_+-]+$")
+ORDINARY_TARGET_RE = re.compile(r"^[a-z_][a-z0-9_+.-]*$")
+SOURCE_SUFFIX_RE = re.compile(r"\.(?:c|cc|cpp|cxx|m|mm|h|hh|hpp|hxx|swift|rs)$")
+SYSTEM_LINK_NAMES = {"atomic", "c", "dl", "gcc", "gcc_s", "m", "pthread", "rt", "stdc++"}
+GENERATOR_TOKENS = {"build_interface", "config", "install_interface", "link_only",
+                   "target_objects", "target_file", "target_file_base_name",
+                   "target_file_name", "target_file_dir", "target_linker_file"}
 EXPLICIT_TARGET_RE = re.compile(
     r"\$<TARGET_(?:OBJECTS|FILE|FILE_DIR|FILE_NAME|LINKER_FILE|SONAME_FILE|PROPERTY|"
     r"NAME_IF_EXISTS|BUNDLE_DIR):([A-Za-z0-9_+.@:-]+)", re.IGNORECASE)
@@ -97,6 +103,9 @@ class Graph:
         self.malformed: list[str] = []
         # Names a generator expression names as a CMake target, whatever their spelling.
         self.explicit: set[str] = set()
+        self.link_edges: set[tuple[str, str]] = set()
+        self.archive_derived: set[str] = set()
+        self.path_derived: set[str] = set()
 
     @classmethod
     def parse(cls, text: str) -> "Graph":
@@ -114,13 +123,24 @@ class Graph:
                 graph.explicit.update(canonical(w) for w in re.split(r"[;\s]+", fields[5]) if w)
             graph.types[name] = fields[1].strip()
             targets: list[str] = []
-            for value in fields[2:5]:
+            for field_index, value in enumerate(fields[2:5]):
                 if value.endswith("-NOTFOUND"):
                     continue
                 graph.explicit.update(canonical(m) for m in EXPLICIT_TARGET_RE.findall(value))
+                for raw in WORD_RE.findall(value):
+                    base = raw.rsplit("/", 1)[-1]
+                    if base != raw:
+                        graph.path_derived.update({canonical(raw), canonical(base)})
+                    archive = ARCHIVE_RE.match(base)
+                    if archive:
+                        graph.archive_derived.update({canonical(archive.group(1)),
+                                                      canonical(base),
+                                                      canonical(base.rsplit(".", 1)[0])})
                 for target in referenced_targets(value):
                     if target != name and target not in targets:
                         targets.append(target)
+                    if field_index < 2:
+                        graph.link_edges.add((name, target))
             graph.edges.setdefault(name, [])
             for target in targets:
                 if target not in graph.edges[name]:
@@ -130,6 +150,13 @@ class Graph:
 
 def matches(name: str, patterns: list[str]) -> bool:
     return any(fnmatch.fnmatchcase(name, pattern) for pattern in patterns)
+
+
+def looks_like_unresolved_target(name: str) -> bool:
+    """Treat an unseen ordinary target/alias as unsafe, but ignore source paths and flags."""
+    return (name not in SYSTEM_LINK_NAMES and name not in GENERATOR_TOKENS
+            and ORDINARY_TARGET_RE.fullmatch(name) is not None
+            and SOURCE_SUFFIX_RE.search(name) is None)
 
 
 def find_paths(graph: Graph, root: str, forbidden: list[str],
@@ -156,12 +183,16 @@ def find_paths(graph: Graph, root: str, forbidden: list[str],
                     path.append(parent[path[-1]])  # type: ignore[arg-type]
                 found.append(list(reversed(path)))
                 continue
-            if (target not in graph.edges and unresolved is not None
-                    and (TARGET_SHAPED_RE.match(target) or target in graph.explicit)):
-                unresolved.append(target)
-            elif (target not in graph.edges and external is not None
-                    and EXTERNAL_NS_RE.match(target)):
-                external.append(target)
+            if target not in graph.edges:
+                if external is not None and EXTERNAL_NS_RE.match(target):
+                    external.append(target)
+                elif (unresolved is not None
+                      and (TARGET_SHAPED_RE.match(target) or target in graph.explicit
+                           or ((current, target) in graph.link_edges
+                               and target not in graph.archive_derived
+                               and target not in graph.path_derived
+                               and looks_like_unresolved_target(target)))):
+                    unresolved.append(target)
             queue.append(target)
     return found
 
