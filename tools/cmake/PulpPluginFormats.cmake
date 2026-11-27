@@ -382,6 +382,31 @@ function(_pulp_add_vst3 target name bundle_id version manufacturer category)
 endfunction()
 
 # ── Internal: CLAP target ───────────────────────────────────────────────
+
+# The CLAP GUI extension (PULP_CLAP_GUI) embeds a ViewBridge in PulpClapPlugin,
+# so the plug-in's entry TU and the shared adapter must agree on it or every
+# later member sits at a different offset. A format-core built with
+# PULP_FORMAT_LEGACY_VIEW=0 ships the adapter without that extension, so a
+# plug-in entry built with it would mismatch the adapter's layout silently.
+# Refuse at configure time instead; NO_EDITOR and the editor that
+# Processor::editor_factory() returns build view-free on both sides.
+function(_pulp_refuse_clap_gui_on_ui_free_format target)
+    set(_core "${_PULP_FORMAT_CORE_TARGET}")
+    if(NOT _core OR NOT TARGET "${_core}")
+        return()
+    endif()
+    get_target_property(_definitions "${_core}" INTERFACE_COMPILE_DEFINITIONS)
+    if("PULP_FORMAT_LEGACY_VIEW=0" IN_LIST _definitions)
+        message(FATAL_ERROR
+            "pulp_add_plugin(${target}) CLAP: this Pulp build's format-core has no "
+            "view layer (PULP_FORMAT_LEGACY_VIEW=0), so its CLAP adapter has no "
+            "ViewBridge GUI extension, and a CLAP entry built with one (PULP_CLAP_GUI) "
+            "would not match the adapter's PulpClapPlugin layout. Build this plug-in "
+            "with NO_EDITOR, a UI <package>, or UI_ENGINE vellum, whose editors come "
+            "from Processor::editor_factory().")
+    endif()
+endfunction()
+
 function(_pulp_add_clap target name bundle_id version manufacturer category)
     if(NOT _PULP_CLAP_TARGET)
         message(FATAL_ERROR "pulp_add_plugin(${target}): CLAP requested but the CLAP SDK is unavailable")
@@ -416,6 +441,7 @@ function(_pulp_add_clap target name bundle_id version manufacturer category)
             ${_PULP_CLAP_TARGET}
         )
     else()
+        _pulp_refuse_clap_gui_on_ui_free_format(${target})
         target_link_libraries(${target}_CLAP PRIVATE
             ${target}_Core
             ${_PULP_FORMAT_TARGET}
