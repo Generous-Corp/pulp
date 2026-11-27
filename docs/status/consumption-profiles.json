@@ -408,6 +408,7 @@
       "pulp/format/reload/reload_swap_units.hpp",
       "pulp/format/reload/reload_transaction.hpp",
       "pulp/format/reload/reload_trust_policy.hpp",
+      "pulp/format/reload/reloadable_editor_shell.hpp",
       "pulp/format/reload/reloadable_shell.hpp",
       "pulp/format/reload/reloadable_shell_core.hpp",
       "pulp/format/reload/remote_update.hpp",
