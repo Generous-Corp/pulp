@@ -1,0 +1,26 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20261127-c4a-row1-format-core-in-tree-watch",
+  "created_at": "2026-11-27T16:06:18Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "render-assets-and-backends"
+  ],
+  "rationale": "The range carries the editor-bridge home move (EditorBridge's core to core/editor_bridge, its view attachments to pulp/view/editor_bridge_attach.hpp and editor_bridge_scaffold.hpp as free functions with unchanged bodies in pulp-view-tooling) and the in-tree Vellum UI mode, in which pulp-format-core builds with PULP_FORMAT_LEGACY_VIEW=0 and pulp-format-view links the Vellum editor adapter. Only core/view source lists and editor-bridge files change under the render family; no canvas, renderer, Skia or Dawn code changes. No design-import, Chromium, rendering, or packaging authority moves.",
+  "tests": [
+    "ctest --test-dir build -R pulp-test-app-updates",
+    "ctest --test-dir build -R pulp-test-design-import-codegen",
+    "ctest --test-dir build -R pulp-test-editor-bridge",
+    "ctest --test-dir build -R pulp-test-editor-bridge-core",
+    "ctest --test-dir build -R pulp-test-pulp-vellum-editor",
+    "ctest --test-dir build -R pulp-test-reloadable-editor-shell",
+    "ctest --test-dir build -R pulp-test-standalone-updater",
+    "python3 tools/scripts/test_gpu_handoff_provenance.py",
+    "python3 tools/scripts/vellum_expansion_watch_check.py --base <merge-base origin/main HEAD> --head <HEAD>",
+    "vellum-expansion-watch"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}
