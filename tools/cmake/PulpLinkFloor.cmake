@@ -175,7 +175,7 @@ if(PULP_ENABLE_GPU)
     list(APPEND PULP_LINK_FLOOR_DEBT_TimelinePluginProof_CLAP render)
 endif()
 #
-#   canvas, view, editor_bridge — the view stack pulp-view-tooling brings. A tree
+#   canvas, view, editor_bridge: the view stack pulp-view-tooling brings. A tree
 #     configured with PULP_UI_FROM_VELLUM_IN_TREE builds neither core/canvas nor
 #     core/view, and pulp_add_plugin builds every plug-in there view-free, so no
 #     Pulp view target exists to carry the three. editor_bridge is still built
