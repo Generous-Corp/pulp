@@ -1,0 +1,12 @@
+{
+ "name": "examples-manifest-guard-selftest",
+ "record": {
+  "entry": "tools/scripts/test_examples_manifest_guard.py",
+  "inputs": [
+   "docs/status/examples-manifest.json",
+   "tools/scripts/examples_manifest_guard.py",
+   "tools/scripts/test_examples_manifest_guard.py"
+  ],
+  "kind": "python"
+ }
+}
