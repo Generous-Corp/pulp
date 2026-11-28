@@ -27,6 +27,7 @@ with a stable code), 2 the input could not be read or is incomplete.
 from __future__ import annotations
 
 import argparse
+import json
 import re
 import sys
 from pathlib import Path
@@ -46,6 +47,9 @@ API_HEADERS = frozenset({
 # or pulp- is a module above or beside the device layer.
 DEVICE_ALLOWED_PULP_LINKS = frozenset({"gpu-device-api", "runtime"})
 
+# What the compute consumption target may link: the device layer and the runtime.
+COMPUTE_ALLOWED_PULP_LINKS = frozenset({"gpu-device", "runtime"})
+
 # Pulp include roots a device implementation source may use besides the API.
 DEVICE_ALLOWED_INCLUDE_ROOTS = frozenset({"runtime"})
 
@@ -61,10 +65,13 @@ REQUIRED_KEYS = (
     "render.interface_link",
     "gpu_audio.link",
     "gpu_audio.source_dir",
+    "compute.type",
+    "compute.interface_link",
     "api_consumer.link",
     "device_consumer.link",
 )
 
+QUOTED_INCLUDE_RE = re.compile(r'^\s*#\s*include\s*"([^"]+)"', re.MULTILINE)
 PULP_LINK_RE = re.compile(r"\bpulp(?:::|-)([A-Za-z0-9_-]+)")
 INCLUDE_RE = re.compile(r'^\s*#\s*(?:include|import)\s*[<"]([^>"]+)[>"]', re.MULTILINE)
 SOURCE_SUFFIXES = {".c", ".cc", ".cpp", ".cxx", ".h", ".hh", ".hpp", ".hxx", ".mm", ".m"}
@@ -201,6 +208,31 @@ def check_links(props: dict[str, str]) -> list[Violation]:
             "pulp-render's interface carries no $<LINK_ONLY:pulp::gpu-device>; "
             "the device objects would be missing from a renderer consumer's link"))
 
+    # pulp-gpu-compute is what a compute or diagnostics consumer links instead
+    # of the 2D renderer. It carries the device layer and the runtime, and
+    # pulp-render re-exports it, so a renderer consumer keeps every requirement
+    # it had before the carve.
+    if props["compute.type"] != "INTERFACE_LIBRARY":
+        violations.append(Violation(
+            "compute-not-interface",
+            f"pulp-gpu-compute must be an INTERFACE library, got {props['compute.type']!r}"))
+    compute_links = split_list(props.get("compute.interface_link", ""))
+    escaped = sorted(pulp_modules(compute_links) - COMPUTE_ALLOWED_PULP_LINKS)
+    if escaped:
+        violations.append(Violation(
+            "compute-reaches-up",
+            f"pulp-gpu-compute links Pulp modules outside "
+            f"{sorted(COMPUTE_ALLOWED_PULP_LINKS)}: {escaped}"))
+    if not plain_names(compute_links, "gpu-device"):
+        violations.append(Violation(
+            "compute-missing-device",
+            f"pulp-gpu-compute must link pulp::gpu-device, got {compute_links}"))
+    if not plain_names(split_list(props["render.interface_link"]), "gpu-compute"):
+        violations.append(Violation(
+            "render-missing-compute",
+            "pulp-render must expose pulp::gpu-compute in its link interface, "
+            "or its consumers lose the provider requirements the carve moved"))
+
     gpu_audio_links = split_list(props["gpu_audio.link"])
     gpu_audio_modules = pulp_modules(gpu_audio_links)
     if "render" in gpu_audio_modules:
@@ -277,13 +309,62 @@ def check_includes(props: dict[str, str], render_include: Path) -> list[Violatio
     return violations
 
 
+def retained_device_files(props: dict[str, str], render_include: Path,
+                          repo_root: Path) -> dict[str, str]:
+    """Repo-relative path of every file the device layer needs, with its role."""
+    files: dict[str, str] = {}
+
+    def add(path: Path, role: str) -> None:
+        try:
+            files[path.resolve().relative_to(repo_root.resolve()).as_posix()] = role
+        except ValueError:
+            pass
+
+    for header in sorted(API_HEADERS):
+        add(render_include / header, "device API header")
+    device_dir = Path(props["device.source_dir"])
+    for source in split_list(props["device.sources"]):
+        path = Path(source)
+        if not path.is_absolute():
+            path = device_dir / path
+        if not path.is_file():
+            continue
+        add(path, "device source")
+        text = path.read_text(encoding="utf-8", errors="replace")
+        for include in QUOTED_INCLUDE_RE.findall(text):
+            sibling = path.parent / include
+            if sibling.is_file():
+                add(sibling, "device private header")
+    return files
+
+
+def check_deletion_list(props: dict[str, str], render_include: Path, repo_root: Path,
+                        cutover_inputs: Path) -> list[Violation]:
+    """A file the device layer needs must not be on the cutover deletion list."""
+    delete_paths = set(json.loads(cutover_inputs.read_text(encoding="utf-8"))["delete_paths"])
+    violations: list[Violation] = []
+    for path, role in sorted(retained_device_files(props, render_include, repo_root).items()):
+        if path in delete_paths:
+            violations.append(Violation(
+                "device-file-on-deletion-list",
+                f"{path} is a {role} of pulp-gpu-device but is listed in {cutover_inputs.name}; "
+                "deleting it leaves the retained device layer unable to compile"))
+    return violations
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--properties", required=True, type=Path,
                         help="configure-time properties file")
     parser.add_argument("--render-include", required=True, type=Path,
                         help="core/render/include directory")
+    parser.add_argument("--cutover-inputs", type=Path,
+                        help="cutover deletion list (tools/scripts/cutover_trial_inputs.json); "
+                             "requires --repo-root")
+    parser.add_argument("--repo-root", type=Path)
     args = parser.parse_args(argv)
+    if bool(args.cutover_inputs) != bool(args.repo_root):
+        parser.error("--cutover-inputs and --repo-root go together")
 
     try:
         props = parse_properties(args.properties.read_text(encoding="utf-8"))
@@ -301,6 +382,13 @@ def main(argv: list[str] | None = None) -> int:
         return 2
 
     violations = check_links(props) + check_includes(props, args.render_include)
+    if args.cutover_inputs:
+        try:
+            violations += check_deletion_list(props, args.render_include, args.repo_root,
+                                              args.cutover_inputs)
+        except (OSError, KeyError, ValueError) as error:
+            print(f"gpu-device-link-closure: INCONCLUSIVE: {error}", file=sys.stderr)
+            return 2
     if violations:
         for violation in violations:
             print(f"gpu-device-link-closure: FAIL {violation}", file=sys.stderr)

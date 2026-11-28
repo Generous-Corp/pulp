@@ -30,8 +30,11 @@ on:
       - 'test/editor_host_slice/**'
       - 'integrations/pulp-vellum/**'
       - 'integrations/pulp-vellum-audio/**'
+      - 'integrations/pulp-vellum-scene/**'
+      - 'test/fixtures/scene3d/DracoTriangle/**'
       - 'integrations/pulp-vellum-components/**'
       - 'integrations/pulp-vellum-renderer3d/**'
+      - 'integrations/pulp-vellum-graph/**'
       - 'integrations/pulp-vellum/cmake/PulpVellumEditorPackage.cmake'
       - 'test/test_pulp_vellum_editor.cpp'
       - 'test/test_pulp_vellum_audio.cpp'
@@ -41,15 +44,35 @@ on:
       - 'integrations/CMakeLists.txt'
       - 'CMakeLists.txt'
       - 'test/test_pulp_vellum_param_bridge.cpp'
+      # The view-free DAW reload shell that pulp-test-vellum-reload-shell drives
+      # under the Vellum scripted editor.
+      - 'core/format/include/pulp/format/reload/reloadable_shell_core.hpp'
       - 'test/cmake/editor_host_slice_tests.cmake'
       - 'tools/scripts/editor_host_acceptance.py'
       - 'tools/ci/vellum_sdk_consumer.py'
+      # Yoga layout fixtures run on Vellum's layout through the SDK's app host.
+      - 'tools/harness/visual/vellum_layout.py'
+      - 'tools/harness/visual/runner.py'
+      - 'tools/harness/visual/fixtures/yoga/**'
+      - 'tools/harness/visual/goldens/yoga/**'
+      - 'tools/harness/visual/tests/test_vellum_layout.py'
+      # The GPU adapter probe built by the bridge configure.
+      - 'tools/cli/gpu_probe/src/adapter_probe.cpp'
+      - 'tools/cli/gpu_probe/include/pulp_tooling/gpu_probe/adapter_probe.hpp'
+      # The MCP UI tools that run bundles on the SDK's vellum-app-host.
+      - 'tools/mcp/mcp_ui_tools.cpp'
+      - 'test/test_mcp_ui_tools.cpp'
       # The Vellum-backed UI target names: the package config that defines
       # them, their scenario driver and the installed consumer it builds. The
       # `real` and `wrong-version` scenarios carry the pulp-vellum label.
       - 'tools/cmake/PulpConfig.cmake.in'
       - 'test/cmake/test_vellum_ui_compat_package.cmake'
       - 'tools/validation/sdk-smoke/vellum-ui-compat/**'
+      # The installed-SDK smoke: the install rules that ship the Vellum
+      # packages, its driver and its consumer.
+      - 'tools/cmake/PulpInstallRules.cmake'
+      - 'test/cmake/test_vellum_installed_sdk_smoke.cmake'
+      - 'tools/validation/sdk-smoke/vellum-installed/**'
       - '.github/workflows/vellum-sdk-consumer.yml'
   workflow_dispatch:
     inputs:
@@ -163,10 +186,13 @@ jobs:
           cmake -S . -B build-vellum-bridge -G Ninja -DCMAKE_BUILD_TYPE=Release \
             -DPULP_BUILD_EXAMPLES=OFF -DPULP_BUILD_TESTS=ON \
             -DPULP_ENABLE_PULP_VELLUM=ON \
+            -DPULP_ENABLE_SCENE3D=ON \
+            -DPULP_ENABLE_PULP_VELLUM_SCENE=ON \
             -DPULP_ENABLE_PULP_VELLUM_AUDIO=ON \
             -DPULP_ENABLE_PULP_VELLUM_COMPONENTS=ON \
             -DPULP_ENABLE_SCENE3D=ON \
             -DPULP_ENABLE_PULP_VELLUM_RENDERER3D=ON \
+            -DPULP_ENABLE_PULP_VELLUM_GRAPH=ON \
             -DCMAKE_PREFIX_PATH="${{ steps.sdk.outputs.prefix }}"
           # Every executable under integrations/pulp-vellum*/ and every program
           # a pulp-vellum* ctest entry runs, from the CMake target graph, so a
@@ -181,6 +207,60 @@ jobs:
             --build-dir build-vellum-bridge --verify
           ctest --test-dir build-vellum-bridge -L pulp-vellum --no-tests=error --output-on-failure \
             | tee "$RUNNER_TEMP/vellum-sdk/bridge.log"
+
+      # Installs a release-profile SDK to an empty prefix and configures a
+      # consumer of the two Vellum integration packages from scratch against
+      # it. `cmake --install` needs every target built, which the labelled
+      # build above does not do, so this is its own configure and build.
+      - name: Installed SDK smoke (empty prefix, fresh consumer)
+        if: steps.sdk.outputs.unchanged != 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          cmake -S . -B build-vellum-install -G Ninja -DCMAKE_BUILD_TYPE=Release \
+            -DPULP_PROFILE=release \
+            -DPULP_ENABLE_PULP_VELLUM=ON \
+            -DPULP_ENABLE_PULP_VELLUM_AUDIO=ON \
+            -DCMAKE_PREFIX_PATH="${{ steps.sdk.outputs.prefix }}"
+          tools/ci/governed-build.sh cmake --build build-vellum-install
+          cmake -DPULP_SOURCE_DIR="$PWD" \
+            -DBUILD_DIR="$PWD/build-vellum-install" \
+            -DFIXTURE_DIR="$RUNNER_TEMP/vellum-installed-sdk" \
+            -DVELLUM_PREFIX="${{ steps.sdk.outputs.prefix }}" \
+            -P test/cmake/test_vellum_installed_sdk_smoke.cmake \
+            | tee "$RUNNER_TEMP/vellum-sdk/installed-sdk.log"
+          grep -q "vellum-installed-sdk-smoke: ok" "$RUNNER_TEMP/vellum-sdk/installed-sdk.log"
+
+      # The MCP UI tools resolve vellum-app-host from the SDK this run
+      # resolved. The live case must run, so a skip fails the step.
+      - name: MCP UI tools against the SDK's app host
+        if: steps.sdk.outputs.unchanged != 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          tools/ci/governed-build.sh cmake --build build-vellum-bridge --target pulp-test-mcp-server
+          host="${{ steps.sdk.outputs.prefix }}/bin/vellum-app-host"
+          test -x "$host"
+          PULP_TEST_VELLUM_APP_HOST="$host" MTL_DEBUG_LAYER=0 \
+            build-vellum-bridge/test/pulp-test-mcp-server "[ui]" | tee "$RUNNER_TEMP/vellum-sdk/mcp-ui.log"
+          if grep -q "SKIPPED" "$RUNNER_TEMP/vellum-sdk/mcp-ui.log"; then
+            echo "the live MCP UI case skipped" >&2
+            exit 1
+          fi
+
+      # Layout fixtures on Vellum's layout, through the SDK's vellum-app-host.
+      # The runner exits 3 when nothing was measured, so a run that skipped
+      # every fixture fails here instead of passing.
+      - name: Yoga layout fixtures on Vellum's layout
+        if: steps.sdk.outputs.unchanged != 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          host="${{ steps.sdk.outputs.prefix }}/bin/vellum-app-host"
+          test -x "$host"
+          export VELLUM_APP_HOST="$host" MTL_DEBUG_LAYER=0
+          python3 -m tools.harness.visual.runner --verify --engine vellum
+          python3 -m unittest tools.harness.visual.tests.test_vellum_layout -v
 
       - name: Negative control (a renamed SDK header must fail the build)
         if: steps.sdk.outputs.unchanged != 'true'

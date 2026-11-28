@@ -907,9 +907,10 @@ bool StandaloneApp::apply_config(const StandaloneConfig& new_config) {
 }
 
 void StandaloneApp::create_panels(const StandaloneConfig& config) {
-    StandalonePanelContext context{config, [this](const midi::MidiEvent& event) {
-                                       return ui_midi_collector_.push_now(event);
-                                   }};
+    detail::install_standalone_panels();
+    StandalonePanelContext context{
+        config, [this](const midi::MidiEvent& event) { return ui_midi_collector_.push_now(event); },
+        [] { return detail::standalone_text_input_has_focus(); }};
     panels_ = detail::create_standalone_panels(context);
 }
 

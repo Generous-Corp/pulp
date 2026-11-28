@@ -61,6 +61,10 @@ the Rust crate would ship a check nobody reaches. Verify the split rather than
 assuming it: run the built `./build/pulp doctor` and confirm the C++ check names
 appear in its output.
 
+The WidgetBridge doctor row keeps its own list of the generator's input files
+(`input_rels`). When the generator reads a capability table from a new header,
+mirror the path there too, or the row reports a stale surface as current.
+
 ### `--only` must filter BEFORE the work, not after
 
 `run_doctor_checks(root, standalone, only)` is also how `pulp status` gets its
@@ -101,6 +105,19 @@ Two consequences worth keeping:
   case in `test/test_cli_git_lock_health.cpp` is the *held* lock that must NOT
   be reported, exercised against the real `lsof` probe — without it, a probe
   that always answered "nobody holds this" would pass every other assertion.
+
+### The WidgetBridge freshness row hashes the generator's own input list
+
+The `WidgetBridge generated API` row in `tools/cli/cli_doctor_helpers.cpp`
+recomputes the generator's input fingerprint without running Python, so its
+`input_rels` list must match `FINGERPRINT_INPUTS` in
+`tools/scripts/generate_widget_bridge_api.py` exactly, in order and by path:
+each relative path is hashed along with the file's bytes. Moving one of those
+inputs (the capability vocabulary moved to `pulp/runtime/reload_capabilities.hpp`)
+means changing the generator, the doctor list and the paths the doctor tests in
+`test/test_cli_project_command.cpp` write, then regenerating the outputs. A
+forwarding header left at the old path still exists, so a missed doctor path
+reports the checked-in outputs as stale rather than missing.
 
 ### `pulp doctor gpu` is a typed diagnostic subcommand
 
@@ -570,6 +587,25 @@ need authoring templates are refused (`subgraph_records_unsupported`) rather
 than stripped. A new rewrite mode needs the same check, and its shell-out test
 must diff the CLI's own output, not a file the C++ API wrote: the diff tests
 once passed while no CLI command could produce a diff input.
+
+### UI commands that moved to Vellum forward or name the Vellum spelling
+
+`pulp ui` runs `tools/ui-build/ui_build.py` only when the checkout carries it;
+otherwise `forward_to_vellum()` (`cli_delegate.cpp`) passes the arguments and
+exit status to `vellum ui`. The Vellum CLI is `$PULP_VELLUM_CLI` when set, else
+`vellum` on PATH; when neither exists the command exits 2 and names the install
+step. Never fall back to a silent success.
+
+`pulp import-design` is different: when `find_build_binary()` finds no
+`pulp-import-design`, it exits 2 and prints the `vellum import` spelling
+(`import_design_moved.cpp`) without running anything. Vellum imports into a
+Vellum project with its own grammar, so translating flags would hide that the
+output contract changed. Keep both forwarders free of view, canvas, render and
+design-import headers so the CLI can stop linking those targets.
+
+The `cli-vellum-forward` ctest copies `pulp-cpp` outside the build tree, so the
+sibling importer is not found, and runs it against a stub `vellum` that records
+its argv.
 
 ## Adding a CLI Command — Full Checklist
 
@@ -4460,3 +4496,21 @@ or a Program Change is latched and never applied.
 before building and refuses the install when the lock is missing or malformed.
 A snapshot without `tools/deps/pulp_lock.py` is treated as a failure, not
 skipped.
+
+## The GPU adapter probe's verdict rules have no GPU dependency
+
+`tools/cli/gpu_probe/src/adapter_probe.cpp` judges adapter evidence and sampled
+pixels with plain structs, so its unit test runs in the default build. The
+probe executable that fills the structs from Vellum's GPU runtime lives in
+`integrations/pulp-vellum` and compiles that source directly; it is not part of
+the `pulp doctor gpu` or `pulp gpu probe` recipe registry. `unavailable` (no
+device) and `fail` (device came up wrong) stay distinct exit codes (2 and 1).
+
+## `pulp audio` image PNGs are encoded without the render layer
+
+`tools/cli/audio_png_encoder.cpp` writes the scope, waveform and spectrogram
+PNGs from a raw RGBA buffer over the runtime's `zlib_compress`; `cmd_audio.cpp`
+includes no `pulp/render` header. Keep it that way: a new image verb hands its
+pixels to `encode_png_rgba` and never reaches for a surface. The unit test
+parses the bytes by hand (CRCs, IHDR, inflate, filter bytes), so an encoder
+change that a viewer would forgive still fails there.

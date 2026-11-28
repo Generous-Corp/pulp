@@ -1650,7 +1650,7 @@ TEST_CASE("every hosted format adapter builds its editor from hosted_editor()",
     // Each of these constructs a ViewBridge for an editor embedded in a host.
     // Adding a new format adapter with an editor means adding it here.
     const AdapterSource hosted[] = {
-        {"core/format/include/pulp/format/clap_entry.hpp", "CLAP gui_create"},
+        {"core/format/src/clap_adapter.cpp", "CLAP gui_create"},
         {"core/format/src/vst3_plug_view.cpp", "VST3 IPlugView"},
         {"core/format/src/au_view_controller_mac.mm", "AU v3 macOS"},
         {"core/format/src/au_view_controller_ios.mm", "AU v3 iOS"},

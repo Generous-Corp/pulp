@@ -123,6 +123,7 @@ add_executable(pulp-cli
     cmd_validate.cpp
     cmd_sdk.cpp
     cmd_audio.cpp
+    audio_png_encoder.cpp
     cmd_audio_plugin_common.cpp
     cmd_audio_render.cpp
     cmd_audio_render_parse.cpp
@@ -143,6 +144,7 @@ add_executable(pulp-cli
     au_info_plist.cpp
     cmd_import.cpp
     cmd_ui.cpp
+    import_design_moved.cpp
     import_run.cpp
     import_detect.cpp
     import_spi.cpp
@@ -450,6 +452,19 @@ if(PULP_BUILD_TESTS)
         WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
     set_tests_properties(cli-help PROPERTIES
         PASS_REGULAR_EXPRESSION "pulp .* Pulp audio plugin framework CLI")
+
+    # `pulp ui` forwards to `vellum ui` and `pulp import-design` names the
+    # `vellum import` spelling when the tool is absent. The script runs a copy
+    # of the CLI against a stub `vellum` that records its arguments.
+    if(NOT WIN32)
+        add_test(NAME cli-vellum-forward
+            COMMAND sh "${CMAKE_SOURCE_DIR}/test/cli_vellum_forward_test.sh"
+                "$<TARGET_FILE:pulp-cli>")
+        set_tests_properties(cli-vellum-forward PROPERTIES
+            LABELS "cli"
+            ENVIRONMENT "PULP_UPDATE_CHECK_DISABLED=1"
+            PASS_REGULAR_EXPRESSION "PASS: pulp ui forwards to vellum")
+    endif()
 
     add_test(NAME cli-forge-catalog-json
         COMMAND pulp-cli forge catalog export --json

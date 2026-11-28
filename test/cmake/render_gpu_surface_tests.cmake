@@ -52,7 +52,7 @@
     endif()
 
     add_executable(pulp-test-gpu-surface test_gpu_surface.cpp)
-    target_link_libraries(pulp-test-gpu-surface PRIVATE pulp::render Catch2::Catch2WithMain)
+    target_link_libraries(pulp-test-gpu-surface PRIVATE pulp::gpu-compute Catch2::Catch2WithMain)
     catch_discover_tests(pulp-test-gpu-surface ${PULP_GPU_TEST_DISCOVERY_ARGS})
 
     # SkiaSurface readback size on a real CAMetalLayer swapchain.
@@ -302,7 +302,7 @@
 
     # GPU compute tests.
     add_executable(pulp-test-gpu-compute test_gpu_compute.cpp)
-    target_link_libraries(pulp-test-gpu-compute PRIVATE pulp::render pulp::signal Catch2::Catch2WithMain)
+    target_link_libraries(pulp-test-gpu-compute PRIVATE pulp::gpu-compute pulp::signal Catch2::Catch2WithMain)
     catch_discover_tests(pulp-test-gpu-compute ${PULP_GPU_TEST_DISCOVERY_ARGS})
 
     # Read the production library identity; probes do not initialize it.
@@ -1025,11 +1025,11 @@
     # table. Confirms the WaveNet one-thread-per-sample gap and its siblings.
     add_executable(pulp-gpu-roofline-harness
         "${PROJECT_SOURCE_DIR}/tools/gpu_roofline/gpu_roofline_harness.cpp")
-    target_link_libraries(pulp-gpu-roofline-harness PRIVATE pulp::render pulp::signal)
+    target_link_libraries(pulp-gpu-roofline-harness PRIVATE pulp::gpu-compute pulp::signal)
 
     # Multi-instance WaveNet scaling bench (tooling, not a test): per-period wall,
     # thread CPU and GPU-busy time for N streams via per-instance or batched
     # forwards, each stream checked against a double-precision CPU reference.
     add_executable(pulp-gpu-wavenet-scaling-bench
         "${PROJECT_SOURCE_DIR}/tools/gpu_roofline/gpu_wavenet_scaling_bench.cpp")
-    target_link_libraries(pulp-gpu-wavenet-scaling-bench PRIVATE pulp::render pulp::runtime)
+    target_link_libraries(pulp-gpu-wavenet-scaling-bench PRIVATE pulp::gpu-compute pulp::runtime)

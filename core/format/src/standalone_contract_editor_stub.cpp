@@ -8,6 +8,10 @@ bool standalone_contract_editor_supported() {
     return false;
 }
 
+bool standalone_text_input_has_focus() {
+    return false;
+}
+
 bool run_standalone_contract_editor(Processor&, state::StateStore&, EditorFactory&,
                                     const StandaloneContractEditorOptions&) {
     runtime::log_error("Standalone: this platform cannot host an editor-host contract editor yet");

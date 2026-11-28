@@ -106,6 +106,8 @@ class ContractEditorSession::Context final : public EditorContext {
     void* query_extension(std::string_view id) override {
         if (id == native_surface_extension_id)
             return as_extension(native_surface_);
+        if (id == editor_keys_after_native_pass_extension_id && hooks_.keys_after_native_pass)
+            return &hooks_;
         return nullptr;
     }
     NativeSurfaceHostState& native_surface() {
