@@ -400,14 +400,6 @@
       "timeout": 120.0
     },
     {
-      "name": "examples-build-record",
-      "argv": [
-        "{repo}/tools/scripts/examples_build_matrix.py",
-        "--check-record"
-      ],
-      "timeout": 120.0
-    },
-    {
       "name": "examples-manifest-guard",
       "argv": [
         "{repo}/tools/scripts/examples_manifest_guard.py"

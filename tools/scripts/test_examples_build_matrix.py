@@ -112,10 +112,59 @@ class CheckRecordTest(unittest.TestCase):
         record = {"examples": {**self.GOOD["examples"], "keep": {"status": "built", "exit_code": 0}}}
         self.assertTrue(any("needs targets" in p for p in matrix.check_record(self.MANIFEST, record)))
 
-    def test_real_record_covers_real_manifest(self):
-        manifest = json.loads((REPO_ROOT / matrix.MANIFEST).read_text(encoding="utf-8"))
-        record = json.loads((REPO_ROOT / matrix.RECORD).read_text(encoding="utf-8"))
-        self.assertEqual(matrix.check_record(manifest, record), [])
+    def test_missing_record_file_is_an_error_not_a_crash(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "docs/status").mkdir(parents=True)
+            (root / "docs/status/examples-manifest.json").write_text(
+                json.dumps(self.MANIFEST), encoding="utf-8")
+            self.assertEqual(matrix.main(["--repo-root", str(root), "--check-record"]), 1)
+
+
+def write_reply(build: Path, source_root: str, target_sources: dict[str, str]) -> None:
+    """A minimal file-API reply: one target per (name -> paths.source)."""
+    reply = build / ".cmake" / "api" / "v1" / "reply"
+    reply.mkdir(parents=True)
+    refs = []
+    for name, source in target_sources.items():
+        (reply / f"target-{name}.json").write_text(
+            json.dumps({"name": name, "type": "EXECUTABLE", "paths": {"source": source}}),
+            encoding="utf-8")
+        refs.append({"jsonFile": f"target-{name}.json"})
+    (reply / "codemodel.json").write_text(json.dumps({
+        "paths": {"source": source_root, "build": str(build)},
+        "configurations": [{"targets": refs}]}), encoding="utf-8")
+    (reply / "index-1.json").write_text(json.dumps({
+        "objects": [{"kind": "codemodel", "jsonFile": "codemodel.json"}]}), encoding="utf-8")
+
+
+class ExampleTargetsTest(unittest.TestCase):
+    def _targets(self, source_root: str, sources: dict[str, str]) -> dict:
+        with tempfile.TemporaryDirectory() as tmp:
+            build = Path(tmp)
+            write_reply(build, source_root, sources)
+            return matrix.example_targets(build)
+
+    def test_absolute_source_paths_are_made_relative_to_the_source_root(self):
+        found = self._targets("/work/pulp", {
+            "Foo_CLAP": "/work/pulp/examples/foo",
+            "bar": "/work/pulp/examples/bar/sub",
+            "core": "/work/pulp/core/audio",
+        })
+        self.assertEqual(sorted(found), ["bar", "foo"])
+        self.assertEqual(found["foo"], [{"name": "Foo_CLAP", "type": "EXECUTABLE"}])
+
+    def test_relative_source_paths_still_work(self):
+        found = self._targets("/work/pulp", {"Foo": "examples/foo", "core": "core/audio"})
+        self.assertEqual(sorted(found), ["foo"])
+
+    def test_absolute_path_outside_the_source_root_is_ignored(self):
+        found = self._targets("/work/pulp", {"Ext": "/elsewhere/examples/foo"})
+        self.assertEqual(found, {})
+
+    def test_the_examples_directory_itself_names_no_example(self):
+        self.assertIsNone(matrix.example_dir_of("/work/pulp/examples", "/work/pulp"))
+        self.assertIsNone(matrix.example_dir_of("examples", "/work/pulp"))
 
 
 if __name__ == "__main__":

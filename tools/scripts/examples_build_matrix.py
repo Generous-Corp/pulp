@@ -34,7 +34,7 @@ import json
 import subprocess
 import sys
 import time
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 MANIFEST = Path("docs/status/examples-manifest.json")
@@ -53,15 +53,34 @@ def example_targets(build_dir: Path) -> dict[str, list[dict]]:
     index = json.loads(Path(indexes[-1]).read_text(encoding="utf-8"))
     model_file = next(o["jsonFile"] for o in index["objects"] if o["kind"] == "codemodel")
     model = json.loads((reply / model_file).read_text(encoding="utf-8"))
+    source_root = model.get("paths", {}).get("source", "")
     by_dir: dict[str, list[dict]] = {}
     for target in model["configurations"][0]["targets"]:
         detail = json.loads((reply / target["jsonFile"]).read_text(encoding="utf-8"))
-        source = detail.get("paths", {}).get("source", "")
-        parts = source.split("/")
-        if len(parts) >= 2 and parts[0] == "examples":
-            by_dir.setdefault(parts[1], []).append(
+        example = example_dir_of(detail.get("paths", {}).get("source", ""), source_root)
+        if example:
+            by_dir.setdefault(example, []).append(
                 {"name": detail["name"], "type": detail["type"]})
     return by_dir
+
+
+def example_dir_of(source: str, source_root: str) -> str | None:
+    """The examples/<name> directory name of a target's source path, if any.
+
+    The file API gives a target's source directory relative to the top source
+    directory when it lies inside it and as an absolute path otherwise, so an
+    absolute path is first made relative to the codemodel's own source root.
+    """
+    path = PurePosixPath(source.replace("\\", "/"))
+    if path.is_absolute():
+        try:
+            path = path.relative_to(PurePosixPath(source_root.replace("\\", "/")))
+        except ValueError:
+            return None
+    parts = path.parts
+    if len(parts) >= 2 and parts[0] == "examples":
+        return parts[1]
+    return None
 
 
 def primary_targets(targets: list[dict]) -> list[str]:
@@ -129,7 +148,11 @@ def check_record(manifest: dict, record: dict) -> list[str]:
 def run(args: argparse.Namespace) -> int:
     if args.check_record:
         manifest = json.loads((args.repo_root / MANIFEST).read_text(encoding="utf-8"))
-        record = json.loads((args.repo_root / RECORD).read_text(encoding="utf-8"))
+        record_path = args.repo_root / RECORD
+        if not record_path.is_file():
+            print(f"examples-build-record: {RECORD} does not exist", file=sys.stderr)
+            return 1
+        record = json.loads(record_path.read_text(encoding="utf-8"))
         problems = check_record(manifest, record)
         for problem in problems:
             print(f"examples-build-record: {problem}", file=sys.stderr)
