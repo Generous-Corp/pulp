@@ -646,6 +646,8 @@ jobs:
               tools/scripts/sdk_capability_handoff.py \
               tools/scripts/sdk_provenance.py \
               tools/cmake/PulpSdkProvenance.cmake \
+              tools/scripts/archive_sdk.py \
+              tools/scripts/check_archive_mtimes.py \
               ; do
             if [ '${{ github.event_name }}' = 'workflow_dispatch' ] \
                 && { [ "$path" = tools/scripts/package_cli.py ] \
@@ -654,6 +656,8 @@ jobs:
                   || [ "$path" = tools/scripts/json_schema_lite.py ] \
                   || [ "$path" = tools/scripts/sdk_capability_handoff.py ] \
                   || [ "$path" = tools/scripts/sdk_provenance.py ] \
+                  || [ "$path" = tools/scripts/archive_sdk.py ] \
+                  || [ "$path" = tools/scripts/check_archive_mtimes.py ] \
                   || [ "$path" = tools/cmake/PulpSdkProvenance.cmake ]; }; then
               url="https://raw.githubusercontent.com/${repo}/main/${path}"
               echo "Overlaying current backfill compatibility engine from ${url}"
@@ -736,6 +740,10 @@ jobs:
               >> "$GITHUB_ENV"
             echo "PULP_SDK_PROVENANCE_CMAKE=$compat_dir/PulpSdkProvenance.cmake" \
               >> "$GITHUB_ENV"
+            echo "PULP_SDK_ARCHIVE_HELPER=$compat_dir/archive_sdk.py" \
+              >> "$GITHUB_ENV"
+            echo "PULP_SDK_ARCHIVE_MTIME_CHECK=$compat_dir/check_archive_mtimes.py" \
+              >> "$GITHUB_ENV"
           else
             release_contract_matrix="tools/scripts/release_product_matrix.json"
             echo "PULP_RELEASE_CONTENT_VERIFIER=tools/scripts/release_artifact_contents.py" \
@@ -747,6 +755,10 @@ jobs:
             echo "PULP_RELEASE_PACKAGE_SCRIPT=tools/ci/release_package_cli.sh" \
               >> "$GITHUB_ENV"
             echo "PULP_SDK_PROVENANCE_CMAKE=tools/cmake/PulpSdkProvenance.cmake" \
+              >> "$GITHUB_ENV"
+            echo "PULP_SDK_ARCHIVE_HELPER=tools/scripts/archive_sdk.py" \
+              >> "$GITHUB_ENV"
+            echo "PULP_SDK_ARCHIVE_MTIME_CHECK=tools/scripts/check_archive_mtimes.py" \
               >> "$GITHUB_ENV"
           fi
           control_broker_floor="$(python3 - "$release_contract_matrix" <<'PY'
@@ -1417,7 +1429,14 @@ jobs:
               print("OK: MacGpuWindowHost symbol present in libpulp-view-core.a")
           PY
           mv sdk-staging pulp-sdk
-          tar czf pulp-sdk-${{ matrix.platform }}.tar.gz pulp-sdk
+          SOURCE_DATE_EPOCH="$(git show -s --format=%ct HEAD)"
+          python3 "$PULP_SDK_ARCHIVE_HELPER" \
+            --source pulp-sdk \
+            --output "pulp-sdk-${{ matrix.platform }}.tar.gz" \
+            --epoch "$SOURCE_DATE_EPOCH"
+          python3 "$PULP_SDK_ARCHIVE_MTIME_CHECK" \
+            "pulp-sdk-${{ matrix.platform }}.tar.gz" \
+            --max-mtime "$SOURCE_DATE_EPOCH"
           rm -rf pulp-sdk
         shell: bash
 
@@ -1457,7 +1476,20 @@ jobs:
           # somewhere, not that they are in the correct archive.
           python -c "from pathlib import Path; core = Path(r'sdk-staging/lib/pulp-view-core.lib').read_bytes(); wv = Path(r'sdk-staging/lib/pulp-view-webview.lib'); data = core + (wv.read_bytes() if wv.exists() else b''); assert b'WebViewPanel' in data, 'WebViewPanel symbol missing'; assert b'make_webview_embedded_resource_fetcher' in data, 'make_webview_embedded_resource_fetcher symbol missing'"
           Rename-Item sdk-staging pulp-sdk
-          Compress-Archive -Path pulp-sdk -DestinationPath pulp-sdk-${{ matrix.platform }}.tar.gz
+          $sourceEpoch = [int64](git show -s --format=%ct HEAD).Trim()
+          python $env:PULP_SDK_ARCHIVE_HELPER `
+            --source pulp-sdk `
+            --output pulp-sdk-${{ matrix.platform }}.tar.gz `
+            --epoch $sourceEpoch
+          if ($LASTEXITCODE -ne 0) {
+            throw 'Failed to create deterministic SDK archive'
+          }
+          python $env:PULP_SDK_ARCHIVE_MTIME_CHECK `
+            pulp-sdk-${{ matrix.platform }}.tar.gz `
+            --max-mtime $sourceEpoch
+          if ($LASTEXITCODE -ne 0) {
+            throw 'SDK archive contains a future-dated entry'
+          }
           Remove-Item -Recurse pulp-sdk
         shell: pwsh
 

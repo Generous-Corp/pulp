@@ -334,6 +334,12 @@ public:
         return state_persist_.saves;
     }
 
+    /// How many tool panels this run holds (standalone_panel.hpp). Valid from
+    /// the moment the panels are built, before audio starts, until shutdown.
+    std::size_t panel_count() const noexcept {
+        return panels_.size();
+    }
+
   private:
     // run_with_editor() for a processor with an editor factory: the editor-host
     // contract editor in its own native window (detail/standalone_contract_editor.hpp).
