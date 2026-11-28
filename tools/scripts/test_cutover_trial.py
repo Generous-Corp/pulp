@@ -448,11 +448,114 @@ class RepairRegressionTests(unittest.TestCase):
             self.assertTrue(build_call.kwargs["env"]["CCACHE_TEMPDIR"].endswith("build/cutover-ccache-tmp"))
 
 
+class PlatformGuardedRegistrationTests(unittest.TestCase):
+    """Configure-level proof of the platform guards on two quarantined suites.
+
+    Each test manifest is included under cmake -P with every command it calls
+    stubbed to record the targets it registers, once per platform."""
+
+    ROOT = Path(__file__).resolve().parents[2]
+    GUARDED = (
+        ("test/cmake/motion_tests.cmake", "pulp-test-motion-android-bridge", "Android"),
+        ("test/cmake/view_host_tests.cmake", "pulp-test-linux-pure-helpers", "Linux"),
+    )
+    NATIVE = {"if", "elseif", "else", "endif", "foreach", "endforeach", "while", "endwhile",
+              "function", "endfunction", "macro", "endmacro", "set", "unset", "list", "string",
+              "file", "include", "get_filename_component", "return", "block", "endblock",
+              "message", "math", "cmake_path"}
+    REGISTER = {"add_executable", "pulp_add_test_suite"}
+
+    def registered(self, manifest, system):
+        import re
+        import shutil
+        cmake = shutil.which("cmake")
+        if not cmake:
+            self.skipTest("cmake not installed")
+        text = (self.ROOT / manifest).read_text(encoding="utf-8")
+        commands = {c.lower() for c in re.findall(r"^\s*([A-Za-z_][A-Za-z0-9_]*)\(", text, re.M)}
+        with tempfile.TemporaryDirectory() as tmp:
+            out = Path(tmp) / "targets.txt"
+            lines = []
+            for cmd in sorted(commands - self.NATIVE):
+                body = f'file(APPEND "{out}" "${{ARGV0}}\\n")' if cmd in self.REGISTER else ""
+                lines.append(f"function({cmd})\n{body}\nendfunction()")
+            android = "set(ANDROID 1)\n" if system == "Android" else ""
+            harness = Path(tmp) / "h.cmake"
+            harness.write_text(
+                f'set(CMAKE_SYSTEM_NAME {system})\n{android}' + "\n".join(lines) +
+                f'\nfile(WRITE "{out}" "")\ninclude("{self.ROOT / manifest}")\n',
+                encoding="utf-8")
+            proc = subprocess.run([cmake, "-P", str(harness)], capture_output=True, text=True,
+                                  encoding="utf-8")
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            return out.read_text(encoding="utf-8").split()
+
+    def test_guarded_suites_register_only_on_their_owning_platform(self):
+        for manifest, target, owner in self.GUARDED:
+            for system in ("Darwin", "Linux", "Android"):
+                with self.subTest(target=target, system=system):
+                    targets = self.registered(manifest, system)
+                    if system == owner:
+                        self.assertIn(target, targets)
+                    else:
+                        self.assertNotIn(target, targets)
+
+
 class InputTests(unittest.TestCase):
+    def test_shipped_deletion_paths_are_unique(self):
+        paths = ct.load_inputs()["delete_paths"]
+        self.assertEqual(len(paths), len(set(paths)))
+
+    def test_trial_inventory_keeps_retained_build_inputs(self):
+        # C4a trial failures showed that retained tests and build targets
+        # still depend on these paths.
+        retained = {
+            "core/view/cmake/PulpViewJsPreludes.cmake",
+            "core/view/include/pulp/view/recognition_audio_pack.hpp",
+            "core/view/include/pulp/view/value_channel_json.hpp",
+            "core/view/include/pulp/view/value_channel_set.hpp",
+            "core/view/include/pulp/view/value_channel_telemetry.hpp",
+            "core/view/js/css-colors.js",
+            "core/view/js/css-parser.js",
+            "core/view/js/embed_js.py",
+            "core/view/js/import-runtime.js",
+            "core/view/js/web-compat-animation.js",
+            "core/view/js/web-compat-canvas-gpu.js",
+            "core/view/js/web-compat-canvas-image.js",
+            "core/view/js/web-compat-canvas-matrix.js",
+            "core/view/js/web-compat-canvas.js",
+            "core/view/js/web-compat-document-gpu-mock.js",
+            "core/view/js/web-compat-document-selectors.js",
+            "core/view/js/web-compat-document.js",
+            "core/view/js/web-compat-dom-ops.js",
+            "core/view/js/web-compat-element-events.js",
+            "core/view/js/web-compat-element.js",
+            "core/view/js/web-compat-gpu-buffered.js",
+            "core/view/js/web-compat-observers.js",
+            "core/view/js/web-compat-scheduler.js",
+            "core/view/js/web-compat-style-decl-helpers.js",
+            "core/view/js/web-compat-style-decl-layout.js",
+            "core/view/js/web-compat-style-decl-misc.js",
+            "core/view/js/web-compat-style-decl-paint.js",
+            "core/view/js/web-compat-style-decl-transform.js",
+            "core/view/js/web-compat-style-decl-typography.js",
+            "core/view/js/web-compat-style-decl.js",
+            "core/view/js/web-compat-style-dedup-table.js",
+            "core/view/js/web-compat-transient-interaction.js",
+            "external/fonts/Inter-Regular.ttf",
+            "external/fonts/JetBrainsMono-Regular.ttf",
+            "external/fonts/Jost-Bold.ttf",
+            "external/fonts/Jost-Medium.ttf",
+            "external/fonts/Jost-Regular.ttf",
+            "external/fonts/Jost-SemiBold.ttf",
+            "tools/cmake/PulpEmbedData.cmake",
+            "tools/cmake/scripts/encode_binary_data.py",
+        }
+        self.assertEqual(retained.intersection(ct.load_inputs()["delete_paths"]), set())
     def test_shipped_inputs_are_unique_paths(self):
         data = ct.load_inputs()
-        self.assertEqual(len(data["delete_paths"]), 683)
-        self.assertEqual(len(set(data["delete_paths"])), 683)
+        self.assertEqual(len(data["delete_paths"]), 644)
+        self.assertEqual(len(set(data["delete_paths"])), 644)
 
     def test_row_count_equals_the_ledger_stranded_count(self):
         data = ct.load_inputs()
