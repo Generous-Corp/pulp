@@ -12,10 +12,15 @@
    "templates/ios-auv3/Info.plist.in"
   ],
   "kind": "compiled",
+  "runtime_targets": [],
   "sources": [
    "test/test_design_tool_layout.cpp",
    "test/test_ios_foundation.cpp"
   ],
+  "spawning_sources": [
+   "test/test_design_tool_layout.cpp"
+  ],
+  "spawns": "undeclared",
   "undeclared_sources": []
  },
  "scanned": true

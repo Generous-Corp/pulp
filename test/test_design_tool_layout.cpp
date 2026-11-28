@@ -2124,12 +2124,12 @@ TEST_CASE("Design tool: theme export Save asks for a destination and cleans up p
     }
 
     SECTION("a chosen destination is written through the safe writer") {
-        REQUIRE_NOTHROW(
-            engine.evaluate("var __execLog = [];"
-                            "exec = function(cmd) { __execLog.push(String(cmd)); return ''; };"
-                            "showSaveDialog = function() { return '/Users/example/Documents/theme'; };"
-                            "__dispatch__('export-btn-pill', 'click', 0);"
-                            "__dispatch__('exp-save-btn', 'click', 0);"));
+        REQUIRE_NOTHROW(engine.evaluate(
+            "var __execLog = [];"
+            "exec = function(cmd) { __execLog.push(String(cmd)); return ''; };"
+            "showSaveDialog = function() { return '/Users/example/Documents/theme'; };"
+            "__dispatch__('export-btn-pill', 'click', 0);"
+            "__dispatch__('exp-save-btn', 'click', 0);"));
         REQUIRE(engine.evaluate("__execLog.length").getWithDefault<int>(-1) == 1);
         REQUIRE(engine.evaluate("__execLog[0].indexOf('/Users/example/Documents/theme.json') >= 0")
                     .getWithDefault<bool>(false));
@@ -2151,7 +2151,10 @@ TEST_CASE("Design tool: theme export Save asks for a destination and cleans up p
         REQUIRE(read_file(engine.evaluate("__file").toString()) == "hello");
         REQUIRE_NOTHROW(engine.evaluate("exec(buildAiCliCommand(__file, 'm', 'claude', ''));"));
         std::size_t left = 0;
-        for (const auto& e : fs::directory_iterator(base)) { (void)e; ++left; }
+        for (const auto& e : fs::directory_iterator(base)) {
+            (void)e;
+            ++left;
+        }
         REQUIRE(left == 0);
         fs::remove_all(base);
     }
@@ -2166,7 +2169,10 @@ TEST_CASE("Design tool: theme export Save asks for a destination and cleans up p
         ::unsetenv("TMPDIR");
         REQUIRE(result.empty());
         std::size_t left = 0;
-        for (const auto& e : fs::directory_iterator(base)) { (void)e; ++left; }
+        for (const auto& e : fs::directory_iterator(base)) {
+            (void)e;
+            ++left;
+        }
         REQUIRE(left == 0);
         fs::remove_all(base);
     }
