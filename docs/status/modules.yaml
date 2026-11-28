@@ -271,6 +271,9 @@ modules:
       targets: pulp-gpu-device-api (Dawn-free device headers) and
       pulp-gpu-device (Dawn surface and compute implementation), which
       pulp-render links and GPU audio links without the 2D renderer.
+      pulp-gpu-compute is the INTERFACE consumption target for compute and
+      diagnostics code: the device layer plus the provider requirements
+      pulp-render exports, with no canvas, view or renderer behind it.
     status: usable
     dependencies: [runtime, canvas]
     docs: reference/rendering.md#render

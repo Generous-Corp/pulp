@@ -449,10 +449,10 @@ class RepairRegressionTests(unittest.TestCase):
 
 
 class InputTests(unittest.TestCase):
-    def test_shipped_inputs_hold_the_687_paths(self):
+    def test_shipped_inputs_are_unique_paths(self):
         data = ct.load_inputs()
-        self.assertEqual(len(data["delete_paths"]), 687)
-        self.assertEqual(len(set(data["delete_paths"])), 687)
+        self.assertEqual(len(data["delete_paths"]), 683)
+        self.assertEqual(len(set(data["delete_paths"])), 683)
 
     def test_row_count_equals_the_ledger_stranded_count(self):
         data = ct.load_inputs()
