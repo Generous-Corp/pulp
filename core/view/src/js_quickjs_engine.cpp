@@ -33,6 +33,9 @@
 #if defined(__APPLE__) || defined(__linux__)
 #include <pthread.h>
 #endif
+#if defined(_WIN32)
+#include <pulp/platform/win32_sane.hpp>
+#endif
 #include <cmath>
 #include <stdexcept>
 #include <unordered_set>
@@ -55,7 +58,8 @@ namespace pulp::view {
 // thread has left would turn a JS "stack overflow" error into a real crash.
 // set_quickjs_stack_size therefore never asks for more than three quarters of
 // the stack left below the caller; on platforms where that cannot be read the
-// requested size is used unchanged.
+// requested size is used unchanged. MSVC's default 1MB thread stack is smaller
+// than the requested limit, so Windows reads its bounds the same way.
 #if defined(__SANITIZE_ADDRESS__)
 #define PULP_QUICKJS_UNDER_ASAN 1
 #elif defined(__has_feature)
@@ -94,6 +98,11 @@ static size_t current_thread_stack_remaining() noexcept {
     if (!ok)
         return 0;
     low = reinterpret_cast<std::uintptr_t>(addr);
+#elif defined(_WIN32)
+    ULONG_PTR stack_low = 0;
+    ULONG_PTR stack_high = 0;
+    GetCurrentThreadStackLimits(&stack_low, &stack_high);
+    low = static_cast<std::uintptr_t>(stack_low);
 #else
     return 0;
 #endif
