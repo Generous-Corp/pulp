@@ -274,10 +274,14 @@ It also runs in the pre-push `gates.sh`, so a violation is caught before the pus
 The **header fan-out guard** (`header_fanout_guard.py`, ledger
 `header_fanout_guard.json`) runs in the same workflow, `gates.sh`, and the
 pre-push hook. It counts the translation units whose static `#include` closure
-contains each tracked header. A tracked header over its `max_tus` ceiling fails
-only when the PR grew it relative to the merge-base, which is the same
-rebase-stable rule the hotspot guard uses. A `Fanout-Grow: <path|all> reason="..."`
-trailer authorizes deliberate growth.
+contains each tracked header. A tracked header over its `max_tus` ceiling
+counts only when the PR grew it relative to the merge-base, which is the same
+rebase-stable rule the hotspot guard uses. That growth is a review item,
+`fanout:<path>:+<added TUs>`. The guard reports it and passes. The required
+`review-verdict` check then refuses the head until the standing reviewer's
+exact-head verdict accepts the item with an `accept-review-item: <id>` line
+(`tools/scripts/review_items.py`; see the `ci` skill, "Review items"). A
+`Fanout-Grow: <path|all> reason="..."` commit trailer also accepts it.
 
 The workflow runs every registration listed in
 `tools/ci/source_selftests.json` with `tools/ci/source_selftests.py run

@@ -165,8 +165,9 @@ on a real PR. Do them in order.
    give its ctest targets a label that starts with `pulp-vellum` so
    `labelled-targets` selects them. Any new TU that includes a tracked core
    header (for example `pulp/host/signal_graph.hpp`) trips the header fan-out
-   guard; the package needs a `Fanout-Grow: all reason="..."` trailer naming
-   the legacy TU it replaces.
+   guard; that growth is a review item the reviewer's verdict must accept by id
+   (see "Review items" below), so say in the PR body which legacy TU it
+   replaces.
 2. **Know the required contexts, and only those.** They come from branch
    protection, not from the check list on the PR page:
 
@@ -815,6 +816,77 @@ three review-verdict workflows, or a manual `workflow_dispatch`, runs
 `backfill-review-verdict`, which drives the same pinned script for every open
 non-draft PR targeting main, so existing PRs get a current status without a
 push. A refusal is a warning there, not a failed run.
+
+## Review items: the reviewer accepts a guard's exception, not the author
+
+Two guards report an exception instead of failing: `hotspot_edit_guard.py` when a
+branch changes a `serialized` hotspot, and `header_fanout_guard.py` when a branch
+grows a tracked header past its ceiling. Each one is a **review item** with a
+stable id:
+
+| id | raised when |
+|---|---|
+| `hotspot:<registered path>` | a serialized hotspot (today `docs/status/consumption-profiles.json`) changed |
+| `fanout:<header path>:+<added TUs>` | the range grew a tracked header's fan-out past its `max_tus` |
+| `ledger:<ledger path>` | the range changed `hotspot_edit_guard.json` or `header_fanout_guard.json` (checked in `review-verdict` only) |
+
+Locally (pre-push, `gates.sh`), in `drift-fast` and in `Enforce version & skill
+sync` the guards print the id as `NEEDS REVIEWER ACKNOWLEDGEMENT` and pass,
+because no verdict exists before the push. `--review-items-json PATH` writes
+the items. Fragment-mode hotspot edits and a stale fan-out ledger still fail
+there.
+
+**Acceptance.** The standing reviewer accepts each id with one line in its
+exact-head verdict, above the final marker line:
+
+```
+accept-review-item: fanout:core/audio/include/pulp/audio/buffer.hpp:+12
+reviewer: pulp-review
+<!-- session: <host>/fleet-pass-reviewer-... agent: pulp-review -->
+verdict: APPROVE head:<sha>
+```
+
+`python3 tools/scripts/review_items.py items --base origin/main --head <sha>`,
+run from a checkout of `main` with the head fetched, prints those lines.
+
+**Enforcement.** `.github/workflows/review-verdict.yml` runs
+`review_items.py check` after Shipyard's rule allows a head. The checker and
+`.shipyard/config.toml` come from a default-branch checkout, and the two
+ledgers are read from the base ref (`git show`), never from a working tree, so
+a branch that loosens its own ledger is still measured against main's. A guard's
+outright refusal (a fragment-mode hotspot edit, a tracked header missing at the
+head) refuses the head whatever the verdict says; removing a header together
+with its ledger entry is the `ledger:` item instead. It reads the head as git objects only and never
+checks it out or runs it. It takes acceptances only from the newest APPROVE
+comment that names the exact head and qualifies:
+- posted by `shipyard-local[bot]` with account type `Bot`;
+- a canonical `ghapp` stamp, no stamp-like variant, and a session matching
+  `[auto_merge] reviewer_stamp_sessions`;
+- a `reviewer:` line naming one of `reviewer_signers`;
+- never edited.
+
+Lines inside fenced code or `>` quotes do not count. When an id is
+unaccepted, the checker posts a `failure` `review-verdict` status over
+Shipyard's `success` (the required context has no integration binding, so a
+red check run alone is not enough). On `pull_request_target` it also fails the
+job. If the checker cannot run, the job posts the failure itself. The backfill
+job applies the same rule to every PR it judges.
+
+**Why this keeps the oversight the trailers gave.** The guards exist so that a
+hotspot regeneration or a fan-out growth is seen in review. An item still
+blocks a required check until someone accepts it. The acceptance now comes
+from the reviewer's verdict, which the PR's code cannot write: the PR's own
+runs post as `github-actions[bot]`, and an App comment from any other session
+fails the stamp-session rule. So an acceptance is as hard to forge as the
+approval itself. It is also bound to one head and names each item. A
+`Serialized-Hotspot:` or `Fanout-Grow:` commit line still accepts its item,
+for a human author.
+
+**Costs to know.** An acceptance never carries. A merge-only or rebase carry
+keeps the approval, but a head with items needs a new verdict that accepts
+them again. Editing a verdict to add a line does not count; post a new one. A
+`fanout` id includes the TU count, so a later push that grows the header
+further changes the id.
 
 ## A failed batch's branch name is not the culprit
 

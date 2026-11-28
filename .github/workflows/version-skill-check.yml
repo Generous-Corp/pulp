@@ -250,7 +250,8 @@ jobs:
 
       - name: Header fan-out guard
         # A tracked header whose translation-unit fan-out this PR grew past its
-        # ceiling (an umbrella include) fails; `Fanout-Grow:` trailer bypass.
+        # ceiling (an umbrella include) is a review item: it passes here and
+        # the review-verdict check requires the verdict to accept it.
         run: |
           python3 tools/scripts/header_fanout_guard.py \
               --base "${{ steps.base.outputs.ref }}" \
@@ -340,6 +341,7 @@ jobs:
           python3 tools/scripts/test_node_abi_gate.py
           python3 tools/scripts/test_hotspot_size_guard.py
           python3 tools/scripts/test_header_fanout_guard.py
+          python3 tools/scripts/test_review_items.py
           python3 tools/scripts/test_planning_gitlink_guard.py
           python3 tools/scripts/test_pr_check_triage.py
           python3 tools/scripts/test_version_at_land.py
