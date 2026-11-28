@@ -164,9 +164,6 @@ class Editor final : public format::Editor, public format::EditorAttachDiagnosti
         invalidate();
     }
 
-    // X11 is not offered: an X11 parent carries its window in window_id with a
-    // null handle, and PluginViewHost attaches only to a pointer parent, so a
-    // claimed X11 parent could never attach. Add it once the host takes an id.
     /// True when the root reports, through an optional
     /// `bool editor_failed_to_open() const`, that it could not build its
     /// content. The factory then returns no editor and no host is created.
@@ -179,6 +176,9 @@ class Editor final : public format::Editor, public format::EditorAttachDiagnosti
             return false;
     }
 
+    // X11 is not offered: an X11 parent carries its window in window_id with a
+    // null handle, and PluginViewHost attaches only to a pointer parent, so a
+    // claimed X11 parent could never attach. Add it once the host takes an id.
     bool supports_parent(format::NativeParentKind kind) const override {
         return kind == format::NativeParentKind::none ||
                kind == format::NativeParentKind::cocoa_view ||
