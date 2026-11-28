@@ -72,23 +72,31 @@ endfunction()
 # appending "<target>|<header>|<function>" to the global property
 # PULP_STANDALONE_PANEL_PROVIDERS from its own CMake, where <function> is a
 # callable returning bool that installs its StandalonePanelFactory. An
-# integration target that ships in the SDK declares the same thing as an
-# exported target property, PULP_STANDALONE_PANEL_PROVIDER = "<header>|<function>",
-# which is how an installed SDK consumer, that never runs the integration's own
-# CMakeLists.txt, still finds it. The standalone calls the registrar before it builds its panels, so the factory is
+# integration that ships in the SDK also declares it as an exported target
+# property, PULP_STANDALONE_PANEL_PROVIDER = "<header>|<function>", and the
+# installed PulpConfig.cmake turns that into the same global entry, because an
+# installed SDK consumer never runs the integration's own CMakeLists.txt. The
+# standalone calls the registrar before it builds its panels, so the factory is
 # installed by an explicit call and not by a static-init object an archive could
 # drop. Adds nothing when no integration announced a provider.
+# Appends an imported SDK target's PULP_STANDALONE_PANEL_PROVIDER to the global
+# provider list under its lower-case `pulp::` alias, the form the registrar
+# links. Does nothing for a target that does not exist or declares none.
+function(_pulp_announce_standalone_panel_provider imported)
+    if(NOT TARGET "${imported}")
+        return()
+    endif()
+    get_target_property(_declared "${imported}" PULP_STANDALONE_PANEL_PROVIDER)
+    if(NOT _declared)
+        return()
+    endif()
+    string(REGEX REPLACE "^Pulp::" "pulp::" _alias "${imported}")
+    set_property(GLOBAL APPEND PROPERTY PULP_STANDALONE_PANEL_PROVIDERS
+        "${_alias}|${_declared}")
+endfunction()
+
 function(_pulp_add_standalone_panel_registrar exe)
     get_property(_providers GLOBAL PROPERTY PULP_STANDALONE_PANEL_PROVIDERS)
-    foreach(_declaring IN ITEMS pulp::vellum-audio)
-        if(TARGET ${_declaring})
-            get_target_property(_declared ${_declaring} PULP_STANDALONE_PANEL_PROVIDER)
-            if(_declared)
-                list(APPEND _providers "${_declaring}|${_declared}")
-            endif()
-        endif()
-    endforeach()
-    list(REMOVE_DUPLICATES _providers)
     set(_includes "")
     set(_calls "")
     foreach(_provider IN LISTS _providers)

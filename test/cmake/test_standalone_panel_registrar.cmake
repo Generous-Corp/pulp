@@ -9,9 +9,10 @@ exported target property PULP_STANDALONE_PANEL_PROVIDER. Two halves:
      (with EXPORT_PROPERTIES, as pulp-vellum-audio does) is installed, and the
      exported targets file must carry it.
   2. A consumer that only has the imported target, and never runs the
-     integration's CMakeLists.txt, still gets a registrar that includes the
-     provider's header and calls its function. A consumer with no provider
-     must get no registrar.
+     integration's CMakeLists.txt, announces it the way PulpConfig.cmake does
+     (_pulp_announce_standalone_panel_provider) and still gets a registrar that
+     includes the provider's header and calls its function. A consumer with no
+     provider must get no registrar.
 
   -DPULP_SOURCE_DIR  the source tree
   -DFIXTURE_DIR      scratch directory, removed and recreated
@@ -64,9 +65,9 @@ function(_consume dir declares expect_registrar)
     if(declares)
         set(_import [[
 include("${FAKE_PREFIX}/lib/cmake/Fake/FakeTargets.cmake")
-add_library(pulp::vellum-audio INTERFACE IMPORTED)
-get_target_property(_p Pulp::fake-panels PULP_STANDALONE_PANEL_PROVIDER)
-set_target_properties(pulp::vellum-audio PROPERTIES PULP_STANDALONE_PANEL_PROVIDER "${_p}")
+# PulpConfig.cmake aliases each imported target to its lower-case name.
+add_library(pulp::fake-panels INTERFACE IMPORTED)
+_pulp_announce_standalone_panel_provider(Pulp::fake-panels)
 ]])
     else()
         set(_import "")
