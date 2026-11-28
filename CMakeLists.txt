@@ -8,7 +8,7 @@ include(${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpMacOsArch.cmake)  # macOS ar
 include(${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpMinOs.cmake)
 
 project(Pulp
-    VERSION 1.233.0
+    VERSION 1.237.0
     DESCRIPTION "Cross-platform audio plugin and application framework"
     HOMEPAGE_URL "https://github.com/Generous-Corp/pulp"
     LANGUAGES CXX C
@@ -548,6 +548,8 @@ endif()
 # After core/render so the GPU convolver node can link pulp::gpu-device when GPU is
 # enabled. The transport itself is GPU-agnostic and builds regardless.
 add_subdirectory(core/gpu_audio)
+# The view-free editor bridge comes before core/view, whose tooling layer links it.
+add_subdirectory(core/editor_bridge)
 add_subdirectory(core/view)
 # The lite editor stack's replacement objects (see PulpLiteEditorObjects.cmake).
 # Apple only: the lite TextShaper measures through CoreText.

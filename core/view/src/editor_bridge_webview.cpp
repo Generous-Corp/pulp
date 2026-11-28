@@ -1,17 +1,17 @@
-#include "pulp/view/editor_bridge.hpp"
+#include "pulp/view/editor_bridge_attach.hpp"
 
 #include "pulp/view/web_view.hpp"
 
 namespace pulp::view {
 
-void EditorBridge::attach_webview(WebViewPanel& panel) {
-    panel.set_message_handler([this](const WebViewMessage& message) {
-        return dispatch_webview_message(message.type, message.payload_json);
+void attach_webview(EditorBridge& bridge, WebViewPanel& panel) {
+    panel.set_message_handler([&bridge](const WebViewMessage& message) {
+        return bridge.dispatch_webview_message(message.type, message.payload_json);
     });
 }
 
-void EditorBridge::detach_webview(WebViewPanel& panel) {
+void detach_webview(EditorBridge& /*bridge*/, WebViewPanel& panel) {
     panel.set_message_handler({});
 }
 
-}  // namespace pulp::view
+} // namespace pulp::view

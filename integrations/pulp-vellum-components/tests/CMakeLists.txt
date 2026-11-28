@@ -11,7 +11,8 @@ if(PULP_BUILD_TESTS AND TARGET Catch2::Catch2WithMain)
         ${CMAKE_CURRENT_SOURCE_DIR}/property_panel_test.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/catalogue_test.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/gpu_health_content_test.cpp
-        ${CMAKE_CURRENT_SOURCE_DIR}/inspector_window_test.cpp)
+        ${CMAKE_CURRENT_SOURCE_DIR}/inspector_window_test.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/view_inspector_test.cpp)
     # The timeline fixtures are shared with the core timeline tests.
     target_include_directories(pulp-test-pulp-vellum-components PRIVATE
         ${PULP_ROOT_DIR}/test)

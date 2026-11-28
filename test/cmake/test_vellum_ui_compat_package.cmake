@@ -675,8 +675,8 @@ elseif(SCENARIO STREQUAL "no-vellum" OR SCENARIO STREQUAL "real" OR SCENARIO STR
             "if(NOT TARGET Pulp::editor-bridge)\n"
             "  add_library(Pulp::editor-bridge INTERFACE IMPORTED)\n"
             "  set_target_properties(Pulp::editor-bridge PROPERTIES\n"
-            "    INTERFACE_SOURCES \"${PULP_SOURCE_DIR}/core/view/src/editor_bridge.cpp\"\n"
-            "    INTERFACE_INCLUDE_DIRECTORIES \"${PULP_SOURCE_DIR}/core/view/include;${PULP_SOURCE_DIR}/core/runtime/include;${CHOC_DIR}\"\n"
+            "    INTERFACE_SOURCES \"${PULP_SOURCE_DIR}/core/editor_bridge/src/editor_bridge.cpp\"\n"
+            "    INTERFACE_INCLUDE_DIRECTORIES \"${PULP_SOURCE_DIR}/core/editor_bridge/include;${PULP_SOURCE_DIR}/core/runtime/include;${CHOC_DIR}\"\n"
             "    INTERFACE_COMPILE_FEATURES cxx_std_20)\n"
             "endif()\n")
     endif()

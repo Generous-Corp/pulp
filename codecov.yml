@@ -262,6 +262,9 @@ component_management:
     - component_id: dsl
       name: dsl
       paths: ["core/dsl/**"]
+    - component_id: editor_bridge
+      name: editor_bridge
+      paths: ["core/editor_bridge/**"]
     - component_id: events
       name: events
       paths:

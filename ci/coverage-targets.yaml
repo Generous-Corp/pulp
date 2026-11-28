@@ -69,6 +69,7 @@ tiers:
     line_target: 70
     paths:
       - core/view/**
+      - core/editor_bridge/**
       - core/render/**
       - core/scene/**
       - core/timeline_agent_view/**

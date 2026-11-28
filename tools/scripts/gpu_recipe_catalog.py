@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import concurrent.futures
 import importlib.util
 import json
 import pathlib
@@ -801,6 +802,54 @@ def validate_handoff_routing(
                 dirty_paths.add(records[index].decode("utf-8", errors="surrogateescape"))
         index += 1
 
+    def immutable_facts_for(revision: str, path: str) -> tuple[Any, ...]:
+        """The Git answers for one (revision, path), cached for this HEAD.
+
+        Each is a few subprocesses, so a hundred rows are the whole cost of a
+        validation. The answers are independent of one another and of the
+        row's other fields, which is what lets ``prewarm`` run them side by
+        side before the row loop reads them back in order.
+        """
+
+        immutable_key = (root_identity, head_revision, revision, path)
+        facts = _HANDOFF_GIT_FACT_CACHE.get(immutable_key)
+        if facts is not None:
+            return facts
+        pinned_object = git_text(["rev-parse", f"{revision}:{path}"])
+        pinned_type = (
+            git_text(["cat-file", "-t", pinned_object]) if pinned_object else None
+        )
+        head_object = git_text(["rev-parse", f"HEAD:{path}"])
+        latest_owner = git_text(["log", "-1", "--format=%H", "HEAD", "--", path])
+        ancestor_key = (root_identity, head_revision, revision)
+        ancestor_code = _HANDOFF_ANCESTOR_CACHE.get(ancestor_key)
+        if ancestor_code is None:
+            ancestor_code = subprocess.run(
+                ["git", "merge-base", "--is-ancestor", revision, "HEAD"],
+                cwd=root, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL, timeout=10, check=False,
+            ).returncode
+            _HANDOFF_ANCESTOR_CACHE[ancestor_key] = ancestor_code
+        facts = (pinned_object, pinned_type, head_object, latest_owner, ancestor_code)
+        _HANDOFF_GIT_FACT_CACHE[immutable_key] = facts
+        return facts
+
+    wanted: dict[tuple[str, str], None] = {}
+    for entry in document.get("entries", []):
+        if not isinstance(entry, dict) or not isinstance(entry.get("pulp_paths"), list):
+            continue
+        for row in entry["pulp_paths"]:
+            if isinstance(row, dict) and isinstance(row.get("path"), str):
+                if row["path"] in routed_paths:
+                    wanted[(str(row.get("revision")), row["path"])] = None
+    pending = [
+        key for key in wanted
+        if (root_identity, head_revision, *key) not in _HANDOFF_GIT_FACT_CACHE
+    ]
+    if len(pending) > 1:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=8) as pool:
+            list(pool.map(lambda key: immutable_facts_for(*key), pending))
+
     git_facts: dict[
         tuple[str, str],
         tuple[str | None, str | None, str | None, str | None, int, bool],
@@ -837,28 +886,7 @@ def validate_handoff_routing(
                 immutable_key = (root_identity, head_revision, str(revision), path)
                 immutable_facts = _HANDOFF_GIT_FACT_CACHE.get(immutable_key)
                 if immutable_facts is None:
-                    pinned_object = git_text(["rev-parse", f"{revision}:{path}"])
-                    pinned_type = (
-                        git_text(["cat-file", "-t", pinned_object])
-                        if pinned_object else None
-                    )
-                    head_object = git_text(["rev-parse", f"HEAD:{path}"])
-                    latest_owner = git_text(
-                        ["log", "-1", "--format=%H", "HEAD", "--", path]
-                    )
-                    ancestor_key = (root_identity, head_revision, str(revision))
-                    ancestor_code = _HANDOFF_ANCESTOR_CACHE.get(ancestor_key)
-                    if ancestor_code is None:
-                        ancestor_code = subprocess.run(
-                            ["git", "merge-base", "--is-ancestor", str(revision), "HEAD"],
-                            cwd=root, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
-                            stderr=subprocess.DEVNULL, timeout=10, check=False,
-                        ).returncode
-                        _HANDOFF_ANCESTOR_CACHE[ancestor_key] = ancestor_code
-                    immutable_facts = (
-                        pinned_object, pinned_type, head_object, latest_owner, ancestor_code,
-                    )
-                    _HANDOFF_GIT_FACT_CACHE[immutable_key] = immutable_facts
+                    immutable_facts = immutable_facts_for(str(revision), path)
                 pinned_object, pinned_type, head_object, latest_owner, ancestor_code = (
                     immutable_facts
                 )

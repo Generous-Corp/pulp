@@ -235,6 +235,9 @@
       "pulp/dsl/faust_base.hpp",
       "pulp/dsl/faust_processor.hpp"
     ],
+    "core/editor_bridge/include": [
+      "pulp/view/editor_bridge.hpp"
+    ],
     "core/events/include": [
       "pulp/events/child_process_manager.hpp",
       "pulp/events/coalesced_updater.hpp",
@@ -1480,7 +1483,8 @@
       "pulp/view/design_update.hpp",
       "pulp/view/designed_control_painter.hpp",
       "pulp/view/drag_drop.hpp",
-      "pulp/view/editor_bridge.hpp",
+      "pulp/view/editor_bridge_attach.hpp",
+      "pulp/view/editor_bridge_scaffold.hpp",
       "pulp/view/file_browser.hpp",
       "pulp/view/file_chooser.hpp",
       "pulp/view/file_drop_zone.hpp",
@@ -1739,7 +1743,8 @@
       "pulp/vellum_components/panic_button.hpp",
       "pulp/vellum_components/panic_target.hpp",
       "pulp/vellum_components/preferences_panel.hpp",
-      "pulp/vellum_components/property_panel.hpp"
+      "pulp/vellum_components/property_panel.hpp",
+      "pulp/vellum_components/view_inspector.hpp"
     ],
     "tools/audio/analysis/include": [
       "pulp/audio/analysis/audio_artifacts.hpp",
@@ -3330,7 +3335,7 @@
           "target": "pulp-editor-bridge",
           "exported_as": "Pulp::editor-bridge",
           "type": "STATIC_LIBRARY",
-          "source_dir": "core/view",
+          "source_dir": "core/editor_bridge",
           "closure": {
             "node_count": 20,
             "pulp_targets": [
@@ -3380,7 +3385,7 @@
           },
           "public_headers": {
             "roots": [
-              "core/view/include"
+              "core/editor_bridge/include"
             ],
             "generated_include_roots": 1
           },

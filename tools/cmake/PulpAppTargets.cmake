@@ -66,6 +66,60 @@ function(_pulp_check_standalone_hosts target)
     endif()
 endfunction()
 
+# The generated registrar of a view-free standalone: a definition of
+# pulp::format::detail::install_standalone_panels() that installs the panel
+# factories UI integrations have announced. An integration announces one by
+# appending "<target>|<header>|<function>" to the global property
+# PULP_STANDALONE_PANEL_PROVIDERS from its own CMake, where <function> is a
+# callable returning bool that installs its StandalonePanelFactory. An
+# integration that ships in the SDK also declares it as an exported target
+# property, PULP_STANDALONE_PANEL_PROVIDER = "<header>|<function>", and the
+# installed PulpConfig.cmake turns that into the same global entry, because an
+# installed SDK consumer never runs the integration's own CMakeLists.txt. The
+# standalone calls the registrar before it builds its panels, so the factory is
+# installed by an explicit call and not by a static-init object an archive could
+# drop. Adds nothing when no integration announced a provider.
+# Appends an imported SDK target's PULP_STANDALONE_PANEL_PROVIDER to the global
+# provider list under its lower-case `pulp::` alias, the form the registrar
+# links. Does nothing for a target that does not exist or declares none.
+function(_pulp_announce_standalone_panel_provider imported)
+    if(NOT TARGET "${imported}")
+        return()
+    endif()
+    get_target_property(_declared "${imported}" PULP_STANDALONE_PANEL_PROVIDER)
+    if(NOT _declared)
+        return()
+    endif()
+    string(REGEX REPLACE "^Pulp::" "pulp::" _alias "${imported}")
+    set_property(GLOBAL APPEND PROPERTY PULP_STANDALONE_PANEL_PROVIDERS
+        "${_alias}|${_declared}")
+endfunction()
+
+function(_pulp_add_standalone_panel_registrar exe)
+    get_property(_providers GLOBAL PROPERTY PULP_STANDALONE_PANEL_PROVIDERS)
+    set(_includes "")
+    set(_calls "")
+    foreach(_provider IN LISTS _providers)
+        string(REPLACE "|" ";" _parts "${_provider}")
+        list(GET _parts 0 _provider_target)
+        list(GET _parts 1 _provider_header)
+        list(GET _parts 2 _provider_function)
+        if(NOT TARGET ${_provider_target})
+            continue()
+        endif()
+        string(APPEND _includes "#include <${_provider_header}>\n")
+        string(APPEND _calls " ${_provider_function}();")
+        target_link_libraries(${exe} PRIVATE ${_provider_target})
+    endforeach()
+    if(NOT _calls)
+        return()
+    endif()
+    set(_registrar "${CMAKE_CURRENT_BINARY_DIR}/${exe}_standalone_panel_registrar.cpp")
+    file(GENERATE OUTPUT "${_registrar}" CONTENT
+        "#include <pulp/format/standalone_panel.hpp>\n${_includes}namespace pulp::format::detail { void install_standalone_panels() {${_calls} } }\n")
+    target_sources(${exe} PRIVATE "${_registrar}")
+endfunction()
+
 function(_pulp_add_standalone target name bundle_id version processor_factory)
     if(NOT PULP_${target}_STANDALONE_TARGET)
         if(PULP_${target}_VIEW_FREE_STANDALONE)
@@ -99,6 +153,9 @@ function(_pulp_add_standalone target name bundle_id version processor_factory)
             "pulp_add_plugin(${target}): declared inspector shipping component is unavailable; configure/install Pulp with Inspector support")
     endif()
     target_link_libraries(${target}_Standalone PRIVATE ${target}_Core ${_standalone_target})
+    if(PULP_${target}_VIEW_FREE_STANDALONE)
+        _pulp_add_standalone_panel_registrar(${target}_Standalone)
+    endif()
     # Checked once the directory is done, when every link has been added.
     cmake_language(DEFER DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
         CALL _pulp_check_standalone_hosts "${target}_Standalone")
