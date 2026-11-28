@@ -57,6 +57,16 @@ inline float aax_display_scale(void*) noexcept {
 }
 #endif
 
+/// Whether the host container's size can be read back. Pro Tools resizes the
+/// container without calling into the plug-in, so a contract editor is offered
+/// only on platforms where this is true; elsewhere the editor could not follow a
+/// host resize and the legacy editor path keeps its own sizing.
+#if defined(__APPLE__)
+inline constexpr bool kAaxParentSizeReadable = true;
+#else
+inline constexpr bool kAaxParentSizeReadable = false;
+#endif
+
 #if defined(__APPLE__)
 /// The host container's current size in its own logical units (the parent's
 /// bounds, rounded to whole units). False, leaving the outputs untouched, when

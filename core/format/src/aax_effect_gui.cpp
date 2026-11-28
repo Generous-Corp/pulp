@@ -130,7 +130,7 @@ private:
 
         // A processor with an editor factory: the contract editor built in
         // CreateViewContents() is attached into the host's view.
-        if (ContractEditorShell::applies(*model)) {
+        if (kAaxParentSizeReadable && ContractEditorShell::applies(*model)) {
             attach_contract_editor(*model, parent);
             return;
         }

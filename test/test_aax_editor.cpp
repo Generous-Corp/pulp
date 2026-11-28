@@ -17,6 +17,7 @@
 
 #include <pulp/format/aax_editor.hpp>
 #include <pulp/format/aax_model.hpp>
+#include <pulp/format/aax_native_view.hpp>
 #include <pulp/format/processor.hpp>
 #include <pulp/state/store.hpp>
 
@@ -1241,6 +1242,22 @@ TEST_CASE("AAX keeps a Vellum editor closed when its view host cannot be created
     CHECK(g_aax_root.opens == 0);
     shell.close();
     CHECK(g_aax_root.closes == 0);
+}
+
+TEST_CASE("AAX offers the contract editor only where the host container size is readable",
+          "[aax][vellum][resize]") {
+    using namespace pulp::format::aax;
+    std::uint32_t w = 0, h = 0;
+    int stand_in = 0;
+    // A platform without a container size reader cannot follow a host resize,
+    // so the flag must be false there and true wherever the reader works.
+#if defined(__APPLE__)
+    CHECK(kAaxParentSizeReadable);
+#else
+    CHECK_FALSE(kAaxParentSizeReadable);
+    CHECK_FALSE(aax_native_parent_size(&stand_in, w, h));
+#endif
+    (void)w; (void)h; (void)stand_in;
 }
 
 #endif // PULP_TEST_AAX_VELLUM
