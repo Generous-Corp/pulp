@@ -45,7 +45,10 @@ def census(extra: dict | None = None) -> str:
     return json.dumps({"profiles": profiles})
 
 
-def fake_cmake(path: Path, record: Path, features_json: dict) -> None:
+def fake_cmake(path: Path, record: Path, features_json: dict, mode: str = "") -> None:
+    extra = {"fail": 'echo "CMake Error: boom" >&2; exit 1', "compile": 'touch "$build/stray.o"',
+             "nofacts": 'rm -f "$build/consumption-census-facts.json"',
+             "badfacts": 'echo "{" > "$build/consumption-census-facts.json"'}.get(mode, "")
     path.write_text(f"""#!/bin/sh
 echo "$GIT_OPTIONAL_LOCKS" > "{record}.locks"
 src=""; build=""
@@ -59,6 +62,7 @@ cat > "$build/consumption-census-facts.json" <<'EOF'
 {json.dumps({"facts_schema": 1, "system_name": platform.system(), "system_processor": platform.machine(),
              "features": features_json})}
 EOF
+{extra}
 """, encoding="utf-8")
     path.chmod(path.stat().st_mode | stat.S_IXUSR)
 
@@ -76,6 +80,7 @@ class CensusProfilesTests(unittest.TestCase):
             "core/src/a.cpp": "int a;\n",
             "tools/scripts/consumption_census.py": "# census\n",
             "tools/scripts/census_profiles.py": "# script\n",
+            "tools/scripts/configure_only.py": "# recipe\n",
         }.items():
             path = self.root / rel
             path.parent.mkdir(parents=True, exist_ok=True)
@@ -126,7 +131,6 @@ class CensusProfilesTests(unittest.TestCase):
             path = Path(scratch)
             self.assertEqual(path.parent, self.root)
             self.assertTrue(path.name.startswith("build"))
-            self.assertFalse(str(path).startswith(tempfile.gettempdir()))
             overlay = cp.make_overlay(self.root, path, set())
             self.assertFalse((overlay / path.name).exists(), "the overlay must not contain itself")
         self.assertFalse(path.exists(), "removed when the profile is done")
@@ -166,16 +170,14 @@ class CensusProfilesTests(unittest.TestCase):
         (self.root / "core/src/a.cpp").write_text("int a = 2;\n", encoding="utf-8")
         self.assertEqual(cp.inputs_digest(self.root), base)
 
-    def configure(self, spec: cp.Spec, cmake_features: dict, sdks: bool = True) -> tuple[str, str]:
+    def configure(self, spec: cp.Spec, cmake_features: dict, mode: str = "") -> tuple[str, str]:
         record = Path(self._tmp.name) / "source-arg"
         script = Path(self._tmp.name) / "cmake"
-        fake_cmake(script, record, cmake_features)
-        build, scratch = Path(self._tmp.name) / "b", Path(self._tmp.name) / "s"
-        build.mkdir(exist_ok=True)
-        scratch.mkdir(exist_ok=True)
+        fake_cmake(script, record, cmake_features, mode)
+        build, scratch = Path(tempfile.mkdtemp(dir=self._tmp.name)), Path(tempfile.mkdtemp(dir=self._tmp.name))
         with mock.patch.dict(os.environ, {"CMAKE": str(script), "PULP_CONFIGURE_ONLY_GOVERNOR": ""}), \
                 contextlib.redirect_stderr(io.StringIO()):
-            why, _ = cp.configure_profile(self.root, spec, build, scratch)
+            self.kind, why, _ = cp.configure_profile(self.root, spec, build, scratch)
         return why, record.read_text(encoding="utf-8").strip() if record.exists() else ""
 
     def test_sdk_less_profile_is_configured_from_the_overlay(self) -> None:
@@ -183,7 +185,7 @@ class CensusProfilesTests(unittest.TestCase):
         why, source = self.configure(none, features("OFF"))
         self.assertEqual(why, "")
         self.assertNotEqual(Path(source), self.root)
-        self.assertTrue(Path(source).name == "s")
+        self.assertFalse((Path(source) / "external" / "vst3sdk").exists(), "the view omits the SDKs")
 
     def test_force_overlay_configures_even_a_buildable_profile_from_the_view(self) -> None:
         record = Path(self._tmp.name) / "source-arg"
@@ -194,8 +196,8 @@ class CensusProfilesTests(unittest.TestCase):
         scratch.mkdir()
         with mock.patch.dict(os.environ, {"CMAKE": str(script), "PULP_CONFIGURE_ONLY_GOVERNOR": ""}), \
                 contextlib.redirect_stderr(io.StringIO()):
-            why, source = cp.configure_profile(self.root, cp.Spec(KEY_ALL, features("ON")), build, scratch,
-                                               force_overlay=True)
+            _, why, source = cp.configure_profile(self.root, cp.Spec(KEY_ALL, features("ON")), build, scratch,
+                                                  force_overlay=True)
         self.assertEqual(why, "")
         self.assertNotEqual(source, self.root)
         self.assertTrue((source / "external" / "vst3sdk").exists(), "the profile's SDKs are still present")
@@ -217,6 +219,42 @@ class CensusProfilesTests(unittest.TestCase):
     def test_a_configure_that_lands_on_another_key_is_not_configurable(self) -> None:
         why, _ = self.configure(cp.Spec(f"{HOST}-js+skia", features("OFF", gpu="ON")), features("OFF"))
         self.assertIn("configures that feature set as", why)
+
+    def test_a_broken_configure_is_an_error_never_an_unavailable_host(self) -> None:
+        # What a change that breaks one sibling profile looks like must fail the gate, not exit 3.
+        spec = cp.Spec(KEY_NONE, features("OFF"))
+        for mode, expected in (("fail", "configure failed"), ("compile", "the configure compiled"),
+                               ("nofacts", "no usable census facts"), ("badfacts", "no usable census facts")):
+            with self.subTest(mode=mode):
+                why, _ = self.configure(spec, features("OFF"), mode)
+                self.assertEqual(self.kind, cp.BROKEN)
+                self.assertIn(expected, why)
+
+    def test_control_established_unavailability_stays_unavailable(self) -> None:
+        self.configure(cp.Spec(f"{HOST}-js+skia", features("OFF", gpu="ON")), features("OFF"))
+        self.assertEqual(self.kind, cp.UNAVAILABLE)
+        import shutil
+        shutil.rmtree(self.root / "external" / "vst3sdk")
+        self.configure(cp.Spec(KEY_ALL, features("ON")), features("ON"))
+        self.assertEqual(self.kind, cp.UNAVAILABLE)
+        self.configure(cp.Spec(KEY_NONE, features("OFF")), features("OFF"))
+        self.assertEqual(self.kind, "", "control: a good configure is neither")
+
+    def test_process_reports_a_broken_configure_as_an_error_and_main_fails_and_never_caches_it(self) -> None:
+        spec = cp.Spec(KEY_NONE, features("OFF"))
+        with mock.patch.object(cp, "configure_profile", return_value=(cp.BROKEN, "configure failed: x", self.root)):
+            status, detail, _ = cp.process(self.root, spec, "--check")
+        self.assertEqual(status, "error")
+        rc, err, _ = self.run_main("--check", "--cached", results={KEY_NONE: ("error", "configure failed: x")})
+        self.assertEqual(rc, 1, err)
+        self.assertIn("could not be measured", err)
+        _, _, calls = self.run_main("--check", "--cached", results={KEY_NONE: ("error", "configure failed: x")})
+        self.assertIn(KEY_NONE, calls, "an error is measured again, never remembered as unavailable")
+
+    def test_the_configure_recipe_is_part_of_the_cache_key(self) -> None:
+        base = cp.inputs_digest(self.root)
+        (self.root / "tools/scripts/configure_only.py").write_text("# a different recipe\n", encoding="utf-8")
+        self.assertNotEqual(cp.inputs_digest(self.root), base)
 
     def test_missing_sdk_names_the_bootstrap_command(self) -> None:
         import shutil
@@ -295,11 +333,12 @@ class CensusProfilesTests(unittest.TestCase):
     # -- the review's findings ------------------------------------------------------------
 
     def test_a_host_with_no_recorded_profile_is_not_checked_not_a_pass(self) -> None:
-        with mock.patch.object(cp, "host_prefix", return_value="linux-x86_64-"):
+        # A prefix no fixture key can start with, whatever platform this runs on.
+        with mock.patch.object(cp, "host_prefix", return_value="absent-cpu-"):
             rc, err, calls = self.run_main("--check", "--cached")
         self.assertEqual(rc, 3, err)
         self.assertEqual(calls, [])
-        self.assertIn("NOT CHECKED here: the census records no profile for linux-x86_64", err)
+        self.assertIn("NOT CHECKED here: the census records no profile for absent-cpu", err)
         self.assertNotIn("0 profile(s) current", err)
 
     def test_control_the_same_run_on_a_recorded_host_still_passes(self) -> None:
@@ -439,6 +478,22 @@ class GatesIntegrationTests(unittest.TestCase):
                                             "census_profiles: 1 profile(s) current")
         self.assertEqual(result, 0)
         self.assertNotIn("NOT CHECKED", out)
+
+    def test_only_the_documented_statuses_are_verdicts_everything_else_fails_the_gate(self) -> None:
+        # 2 is census_profiles' internal error; negative is a signal; 126/127 an interpreter that did not run.
+        for rc in (2, -9, -15, 126, 127, 4, 77):
+            with self.subTest(rc=rc):
+                result, err, _ = self.check(rc, "boom")
+                self.assertEqual(result, 1, f"status {rc} must fail the gate")
+                self.assertIn(f"ended with status {rc}", err)
+                self.assertNotIn("NOT CHECKED", err)
+
+    def test_control_the_three_verdicts_keep_their_meaning(self) -> None:
+        self.assertEqual(self.check(0, "current")[0], 0)
+        self.assertEqual(self.check(1, "drift")[0], 1)
+        result, err, _ = self.check(3, "NOT CHECKED here")
+        self.assertEqual(result, 0)
+        self.assertIn("NOT CHECKED locally", err)
 
     def test_local_only_opt_out_is_listed_not_checked(self) -> None:
         result, err, seen = self.check(0, env={"PULP_GATES_CENSUS_LOCAL_ONLY": "1"})

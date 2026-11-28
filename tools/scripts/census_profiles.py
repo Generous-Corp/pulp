@@ -193,7 +193,9 @@ def inputs_digest(root: Path) -> str:
                 digest.update(raw + b"\0" + (root / name).read_bytes())
             except OSError:
                 continue
-    for extra in (Path("tools/scripts/consumption_census.py"), Path("tools/scripts/census_profiles.py")):
+    # The configure recipe (its arguments and governed execution) is part of what a verification means.
+    for extra in (Path("tools/scripts/consumption_census.py"), Path("tools/scripts/census_profiles.py"),
+                  Path("tools/scripts/configure_only.py")):
         digest.update((root / extra).read_bytes())
     digest.update(host_prefix().encode())
     digest.update(environment_signature(root).encode())
@@ -267,13 +269,21 @@ def run_census(root: Path, build: Path, mode: str, source: Path) -> tuple[int, s
     return proc.returncode, (proc.stdout + proc.stderr).strip()
 
 
+UNAVAILABLE, BROKEN = "unavailable", "error"
+
+
 def configure_profile(root: Path, spec: Spec, build: Path, scratch: Path,
-                      force_overlay: bool = False) -> tuple[str, Path]:
-    """Configure ``build`` for ``spec``: ("", source tree used) on success, else (why this host cannot, root)."""
+                      force_overlay: bool = False) -> tuple[str, str, Path]:
+    """Configure ``build`` for ``spec``: ("", "", source tree used) on success, else (kind, why, source).
+
+    kind is UNAVAILABLE only when this host is established not to be able to build the profile: an SDK
+    it records is not installed, or the tree configures to a different feature set (no Skia library,
+    another platform). A configure that fails, compile evidence, and missing or malformed facts are
+    BROKEN: they are what a change that breaks a sibling profile looks like, so they must fail the gate."""
     missing = spec.sdks() - present_sdks(root)
     if missing:
-        return (f"needs {', '.join(sorted(missing))} under external/; run ./setup.sh --deps-only "
-                "--non-interactive"), root
+        return UNAVAILABLE, (f"needs {', '.join(sorted(missing))} under external/; run ./setup.sh --deps-only "
+                             "--non-interactive"), root
     source = root if spec.sdks() == present_sdks(root) and not force_overlay else make_overlay(
         root, scratch, spec.sdks())
     cmd = configure_only.governor_prefix(root) + [
@@ -284,26 +294,28 @@ def configure_profile(root: Path, spec: Spec, build: Path, scratch: Path,
     why = configure_only._run(cmd, root, {**os.environ, **configure_only.GOVERNED_ENV,  # noqa: SLF001
                                           "GIT_OPTIONAL_LOCKS": "0"})
     if why:
-        return f"configure failed: {why}", source
+        return BROKEN, f"configure failed: {why}", source
     compiled = configure_only.compile_evidence(build)
     if compiled:
-        return f"the configure compiled {', '.join(compiled[:3])}", source
+        return BROKEN, f"the configure compiled {', '.join(compiled[:3])}", source
     try:
         configured = census.profile_key(census.load_facts(build))
-    except census.CensusError as error:
-        return str(error), source
+    except (census.CensusError, KeyError, ValueError, OSError) as error:
+        return BROKEN, f"the configure left no usable census facts: {error}", source
     if configured != spec.key:
-        return f"this host configures that feature set as {configured}", source
-    return "", source
+        return UNAVAILABLE, f"this host configures that feature set as {configured}", source
+    return "", "", source
 
 
 def process(root: Path, spec: Spec, mode: str,
             force_overlay: bool = False) -> tuple[str, str, list[str]]:
     """(status, detail, configure inputs): status is ok, drift, not-configurable or error."""
     with configure_only.temporary_build(root) as build, scratch_source_dir(root) as scratch:
-        why, source = configure_profile(root, spec, build, Path(scratch), force_overlay)
-        if why:
+        kind, why, source = configure_profile(root, spec, build, Path(scratch), force_overlay)
+        if kind == UNAVAILABLE:
             return "not-configurable", why, []
+        if kind:
+            return "error", why, []
         inputs = configure_input_paths(build, source)
         rc, text = run_census(root, build, mode, source)
         if rc == 0:
@@ -383,6 +395,9 @@ def main(argv: list[str]) -> int:
     for key in other:
         say(f"  {'other platform':16} {key}: carried through untouched")
     if drift or errors:
+        if errors and not drift:
+            say("census_profiles: a profile could not be measured (a failed configure, compile evidence or "
+                "unusable facts is a failure, not an unavailable host): " + ", ".join(errors))
         if drift:
             say("census_profiles: these profiles no longer match the build graph. Regenerate every profile "
                 "in one command and commit the file:")

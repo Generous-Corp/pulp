@@ -88,6 +88,7 @@ SKIP_EXIT = 77
 CENSUS_TEST = "consumption-census-drift"
 CENSUS_SCRIPT = Path("tools/scripts/consumption_census.py")
 CENSUS_PROFILES_SCRIPT = Path("tools/scripts/census_profiles.py")
+CENSUS_PROFILES_UNAVAILABLE = 3  # census_profiles.EXIT_NOT_CONFIGURABLE
 CENSUS_FILE = "docs/status/consumption-profiles.json"
 HEADER_SUFFIXES = (".h", ".hh", ".hpp", ".inc")
 FAMILIES = HERE / "changed_surface_script_families.py"
@@ -348,8 +349,14 @@ def check_other_profiles(root: Path, verified_key: str | None) -> int:
         say("    python3 tools/scripts/census_profiles.py --write")
         say(f"    git add {CENSUS_FILE}")
         return 1
-    say(f"NOT CHECKED locally: {CENSUS_TEST} (other profiles: census_profiles.py exited {rc}; the lines above name them)")
-    return 0
+    if rc == CENSUS_PROFILES_UNAVAILABLE:
+        say(f"NOT CHECKED locally: {CENSUS_TEST} (other profiles: this host cannot measure them; the lines above name them)")
+        return 0
+    # Status 2 (an internal error), an interpreter failure, a signal (negative) or anything unexpected is
+    # a failure of the check, not a reason to skip it.
+    say(f"  consumption-census: census_profiles.py ended with status {rc}, which is not a verdict "
+        "(0 current, 1 drift, 3 this host cannot measure). That is a failure of the check itself:")
+    return 1
 
 
 def check_selftest_manifest(root: Path, build: Path, shown: str) -> int:
