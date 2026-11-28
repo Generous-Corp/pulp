@@ -1201,8 +1201,14 @@ never from the check run alone.
   IDs use the same grammar); only a bare release clears all claims. An
   unreadable expiry remains live until released or corrected. A whitespace-separated
   explanation after a valid UTC timestamp does not extend its expiry; malformed
-  timestamp tokens still count as live. Name your own
-  claim with `PULP_REPAIR_CLAIM_ID`. A failed read warns and
+  timestamp tokens still count as live. Claim with `shipyard claim post --pr
+  <n> --owner <id> --until 2h` from the worktree you push from: it posts the
+  claim and records that comment in the worktree's own git config, and the hook
+  then counts that one claim as yours (same id, same comment, still live, not
+  released or taken; another worktree's record never counts). `shipyard claim
+  release --pr <n>` ends it. `repair-claim-taken: <new> from <old>` moves a
+  claim to its new owner. The fleet runner's `SHIPYARD_CLAIM_OWNER` (or
+  `PULP_REPAIR_CLAIM_ID`) still names an own claim by id. A failed read warns and
   allows. With `PULP_AGENT_OWNER` set, it also refuses a push from an active
   worktree whose lineage owner is someone else
   (`worktree_lineage.sh assert-owner`). Edit only worktrees you created, and
