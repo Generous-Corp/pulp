@@ -9,6 +9,30 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
      release's bullet block. See docs/guides/versioning.md § Release pipeline
      for the full end-to-end flow. -->
 
+<a id="v12300"></a>
+## [1.230.0] - 2026-11-27
+
+- release/version bump ([#13022](https://github.com/Generous-Corp/pulp/pull/13022))
+- feature/vellum standalone typing panel ([#12955](https://github.com/Generous-Corp/pulp/pull/12955))
+- spectr/attested2 mirror binding ([#13016](https://github.com/Generous-Corp/pulp/pull/13016))
+
+<a id="v12290"></a>
+## [1.229.0] - 2026-11-27
+
+- release/version bump ([#13013](https://github.com/Generous-Corp/pulp/pull/13013))
+- lane/yoga vellum engine ([#12926](https://github.com/Generous-Corp/pulp/pull/12926))
+- spectr/intel sdk renderer transition ([#13014](https://github.com/Generous-Corp/pulp/pull/13014))
+- feature/vellum view editor cpp ([#13011](https://github.com/Generous-Corp/pulp/pull/13011))
+- fix/widget bridge dispatch depth ([#12911](https://github.com/Generous-Corp/pulp/pull/12911))
+- feature/h7 view umbrella parity ([#12956](https://github.com/Generous-Corp/pulp/pull/12956))
+
+<a id="v12280"></a>
+## [1.228.0] - 2026-11-27
+
+- release/version bump ([#13012](https://github.com/Generous-Corp/pulp/pull/13012))
+- fix/auv3 appex editor package ([#12985](https://github.com/Generous-Corp/pulp/pull/12985))
+- feature/g3 clap gui split ([#12887](https://github.com/Generous-Corp/pulp/pull/12887))
+
 <a id="v12270"></a>
 ## [1.227.0] - 2026-11-27
 
@@ -13895,6 +13919,9 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/Generous-Corp/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/Generous-Corp/pulp/pull/2))
 
+[1.230.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.230.0
+[1.229.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.229.0
+[1.228.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.228.0
 [1.227.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.227.0
 [1.226.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.226.0
 [1.225.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.225.0
