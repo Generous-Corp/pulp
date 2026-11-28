@@ -40,8 +40,8 @@ hard to forge as the approval. An item a `Serialized-Hotspot:` or
       verdict. Each `accept-review-item:` line it prints is pasted as is.
 
   review_items.py check --repo O/R --pr N --head SHA --base REF [--root DIR]
-                        [--comments-json FILE] [--post-status] [--event NAME]
-                        [--target-url URL]
+                        [--comments-json FILE] [--post-status]
+                        [--posted-marker FILE] [--target-url URL]
       Refuse the head unless the verdict accepts every review item. The
       `review-verdict` workflow runs it from the base branch after Shipyard's
       rule has allowed the head; with `--post-status` it posts a `failure`
@@ -49,9 +49,8 @@ hard to forge as the approval. An item a `Serialized-Hotspot:` or
       cannot satisfy the required context while an item is unaccepted.
 
 Exit codes: 0 every item accepted (or none); 1 an item is unaccepted or the
-guards refuse the head outright (for
-`check` on a non-head event, 0 once the status is posted); 2 anything could
-not be read or posted.
+guards refuse the head outright; 2 anything could not be read or posted. The
+workflow decides what each means for its job.
 """
 from __future__ import annotations
 
@@ -73,9 +72,6 @@ import hotspot_edit_guard  # noqa: E402
 CONTEXT = "review-verdict"
 DESCRIPTION_LIMIT = 140
 FLEET_APP_LOGIN = "shipyard-local[bot]"
-# Events whose check run sits on the pull request's head; elsewhere the posted
-# status is the signal and the job does not fail on an unaccepted item.
-HEAD_CHECK_EVENTS = frozenset({"pull_request_target"})
 UNATTRIBUTED = "unattributed"
 
 ACCEPT_LINE = re.compile(r"^[ \t]*accept-review-item:[ \t]*(\S+)[ \t]*$")
@@ -337,6 +333,11 @@ def describe_status(missing: list[str], prefix: str = "unaccepted review items: 
     return text if len(text) <= DESCRIPTION_LIMIT else text[: DESCRIPTION_LIMIT - 1] + "…"
 
 
+# Set by main(): a file written once a failure status is confirmed posted, so
+# the workflow's fallback knows whether it still has to refuse the head.
+POSTED_MARKER: Path | None = None
+
+
 def post_failure(repo: str, head: str, description: str, target_url: str | None,
                  api: Callable[[list[str]], Any] | None = None) -> None:
     api = api or gh_json
@@ -345,6 +346,8 @@ def post_failure(repo: str, head: str, description: str, target_url: str | None,
     if target_url:
         args += ["-f", f"target_url={target_url}"]
     api(args)
+    if POSTED_MARKER is not None:
+        POSTED_MARKER.write_text(f"{head}\n", encoding="utf-8")
 
 
 # ---------------------------------------------------------------------------
@@ -400,8 +403,7 @@ def cmd_check(a: argparse.Namespace) -> int:
                 print(f"review-items: ERROR: {exc}", file=sys.stderr)
                 return 2
             print(f"review-items: posted a failure {CONTEXT} status on {head}")
-        off_head = a.post_status and a.event is not None and a.event not in HEAD_CHECK_EVENTS
-        return 0 if off_head else 1
+        return 1
 
     if not re.fullmatch(r"[0-9a-f]{40}", head):
         return fail_closed(f"--head must be a full commit sha, not {a.head!r}")
@@ -443,10 +445,7 @@ def cmd_check(a: argparse.Namespace) -> int:
             print(f"review-items: ERROR: {exc}", file=sys.stderr)
             return 2
         print(f"review-items: posted a failure {CONTEXT} status on {head}")
-    # A comment's or a review's run leaves its check run on the default
-    # branch, where it gates nothing: the posted status is the signal there.
-    off_head = a.post_status and a.event is not None and a.event not in HEAD_CHECK_EVENTS
-    return 0 if off_head else 1
+    return 1
 
 
 def main(argv: list[str]) -> int:
@@ -466,9 +465,12 @@ def main(argv: list[str]) -> int:
     check.add_argument("--comments-json", default=None,
                        help="read the pull request's comments from this file instead of the API")
     check.add_argument("--post-status", action="store_true")
-    check.add_argument("--event", default=None)
     check.add_argument("--target-url", default=None)
+    check.add_argument("--posted-marker", default=None,
+                       help="write this file once a failure status is confirmed posted")
     a = ap.parse_args(argv[1:])
+    global POSTED_MARKER
+    POSTED_MARKER = Path(a.posted_marker) if getattr(a, "posted_marker", None) else None
     return cmd_items(a) if a.command == "items" else cmd_check(a)
 
 

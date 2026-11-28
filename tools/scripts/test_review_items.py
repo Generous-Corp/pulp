@@ -207,29 +207,45 @@ class CheckCli(RepoCase):
         rc, out = self.check(head[:12], [])
         self.assertEqual(rc, 2, out)
 
-    def test_post_status_posts_failure_and_only_head_events_fail_the_job(self) -> None:
+    def test_post_status_posts_failure_and_writes_the_marker(self) -> None:
         head = grow(self.root)
+        marker = Path(self._td.name) / "posted"
         posted: list[list[str]] = []
         original = ri.gh_json
         ri.gh_json = lambda args: posted.append(args) or {}
         try:
-            rc, out = self.check(head, [verdict(head)], "--post-status", "--event", "issue_comment")
-            self.assertEqual(rc, 0, out)
-            rc, out = self.check(head, [verdict(head)], "--post-status", "--event", "pull_request_target")
-            self.assertEqual(rc, 1, out)
             rc, out = self.check(head, [verdict(head, HOTSPOT_ID, FANOUT_ID)], "--post-status",
-                                 "--event", "pull_request_target")
+                                 "--posted-marker", str(marker))
             self.assertEqual(rc, 0, out)
+            self.assertFalse(marker.exists(), "an accepted head posts nothing")
+            rc, out = self.check(head, [verdict(head)], "--post-status", "--posted-marker", str(marker))
+            self.assertEqual(rc, 1, out)
         finally:
             ri.gh_json = original
-        self.assertEqual(len(posted), 2)
-        for args in posted:
-            self.assertIn(f"repos/o/r/statuses/{head}", args)
-            self.assertIn("state=failure", args)
-            self.assertIn("context=review-verdict", args)
-            description = next(a for a in args if a.startswith("description="))
-            self.assertLessEqual(len(description) - len("description="), ri.DESCRIPTION_LIMIT)
+        self.assertTrue(marker.exists(), out)
+        self.assertEqual(len(posted), 1)
+        args = posted[0]
+        self.assertIn(f"repos/o/r/statuses/{head}", args)
+        self.assertIn("state=failure", args)
+        self.assertIn("context=review-verdict", args)
+        description = next(a for a in args if a.startswith("description="))
+        self.assertLessEqual(len(description) - len("description="), ri.DESCRIPTION_LIMIT)
 
+    def test_a_failed_post_writes_no_marker(self) -> None:
+        head = grow(self.root)
+        marker = Path(self._td.name) / "posted"
+
+        def refuse(args: list[str]) -> None:
+            raise ri.ReviewItemError("HTTP 500")
+
+        original = ri.gh_json
+        ri.gh_json = refuse
+        try:
+            rc, out = self.check(head, [verdict(head)], "--post-status", "--posted-marker", str(marker))
+        finally:
+            ri.gh_json = original
+        self.assertEqual(rc, 2, out)
+        self.assertFalse(marker.exists(), out)
 
 class HardFailures(RepoCase):
     """A guard's outright refusal fails the check whatever the verdict says."""
@@ -303,7 +319,7 @@ class HardFailures(RepoCase):
         original = ri.gh_json
         ri.gh_json = lambda args: posted.append(args) or {}
         try:
-            rc, out = self.check(head, [], "--post-status", "--event", "pull_request_target")
+            rc, out = self.check(head, [], "--post-status")
         finally:
             ri.gh_json = original
         self.assertEqual(rc, 1, out)

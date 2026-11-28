@@ -160,21 +160,37 @@ jobs:
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
           set -euo pipefail
+          # Worst result over every PR on the head: 0 accepted, 1 refused
+          # (failure status posted), 2 could not be judged.
           rc=0
           for pr in $PRS; do
+            r=0
             "$PYTHON" tools/scripts/review_items.py check --root . --repo "$GITHUB_REPOSITORY" \
-              --pr "$pr" --head "$HEAD_SHA" --base "origin/$BASE_BRANCH" \
-              --event "$EVENT_NAME" --post-status --target-url "$RUN_URL" || rc=$?
+              --pr "$pr" --head "$HEAD_SHA" --base "origin/$BASE_BRANCH" --post-status \
+              --posted-marker "$RUNNER_TEMP/review-items-posted" --target-url "$RUN_URL" || r=$?
+            if [ "$r" -gt "$rc" ]; then rc=$r; fi
           done
-          exit "$rc"
+          if [ "$EVENT_NAME" = pull_request_target ]; then
+            # This run's check run sits on the head: it is red unless accepted.
+            exit "$rc"
+          fi
+          if [ "$rc" -eq 0 ]; then
+            # The hold step replaced Shipyard's success with pending; the head
+            # is allowed and every item accepted, so restore it here rather
+            # than rely on the head's re-run (which may find no run to re-run).
+            gh api -X POST "repos/${GITHUB_REPOSITORY}/statuses/${HEAD_SHA}" -f state=success \
+              -f context=review-verdict \
+              -f "description=approved; every review item is accepted" \
+              -f "target_url=${RUN_URL}" > /dev/null
+          fi
+          # A comment's run leaves its check run on the default branch, where it
+          # gates nothing: a refusal is the posted status, an error fails the run.
+          [ "$rc" -le 1 ]
       - name: Refuse the head when the review-item rule could not run
-        # Shipyard has already posted `success`; if the rule never ran (its
-        # checkout or fetch failed or timed out, or the run was cancelled),
-        # that status must not stand. When the rule itself fails it has posted
-        # its own failure status.
-        if: >-
-          (failure() || cancelled()) && steps.allowed.outputs.head != ''
-          && steps.items.outcome != 'failure'
+        # Shipyard has posted `success` (or the hold step `pending`). If any
+        # step after it failed, timed out or was cancelled, that status must
+        # not stand, unless the rule confirmed it already posted a failure.
+        if: (failure() || cancelled()) && steps.allowed.outputs.head != ''
         shell: bash
         timeout-minutes: 2
         env:
@@ -182,6 +198,10 @@ jobs:
           HEAD_SHA: ${{ steps.allowed.outputs.head }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
+          if [ -f "$RUNNER_TEMP/review-items-posted" ]; then
+            echo "the review-item rule already posted a failure status on $HEAD_SHA"
+            exit 1
+          fi
           gh api -X POST "repos/${GITHUB_REPOSITORY}/statuses/${HEAD_SHA}" -f state=failure \
             -f context=review-verdict \
             -f "description=review items could not be judged; see the run" \
@@ -268,11 +288,14 @@ jobs:
               # An unfetched head cannot be read, and the checker then posts failure.
               timeout 300 git -C pulp-base -c "http.https://github.com/.extraheader=$auth" \
                 fetch --no-tags --quiet origin "$head" || echo "::warning::could not fetch $head"
+              rm -f "$dir/posted"
               (cd pulp-base && timeout 300 "$PYTHON" tools/scripts/review_items.py check --root . \
                 --repo "$GITHUB_REPOSITORY" --pr "$number" --head "$head" \
-                --base "origin/$BASE_BRANCH" --post-status --target-url "$RUN_URL") || item_rc=$?
-              if [ "$item_rc" -gt 2 ]; then
-                # Killed or timed out before it could post: refuse the head here.
+                --base "origin/$BASE_BRANCH" --post-status --posted-marker "$dir/posted" \
+                --target-url "$RUN_URL") || item_rc=$?
+              if [ "$item_rc" -ne 0 ] && [ ! -f "$dir/posted" ]; then
+                # Refused, killed or timed out without a confirmed failure
+                # status: refuse the head here.
                 gh api -X POST "repos/${GITHUB_REPOSITORY}/statuses/${head}" -f state=failure \
                   -f context=review-verdict \
                   -f "description=review items could not be judged; see the run" \
