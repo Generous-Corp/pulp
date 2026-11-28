@@ -1,0 +1,24 @@
+{
+ "name": "legacy-platform-hosts-guard-negative-contract",
+ "record": {
+  "entry": "tools/scripts/test_legacy_platform_hosts_guard.py",
+  "inputs": [
+   "core/audio/platform/linux/alsa_device.hpp",
+   "core/format/CMakeLists.txt",
+   "core/render/platform/android/gpu_surface_android.cpp",
+   "core/view/CMakeLists.txt",
+   "core/view/include/pulp/view/platform/win_pointer_input.hpp",
+   "core/view/platform/ios/window_host_ios.mm",
+   "core/view/platform/web/window_host_web.cpp",
+   "core/view/platform/win/plugin_view_host_win.cpp",
+   "core/view/src/view.cpp",
+   "ship/CMakeLists.txt",
+   "ship/platform/win/codesign_win.cpp",
+   "test/test_uia_mapping.cpp",
+   "test/test_view.cpp",
+   "tools/cmake/PulpWebUi.cmake",
+   "tools/scripts/test_legacy_platform_hosts_guard.py"
+  ],
+  "kind": "python"
+ }
+}

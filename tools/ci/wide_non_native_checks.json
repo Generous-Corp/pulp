@@ -47,6 +47,10 @@
       "argv": ["{repo}/tools/scripts/test_verify_create_templates.py"]
     },
     {
+      "name": "legacy-platform-hosts-guard",
+      "argv": ["{repo}/tools/scripts/legacy_platform_hosts_guard.py", "--root", "{repo}"]
+    },
+    {
       "name": "shipping-macro-guard",
       "argv": ["{repo}/tools/scripts/shipping_macro_guard.py", "--root", "{repo}"]
     }

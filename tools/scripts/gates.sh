@@ -214,6 +214,7 @@ DESIGNATED_INIT_LINT="$ROOT/tools/scripts/designated_initializer_lint.py"
 WIN32_INCLUDE_LINT="$ROOT/tools/scripts/win32_include_lint.py"
 FOUNDATION_INCLUDE_LINT="$ROOT/tools/scripts/foundation_include_lint.py"
 CORE_VELLUM_DIRECTION="$ROOT/tools/scripts/core_vellum_direction.py"
+LEGACY_HOSTS_GUARD="$ROOT/tools/scripts/legacy_platform_hosts_guard.py"
 SAFE_PATH_LINT="$ROOT/tools/scripts/safe_path_guard_lint.py"
 TEXT_ENCODING_LINT="$ROOT/tools/scripts/text_encoding_lint.py"
 PYTHON_FLOOR_SYNTAX="$ROOT/tools/scripts/python_floor_syntax_check.py"
@@ -984,6 +985,18 @@ if [ -f "$CORE_VELLUM_DIRECTION" ]; then
     echo "▸ core -> Vellum direction (no vellum/ include or Vellum link under core/)" >&2
     if ! "$PYTHON" "$CORE_VELLUM_DIRECTION" --root "$ROOT" >&2; then
         gate_fail "core → Vellum direction"
+    fi
+fi
+
+# ── 9e. legacy platform hosts quarantine ──
+# Nothing outside integrations/legacy-platform-hosts/ includes, names or links
+# the quarantined Windows, Linux, iOS, Android or web UI hosts. Known edges
+# carry an exact count. Lexical, whole-tree, a few seconds.
+if [ -f "$LEGACY_HOSTS_GUARD" ]; then
+    echo "" >&2
+    echo "▸ legacy platform hosts guard (no new dependency on the quarantined hosts)" >&2
+    if ! "$PYTHON" "$LEGACY_HOSTS_GUARD" --root "$ROOT" >&2; then
+        gate_fail "legacy platform hosts guard"
     fi
 fi
 

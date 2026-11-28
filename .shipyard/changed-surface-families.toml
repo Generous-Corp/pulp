@@ -4,7 +4,7 @@
 # Resolve a merge conflict in this file by regenerating, never by hand.
 
 [[families]]
-name = "script-readers-860537b57923"
+name = "script-readers-b0de2f5fbc23"
 paths = [
   "tools/scripts/action_pin_lint.py",
   "tools/scripts/archive_sdk.py",
@@ -307,6 +307,7 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "legacy-platform-hosts-guard",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
   "prepush-receipt",
@@ -324,7 +325,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-75abcc46e479"
+name = "script-readers-ef51824a2d0a"
 paths = ["tools/scripts/check_bundled_font_lists.py"]
 tests = [
   "build-parallelism-guard",
@@ -346,6 +347,7 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "legacy-platform-hosts-guard",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
   "prepush-receipt",
@@ -363,7 +365,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-c5929f4d1e1d"
+name = "script-readers-3cd90aafa996"
 paths = ["tools/scripts/check_host_adapter_tracing_contract.py"]
 tests = [
   "build-parallelism-guard",
@@ -385,6 +387,7 @@ tests = [
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
   "host-adapter-tracing-contract",
+  "legacy-platform-hosts-guard",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
   "prepush-receipt",
@@ -402,7 +405,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-7b5645d47751"
+name = "script-readers-a1846b2b76c1"
 paths = ["tools/scripts/check_inspector_protocol_registry.py"]
 tests = [
   "build-parallelism-guard",
@@ -425,6 +428,7 @@ tests = [
   "gpu-handoff-provenance-selftest",
   "inspector-protocol-registry-check-selftest",
   "inspector-protocol-registry-complete",
+  "legacy-platform-hosts-guard",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
   "prepush-receipt",
@@ -442,7 +446,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-785758fffd7b"
+name = "script-readers-f857606c39f2"
 paths = ["tools/scripts/check_visual_python_deps.py"]
 tests = [
   "build-parallelism-guard",
@@ -463,6 +467,7 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "legacy-platform-hosts-guard",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
   "prepush-receipt",
@@ -482,7 +487,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-5387e9729412"
+name = "script-readers-7f010d22da2d"
 paths = ["tools/scripts/ci_routing_digest.py"]
 tests = [
   "build-parallelism-guard",
@@ -505,6 +510,7 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "legacy-platform-hosts-guard",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
   "prepush-receipt",
@@ -522,7 +528,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-09fa1d4aaf3e"
+name = "script-readers-0323cb42ec57"
 paths = ["tools/scripts/convolver_crossover_check.py"]
 tests = [
   "build-parallelism-guard",
@@ -544,6 +550,7 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "legacy-platform-hosts-guard",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
   "prepush-receipt",
@@ -561,7 +568,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-e53ed33d85f6"
+name = "script-readers-2fe0f35fa99a"
 paths = ["tools/scripts/ctest_inventory_parity.py"]
 tests = [
   "build-parallelism-guard",
@@ -583,6 +590,7 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "legacy-platform-hosts-guard",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
   "prepush-receipt",
@@ -600,7 +608,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-e11d15623b79"
+name = "script-readers-95e8b57ae4cc"
 paths = ["tools/scripts/ctest_unique_names_check.py"]
 tests = [
   "build-parallelism-guard",
@@ -623,6 +631,7 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "legacy-platform-hosts-guard",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
   "prepush-receipt",
@@ -640,7 +649,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-45ed38d3367f"
+name = "script-readers-e4375655a348"
 paths = [
   "tools/scripts/cutover_trial.py",
   "tools/scripts/test_cutover_trial.py",
@@ -665,6 +674,7 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "legacy-platform-hosts-guard",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
   "prepush-receipt",
@@ -683,7 +693,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-c3d205efaf99"
+name = "script-readers-7a97f5db816a"
 paths = ["tools/scripts/date_sensitive_selftests_tz_matrix.py"]
 tests = [
   "build-parallelism-guard",
@@ -706,6 +716,7 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "legacy-platform-hosts-guard",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
   "prepush-receipt",
@@ -723,7 +734,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-32021bb39eb9"
+name = "script-readers-fc035c829753"
 paths = ["tools/scripts/design_unit_boundary_check.py"]
 tests = [
   "build-parallelism-guard",
@@ -746,6 +757,7 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "legacy-platform-hosts-guard",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
   "prepush-receipt",
@@ -763,7 +775,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-e48cd546fa86"
+name = "script-readers-fdebc952102c"
 paths = ["tools/scripts/dsp_provenance_audit.py"]
 tests = [
   "build-parallelism-guard",
@@ -785,6 +797,7 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "legacy-platform-hosts-guard",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
   "prepush-receipt",
@@ -802,7 +815,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-44b8a332fae5"
+name = "script-readers-fe103be4ae03"
 paths = ["tools/scripts/examples_manifest_guard.py"]
 tests = [
   "build-parallelism-guard",
@@ -825,6 +838,7 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "legacy-platform-hosts-guard",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
   "prepush-receipt",
@@ -842,7 +856,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-6d622f6a2f5c"
+name = "script-readers-69b61dcde053"
 paths = ["tools/scripts/format_header_view_boundary.py"]
 tests = [
   "build-parallelism-guard",
@@ -864,6 +878,7 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "legacy-platform-hosts-guard",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
   "prepush-receipt",
@@ -881,7 +896,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-93ccf45307cd"
+name = "script-readers-1e63cb395fe9"
 paths = ["tools/scripts/gate_python_imports_check.py"]
 tests = [
   "build-parallelism-guard",
@@ -905,6 +920,7 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "legacy-platform-hosts-guard",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
   "prepush-receipt",
@@ -924,7 +940,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-93f551df5f39"
+name = "script-readers-1ce0a0cd2a5e"
 paths = ["tools/scripts/gpu_audio_header_vocabulary_guard.py"]
 tests = [
   "build-parallelism-guard",
@@ -946,6 +962,7 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "legacy-platform-hosts-guard",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
   "prepush-receipt",
@@ -963,7 +980,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-7b8f50966e25"
+name = "script-readers-b077a8323e3e"
 paths = ["tools/scripts/gpu_fault_hooks_release_gate.py"]
 tests = [
   "build-parallelism-guard",
@@ -985,6 +1002,7 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "legacy-platform-hosts-guard",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
   "prepush-receipt",
@@ -1002,7 +1020,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-68cc69e7367d"
+name = "script-readers-df1b6555036a"
 paths = ["tools/scripts/integrations_boundary_check.py"]
 tests = [
   "build-parallelism-guard",
@@ -1024,6 +1042,7 @@ tests = [
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
   "integrations-boundary-check",
+  "legacy-platform-hosts-guard",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
   "prepush-receipt",
@@ -1041,7 +1060,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-ac59e75fddcc"
+name = "script-readers-5503f28d6ea3"
 paths = ["tools/scripts/link_floor_selftest.py"]
 tests = [
   "build-parallelism-guard",
@@ -1063,6 +1082,7 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "legacy-platform-hosts-guard",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
   "prepush-receipt",
@@ -1080,7 +1100,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-64a0d564bd12"
+name = "script-readers-ac6c49146697"
 paths = ["tools/scripts/mac_objc_source_list_guard.py"]
 tests = [
   "build-parallelism-guard",
@@ -1101,6 +1121,7 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "legacy-platform-hosts-guard",
   "mac-objc-source-list-guard",
   "mac-objc-source-list-guard-selftest",
   "pr-head-affected-tests-selftest",
@@ -1120,7 +1141,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-d8439d7370c0"
+name = "script-readers-e6be0cf3fc7f"
 paths = ["tools/scripts/msvc_string_literal_guard.py"]
 tests = [
   "build-parallelism-guard",
@@ -1141,6 +1162,7 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "legacy-platform-hosts-guard",
   "msvc-string-literal-guard",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
@@ -1159,7 +1181,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-9cd6e9e401eb"
+name = "script-readers-1b1d533a187c"
 paths = ["tools/scripts/nonuniform_head_check.py"]
 tests = [
   "build-parallelism-guard",
@@ -1180,6 +1202,7 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "legacy-platform-hosts-guard",
   "nonuniform-head-table",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
@@ -1198,7 +1221,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-6588f300110c"
+name = "script-readers-7badc2e3372a"
 paths = ["tools/scripts/pch_wiring_check.py"]
 tests = [
   "build-parallelism-guard",
@@ -1220,6 +1243,7 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "legacy-platform-hosts-guard",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
   "prepush-receipt",
@@ -1239,7 +1263,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-9d92737b2af8"
+name = "script-readers-6ac59ece7101"
 paths = ["tools/scripts/plugin_footprint_check.py"]
 tests = [
   "build-parallelism-guard",
@@ -1261,6 +1285,7 @@ tests = [
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
   "icu-data-subset-linked",
+  "legacy-platform-hosts-guard",
   "plugin-footprint-check-selftest",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
@@ -1282,7 +1307,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-289d2158bdef"
+name = "script-readers-bb9d30571895"
 paths = ["tools/scripts/pr_fast_tier_check.py"]
 tests = [
   "build-parallelism-guard",
@@ -1303,6 +1328,7 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "legacy-platform-hosts-guard",
   "pr-fast-tier-contract",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
@@ -1321,7 +1347,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-2646f9d0e0c7"
+name = "script-readers-82f0f537909a"
 paths = [
   "tools/scripts/queue_admission_guard.py",
   "tools/scripts/test_queue_batch_attribute.py",
@@ -1345,6 +1371,7 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "legacy-platform-hosts-guard",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
   "prepush-receipt",
@@ -1363,7 +1390,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-04d866bb284d"
+name = "script-readers-0cefffe84666"
 paths = ["tools/scripts/raw_this_async_check.py"]
 tests = [
   "build-parallelism-guard",
@@ -1384,6 +1411,7 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "legacy-platform-hosts-guard",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
   "prepush-receipt",
@@ -1403,7 +1431,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-622c8c4e2a6e"
+name = "script-readers-3246cfc40d2c"
 paths = [
   "tools/scripts/regen_agent_capability_after_merge.py",
   "tools/scripts/test_regen_agent_capability_after_merge.py",
@@ -1427,6 +1455,7 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "legacy-platform-hosts-guard",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
   "prepush-receipt",
@@ -1445,7 +1474,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-164153efae50"
+name = "script-readers-50b2658090bb"
 paths = ["tools/scripts/relay_contract_check.py"]
 tests = [
   "build-parallelism-guard",
@@ -1466,6 +1495,7 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "legacy-platform-hosts-guard",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
   "prepush-receipt",
@@ -1485,7 +1515,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-92d13f71d7f3"
+name = "script-readers-e685f34958c2"
 paths = ["tools/scripts/render_upward_edge_check.py"]
 tests = [
   "build-parallelism-guard",
@@ -1506,6 +1536,7 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "legacy-platform-hosts-guard",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
   "prepush-receipt",
@@ -1525,7 +1556,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-e9761087ef56"
+name = "script-readers-9ab77b8dc4d4"
 paths = ["tools/scripts/rust_cli_build_edge_check.py"]
 tests = [
   "build-parallelism-guard",
@@ -1546,6 +1577,7 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "legacy-platform-hosts-guard",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
   "prepush-receipt",
@@ -1565,7 +1597,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-c208d6e0c703"
+name = "script-readers-d636bd9eee30"
 paths = ["tools/scripts/sample_region_compat_baseline.py"]
 tests = [
   "build-parallelism-guard",
@@ -1586,6 +1618,7 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "legacy-platform-hosts-guard",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
   "prepush-receipt",
@@ -1604,7 +1637,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-2a9fba166cb0"
+name = "script-readers-a527b904f1e2"
 paths = ["tools/scripts/sequencer_control_skill_check.py"]
 tests = [
   "build-parallelism-guard",
@@ -1625,6 +1658,7 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "legacy-platform-hosts-guard",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
   "prepush-receipt",
@@ -1644,7 +1678,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-1fdb6feff1a5"
+name = "script-readers-8a38a460378d"
 paths = ["tools/scripts/setup_bootstrap_plan_guard.py"]
 tests = [
   "build-parallelism-guard",
@@ -1665,6 +1699,7 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "legacy-platform-hosts-guard",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
   "prepush-receipt",
@@ -1683,7 +1718,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-6865e0f4abcf"
+name = "script-readers-2fef6c5281db"
 paths = ["tools/scripts/shared_test_objects_check.py"]
 tests = [
   "build-parallelism-guard",
@@ -1704,6 +1739,7 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "legacy-platform-hosts-guard",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
   "prepush-receipt",
@@ -1723,7 +1759,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-13c91d8ed745"
+name = "script-readers-cdb615e97721"
 paths = ["tools/scripts/shipping_macro_guard.py"]
 tests = [
   "build-parallelism-guard",
@@ -1744,6 +1780,7 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "legacy-platform-hosts-guard",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
   "prepush-receipt",
@@ -1762,7 +1799,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-dcff41021682"
+name = "script-readers-6644588128e1"
 paths = ["tools/scripts/status_tone_signal_lint.py"]
 tests = [
   "build-parallelism-guard",
@@ -1783,6 +1820,7 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "legacy-platform-hosts-guard",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
   "prepush-receipt",
@@ -1801,7 +1839,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-d950b452ce23"
+name = "script-readers-f3936db7fe90"
 paths = ["tools/scripts/swift_bridge_split_guard.py"]
 tests = [
   "build-parallelism-guard",
@@ -1822,6 +1860,7 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "legacy-platform-hosts-guard",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
   "prepush-receipt",
@@ -1840,7 +1879,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-c9c10daa0b4f"
+name = "script-readers-9e6ff67dfeb4"
 paths = ["tools/scripts/test_advisory_macos_runner_policy.py"]
 tests = [
   "advisory-macos-runner-policy",
@@ -1862,6 +1901,7 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "legacy-platform-hosts-guard",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
   "prepush-receipt",
@@ -1879,7 +1919,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-939cff42e911"
+name = "script-readers-d0431364e26e"
 paths = ["tools/scripts/test_affected_targets.py"]
 tests = [
   "affected-targets-selftest",
@@ -1901,6 +1941,7 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "legacy-platform-hosts-guard",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
   "prepush-receipt",
@@ -1918,7 +1959,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-59974a6276c2"
+name = "script-readers-aaeebae8c130"
 paths = ["tools/scripts/test_agent_capability_store.py"]
 tests = [
   "agent-capability-store-selftest",
@@ -1940,6 +1981,7 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "legacy-platform-hosts-guard",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
   "prepush-receipt",
@@ -1957,7 +1999,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-17f2436efb08"
+name = "script-readers-0a31c8e244d3"
 paths = ["tools/scripts/test_agent_hook_paths.py"]
 tests = [
   "agent-hook-paths",
@@ -1979,6 +2021,7 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "legacy-platform-hosts-guard",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
   "prepush-receipt",
@@ -1996,7 +2039,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-fe3261566475"
+name = "script-readers-b5eb0b2811bb"
 paths = ["tools/scripts/test_android_surface_runtime_contract.py"]
 tests = [
   "android-surface-runtime-contract",
@@ -2018,6 +2061,7 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "legacy-platform-hosts-guard",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
   "prepush-receipt",
@@ -2035,7 +2079,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-bc8b6ef072cc"
+name = "script-readers-cbd16995c8c4"
 paths = ["tools/scripts/test_archive_symbol_closure_check.py"]
 tests = [
   "archive-symbol-closure-selftest",
@@ -2057,6 +2101,7 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "legacy-platform-hosts-guard",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
   "prepush-receipt",
@@ -2074,7 +2119,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-006332c30974"
+name = "script-readers-a1095892e7a5"
 paths = ["tools/scripts/test_build_combined_installer.py"]
 tests = [
   "build-parallelism-guard",
@@ -2096,6 +2141,7 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "legacy-platform-hosts-guard",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
   "prepush-receipt",
@@ -2113,7 +2159,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-cbf4d1c4ee3b"
+name = "script-readers-52ea091fac03"
 paths = ["tools/scripts/test_build_parallelism_guard.py"]
 tests = [
   "build-parallelism-guard",
@@ -2135,6 +2181,7 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "legacy-platform-hosts-guard",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
   "prepush-receipt",
@@ -2152,7 +2199,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-67163090b2ae"
+name = "script-readers-e59d130575fd"
 paths = ["tools/scripts/test_build_speed_proxies.py"]
 tests = [
   "build-parallelism-guard",
@@ -2174,6 +2221,7 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "legacy-platform-hosts-guard",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
   "prepush-receipt",
@@ -2191,7 +2239,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-53c9f125f1bd"
+name = "script-readers-ec494487d04a"
 paths = ["tools/scripts/test_build_speed_scorecard.py"]
 tests = [
   "build-parallelism-guard",
@@ -2213,6 +2261,7 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "legacy-platform-hosts-guard",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
   "prepush-receipt",
@@ -2230,7 +2279,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-2e2551675de8"
+name = "script-readers-9d931fb65ae7"
 paths = ["tools/scripts/test_build_time_report.py"]
 tests = [
   "build-parallelism-guard",
@@ -2252,6 +2301,7 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "legacy-platform-hosts-guard",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
   "prepush-receipt",
@@ -2269,7 +2319,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-74f98fafa414"
+name = "script-readers-ea194ac9c8cb"
 paths = ["tools/scripts/test_bump_fastpath.py"]
 tests = [
   "build-parallelism-guard",
@@ -2291,6 +2341,7 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "legacy-platform-hosts-guard",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
   "prepush-receipt",
@@ -2308,7 +2359,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-7ee956cd1c77"
+name = "script-readers-a7852001ec24"
 paths = ["tools/scripts/test_bundle_vellum_sdk.py"]
 tests = [
   "build-parallelism-guard",
@@ -2329,6 +2380,7 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "legacy-platform-hosts-guard",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
   "prepush-receipt",
@@ -2347,7 +2399,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-7a7b3a7f0c02"
+name = "script-readers-5d839bf9e4d5"
 paths = ["tools/scripts/test_capability_contract_gate.py"]
 tests = [
   "build-parallelism-guard",
@@ -2369,6 +2421,7 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "legacy-platform-hosts-guard",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
   "prepush-receipt",
@@ -2386,7 +2439,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-f5c9f61c0823"
+name = "script-readers-bb09d2d2db3d"
 paths = ["tools/scripts/test_catch_discover_timeout_guard.py"]
 tests = [
   "build-parallelism-guard",
@@ -2408,6 +2461,7 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "legacy-platform-hosts-guard",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
   "prepush-receipt",
@@ -2425,7 +2479,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-4e8e076a5aa5"
+name = "script-readers-2798328162a2"
 paths = ["tools/scripts/test_catch_multilabel_properties.py"]
 tests = [
   "build-parallelism-guard",
@@ -2447,6 +2501,7 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "legacy-platform-hosts-guard",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
   "prepush-receipt",
@@ -2464,7 +2519,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-c63610ed2e1d"
+name = "script-readers-9d7e19b76a90"
 paths = ["tools/scripts/test_catch_test_name_guard.py"]
 tests = [
   "build-parallelism-guard",
@@ -2486,6 +2541,7 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "legacy-platform-hosts-guard",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
   "prepush-receipt",
@@ -2503,7 +2559,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-c38123e42137"
+name = "script-readers-da5c3d8c42f8"
 paths = ["tools/scripts/test_changed_surface_registration_projection.py"]
 tests = [
   "build-parallelism-guard",
@@ -2525,6 +2581,7 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "legacy-platform-hosts-guard",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
   "prepush-receipt",
@@ -2542,7 +2599,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-86394373704a"
+name = "script-readers-975e076464d3"
 paths = ["tools/scripts/test_check_android_jni_exports.py"]
 tests = [
   "android-jni-exports-selftest",
@@ -2564,6 +2621,7 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "legacy-platform-hosts-guard",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
   "prepush-receipt",
@@ -2581,7 +2639,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-68947aa40981"
+name = "script-readers-66d20e70eae1"
 paths = ["tools/scripts/test_check_apple_bundle_signing.py"]
 tests = [
   "apple-bundle-signing-check",
@@ -2603,6 +2661,7 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "legacy-platform-hosts-guard",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
   "prepush-receipt",
@@ -2620,7 +2679,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-d4f5368316e7"
+name = "script-readers-4b1765390ee1"
 paths = ["tools/scripts/test_check_au_component_preflight.py"]
 tests = [
   "au-component-preflight-selftest",
@@ -2642,6 +2701,7 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "legacy-platform-hosts-guard",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
   "prepush-receipt",
@@ -2659,7 +2719,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-42f9d1a75587"
+name = "script-readers-5e2cf9fe9dcb"
 paths = ["tools/scripts/test_check_bundle_architectures.py"]
 tests = [
   "build-parallelism-guard",
@@ -2681,6 +2741,7 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "legacy-platform-hosts-guard",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
   "prepush-receipt",
@@ -2698,7 +2759,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-3ab0672ce041"
+name = "script-readers-b6b28952ae5f"
 paths = ["tools/scripts/test_check_canvas_path_flush.py"]
 tests = [
   "build-parallelism-guard",
@@ -2720,6 +2781,7 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "legacy-platform-hosts-guard",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
   "prepush-receipt",
@@ -2737,7 +2799,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-d0edc4526a67"
+name = "script-readers-e6c86274cf33"
 paths = ["tools/scripts/test_check_host_adapter_tracing_contract.py"]
 tests = [
   "build-parallelism-guard",
@@ -2759,6 +2821,7 @@ tests = [
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
   "host-adapter-tracing-contract-selftest",
+  "legacy-platform-hosts-guard",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
   "prepush-receipt",
@@ -2776,7 +2839,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-576681f739b0"
+name = "script-readers-5ee1ee2fb628"
 paths = ["tools/scripts/test_check_installed_rpaths.py"]
 tests = [
   "build-parallelism-guard",
@@ -2798,6 +2861,7 @@ tests = [
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
   "install-rpath-closure",
+  "legacy-platform-hosts-guard",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
   "prepush-receipt",
@@ -2816,7 +2880,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-4d0d8590d61c"
+name = "script-readers-983b51c4e597"
 paths = ["tools/scripts/test_check_skip_not_pass.py"]
 tests = [
   "build-parallelism-guard",
@@ -2837,6 +2901,7 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "legacy-platform-hosts-guard",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
   "prepush-receipt",
@@ -2855,7 +2920,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-e394931573cf"
+name = "script-readers-87d6aa10ed7c"
 paths = ["tools/scripts/test_check_test_file_paths.py"]
 tests = [
   "build-parallelism-guard",
@@ -2876,6 +2941,7 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "legacy-platform-hosts-guard",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
   "prepush-receipt",
@@ -2894,7 +2960,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-b8379215ae98"
+name = "script-readers-f692bf185a87"
 paths = ["tools/scripts/test_check_transient_interaction_trace.py"]
 tests = [
   "build-parallelism-guard",
@@ -2915,6 +2981,7 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "legacy-platform-hosts-guard",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
   "prepush-receipt",
@@ -2933,7 +3000,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-a1bf5e5cdbe4"
+name = "script-readers-0e29b1558e01"
 paths = ["tools/scripts/test_check_vellum_sdk_staging.py"]
 tests = [
   "build-parallelism-guard",
@@ -2954,6 +3021,7 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "legacy-platform-hosts-guard",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
   "prepush-receipt",
@@ -2972,7 +3040,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-36a15d710023"
+name = "script-readers-777a9711ce87"
 paths = ["tools/scripts/test_check_visual_python_deps.py"]
 tests = [
   "build-parallelism-guard",
@@ -2993,6 +3061,7 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "legacy-platform-hosts-guard",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
   "prepush-receipt",
@@ -3011,7 +3080,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-4b2ae5855513"
+name = "script-readers-b9435383a079"
 paths = ["tools/scripts/test_check_yoga_oracle_pin.py"]
 tests = [
   "build-parallelism-guard",
@@ -3032,6 +3101,7 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "legacy-platform-hosts-guard",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
   "prepush-receipt",
@@ -3050,7 +3120,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-4c21c70669ba"
+name = "script-readers-ef6d40fc8483"
 paths = ["tools/scripts/test_ci_routing_digest.py"]
 tests = [
   "build-parallelism-guard",
@@ -3072,6 +3142,7 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "legacy-platform-hosts-guard",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
   "prepush-receipt",
@@ -3089,7 +3160,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-3e0b567b49e8"
+name = "script-readers-8f8b3acb0dca"
 paths = ["tools/scripts/test_clap_preset_library_gate.py"]
 tests = [
   "build-parallelism-guard",
@@ -3111,6 +3182,7 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "legacy-platform-hosts-guard",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
   "prepush-receipt",
@@ -3128,7 +3200,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-51e880e9d134"
+name = "script-readers-6a8c3c5a8648"
 paths = ["tools/scripts/test_claude_plugin_command_discovery.py"]
 tests = [
   "build-parallelism-guard",
@@ -3150,6 +3222,7 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "legacy-platform-hosts-guard",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
   "prepush-receipt",
@@ -3167,7 +3240,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-9a2cb723a4b3"
+name = "script-readers-b00e254c10e4"
 paths = ["tools/scripts/test_clean_build_cov.py"]
 tests = [
   "build-parallelism-guard",
@@ -3189,6 +3262,7 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "legacy-platform-hosts-guard",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
   "prepush-receipt",
@@ -3206,7 +3280,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-079e30896cce"
+name = "script-readers-b3215bb42389"
 paths = ["tools/scripts/test_clean_worktree_builds.py"]
 tests = [
   "build-parallelism-guard",
@@ -3228,6 +3302,7 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "legacy-platform-hosts-guard",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
   "prepush-receipt",
@@ -3245,7 +3320,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-76b7b677fcbb"
+name = "script-readers-8e9e194c11a4"
 paths = ["tools/scripts/test_clean_worktrees.py"]
 tests = [
   "build-parallelism-guard",
@@ -3267,6 +3342,7 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "legacy-platform-hosts-guard",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
   "prepush-receipt",
@@ -3284,7 +3360,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-3645593e6309"
+name = "script-readers-38184a2356e7"
 paths = ["tools/scripts/test_clock_in_tests_lint.py"]
 tests = [
   "build-parallelism-guard",
@@ -3306,6 +3382,7 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "legacy-platform-hosts-guard",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
   "prepush-receipt",
@@ -3323,7 +3400,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-482343645022"
+name = "script-readers-94aab72e65bd"
 paths = ["tools/scripts/test_clock_only_temp_key_guard.py"]
 tests = [
   "build-parallelism-guard",
@@ -3345,6 +3422,7 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "legacy-platform-hosts-guard",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
   "prepush-receipt",
@@ -3362,7 +3440,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-deee90f69d3a"
+name = "script-readers-372279626df0"
 paths = ["tools/scripts/test_cmake_manifest_parse.py"]
 tests = [
   "build-parallelism-guard",
@@ -3384,6 +3462,7 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "legacy-platform-hosts-guard",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
   "prepush-receipt",
@@ -3401,7 +3480,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-3a275556910b"
+name = "script-readers-9e955483bac0"
 paths = ["tools/scripts/test_connected_git_history.py"]
 tests = [
   "build-parallelism-guard",
@@ -3423,6 +3502,7 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "legacy-platform-hosts-guard",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
   "prepush-receipt",
@@ -3440,7 +3520,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-9e76dc3f41c7"
+name = "script-readers-3387ea209da2"
 paths = ["tools/scripts/test_consumption_census.py"]
 tests = [
   "build-parallelism-guard",
@@ -3462,6 +3542,7 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "legacy-platform-hosts-guard",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
   "prepush-receipt",
@@ -3479,7 +3560,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-0c88d8ab22cb"
+name = "script-readers-02301ac50b28"
 paths = ["tools/scripts/test_control_profile_downgrade_is_announced.py"]
 tests = [
   "build-parallelism-guard",
@@ -3501,6 +3582,7 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "legacy-platform-hosts-guard",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
   "prepush-receipt",
@@ -3518,7 +3600,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-97470f2df6d5"
+name = "script-readers-ca0594ad2f9c"
 paths = ["tools/scripts/test_core_vellum_direction.py"]
 tests = [
   "build-parallelism-guard",
@@ -3540,6 +3622,7 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "legacy-platform-hosts-guard",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
   "prepush-receipt",
@@ -3557,7 +3640,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-79a19f81df7d"
+name = "script-readers-fd57b1d3e72e"
 paths = ["tools/scripts/test_ctest_coremidi_lock.py"]
 tests = [
   "build-parallelism-guard",
@@ -3579,6 +3662,7 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "legacy-platform-hosts-guard",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
   "prepush-receipt",
@@ -3596,7 +3680,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-cb6043362c41"
+name = "script-readers-3b48a25bfc43"
 paths = ["tools/scripts/test_ctest_label_exclusion_guard.py"]
 tests = [
   "build-parallelism-guard",
@@ -3618,6 +3702,7 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "legacy-platform-hosts-guard",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
   "prepush-receipt",
@@ -3635,7 +3720,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-dcdbd1868a26"
+name = "script-readers-808fbfc4aa56"
 paths = ["tools/scripts/test_ctest_unique_names_check.py"]
 tests = [
   "build-parallelism-guard",
@@ -3657,6 +3742,7 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "legacy-platform-hosts-guard",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
   "prepush-receipt",
@@ -3674,7 +3760,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-a669e09d5fc0"
+name = "script-readers-6f25e0dc1cc4"
 paths = ["tools/scripts/test_date_sensitive_selftests_tz_matrix.py"]
 tests = [
   "build-parallelism-guard",
@@ -3696,6 +3782,7 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "legacy-platform-hosts-guard",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
   "prepush-receipt",
@@ -3713,7 +3800,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-96eb1fc06eb6"
+name = "script-readers-f715bf0ae73c"
 paths = ["tools/scripts/test_dawn_binding_census.py"]
 tests = [
   "build-parallelism-guard",
@@ -3735,6 +3822,7 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "legacy-platform-hosts-guard",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
   "prepush-receipt",
@@ -3752,7 +3840,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-32fb49f6b8f3"
+name = "script-readers-efaea0d9a42c"
 paths = ["tools/scripts/test_dead_test_guard.py"]
 tests = [
   "build-parallelism-guard",
@@ -3774,6 +3862,7 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "legacy-platform-hosts-guard",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
   "prepush-receipt",
@@ -3791,7 +3880,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-a529fa3a61dd"
+name = "script-readers-5d8826a5695c"
 paths = ["tools/scripts/test_design_unit_boundary_check.py"]
 tests = [
   "build-parallelism-guard",
@@ -3813,6 +3902,7 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "legacy-platform-hosts-guard",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
   "prepush-receipt",
@@ -3830,7 +3920,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-2a26af27c388"
+name = "script-readers-ade65ceb601e"
 paths = ["tools/scripts/test_doxygen_installed_header_check.py"]
 tests = [
   "build-parallelism-guard",
@@ -3852,6 +3942,7 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "legacy-platform-hosts-guard",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
   "prepush-receipt",
@@ -3869,7 +3960,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-889b77e3ceea"
+name = "script-readers-9fa7bc2b30bf"
 paths = ["tools/scripts/test_dsp_capability_registry.py"]
 tests = [
   "build-parallelism-guard",
@@ -3892,6 +3983,7 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "legacy-platform-hosts-guard",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
   "prepush-receipt",
@@ -3909,7 +4001,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-78d222ae1bd0"
+name = "script-readers-26b2a76f19ca"
 paths = ["tools/scripts/test_dsp_provenance_audit.py"]
 tests = [
   "build-parallelism-guard",
@@ -3931,6 +4023,7 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "legacy-platform-hosts-guard",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
   "prepush-receipt",
@@ -3948,7 +4041,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-cf263f3f1235"
+name = "script-readers-017f5411fe4f"
 paths = ["tools/scripts/test_editor_host_acceptance.py"]
 tests = [
   "build-parallelism-guard",
@@ -3970,6 +4063,7 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "legacy-platform-hosts-guard",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
   "prepush-receipt",
@@ -3987,7 +4081,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-455f240aa0a7"
+name = "script-readers-8ec1cc0cc9dc"
 paths = ["tools/scripts/test_example_validation_paths.py"]
 tests = [
   "build-parallelism-guard",
@@ -4009,6 +4103,7 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "legacy-platform-hosts-guard",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
   "prepush-receipt",
@@ -4026,7 +4121,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-8393aa1adb07"
+name = "script-readers-190654b95b3b"
 paths = ["tools/scripts/test_examples_index_guard.py"]
 tests = [
   "build-parallelism-guard",
@@ -4048,6 +4143,7 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "legacy-platform-hosts-guard",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
   "prepush-receipt",
@@ -4065,7 +4161,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-31f730d6381a"
+name = "script-readers-90c72b7102f3"
 paths = ["tools/scripts/test_examples_manifest_guard.py"]
 tests = [
   "build-parallelism-guard",
@@ -4087,6 +4183,7 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "legacy-platform-hosts-guard",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
   "prepush-receipt",
@@ -4104,7 +4201,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-63241fcce45c"
+name = "script-readers-ea465724db4a"
 paths = ["tools/scripts/test_findskia_arch_assert.py"]
 tests = [
   "build-parallelism-guard",
@@ -4126,6 +4223,7 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "legacy-platform-hosts-guard",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
   "prepush-receipt",
@@ -4143,7 +4241,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-86dec78bc18b"
+name = "script-readers-da241d3df842"
 paths = ["tools/scripts/test_findskia_windows_arm64_slice.py"]
 tests = [
   "build-parallelism-guard",
@@ -4165,6 +4263,7 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "legacy-platform-hosts-guard",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
   "prepush-receipt",
@@ -4182,7 +4281,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-e4c55d33f623"
+name = "script-readers-566fdae7320a"
 paths = ["tools/scripts/test_fleet_snapshot.py"]
 tests = [
   "build-parallelism-guard",
@@ -4204,6 +4303,7 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "legacy-platform-hosts-guard",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
   "prepush-receipt",
@@ -4221,7 +4321,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-f74a3c995c75"
+name = "script-readers-712cccc2a632"
 paths = ["tools/scripts/test_fold_migration_notes.py"]
 tests = [
   "build-parallelism-guard",
@@ -4243,6 +4343,7 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "legacy-platform-hosts-guard",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
   "prepush-receipt",
@@ -4260,7 +4361,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-2fdd5928f0e7"
+name = "script-readers-c68f975863cb"
 paths = ["tools/scripts/test_fork_pr_runner_routing.py"]
 tests = [
   "build-parallelism-guard",
@@ -4282,6 +4383,7 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "legacy-platform-hosts-guard",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
   "prepush-receipt",
@@ -4299,7 +4401,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-90f04ab988a9"
+name = "script-readers-3faa725c0014"
 paths = ["tools/scripts/test_format_baseline_diff.py"]
 tests = [
   "build-parallelism-guard",
@@ -4321,6 +4423,7 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "legacy-platform-hosts-guard",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
   "prepush-receipt",
@@ -4338,7 +4441,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-12c212465f1a"
+name = "script-readers-7e0164c1cbf9"
 paths = ["tools/scripts/test_foundation_include_lint.py"]
 tests = [
   "build-parallelism-guard",
@@ -4360,6 +4463,7 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "legacy-platform-hosts-guard",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
   "prepush-receipt",
@@ -4377,7 +4481,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-8bfe197bfb9b"
+name = "script-readers-07bd451256fe"
 paths = ["tools/scripts/test_gallery_visual_diff.py"]
 tests = [
   "build-parallelism-guard",
@@ -4399,6 +4503,7 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "legacy-platform-hosts-guard",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
   "prepush-receipt",
@@ -4416,7 +4521,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-414123655faf"
+name = "script-readers-fc8354daeb6c"
 paths = ["tools/scripts/test_gate_python_imports_check.py"]
 tests = [
   "build-parallelism-guard",
@@ -4438,6 +4543,7 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "legacy-platform-hosts-guard",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
   "prepush-receipt",
@@ -4455,7 +4561,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-cb4c7e3e61f2"
+name = "script-readers-be3534e6d8c0"
 paths = ["tools/scripts/test_gate_suite_executed.py"]
 tests = [
   "build-parallelism-guard",
@@ -4477,6 +4583,7 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "legacy-platform-hosts-guard",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
   "prepush-receipt",
@@ -4494,7 +4601,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-c040897dc1b2"
+name = "script-readers-964657905dbd"
 paths = ["tools/scripts/test_gates_named_failures.py"]
 tests = [
   "build-parallelism-guard",
@@ -4516,6 +4623,7 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "legacy-platform-hosts-guard",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
   "prepush-receipt",
@@ -4533,7 +4641,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-da60e7e2477f"
+name = "script-readers-70b24056551c"
 paths = ["tools/scripts/test_generated_version_bump_check.py"]
 tests = [
   "build-parallelism-guard",
@@ -4555,6 +4663,7 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "legacy-platform-hosts-guard",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
   "prepush-receipt",
@@ -4574,7 +4683,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-3f9bab8cefa9"
+name = "script-readers-01810b342463"
 paths = ["tools/scripts/test_git_read_memo.py"]
 tests = [
   "build-parallelism-guard",
@@ -4596,6 +4705,7 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "legacy-platform-hosts-guard",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
   "prepush-receipt",
@@ -4613,7 +4723,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-83e548bafd04"
+name = "script-readers-2ec3f82c4f09"
 paths = ["tools/scripts/test_git_stdin_pipe_deadlock.py"]
 tests = [
   "build-parallelism-guard",
@@ -4635,6 +4745,7 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "legacy-platform-hosts-guard",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
   "prepush-receipt",
@@ -4652,7 +4763,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-98032cb6faf0"
+name = "script-readers-b5fd35b9fc91"
 paths = ["tools/scripts/test_gpu_audio_comparator_v2.py"]
 tests = [
   "build-parallelism-guard",
@@ -4674,6 +4785,7 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "legacy-platform-hosts-guard",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
   "prepush-receipt",
@@ -4691,7 +4803,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-5596804b428b"
+name = "script-readers-93aa2e2a6099"
 paths = ["tools/scripts/test_gpu_audio_header_vocabulary_guard.py"]
 tests = [
   "build-parallelism-guard",
@@ -4713,6 +4825,7 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "legacy-platform-hosts-guard",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
   "prepush-receipt",
@@ -4730,7 +4843,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-d659fa1d4119"
+name = "script-readers-3735aa2ab368"
 paths = ["tools/scripts/test_gpu_audio_p2_campaign.py"]
 tests = [
   "build-parallelism-guard",
@@ -4752,6 +4865,7 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "legacy-platform-hosts-guard",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
   "prepush-receipt",
@@ -4769,7 +4883,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-960e84b28844"
+name = "script-readers-c6965ccf0dd9"
 paths = ["tools/scripts/test_gpu_audio_p2_host_preflight.py"]
 tests = [
   "build-parallelism-guard",
@@ -4791,6 +4905,7 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "legacy-platform-hosts-guard",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
   "prepush-receipt",
@@ -4808,7 +4923,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-87feb89b4f72"
+name = "script-readers-870483c618c3"
 paths = ["tools/scripts/test_gpu_audio_p4_evidence.py"]
 tests = [
   "build-parallelism-guard",
@@ -4830,6 +4945,7 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "legacy-platform-hosts-guard",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
   "prepush-receipt",
@@ -4847,7 +4963,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-c7cce9d42fef"
+name = "script-readers-f1284c8aa6f7"
 paths = ["tools/scripts/test_gpu_clean_agent_journey.py"]
 tests = [
   "build-parallelism-guard",
@@ -4869,6 +4985,7 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "legacy-platform-hosts-guard",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
   "prepush-receipt",
@@ -4886,7 +5003,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-aaa2cb561467"
+name = "script-readers-474ba6012ccd"
 paths = ["tools/scripts/test_gpu_device_link_closure_check.py"]
 tests = [
   "build-parallelism-guard",
@@ -4908,6 +5025,7 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "legacy-platform-hosts-guard",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
   "prepush-receipt",
@@ -4925,7 +5043,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-a8346c1a8786"
+name = "script-readers-a74b36f847af"
 paths = ["tools/scripts/test_gpu_dpr_experiment.py"]
 tests = [
   "build-parallelism-guard",
@@ -4947,6 +5065,7 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "legacy-platform-hosts-guard",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
   "prepush-receipt",
@@ -4964,7 +5083,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-8012941481d6"
+name = "script-readers-f3d40cdd1f91"
 paths = ["tools/scripts/test_gpu_dpr_pulp_native_adapter.py"]
 tests = [
   "build-parallelism-guard",
@@ -4986,6 +5105,7 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "legacy-platform-hosts-guard",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
   "prepush-receipt",
@@ -5003,7 +5123,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-69c42bf35843"
+name = "script-readers-a4ccc6a73dd8"
 paths = ["tools/scripts/test_gpu_dpr_v2_evidence.py"]
 tests = [
   "build-parallelism-guard",
@@ -5025,6 +5145,7 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "legacy-platform-hosts-guard",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
   "prepush-receipt",
@@ -5042,7 +5163,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-716b7ba76e02"
+name = "script-readers-7936b9404d0d"
 paths = ["tools/scripts/test_gpu_dpr_web_adapter.py"]
 tests = [
   "build-parallelism-guard",
@@ -5064,6 +5185,7 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "legacy-platform-hosts-guard",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
   "prepush-receipt",
@@ -5081,7 +5203,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-7861ce97d4d2"
+name = "script-readers-40046fa24048"
 paths = ["tools/scripts/test_gpu_fault_hooks_release_gate.py"]
 tests = [
   "build-parallelism-guard",
@@ -5104,6 +5226,7 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "legacy-platform-hosts-guard",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
   "prepush-receipt",
@@ -5121,7 +5244,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-04aa28d71e11"
+name = "script-readers-b7076545c3ed"
 paths = ["tools/scripts/test_gpu_fault_hooks_release_gate_macos.py"]
 tests = [
   "build-parallelism-guard",
@@ -5143,6 +5266,7 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "legacy-platform-hosts-guard",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
   "prepush-receipt",
@@ -5160,7 +5284,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-1cf0c44fb4b0"
+name = "script-readers-74b52f2b3293"
 paths = ["tools/scripts/test_gpu_first_visible_a3_acceptance_v2.py"]
 tests = [
   "build-parallelism-guard",
@@ -5182,6 +5306,7 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "legacy-platform-hosts-guard",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
   "prepush-receipt",
@@ -5199,7 +5324,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-fc9c1883a092"
+name = "script-readers-18f888a314ef"
 paths = ["tools/scripts/test_gpu_handoff_pin_freshness.py"]
 tests = [
   "build-parallelism-guard",
@@ -5221,6 +5346,7 @@ tests = [
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-pin-freshness-selftest",
   "gpu-handoff-provenance-selftest",
+  "legacy-platform-hosts-guard",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
   "prepush-receipt",
@@ -5238,7 +5364,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-7ccbcecc1c02"
+name = "script-readers-906ed553baaf"
 paths = ["tools/scripts/test_gpu_health_contract.py"]
 tests = [
   "build-parallelism-guard",
@@ -5260,6 +5386,7 @@ tests = [
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
   "gpu-health-contract-selftest",
+  "legacy-platform-hosts-guard",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
   "prepush-receipt",
@@ -5277,7 +5404,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-16e6c34eaa1c"
+name = "script-readers-ff46f72232b8"
 paths = ["tools/scripts/test_gpu_health_read_contract.py"]
 tests = [
   "build-parallelism-guard",
@@ -5299,6 +5426,7 @@ tests = [
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
   "gpu-health-read-contract-selftest",
+  "legacy-platform-hosts-guard",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
   "prepush-receipt",
@@ -5316,7 +5444,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-75fcb7199cfd"
+name = "script-readers-855c6cca08c5"
 paths = ["tools/scripts/test_gpu_health_run_attestation.py"]
 tests = [
   "build-parallelism-guard",
@@ -5338,6 +5466,7 @@ tests = [
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
   "gpu-health-run-attestation",
+  "legacy-platform-hosts-guard",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
   "prepush-receipt",
@@ -5355,7 +5484,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-1f0a01e696c3"
+name = "script-readers-d49a2c3f6fed"
 paths = ["tools/scripts/test_gpu_probe_acceptance.py"]
 tests = [
   "build-parallelism-guard",
@@ -5377,6 +5506,7 @@ tests = [
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
   "gpu-probe-terminal-recorder-selftest",
+  "legacy-platform-hosts-guard",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
   "prepush-receipt",
@@ -5394,7 +5524,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-595294508631"
+name = "script-readers-4adac522ec2e"
 paths = ["tools/scripts/test_gpu_recipe_catalog.py"]
 tests = [
   "build-parallelism-guard",
@@ -5416,6 +5546,7 @@ tests = [
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
   "gpu-recipe-catalog-selftest",
+  "legacy-platform-hosts-guard",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
   "prepush-receipt",
@@ -5433,7 +5564,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-77641093a2b6"
+name = "script-readers-5aff52b91c9e"
 paths = ["tools/scripts/test_gpu_test_resource_locks.py"]
 tests = [
   "build-parallelism-guard",
@@ -5455,6 +5586,7 @@ tests = [
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
   "gpu-test-resource-locks",
+  "legacy-platform-hosts-guard",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
   "prepush-receipt",
@@ -5473,7 +5605,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-7958dadf6cac"
+name = "script-readers-9f4e7e928eab"
 paths = ["tools/scripts/test_hotspot_edit_guard.py"]
 tests = [
   "build-parallelism-guard",
@@ -5495,6 +5627,7 @@ tests = [
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
   "hotspot-edit-guard-selftest",
+  "legacy-platform-hosts-guard",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
   "prepush-receipt",
@@ -5512,7 +5645,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-d1c0fcaeec0b"
+name = "script-readers-5fe92da8f63b"
 paths = ["tools/scripts/test_hydrate_gpu_provenance_commits.py"]
 tests = [
   "build-parallelism-guard",
@@ -5534,6 +5667,7 @@ tests = [
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
   "gpu-provenance-hydration-selftest",
+  "legacy-platform-hosts-guard",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
   "prepush-receipt",
@@ -5551,7 +5685,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-11255209e40a"
+name = "script-readers-e931f501857a"
 paths = ["tools/scripts/test_hydrate_real_git.py"]
 tests = [
   "build-parallelism-guard",
@@ -5573,6 +5707,7 @@ tests = [
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
   "gpu-provenance-hydration-real-git-selftest",
+  "legacy-platform-hosts-guard",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
   "prepush-receipt",
@@ -5590,7 +5725,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-0395064275ca"
+name = "script-readers-b97db6fe6bd8"
 paths = ["tools/scripts/test_include_boundary.py"]
 tests = [
   "build-parallelism-guard",
@@ -5611,6 +5746,7 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "legacy-platform-hosts-guard",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
   "prepush-receipt",
@@ -5629,7 +5765,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-44f41296e28d"
+name = "script-readers-5f95ff57068b"
 paths = ["tools/scripts/test_inspector_truth_check.py"]
 tests = [
   "build-parallelism-guard",
@@ -5651,6 +5787,7 @@ tests = [
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
   "inspector-truth-check-selftest",
+  "legacy-platform-hosts-guard",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
   "prepush-receipt",
@@ -5668,7 +5805,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-b3c4fada73e6"
+name = "script-readers-d0ef806381f4"
 paths = ["tools/scripts/test_install_sha256sums.py"]
 tests = [
   "build-parallelism-guard",
@@ -5690,6 +5827,7 @@ tests = [
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
   "install-sha256sums-current",
+  "legacy-platform-hosts-guard",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
   "prepush-receipt",
@@ -5707,7 +5845,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-83d4487f1dff"
+name = "script-readers-0e5a55166df3"
 paths = ["tools/scripts/test_install_shipyard_queue_repair.py"]
 tests = [
   "build-parallelism-guard",
@@ -5729,6 +5867,7 @@ tests = [
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
   "install-shipyard-queue-repair",
+  "legacy-platform-hosts-guard",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
   "prepush-receipt",
@@ -5746,7 +5885,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-39dc94641fa2"
+name = "script-readers-1f7809e338c5"
 paths = ["tools/scripts/test_integrations_boundary_check.py"]
 tests = [
   "build-parallelism-guard",
@@ -5768,6 +5907,7 @@ tests = [
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
   "integrations-boundary-check-negative-contract",
+  "legacy-platform-hosts-guard",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
   "prepush-receipt",
@@ -5785,7 +5925,47 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-77582338eb79"
+name = "script-readers-2a131b1d0b12"
+paths = ["tools/scripts/test_legacy_platform_hosts_guard.py"]
+tests = [
+  "build-parallelism-guard",
+  "changed-surface-policy-inventory",
+  "changed-surface-policy-selftest",
+  "changed-surface-script-families-drift",
+  "changed-surface-script-families-selftest",
+  "changed-surface-shadow-plans-selftest",
+  "clean-worktree-planning-selftest",
+  "configure-only-selftest",
+  "flake-exoneration-selftest",
+  "gate-common-selftest",
+  "gates-preflight-selftest",
+  "gpu-audio-provider-identity-selftest",
+  "gpu-dpr-runner-selftest",
+  "gpu-first-visible-acceptance-selftest",
+  "gpu-first-visible-campaign-selftest",
+  "gpu-first-visible-external-adapter-selftest",
+  "gpu-first-visible-role-producers-selftest",
+  "gpu-handoff-provenance-selftest",
+  "legacy-platform-hosts-guard",
+  "legacy-platform-hosts-guard-negative-contract",
+  "pr-head-affected-tests-selftest",
+  "pr-head-diff-scoped-registrations",
+  "prepush-receipt",
+  "prepush-refresh-push",
+  "reuse-policy-replay-selftest",
+  "sample-region-compat-baseline-selftest",
+  "vellum-watch-preflight-selftest",
+  "wide-non-native-selftest",
+]
+build_targets = ["pulp-cli"]
+supported_build_types = [
+  "debug",
+  "release",
+]
+risk_class = "low"
+
+[[families]]
+name = "script-readers-b669c18493a2"
 paths = ["tools/scripts/test_link_closure_check.py"]
 tests = [
   "build-parallelism-guard",
@@ -5806,6 +5986,7 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "legacy-platform-hosts-guard",
   "link-closure-check-rules",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
@@ -5824,7 +6005,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-0f167f6dc1cb"
+name = "script-readers-a141f9699fc7"
 paths = ["tools/scripts/test_live_build_check.py"]
 tests = [
   "build-parallelism-guard",
@@ -5845,6 +6026,7 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "legacy-platform-hosts-guard",
   "live-build-check-selftest",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
@@ -5863,7 +6045,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-f5d3801f719a"
+name = "script-readers-9c762f4f1290"
 paths = ["tools/scripts/test_mac_objc_source_list_guard.py"]
 tests = [
   "build-parallelism-guard",
@@ -5884,6 +6066,7 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "legacy-platform-hosts-guard",
   "mac-objc-source-list-guard-selftest",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
@@ -5902,7 +6085,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-b27ead229ec0"
+name = "script-readers-f54578718e2a"
 paths = ["tools/scripts/test_measure_min_os.py"]
 tests = [
   "build-parallelism-guard",
@@ -5923,6 +6106,7 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "legacy-platform-hosts-guard",
   "measure-min-os-selftest",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
@@ -5941,7 +6125,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-5ada21bc2bbd"
+name = "script-readers-ad7b8a04270d"
 paths = ["tools/scripts/test_migration_note_guard.py"]
 tests = [
   "build-parallelism-guard",
@@ -5962,6 +6146,7 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "legacy-platform-hosts-guard",
   "migration-note-guard-selftest",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
@@ -5980,7 +6165,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-d065ad06e69a"
+name = "script-readers-aa327a55ffdf"
 paths = ["tools/scripts/test_minos_registry_absent.py"]
 tests = [
   "build-parallelism-guard",
@@ -6001,6 +6186,7 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "legacy-platform-hosts-guard",
   "minos-registry-absent-selftest",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
@@ -6019,7 +6205,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-58af0d7cd847"
+name = "script-readers-080941332255"
 paths = ["tools/scripts/test_modules_yaml_dirs_check.py"]
 tests = [
   "build-parallelism-guard",
@@ -6040,6 +6226,7 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "legacy-platform-hosts-guard",
   "modules-yaml-dirs-selftest",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
@@ -6058,7 +6245,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-5cd7580484bf"
+name = "script-readers-d75bec3bd824"
 paths = ["tools/scripts/test_nm_symbols.py"]
 tests = [
   "build-parallelism-guard",
@@ -6079,6 +6266,7 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "legacy-platform-hosts-guard",
   "nm-symbols-selftest",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
@@ -6097,7 +6285,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-67218a59b7e6"
+name = "script-readers-99d9e61b142c"
 paths = ["tools/scripts/test_p0_layered_replay_receipt.py"]
 tests = [
   "build-parallelism-guard",
@@ -6118,6 +6306,7 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "legacy-platform-hosts-guard",
   "p0-layered-replay-receipt-selftest",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
@@ -6136,7 +6325,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-6370706b4cf0"
+name = "script-readers-55dd8ed45512"
 paths = ["tools/scripts/test_param_designator_order.py"]
 tests = [
   "build-parallelism-guard",
@@ -6157,6 +6346,7 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "legacy-platform-hosts-guard",
   "param-designator-order",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
@@ -6175,7 +6365,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-23b27daf2b78"
+name = "script-readers-30d29a7de46e"
 paths = ["tools/scripts/test_patched_os_name_path_lint.py"]
 tests = [
   "build-parallelism-guard",
@@ -6196,6 +6386,7 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "legacy-platform-hosts-guard",
   "patched-os-name-path-lint-selftest",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
@@ -6214,7 +6405,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-fb647f5b608b"
+name = "script-readers-2a0bb9709418"
 paths = ["tools/scripts/test_pch_wiring_check.py"]
 tests = [
   "build-parallelism-guard",
@@ -6235,6 +6426,7 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "legacy-platform-hosts-guard",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
   "prepush-receipt",
@@ -6253,7 +6445,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-f7de187e933b"
+name = "script-readers-42894688da3a"
 paths = ["tools/scripts/test_planning_gitlink_guard.py"]
 tests = [
   "build-parallelism-guard",
@@ -6274,6 +6466,7 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "legacy-platform-hosts-guard",
   "planning-gitlink-guard-selftest",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
@@ -6292,7 +6485,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-6d9ddfc9bb8a"
+name = "script-readers-5b665d592ab1"
 paths = ["tools/scripts/test_plugin_footprint_check.py"]
 tests = [
   "build-parallelism-guard",
@@ -6313,6 +6506,7 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "legacy-platform-hosts-guard",
   "plugin-footprint-check-selftest",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
@@ -6331,7 +6525,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-6f943cd89799"
+name = "script-readers-d736cd325fba"
 paths = ["tools/scripts/test_pr_batch_advisor.py"]
 tests = [
   "build-parallelism-guard",
@@ -6352,6 +6546,7 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "legacy-platform-hosts-guard",
   "pr-batch-advisor",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
@@ -6370,7 +6565,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-33ec31fd4785"
+name = "script-readers-e388b11b68b4"
 paths = ["tools/scripts/test_pr_check_triage.py"]
 tests = [
   "build-parallelism-guard",
@@ -6391,6 +6586,7 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "legacy-platform-hosts-guard",
   "pr-check-triage-selftest",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
@@ -6409,7 +6605,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-e374427c1fbc"
+name = "script-readers-3dbc386ed1d5"
 paths = ["tools/scripts/test_pr_fast_tier_check.py"]
 tests = [
   "build-parallelism-guard",
@@ -6430,6 +6626,7 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "legacy-platform-hosts-guard",
   "pr-fast-tier-selftest",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
@@ -6448,7 +6645,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-c21bb6c24c2c"
+name = "script-readers-97434f9c07c7"
 paths = ["tools/scripts/test_pr_flow_audit.py"]
 tests = [
   "build-parallelism-guard",
@@ -6469,6 +6666,7 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "legacy-platform-hosts-guard",
   "pr-flow-audit-selftest",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
@@ -6487,7 +6685,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-8ed392d150ba"
+name = "script-readers-6642d74da6f4"
 paths = ["tools/scripts/test_prepush_affected_tests.py"]
 tests = [
   "build-parallelism-guard",
@@ -6508,6 +6706,7 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "legacy-platform-hosts-guard",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
   "prepush-affected-tests",
@@ -6526,7 +6725,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-03a6128d0502"
+name = "script-readers-9baa82ab3272"
 paths = ["tools/scripts/test_prepush_claim_check.py"]
 tests = [
   "build-parallelism-guard",
@@ -6547,6 +6746,7 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "legacy-platform-hosts-guard",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
   "prepush-claim-check",
@@ -6565,7 +6765,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-c08fa6b442e5"
+name = "script-readers-3f415907e9f1"
 paths = ["tools/scripts/test_prepush_format_gate.py"]
 tests = [
   "build-parallelism-guard",
@@ -6586,6 +6786,7 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "legacy-platform-hosts-guard",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
   "prepush-format-gate-wiring",
@@ -6604,7 +6805,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-6b7597390d94"
+name = "script-readers-351a8ac54ecc"
 paths = ["tools/scripts/test_prepush_gate_output.py"]
 tests = [
   "build-parallelism-guard",
@@ -6625,6 +6826,7 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "legacy-platform-hosts-guard",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
   "prepush-gate-output",
@@ -6643,7 +6845,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-00b754f83e0e"
+name = "script-readers-fe245fbb892e"
 paths = ["tools/scripts/test_prepush_queue_rebase_hint.py"]
 tests = [
   "build-parallelism-guard",
@@ -6664,6 +6866,7 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "legacy-platform-hosts-guard",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
   "prepush-queue-rebase-hint",
@@ -6682,7 +6885,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-150d89984da8"
+name = "script-readers-babd230e751c"
 paths = ["tools/scripts/test_protected_merge_receipt.py"]
 tests = [
   "build-parallelism-guard",
@@ -6704,6 +6907,7 @@ tests = [
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
   "ios-gate-digest-selftest",
+  "legacy-platform-hosts-guard",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
   "prepush-receipt",
@@ -6722,7 +6926,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-476659edfebb"
+name = "script-readers-e61a8e33f83e"
 paths = ["tools/scripts/test_pulp_test_data_cmake.py"]
 tests = [
   "build-parallelism-guard",
@@ -6743,6 +6947,7 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "legacy-platform-hosts-guard",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
   "prepush-receipt",
@@ -6761,7 +6966,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-243d8755d95d"
+name = "script-readers-1f3f9cc809ed"
 paths = ["tools/scripts/test_pulp_test_group.py"]
 tests = [
   "build-parallelism-guard",
@@ -6783,6 +6988,7 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "legacy-platform-hosts-guard",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
   "prepush-receipt",
@@ -6800,7 +7006,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-ef712aff7829"
+name = "script-readers-d3c25148a022"
 paths = ["tools/scripts/test_pulp_uninstall.py"]
 tests = [
   "build-parallelism-guard",
@@ -6821,6 +7027,7 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "legacy-platform-hosts-guard",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
   "prepush-receipt",
@@ -6839,7 +7046,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-51e7a7e6d0d1"
+name = "script-readers-802ef85858f3"
 paths = ["tools/scripts/test_realtime_pool_resource_locks.py"]
 tests = [
   "build-parallelism-guard",
@@ -6860,6 +7067,7 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "legacy-platform-hosts-guard",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
   "prepush-receipt",
@@ -6878,7 +7086,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-785d10d107e3"
+name = "script-readers-978a201230e9"
 paths = ["tools/scripts/test_relay_contract_check.py"]
 tests = [
   "build-parallelism-guard",
@@ -6899,6 +7107,7 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "legacy-platform-hosts-guard",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
   "prepush-receipt",
@@ -6917,7 +7126,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-3139d3b7e1c3"
+name = "script-readers-6bf5e2e9fe55"
 paths = ["tools/scripts/test_release_trailer_guard.py"]
 tests = [
   "build-parallelism-guard",
@@ -6938,6 +7147,7 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "legacy-platform-hosts-guard",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
   "prepush-receipt",
@@ -6956,7 +7166,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-ad1c28ab3a34"
+name = "script-readers-953598559e75"
 paths = ["tools/scripts/test_render_upward_edge_check.py"]
 tests = [
   "build-parallelism-guard",
@@ -6977,6 +7187,7 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "legacy-platform-hosts-guard",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
   "prepush-receipt",
@@ -6995,7 +7206,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-68331d55c704"
+name = "script-readers-9ff12b7ba02d"
 paths = ["tools/scripts/test_repo_source_scan.py"]
 tests = [
   "build-parallelism-guard",
@@ -7016,6 +7227,7 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "legacy-platform-hosts-guard",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
   "prepush-receipt",
@@ -7034,7 +7246,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-64c018dd1c4e"
+name = "script-readers-f03391deff42"
 paths = ["tools/scripts/test_resolve_classify_base.py"]
 tests = [
   "build-parallelism-guard",
@@ -7055,6 +7267,7 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "legacy-platform-hosts-guard",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
   "prepush-receipt",
@@ -7073,7 +7286,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-f6b743616535"
+name = "script-readers-4a226e5a8743"
 paths = ["tools/scripts/test_run_changed_surface_tests.py"]
 tests = [
   "build-parallelism-guard",
@@ -7095,6 +7308,7 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "legacy-platform-hosts-guard",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
   "prepush-receipt",
@@ -7112,7 +7326,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-1c2a3a93051f"
+name = "script-readers-668836e1e766"
 paths = ["tools/scripts/test_runner_topology_check.py"]
 tests = [
   "build-parallelism-guard",
@@ -7133,6 +7347,7 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "legacy-platform-hosts-guard",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
   "prepush-receipt",
@@ -7151,7 +7366,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-7e2a56553a74"
+name = "script-readers-ed2e5088eced"
 paths = ["tools/scripts/test_runner_topology_static.py"]
 tests = [
   "build-parallelism-guard",
@@ -7172,6 +7387,7 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "legacy-platform-hosts-guard",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
   "prepush-receipt",
@@ -7190,7 +7406,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-3c092e362cb9"
+name = "script-readers-eb67b5e34bd4"
 paths = ["tools/scripts/test_rust_cli_build_edge_check.py"]
 tests = [
   "build-parallelism-guard",
@@ -7211,6 +7427,7 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "legacy-platform-hosts-guard",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
   "prepush-receipt",
@@ -7229,7 +7446,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-502d0539422e"
+name = "script-readers-3ed2f947452e"
 paths = ["tools/scripts/test_sample_region_catalogs.py"]
 tests = [
   "build-parallelism-guard",
@@ -7250,6 +7467,7 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "legacy-platform-hosts-guard",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
   "prepush-receipt",
@@ -7268,7 +7486,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-f1184dccbd7f"
+name = "script-readers-74c6af1affa8"
 paths = ["tools/scripts/test_schema_drift_check.py"]
 tests = [
   "build-parallelism-guard",
@@ -7289,6 +7507,7 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "legacy-platform-hosts-guard",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
   "prepush-receipt",
@@ -7307,7 +7526,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-e1114a7366ba"
+name = "script-readers-5e91ea3c78c9"
 paths = ["tools/scripts/test_script_argv.py"]
 tests = [
   "build-parallelism-guard",
@@ -7328,6 +7547,7 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "legacy-platform-hosts-guard",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
   "prepush-receipt",
@@ -7346,7 +7566,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-3f1e35da684c"
+name = "script-readers-e11a9e142c06"
 paths = ["tools/scripts/test_script_inputs_offline.py"]
 tests = [
   "build-parallelism-guard",
@@ -7367,6 +7587,7 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "legacy-platform-hosts-guard",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
   "prepush-receipt",
@@ -7385,7 +7606,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-12fddc75f860"
+name = "script-readers-52ca405ebd38"
 paths = ["tools/scripts/test_script_inputs_precheck.py"]
 tests = [
   "build-parallelism-guard",
@@ -7406,6 +7627,7 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "legacy-platform-hosts-guard",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
   "prepush-receipt",
@@ -7424,7 +7646,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-160105478095"
+name = "script-readers-6b54a75bc565"
 paths = ["tools/scripts/test_script_inputs_store.py"]
 tests = [
   "build-parallelism-guard",
@@ -7445,6 +7667,7 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "legacy-platform-hosts-guard",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
   "prepush-receipt",
@@ -7463,7 +7686,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-a8e13e567e92"
+name = "script-readers-7a2039b4285d"
 paths = ["tools/scripts/test_script_test_inputs.py"]
 tests = [
   "build-parallelism-guard",
@@ -7484,6 +7707,7 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "legacy-platform-hosts-guard",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
   "prepush-receipt",
@@ -7502,7 +7726,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-732981e638c6"
+name = "script-readers-1c427f98ebbc"
 paths = ["tools/scripts/test_sdk_capability_handoff.py"]
 tests = [
   "agent-capability-sdk-handoff-selftest",
@@ -7524,6 +7748,7 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "legacy-platform-hosts-guard",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
   "prepush-receipt",
@@ -7541,7 +7766,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-73ede8d1ee78"
+name = "script-readers-31520a9a4b7b"
 paths = ["tools/scripts/test_sdk_consumer_sweep.py"]
 tests = [
   "build-parallelism-guard",
@@ -7562,6 +7787,7 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "legacy-platform-hosts-guard",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
   "prepush-receipt",
@@ -7580,7 +7806,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-75017cf16ace"
+name = "script-readers-2be188ab23f4"
 paths = ["tools/scripts/test_sdk_consumer_update.py"]
 tests = [
   "build-parallelism-guard",
@@ -7601,6 +7827,7 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "legacy-platform-hosts-guard",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
   "prepush-receipt",
@@ -7619,7 +7846,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-ffb718344018"
+name = "script-readers-ffa335b6d78b"
 paths = ["tools/scripts/test_sdk_plist_templates_installed.py"]
 tests = [
   "build-parallelism-guard",
@@ -7640,6 +7867,7 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "legacy-platform-hosts-guard",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
   "prepush-receipt",
@@ -7658,7 +7886,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-4b8e9b94dee6"
+name = "script-readers-3a0eef63f03b"
 paths = ["tools/scripts/test_seed_build_dir.py"]
 tests = [
   "build-parallelism-guard",
@@ -7679,6 +7907,7 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "legacy-platform-hosts-guard",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
   "prepush-receipt",
@@ -7697,7 +7926,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-bfda52fa5cc9"
+name = "script-readers-3c4b689679eb"
 paths = ["tools/scripts/test_sequencer_control_skill_check.py"]
 tests = [
   "build-parallelism-guard",
@@ -7718,6 +7947,7 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "legacy-platform-hosts-guard",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
   "prepush-receipt",
@@ -7736,7 +7966,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-a76733496b2e"
+name = "script-readers-4689eeedee9b"
 paths = ["tools/scripts/test_setup_bootstrap_plan_guard.py"]
 tests = [
   "build-parallelism-guard",
@@ -7757,6 +7987,7 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "legacy-platform-hosts-guard",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
   "prepush-receipt",
@@ -7775,7 +8006,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-81331326c7a3"
+name = "script-readers-b5d451c3b6bb"
 paths = ["tools/scripts/test_shared_test_objects_check.py"]
 tests = [
   "build-parallelism-guard",
@@ -7796,6 +8027,7 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "legacy-platform-hosts-guard",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
   "prepush-receipt",
@@ -7814,7 +8046,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-837591245094"
+name = "script-readers-6f155dcc001c"
 paths = ["tools/scripts/test_shipping_macro_guard.py"]
 tests = [
   "build-parallelism-guard",
@@ -7835,6 +8067,7 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "legacy-platform-hosts-guard",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
   "prepush-receipt",
@@ -7854,7 +8087,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-fbe57db19508"
+name = "script-readers-f1f7dadcace4"
 paths = ["tools/scripts/test_shipyard_merge_gate_evidence.py"]
 tests = [
   "build-parallelism-guard",
@@ -7875,6 +8108,7 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "legacy-platform-hosts-guard",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
   "prepush-receipt",
@@ -7893,7 +8127,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-6b3017092025"
+name = "script-readers-4253ec404883"
 paths = ["tools/scripts/test_silent_revert_guard.py"]
 tests = [
   "build-parallelism-guard",
@@ -7914,6 +8148,7 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "legacy-platform-hosts-guard",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
   "prepush-receipt",
@@ -7932,7 +8167,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-434519c9385d"
+name = "script-readers-d84cd94d07e9"
 paths = ["tools/scripts/test_skills_doc_check.py"]
 tests = [
   "build-parallelism-guard",
@@ -7953,6 +8188,7 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "legacy-platform-hosts-guard",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
   "prepush-receipt",
@@ -7971,7 +8207,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-b841f4b86fa1"
+name = "script-readers-4114e5b5ec33"
 paths = ["tools/scripts/test_status_tone_signal_lint.py"]
 tests = [
   "build-parallelism-guard",
@@ -7992,6 +8228,7 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "legacy-platform-hosts-guard",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
   "prepush-receipt",
@@ -8010,7 +8247,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-13170ce00870"
+name = "script-readers-3403681842d9"
 paths = ["tools/scripts/test_swift_bridge_split_guard.py"]
 tests = [
   "build-parallelism-guard",
@@ -8031,6 +8268,7 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "legacy-platform-hosts-guard",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
   "prepush-receipt",
@@ -8049,7 +8287,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-ea6db7ec02df"
+name = "script-readers-8498536d1d7b"
 paths = ["tools/scripts/test_tart_home_resolution.py"]
 tests = [
   "build-parallelism-guard",
@@ -8070,6 +8308,7 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "legacy-platform-hosts-guard",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
   "prepush-receipt",
@@ -8088,7 +8327,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-0f1ce969471b"
+name = "script-readers-f27081bfaf20"
 paths = ["tools/scripts/test_timeline_fixture_coverage_check.py"]
 tests = [
   "build-parallelism-guard",
@@ -8109,6 +8348,7 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "legacy-platform-hosts-guard",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
   "prepush-receipt",
@@ -8127,7 +8367,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-15c5cba34d4e"
+name = "script-readers-fa3501d013e1"
 paths = ["tools/scripts/test_tmp_leak_guard.py"]
 tests = [
   "build-parallelism-guard",
@@ -8148,6 +8388,7 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "legacy-platform-hosts-guard",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
   "prepush-receipt",
@@ -8166,7 +8407,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-73631823da04"
+name = "script-readers-dbae53df51d1"
 paths = ["tools/scripts/test_tools_registry_check.py"]
 tests = [
   "build-parallelism-guard",
@@ -8187,6 +8428,7 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "legacy-platform-hosts-guard",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
   "prepush-receipt",
@@ -8205,7 +8447,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-620e9c9ea494"
+name = "script-readers-83131bdb73eb"
 paths = ["tools/scripts/test_trace_frame_cost.py"]
 tests = [
   "build-parallelism-guard",
@@ -8226,6 +8468,7 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "legacy-platform-hosts-guard",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
   "prepush-receipt",
@@ -8244,7 +8487,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-c6e8a78ea04c"
+name = "script-readers-f508f25f611c"
 paths = ["tools/scripts/test_trace_span_category_lint.py"]
 tests = [
   "build-parallelism-guard",
@@ -8265,6 +8508,7 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "legacy-platform-hosts-guard",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
   "prepush-receipt",
@@ -8283,7 +8527,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-8b392c64e887"
+name = "script-readers-204e978e4c75"
 paths = ["tools/scripts/test_unbounded_wait_lint.py"]
 tests = [
   "build-parallelism-guard",
@@ -8304,6 +8548,7 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "legacy-platform-hosts-guard",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
   "prepush-receipt",
@@ -8322,7 +8567,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-2821c822a4b5"
+name = "script-readers-7c88abc49aaf"
 paths = ["tools/scripts/test_undefined_names_check.py"]
 tests = [
   "build-parallelism-guard",
@@ -8344,6 +8589,7 @@ tests = [
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
   "import-validation-undefined-names",
+  "legacy-platform-hosts-guard",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
   "prepush-receipt",
@@ -8361,7 +8607,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-d3d3d92a6d76"
+name = "script-readers-ebf3d0681e0d"
 paths = ["tools/scripts/test_unregistered_tests_check.py"]
 tests = [
   "build-parallelism-guard",
@@ -8382,6 +8628,7 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "legacy-platform-hosts-guard",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
   "prepush-receipt",
@@ -8400,7 +8647,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-c13475d33156"
+name = "script-readers-83a5b24d1c95"
 paths = ["tools/scripts/test_validate_gpu_audio_trace_captures.py"]
 tests = [
   "build-parallelism-guard",
@@ -8422,6 +8669,7 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "legacy-platform-hosts-guard",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
   "prepush-receipt",
@@ -8439,7 +8687,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-41e4b11d5636"
+name = "script-readers-7e7b8e48950d"
 paths = ["tools/scripts/test_vellum_boundary_lint.py"]
 tests = [
   "build-parallelism-guard",
@@ -8460,6 +8708,7 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "legacy-platform-hosts-guard",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
   "prepush-receipt",
@@ -8478,7 +8727,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-6e13161fbfe6"
+name = "script-readers-249d7552e918"
 paths = ["tools/scripts/test_vellum_inheritance_ledger_check.py"]
 tests = [
   "build-parallelism-guard",
@@ -8499,6 +8748,7 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "legacy-platform-hosts-guard",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
   "prepush-receipt",
@@ -8517,7 +8767,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-d40acf042828"
+name = "script-readers-69620768c552"
 paths = ["tools/scripts/test_vellum_trusted_merge.py"]
 tests = [
   "build-parallelism-guard",
@@ -8538,6 +8788,7 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "legacy-platform-hosts-guard",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
   "prepush-receipt",
@@ -8556,7 +8807,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-c95475398e55"
+name = "script-readers-994e639fe38b"
 paths = ["tools/scripts/test_vellum_ui_drift_report.py"]
 tests = [
   "build-parallelism-guard",
@@ -8577,6 +8828,7 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "legacy-platform-hosts-guard",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
   "prepush-receipt",
@@ -8595,7 +8847,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-e8ceafbfa7bf"
+name = "script-readers-312c27e50b95"
 paths = ["tools/scripts/test_vellum_view_core_pulp_kept_check.py"]
 tests = [
   "build-parallelism-guard",
@@ -8616,6 +8868,7 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "legacy-platform-hosts-guard",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
   "prepush-receipt",
@@ -8634,7 +8887,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-d61b9d3361a1"
+name = "script-readers-8fd229ee35da"
 paths = ["tools/scripts/test_vellum_workflow_dispatch.py"]
 tests = [
   "build-parallelism-guard",
@@ -8655,6 +8908,7 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "legacy-platform-hosts-guard",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
   "prepush-receipt",
@@ -8673,7 +8927,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-6f3d2a18d5d9"
+name = "script-readers-21416da0a4be"
 paths = ["tools/scripts/test_verify_create_templates.py"]
 tests = [
   "build-parallelism-guard",
@@ -8695,6 +8949,7 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "legacy-platform-hosts-guard",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
   "prepush-receipt",
@@ -8712,7 +8967,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-55ace3572f02"
+name = "script-readers-94d80fa5967e"
 paths = ["tools/scripts/test_verify_gpu_dpr_inconclusive_receipt.py"]
 tests = [
   "build-parallelism-guard",
@@ -8734,6 +8989,7 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "legacy-platform-hosts-guard",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
   "prepush-receipt",
@@ -8751,7 +9007,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-c94aeaa896fd"
+name = "script-readers-762e963f15f5"
 paths = ["tools/scripts/test_verify_gpu_probe_acceptance.py"]
 tests = [
   "build-parallelism-guard",
@@ -8773,6 +9029,7 @@ tests = [
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
   "gpu-probe-acceptance-verifier-selftest",
+  "legacy-platform-hosts-guard",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
   "prepush-receipt",
@@ -8790,7 +9047,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-36dbeaa83ef5"
+name = "script-readers-22d33bdf602e"
 paths = ["tools/scripts/test_verify_rendered_panel.py"]
 tests = [
   "build-parallelism-guard",
@@ -8811,6 +9068,7 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "legacy-platform-hosts-guard",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
   "prepush-receipt",
@@ -8829,7 +9087,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-811d6a0a7009"
+name = "script-readers-3d6b635a9c57"
 paths = ["tools/scripts/test_version_at_land.py"]
 tests = [
   "build-parallelism-guard",
@@ -8850,6 +9108,7 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "legacy-platform-hosts-guard",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
   "prepush-receipt",
@@ -8868,7 +9127,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-509f05aaee09"
+name = "script-readers-4610c9c87340"
 paths = ["tools/scripts/test_view_audio_symbol_floor.py"]
 tests = [
   "build-parallelism-guard",
@@ -8889,6 +9148,7 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "legacy-platform-hosts-guard",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
   "prepush-receipt",
@@ -8907,7 +9167,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-5bdf6f80f19d"
+name = "script-readers-aad373e791c2"
 paths = ["tools/scripts/test_web_timeline_source_closure_check.py"]
 tests = [
   "build-parallelism-guard",
@@ -8928,6 +9188,7 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "legacy-platform-hosts-guard",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
   "prepush-receipt",
@@ -8946,7 +9207,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-a821223d8862"
+name = "script-readers-a6071664254c"
 paths = ["tools/scripts/test_windows_posix_shims.py"]
 tests = [
   "build-parallelism-guard",
@@ -8967,6 +9228,7 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "legacy-platform-hosts-guard",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
   "prepush-receipt",
@@ -8985,7 +9247,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-0eecfbb733ca"
+name = "script-readers-7f896a2e91c2"
 paths = ["tools/scripts/timeline_command_doc_check.py"]
 tests = [
   "build-parallelism-guard",
@@ -9006,6 +9268,7 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "legacy-platform-hosts-guard",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
   "prepush-receipt",
@@ -9024,7 +9287,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-68f0f7072aad"
+name = "script-readers-874263a7279b"
 paths = ["tools/scripts/timeline_engine_dependency_floor_check.py"]
 tests = [
   "build-parallelism-guard",
@@ -9045,6 +9308,7 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "legacy-platform-hosts-guard",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
   "prepush-receipt",
@@ -9064,7 +9328,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-c10ffdb91176"
+name = "script-readers-23198d43aed6"
 paths = ["tools/scripts/timeline_fixture_coverage_check.py"]
 tests = [
   "build-parallelism-guard",
@@ -9085,6 +9349,7 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "legacy-platform-hosts-guard",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
   "prepush-receipt",
@@ -9103,7 +9368,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-baab4c7d0031"
+name = "script-readers-e90209c42111"
 paths = ["tools/scripts/token_coverage_check.py"]
 tests = [
   "build-parallelism-guard",
@@ -9124,6 +9389,7 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "legacy-platform-hosts-guard",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
   "prepush-receipt",
@@ -9142,7 +9408,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-2303de425410"
+name = "script-readers-384602b2ad1b"
 paths = ["tools/scripts/token_key_check.py"]
 tests = [
   "build-parallelism-guard",
@@ -9163,6 +9429,7 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "legacy-platform-hosts-guard",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
   "prepush-receipt",
@@ -9181,7 +9448,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-b60e559562bc"
+name = "script-readers-b91659f1872f"
 paths = ["tools/scripts/trace_span_category_lint.py"]
 tests = [
   "build-parallelism-guard",
@@ -9202,6 +9469,7 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "legacy-platform-hosts-guard",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
   "prepush-receipt",
@@ -9220,7 +9488,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-0adef6b30bb9"
+name = "script-readers-ca5e876a931c"
 paths = ["tools/scripts/vellum_view_core_pulp_kept_check.py"]
 tests = [
   "build-parallelism-guard",
@@ -9241,6 +9509,7 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "legacy-platform-hosts-guard",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
   "prepush-receipt",
@@ -9259,7 +9528,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-f199e789dcbd"
+name = "script-readers-69aa86e728d2"
 paths = ["tools/scripts/verify_downstream_consumers.py"]
 tests = [
   "build-parallelism-guard",
@@ -9280,6 +9549,7 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "legacy-platform-hosts-guard",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
   "prepush-receipt",
@@ -9299,7 +9569,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-23ffbfe1e11a"
+name = "script-readers-bcf747848932"
 paths = ["tools/scripts/verify_downstream_consumers_contract.py"]
 tests = [
   "build-parallelism-guard",
@@ -9320,6 +9590,7 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "legacy-platform-hosts-guard",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
   "prepush-receipt",
@@ -9338,7 +9609,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-303b6e087bdc"
+name = "script-readers-f8b42ce518b5"
 paths = ["tools/scripts/verify_refactor_baselines.py"]
 tests = [
   "build-parallelism-guard",
@@ -9359,6 +9630,7 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "legacy-platform-hosts-guard",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
   "prepush-receipt",
@@ -9378,7 +9650,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-3b87a68820c2"
+name = "script-readers-051b5e4f8b52"
 paths = ["tools/scripts/verify_refactor_baselines_contract.py"]
 tests = [
   "build-parallelism-guard",
@@ -9399,6 +9671,7 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "legacy-platform-hosts-guard",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
   "prepush-receipt",
@@ -9417,7 +9690,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-dfff7d59744f"
+name = "script-readers-2f832e2d7898"
 paths = ["tools/scripts/verify_timeline_launcher_resource_contract.py"]
 tests = [
   "build-parallelism-guard",
@@ -9438,6 +9711,7 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "legacy-platform-hosts-guard",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
   "prepush-receipt",
@@ -9458,7 +9732,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-f46b93af8135"
+name = "script-readers-f19c863f29e1"
 paths = ["tools/scripts/verify_timeline_live_capture.py"]
 tests = [
   "build-parallelism-guard",
@@ -9479,6 +9753,7 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "legacy-platform-hosts-guard",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
   "prepush-receipt",
@@ -9497,7 +9772,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-bcb352000064"
+name = "script-readers-9628081f3b86"
 paths = ["tools/scripts/verify_timeline_transaction_launcher_complexity.py"]
 tests = [
   "build-parallelism-guard",
@@ -9518,6 +9793,7 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "legacy-platform-hosts-guard",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
   "prepush-receipt",
@@ -9537,7 +9813,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-2ea1b33a1590"
+name = "script-readers-7c57d772ddec"
 paths = ["tools/scripts/verify_wasm_skia_slice.py"]
 tests = [
   "build-parallelism-guard",
@@ -9558,6 +9834,7 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "legacy-platform-hosts-guard",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
   "prepush-receipt",
@@ -9577,7 +9854,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-9166e7b1a2f3"
+name = "script-readers-d0c306d8b641"
 paths = ["tools/scripts/view_audio_seam_debts.py"]
 tests = [
   "build-parallelism-guard",
@@ -9598,6 +9875,7 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "legacy-platform-hosts-guard",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
   "prepush-receipt",
@@ -9616,7 +9894,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-bae064b2e85c"
+name = "script-readers-4860719201bb"
 paths = ["tools/scripts/web_timeline_source_closure_check.py"]
 tests = [
   "build-parallelism-guard",
@@ -9637,6 +9915,7 @@ tests = [
   "gpu-first-visible-external-adapter-selftest",
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
+  "legacy-platform-hosts-guard",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
   "prepush-receipt",
@@ -10092,6 +10371,7 @@ paths = [
   "tools/scripts/test_lcov_cobertura.py",
   "tools/scripts/test_lcov_cobertura_extra.py",
   "tools/scripts/test_lcov_excl_propagation.py",
+  "tools/scripts/test_legacy_platform_hosts_guard.py",
   "tools/scripts/test_link_closure_check.py",
   "tools/scripts/test_live_build_check.py",
   "tools/scripts/test_mac_objc_source_list_guard.py",
@@ -10363,6 +10643,8 @@ tests = [
   "interchange-concepts-drift",
   "interchange-matrix-docs-drift",
   "interchange-tables-drift",
+  "legacy-platform-hosts-guard",
+  "legacy-platform-hosts-guard-negative-contract",
   "mac-objc-source-list-guard",
   "mac-objc-source-list-guard-selftest",
   "migration-note-guard-selftest",
@@ -10737,6 +11019,7 @@ paths = [
   "tools/scripts/test_lcov_cobertura.py",
   "tools/scripts/test_lcov_cobertura_extra.py",
   "tools/scripts/test_lcov_excl_propagation.py",
+  "tools/scripts/test_legacy_platform_hosts_guard.py",
   "tools/scripts/test_link_closure_check.py",
   "tools/scripts/test_live_build_check.py",
   "tools/scripts/test_mac_objc_source_list_guard.py",
