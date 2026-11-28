@@ -276,13 +276,28 @@ stopped compiling and no Pulp check noticed.
   artifact. Any lookup or digest failure fails the step; nothing falls back.
 - **Runs without an SDK are passed over.** A green push run whose change the
   classifier skipped (an observatory-only commit, for example) builds and
-  uploads nothing. `resolve` therefore walks the full page of Vellum main's
-  newest successful runs and takes the first with an unexpired evidence
-  artifact. If none of the returned runs has one, the step fails and says so.
+  uploads nothing. A reused proof names its source run in a "Tree <sha> was
+  proven by <run URL>" notice on the GPU job, which `resolve` reads from the
+  check-run annotations (the job log only when a job has none) and follows,
+  hop by hop, to the source artifact. A chain that loops, runs too deep, or ends
+  at an expired artifact is skipped, and `resolve` then walks the rest of the
+  full page of Vellum main's newest successful runs. If nothing in the page
+  yields an unexpired evidence artifact, the step fails and names the first
+  reuse failure.
 - **Pinned minimum.** `resolve --min-vellum-sha` refuses a run whose head does
   not contain the given Vellum commit (checked through Vellum's compare endpoint
   before any download). The workflow sets it to the commit that introduced the
   `ParamModel` surface that `integrations/pulp-vellum` builds on.
+- **Yoga layout on Vellum.** `runner.py --verify --engine vellum` maps the Yoga
+  layout fixtures onto a Vellum bundle, runs the SDK's `vellum-app-host
+  --dump-tree` and compares node rectangles with the Yoga goldens. Fixtures that
+  use a property Vellum's authoring layout has no equivalent for are skipped by
+  name; the runner exits 3 when it measured nothing.
+- **GPU adapter probe.** The bridge configure also builds
+  `pulp-vellum-gpu-adapter-probe`, which renders a fixed scene on the SDK's GPU
+  runtime and judges the adapter identity and three sampled pixels. Its
+  `pulp-vellum` ctest entries require a pass, and require that the same run with
+  the adapter name dropped fails with reason `empty-adapter`.
 - **MCP UI tools.** After the bridge, the lane builds `pulp-test-mcp-server` in
   the same configure and runs its `[ui]` cases with
   `PULP_TEST_VELLUM_APP_HOST` set to the SDK's `bin/vellum-app-host`. The live
@@ -355,6 +370,15 @@ stopped compiling and no Pulp check noticed.
   fabricated Pulp prefix that stages this run's Vellum SDK. Pull requests that
   touch `tools/cmake/PulpConfig.cmake.in`, the scenario driver
   `test/cmake/test_vellum_ui_compat_package.cmake` or that consumer run the lane.
+- **Installed SDK smoke.** One step configures a release-profile SDK with the
+  Vellum bridge and audio package, builds every target (`cmake --install`
+  refuses an unbuilt one), installs to an empty prefix and runs
+  `test/cmake/test_vellum_installed_sdk_smoke.cmake`. That driver configures
+  `tools/validation/sdk-smoke/vellum-installed/` from scratch against the
+  prefix, links `Pulp::vellum` and `Pulp::vellum-audio`, builds and runs it.
+  The same consumer refused with Vellum unfindable is the control. The
+  installed SDK still exports Pulp's own view targets, so this does not cover
+  the Vellum-backed UI names; the scenario driver above does.
 - **Negative control.** Every full run recompiles one Vellum-side translation
   unit (`knob_panel.cpp`) with `-fsyntax-only`, once against the SDK as
   published, which must succeed, and once against a copy of its mirror headers

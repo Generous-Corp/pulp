@@ -25,7 +25,9 @@
 namespace pulp::vellum_components {
 
 /// Services the catalogue's components bind to. Every member is optional; a
-/// component whose service is absent is still constructed and starts inert.
+/// component whose service is absent is still constructed and starts inert,
+/// except the preset browser, which holds a reference to its manager and is not
+/// constructed without one.
 struct PulpViewComponentContext {
     /// Where the panic button raises its request. Empty means unavailable.
     PanicTarget panic;

@@ -225,6 +225,9 @@ TEST_CASE("AU v2 opens, sizes and closes a contract editor, twice",
         auto* session = pulp::format::au::contract_view_session((__bridge void*)view);
         REQUIRE(session != nullptr);
         REQUIRE(session->editor() != nullptr);
+        // Its keys arrive after AppKit's key-equivalent pass, and it says so.
+        REQUIRE(contract_log().context->query_extension(
+                    pulp::format::editor_keys_after_native_pass_extension_id) != nullptr);
         NSView* other = [[NSView alloc] initWithFrame:NSZeroRect];
         REQUIRE(pulp::format::au::contract_view_session((__bridge void*)other) == nullptr);
         [other release];
@@ -1135,3 +1138,349 @@ TEST_CASE("an AU v2 contract view traces its returned frame and host frames only
     AudioComponentInstanceDispose(au);
     g_instance = nullptr;
 }
+
+// ── An AU v2 host opening a Vellum editor ───────────────────────────────────
+//
+// The same factory, built into a second executable that links Pulp's Vellum
+// bridge: a processor whose editor factory is pulp::vellum's, so the session
+// drives a pulp::vellum::Editor and the Vellum PluginViewHost it owns. The
+// editor attaches into the factory's container at once, so no window is
+// needed. Only these cases run in that executable.
+
+#if defined(PULP_TEST_AU_VELLUM)
+
+#include <pulp/vellum/editor.hpp>
+
+#include <vellum/view/input_events.hpp>
+#include <vellum/view/plugin_view_host.hpp>
+#include <vellum/view/text_editor.hpp>
+#include <vellum/view/view.hpp>
+
+namespace {
+
+/// What the Vellum root saw, reset by each case.
+struct AuRootLog {
+    int opens = 0;
+    int closes = 0;
+    ::vellum::view::View* root = nullptr;
+    ::vellum::view::TextEditor* field = nullptr;
+};
+AuRootLog g_au_root;
+
+/// An aspect-locked root with one text field.
+class AuRootView final : public ::vellum::view::View {
+  public:
+    explicit AuRootView(pulp::vellum::EditorEnv&) {
+        auto field = std::make_unique<::vellum::view::TextEditor>();
+        g_au_root.field = field.get();
+        add_child(std::move(field));
+        g_au_root.root = this;
+    }
+    ~AuRootView() override {
+        g_au_root.root = nullptr;
+        g_au_root.field = nullptr;
+    }
+    pulp::format::ViewSize editor_view_size() const {
+        return {.preferred_width = 400,
+                .preferred_height = 300,
+                .min_width = 200,
+                .min_height = 150,
+                .max_width = 800,
+                .max_height = 600,
+                .aspect_ratio = 4.0 / 3.0};
+    }
+    void editor_opened() {
+        ++g_au_root.opens;
+    }
+    void editor_closing() {
+        ++g_au_root.closes;
+    }
+};
+
+class AuVellumProcessor final : public pulp::format::Processor {
+  public:
+    pulp::format::PluginDescriptor descriptor() const override {
+        pulp::format::PluginDescriptor d;
+        d.name = "Vellum AU";
+        d.manufacturer = "Pulp";
+        d.bundle_id = "dev.pulp.test.au-vellum-editor";
+        d.version = "1.0.0";
+        return d;
+    }
+    void define_parameters(pulp::state::StateStore& store) override {
+        pulp::state::ParamInfo info;
+        info.id = kGain;
+        info.name = "Gain";
+        info.range = {0.0f, 1.0f, 0.5f};
+        store.add_parameter(info);
+    }
+    void prepare(const pulp::format::PrepareContext&) override {}
+    void process(pulp::audio::BufferView<float>&, const pulp::audio::BufferView<const float>&,
+                 pulp::midi::MidiBuffer&, pulp::midi::MidiBuffer&,
+                 const pulp::format::ProcessContext&) override {}
+    pulp::format::EditorFactory* editor_factory() override {
+        return pulp::vellum::editor_factory<AuRootView>();
+    }
+};
+
+struct VellumInstance {
+    pulp::state::StateStore store;
+    std::unique_ptr<AuVellumProcessor> processor = std::make_unique<AuVellumProcessor>();
+    pulp::runtime::AliveToken alive;
+    std::unique_ptr<pulp::format::ContractSessionRegistry> sessions =
+        std::make_unique<pulp::format::ContractSessionRegistry>();
+
+    VellumInstance() {
+        processor->set_state_store(&store);
+        processor->define_parameters(store);
+    }
+};
+VellumInstance* g_vellum_instance = nullptr;
+
+OSStatus vellum_get_property(void*, AudioUnitPropertyID id, AudioUnitScope, AudioUnitElement,
+                             void* out, UInt32* io_size) {
+    if (id != pulp::format::au::kPulpEditorContextProperty || !out || !io_size ||
+        *io_size < sizeof(pulp::format::au::PulpEditorContext) || g_vellum_instance == nullptr)
+        return kAudioUnitErr_InvalidProperty;
+    auto* ctx = static_cast<pulp::format::au::PulpEditorContext*>(out);
+    ctx->processor = g_vellum_instance->processor.get();
+    ctx->store = &g_vellum_instance->store;
+    ctx->owner_alive = g_vellum_instance->alive.capture();
+    ctx->contract_sessions = g_vellum_instance->sessions.get();
+    *io_size = sizeof(*ctx);
+    return noErr;
+}
+AudioComponentMethod vellum_lookup(SInt16 selector) {
+    if (selector == kAudioUnitGetPropertySelect)
+        return reinterpret_cast<AudioComponentMethod>(&vellum_get_property);
+    return nullptr;
+}
+AudioComponentPlugInInterface* vellum_factory(const AudioComponentDescription*) {
+    auto* au = new FakeAU;
+    au->iface.Open = fake_open;
+    au->iface.Close = fake_close;
+    au->iface.Lookup = vellum_lookup;
+    return &au->iface;
+}
+AudioUnit vellum_audio_unit() {
+    static AudioComponent comp = [] {
+        AudioComponentDescription desc{kAudioUnitType_Effect, 'VlVw', 'PlTs', 0, 0};
+        return AudioComponentRegister(&desc, CFSTR("Pulp: Vellum view test"), 1, vellum_factory);
+    }();
+    AudioUnit au = nullptr;
+    REQUIRE(comp != nullptr);
+    REQUIRE(AudioComponentInstanceNew(comp, &au) == noErr);
+    return au;
+}
+
+// Clears any host factory a case registers, even when an assertion stops it.
+struct AuFactoryReset {
+    ~AuFactoryReset() {
+        ::vellum::view::PluginViewHost::clear_factory();
+    }
+};
+
+// Both focus slots are process-global; leave them clear between cases.
+struct AuFocusReset {
+    AuFocusReset() {
+        ::vellum::view::View::focused_input_ = nullptr;
+        ::vellum::view::View::active_overlay_ = nullptr;
+    }
+    ~AuFocusReset() {
+        ::vellum::view::View::focused_input_ = nullptr;
+        ::vellum::view::View::active_overlay_ = nullptr;
+    }
+};
+
+// A host whose native view never accepts a parent.
+class AuRefusingHost final : public ::vellum::view::PluginViewHost {
+  public:
+    explicit AuRefusingHost(Size size) : size_(size) {}
+    ::vellum::view::NativeViewHandle native_handle() override {
+        return this;
+    }
+    void attach_to_parent(::vellum::view::NativeViewHandle) override {}
+    bool is_attached() const noexcept override {
+        return false;
+    }
+    void detach() override {}
+    void repaint() override {}
+    void set_size(uint32_t width, uint32_t height) override {
+        size_ = {width, height};
+    }
+    Size get_size() const override {
+        return size_;
+    }
+
+  private:
+    Size size_;
+};
+
+} // namespace
+
+TEST_CASE("AU v2 opens, sizes and closes a Vellum editor", "[auv2][vellum][editor-host]") {
+    EditorEnvironment env;
+    AuFocusReset focus;
+    g_au_root = {};
+    VellumInstance instance;
+    g_vellum_instance = &instance;
+    AudioUnit au = vellum_audio_unit();
+
+    @autoreleasepool {
+        NSView* view = [open_view(au) retain];
+        REQUIRE(view != nil);
+        // The editor is attached into the container the factory returns, at
+        // the root's declared size.
+        CHECK(g_au_root.opens == 1);
+        REQUIRE(g_au_root.root != nullptr);
+        auto* host = g_au_root.root->plugin_view_host();
+        REQUIRE(host != nullptr);
+        CHECK(host->is_attached());
+        CHECK(view.frame.size.width == 400);
+        CHECK(view.frame.size.height == 300);
+        auto* session = pulp::format::au::contract_view_session((__bridge void*)view);
+        REQUIRE(session != nullptr);
+        REQUIRE(session->editor() != nullptr);
+
+        // The host resizes the container; the Vellum host follows.
+        [view setFrameSize:NSMakeSize(640, 480)];
+        CHECK(session->editor()->size().width == 640);
+        CHECK(session->editor()->size().height == 480);
+        CHECK(host->get_size().width == 640);
+        CHECK(host->get_size().height == 480);
+        // A backing-scale change reaches the editor at the same logical size.
+        REQUIRE(session->set_scale(2.0));
+        CHECK(session->editor()->size().scale == 2.0);
+        CHECK(host->get_size().width == 640);
+
+        [view release];
+    }
+    CHECK(g_au_root.closes == 1);
+    CHECK(instance.sessions->size() == 0);
+    AudioComponentInstanceDispose(au);
+    g_vellum_instance = nullptr;
+}
+
+TEST_CASE("AU v2 hands Space from its container to a focused Vellum text field",
+          "[auv2][vellum][editor-host][keys]") {
+    EditorEnvironment env;
+    AuFocusReset focus;
+    g_au_root = {};
+    VellumInstance instance;
+    g_vellum_instance = &instance;
+    AudioUnit au = vellum_audio_unit();
+
+    @autoreleasepool {
+        NSView* view = [open_view(au) retain];
+        REQUIRE(view != nil);
+        REQUIRE(g_au_root.field != nullptr);
+        // Nothing focused: the container forwards Space to the host.
+        [view keyDown:key_event(NSEventTypeKeyDown, 49, @" ")];
+        CHECK(g_au_root.field->get_text().empty());
+        g_au_root.field->claim_input_focus();
+        [view keyDown:key_event(NSEventTypeKeyDown, 49, @" ")];
+        CHECK(g_au_root.field->get_text() == " ");
+        // Any other key reaching the container stays with the host.
+        [view keyDown:key_event(NSEventTypeKeyDown, 0, @"a")];
+        CHECK(g_au_root.field->get_text() == " ");
+        [view release];
+    }
+    AudioComponentInstanceDispose(au);
+    g_vellum_instance = nullptr;
+}
+
+TEST_CASE("AU v2 offers the root's global key hook once per press",
+          "[auv2][vellum][editor-host][keys][global-hook]") {
+    EditorEnvironment env;
+    AuFocusReset focus;
+    g_au_root = {};
+    VellumInstance instance;
+    g_vellum_instance = &instance;
+    AudioUnit au = vellum_audio_unit();
+    // Never ordered in: it only gives AppKit a first responder.
+    NSWindow* window = make_window();
+
+    @autoreleasepool {
+        NSView* view = [open_view(au) retain];
+        REQUIRE(view != nil);
+        REQUIRE(g_au_root.root != nullptr);
+        auto* host = g_au_root.root->plugin_view_host();
+        REQUIRE(host != nullptr);
+        NSView* editor_view = (__bridge NSView*)host->native_handle();
+        REQUIRE(editor_view.superview == view);
+        [window.contentView addSubview:view];
+
+        int hook_offers = 0;
+        g_au_root.root->on_global_key = [&hook_offers](const ::vellum::view::KeyEvent&) {
+            ++hook_offers;
+            return false;
+        };
+        NSEvent* space = key_event(NSEventTypeKeyDown, 49, @" ");
+
+        // The window dispatches the press the way AppKit does: the
+        // key-equivalent pass over the view tree, then keyDown: to the first
+        // responder, whose unclaimed key climbs to the container.
+        SECTION("the editor's view holds focus") {
+            REQUIRE([window makeFirstResponder:editor_view]);
+            [window sendEvent:space];
+            CHECK(hook_offers == 1);
+        }
+        SECTION("the container holds focus") {
+            REQUIRE([window makeFirstResponder:view]);
+            [window sendEvent:space];
+            CHECK(hook_offers == 1);
+        }
+
+        g_au_root.root->on_global_key = nullptr;
+        [view removeFromSuperview];
+        [view release];
+    }
+    [window close];
+    [window release];
+    AudioComponentInstanceDispose(au);
+    g_vellum_instance = nullptr;
+}
+
+TEST_CASE("AU v2 returns no view when the Vellum host cannot be created",
+          "[auv2][vellum][editor-host][negative]") {
+    EditorEnvironment env;
+    AuFactoryReset reset;
+    ::vellum::view::PluginViewHost::set_factory(
+        [](::vellum::view::View&, const ::vellum::view::PluginViewHost::Options&)
+            -> std::unique_ptr<::vellum::view::PluginViewHost> { return nullptr; });
+    g_au_root = {};
+    VellumInstance instance;
+    g_vellum_instance = &instance;
+    AudioUnit au = vellum_audio_unit();
+    @autoreleasepool {
+        CHECK(open_view(au) == nil);
+    }
+    CHECK(g_au_root.opens == 0);
+    CHECK(g_au_root.closes == 0);
+    AudioComponentInstanceDispose(au);
+    g_vellum_instance = nullptr;
+}
+
+TEST_CASE("AU v2 returns no view when the Vellum view refuses its container",
+          "[auv2][vellum][editor-host][negative]") {
+    EditorEnvironment env;
+    AuFactoryReset reset;
+    ::vellum::view::PluginViewHost::set_factory(
+        [](::vellum::view::View&, const ::vellum::view::PluginViewHost::Options& options) {
+            return std::unique_ptr<::vellum::view::PluginViewHost>(
+                std::make_unique<AuRefusingHost>(options.size));
+        });
+    g_au_root = {};
+    VellumInstance instance;
+    g_vellum_instance = &instance;
+    AudioUnit au = vellum_audio_unit();
+    @autoreleasepool {
+        CHECK(open_view(au) == nil);
+    }
+    CHECK(g_au_root.opens == 0);
+    CHECK(g_au_root.closes == 0);
+    AudioComponentInstanceDispose(au);
+    g_vellum_instance = nullptr;
+}
+
+#endif // PULP_TEST_AU_VELLUM
