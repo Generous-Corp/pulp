@@ -11,14 +11,14 @@ modules:
 
   - name: pulp_vellum
     path: integrations/pulp-vellum
-    summary: The parameter bridge between the editor-host contract and Vellum value interfaces presenting a ParamPort as a Vellum ParamModel with nested gestures echo suppression restore replay text parsing and modulation readout and a VisualPort as a ValueFeed plus the generated AutoUi parameter editor on Vellum views and a live-swap UI stage for Vellum scripted sessions and a scripted editor that reloads on a view-free reload shell hot swap and an editor factory that hosts a create_view-shaped view tree through the editor-host contract built only against an installed Vellum SDK
+    summary: The parameter bridge between the editor-host contract and Vellum value interfaces presenting a ParamPort as a Vellum ParamModel with nested gestures echo suppression restore replay text parsing and modulation readout and a VisualPort as a ValueFeed plus the generated AutoUi parameter editor on Vellum views and a live-swap UI stage for Vellum scripted sessions and a scripted editor that reloads on a view-free reload shell hot swap and an editor factory that hosts a create_view-shaped view tree through the editor-host contract with a ViewProcessor base class for plug-ins built only against an installed Vellum SDK
     status: experimental
     dependencies: [format]
     docs: reference/modules.md#pulp_vellum
 
   - name: pulp_vellum_audio
     path: integrations/pulp-vellum-audio
-    summary: A lock-free TripleBuffer provider that publishes Pulp audio-thread meter and scope frames to Vellum value feeds, plus Vellum MultiMeter, CorrelationMeter, SpectrogramView, WaveformView, WaveformOverviewView, MusicalTypingKeyboard, EqCurveView, StepGridView, WaveformRecorderView and PianoRollView and AudioInspectorPanel displays and the StandaloneTypingPanel tool window over pulp::signal and pulp::audio data, and backend-neutral waveform GPU upload planning with a generation-tagged resource cache
+    summary: A lock-free TripleBuffer provider that publishes Pulp audio-thread meter and scope frames to Vellum value feeds, plus Vellum MultiMeter, CorrelationMeter, SpectrogramView, WaveformView, WaveformOverviewView, MusicalTypingKeyboard, EqCurveView, StepGridView, WaveformRecorderView and PianoRollView and AudioInspectorPanel displays and the StandaloneTypingPanel tool window over pulp::signal and pulp::audio data, and backend-neutral waveform GPU upload planning with a generation-tagged resource cache, a render controller and a headless backend
     status: experimental
     dependencies: [runtime, audio, signal, format, timeline, timeline_editor, timebase, pulp_vellum]
     docs: reference/modules.md#pulp_vellum_audio

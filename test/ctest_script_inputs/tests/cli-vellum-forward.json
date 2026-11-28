@@ -1,0 +1,10 @@
+{
+ "name": "cli-vellum-forward",
+ "record": {
+  "entry": "test/cli_vellum_forward_test.sh",
+  "inputs": [
+   "test/cli_vellum_forward_test.sh"
+  ],
+  "kind": "shell"
+ }
+}
