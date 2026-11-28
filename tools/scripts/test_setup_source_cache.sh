@@ -262,36 +262,50 @@ echo "== git_worktree_is_complete: submodules pending update are not incompleten
     exit $((FAIL > 0))
 ) || FAIL=$((FAIL + 1))
 
-echo "== reuse_shared_git_source: a re-pin re-points a stale symlink"
+echo "== reuse_shared_git_source: links survive invalid caches and failed replacement"
 (
     load_setup_lib
     tmp="$(mktemp -d)"; trap 'rm -rf "$tmp"' EXIT
-    PLATFORM=macOS   # the symlink branch; Windows clones instead
+    PLATFORM=macOS
 
-    # Two shared caches, as a re-pin leaves them: the directory name embeds the
-    # ref, so the OLD one survives next to the new one.
-    for ref in v1 v2; do
-        mkdir -p "$tmp/cache/dep-$ref/marker"
-        git init -q "$tmp/cache/dep-$ref"
-        git -C "$tmp/cache/dep-$ref" config user.email t@t.t
-        git -C "$tmp/cache/dep-$ref" config user.name t
-        git -C "$tmp/cache/dep-$ref" add marker 2>/dev/null || true
-        printf '%s\n' "$ref" > "$tmp/cache/dep-$ref/marker/f"
-        git -C "$tmp/cache/dep-$ref" add -A
-        git -C "$tmp/cache/dep-$ref" commit -qm "$ref"
-    done
-
-    mkdir -p "$tmp/repo/external"
-    ln -s "$tmp/cache/dep-v1" "$tmp/repo/external/dep"   # what the v1 setup left
+    original="$tmp/cache/dep-v1"
+    replacement="$tmp/second cache/dep-v1"
+    sdk_link="$tmp/repo/external/dep"
+    mkdir -p "$original/.git" "$replacement/.git" "$tmp/missing-.git" "$tmp/missing-marker/.git"
+    touch "$original/marker" "$replacement/marker" "$tmp/missing-.git/marker"
 
     rc=0
-    reuse_shared_git_source "Dep" "$tmp/cache/dep-v2" "$tmp/repo/external/dep" "marker" >/dev/null 2>&1 || rc=$?
+    reuse_shared_git_source "Dep" "$original" "$sdk_link" marker >/dev/null || rc=$?
+    check "$rc" "0" "a valid shared cache can be linked"
+    check "$(readlink "$sdk_link")" "$original" "the new SDK link points at the cache"
 
-    check "$rc" "0" "re-pinning an existing link succeeds"
-    check "$(readlink "$tmp/repo/external/dep")" "$tmp/cache/dep-v2" \
-        "the link now points at the NEW pin's cache"
-    check "$(cat "$tmp/repo/external/dep/marker/f" 2>/dev/null)" "v2" \
-        "the tree reachable through it is the new version"
+    for missing in .git marker; do
+        invalid="$tmp/missing-$missing"
+        rc=0
+        out="$(reuse_shared_git_source "Dep" "$invalid" "$sdk_link" marker 2>&1)" || rc=$?
+        check "$rc" "1" "a cache missing $missing is rejected"
+        check "$(printf '%s' "$out" | grep -Fc "$invalid is missing $missing")" "1" \
+            "the warning identifies the cache and its missing $missing"
+        check "$(readlink "$sdk_link")" "$original" "the original link survives a cache missing $missing"
+        [ "$(readlink "$sdk_link")" = "$original" ] || ln -sfn "$original" "$sdk_link"
+    done
+
+    # Refuse replacement at the rename boundary, where the old link must still exist.
+    allow_rename=no
+    mv() {
+        [ "$(readlink "$sdk_link")" = "$original" ] &&
+            [ "$allow_rename" = yes ] &&
+            command mv "$@"
+    }
+    rc=0
+    reuse_shared_git_source "Dep" "$replacement" "$sdk_link" marker >/dev/null 2>&1 || rc=$?
+    check "$rc" "1" "a refused rename fails setup"
+    check "$(readlink "$sdk_link")" "$original" "a refused rename preserves the original link"
+    allow_rename=yes
+    rc=0
+    reuse_shared_git_source "Dep" "$replacement" "$sdk_link" marker >/dev/null || rc=$?
+    check "$rc" "0" "relinking to a different shared root succeeds"
+    check "$(readlink "$sdk_link")" "$replacement" "the link points at the replacement cache"
 
     exit $((FAIL > 0))
 ) || FAIL=$((FAIL + 1))

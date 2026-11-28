@@ -304,34 +304,28 @@ git_checkout_matches_cache() {
     [ "$have" = "$want" ]
 }
 
+replace_shared_source_link() (
+    local shared_dir="$1" local_dir="$2" staging_dir
+    staging_dir="$(mktemp -d "${local_dir}.link.XXXXXX")" || return 1
+    trap 'rm -f "$staging_dir/link"; rmdir "$staging_dir"' EXIT
+
+    # Stage beside the destination so the rename stays on the same filesystem.
+    MSYS=winsymlinks:nativestrict ln -s "$shared_dir" "$staging_dir/link" || return 1
+    [ -L "$local_dir" ] || return 1
+    case "$OSTYPE" in
+        darwin*|*bsd*) mv -fh "$staging_dir/link" "$local_dir" ;;
+        *)             mv -fT "$staging_dir/link" "$local_dir" ;;
+    esac
+)
+
 reuse_shared_git_source() {
     local label="$1"
     local shared_dir="$2"
     local local_dir="$3"
     local marker_path="$4"
 
-    # A symlink is only current if it points at the shared cache for the ref
-    # pinned RIGHT NOW. The cache directory name embeds the ref, so a re-pin
-    # leaves the old link intact and every later run reports "linked from shared
-    # cache" while the tree stays a version behind — which is how a GPL-era VST3
-    # checkout outlived the move to the MIT v3.8.0 pin, with the build, the
-    # tests, and the plug-ins all silently using it. Repointing a symlink
-    # destroys nothing, so repair it rather than report it.
-    if [ -L "$local_dir" ]; then
-        local link_target
-        link_target="$(readlink "$local_dir" 2>/dev/null || true)"
-        if [ "$link_target" = "$shared_dir" ] && [ -e "$local_dir/$marker_path" ]; then
-            info "$label linked from shared cache"
-            return 0
-        fi
-        if [ -n "$link_target" ] && [ "$link_target" != "$shared_dir" ]; then
-            info "$label link is stale ($link_target); re-pointing at $shared_dir"
-        fi
-        rm "$local_dir"
-    elif [ -e "$local_dir" ]; then
-        # A real directory is developer-managed (a hand clone, an unpacked
-        # release), so never delete it — but say so loudly, because a stale one
-        # builds everything against the wrong version in silence.
+    if [ ! -L "$local_dir" ] && [ -e "$local_dir" ]; then
+        # Real checkouts are developer-managed.
         if [ ! -e "$local_dir/$marker_path" ]; then
             fail "$label at $local_dir is missing $marker_path — remove the directory and re-run ./setup.sh"
             return 1
@@ -345,13 +339,28 @@ reuse_shared_git_source() {
     fi
 
     if [ ! -d "$shared_dir/.git" ]; then
-        warn "Shared $label cache missing at $shared_dir"
+        warn "Shared $label cache at $shared_dir is missing .git"
+        return 1
+    fi
+    if [ ! -e "$shared_dir/$marker_path" ]; then
+        warn "Shared $label cache at $shared_dir is missing $marker_path"
         return 1
     fi
 
-    mkdir -p "$(dirname "$local_dir")"
-
-    if [ "$PLATFORM" = "Windows" ]; then
+    if [ -L "$local_dir" ]; then
+        if [ "$(readlink "$local_dir")" = "$shared_dir" ]; then
+            info "$label linked from shared cache"
+            return 0
+        fi
+        info "Relinking $label from shared cache..."
+        if ! dry "replace link $local_dir with $shared_dir" &&
+            ! replace_shared_source_link "$shared_dir" "$local_dir"; then
+            fail "Could not replace $label link at $local_dir"
+            return 1
+        fi
+    elif ! mkdir -p "$(dirname "$local_dir")"; then
+        return 1
+    elif [ "$PLATFORM" = "Windows" ]; then
         info "Cloning $label from shared cache..."
         dry "git -c protocol.file.allow=always clone --local --no-hardlinks $shared_dir $local_dir" || {
             if ! git -c protocol.file.allow=always clone --local --no-hardlinks "$shared_dir" "$local_dir" >/dev/null 2>&1; then
@@ -371,7 +380,7 @@ reuse_shared_git_source() {
         fi
     else
         info "Linking $label from shared cache..."
-        dry "ln -s $shared_dir $local_dir" || ln -s "$shared_dir" "$local_dir"
+        dry "ln -sn $shared_dir $local_dir" || ln -sn "$shared_dir" "$local_dir" || return 1
     fi
 
     if [ -e "$local_dir/$marker_path" ]; then
