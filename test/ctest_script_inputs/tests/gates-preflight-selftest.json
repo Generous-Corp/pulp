@@ -28,6 +28,7 @@
    "tools/import-design/jsx-runtime",
    "tools/motion/visual/requirements.lock",
    "tools/scripts",
+   "tools/scripts/census_profiles.py",
    "tools/scripts/changed_surface_script_families.py",
    "tools/scripts/configure_only.py",
    "tools/scripts/consumption_census.py",
