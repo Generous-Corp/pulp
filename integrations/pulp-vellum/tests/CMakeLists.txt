@@ -177,12 +177,23 @@ if(PULP_BUILD_TESTS AND TARGET Catch2::Catch2WithMain)
         target_link_libraries(pulp-test-pulp-vellum-about-notices PRIVATE
             pulp::vellum Vellum::MirrorView_core Catch2::Catch2WithMain Threads::Threads)
         catch_discover_tests(pulp-test-pulp-vellum-about-notices PROPERTIES LABELS pulp-vellum-editor)
+
+        # The AAX GUI's contract-editor shell hosting a Vellum editor: the
+        # SDK-free AAX editor test source built a second time against Pulp's
+        # Vellum bridge, running only its Vellum cases. Needs no AAX SDK.
+        add_executable(pulp-test-aax-vellum-editor ${PULP_ROOT_DIR}/test/test_aax_editor.cpp)
+        target_include_directories(pulp-test-aax-vellum-editor PRIVATE ${PULP_ROOT_DIR}/test)
+        target_link_libraries(pulp-test-aax-vellum-editor PRIVATE
+            pulp::vellum Vellum::MirrorView_core Catch2::Catch2WithMain Threads::Threads)
+        target_compile_definitions(pulp-test-aax-vellum-editor PRIVATE PULP_TEST_AAX_VELLUM=1)
+        catch_discover_tests(pulp-test-aax-vellum-editor TEST_SPEC "[vellum]"
+            PROPERTIES LABELS pulp-vellum-editor)
+
         # A macOS AUv3 plug-in with a Vellum editor package: the appex stub
         # must link, and the editor code must live in the framework.
         if(APPLE AND NOT PULP_IOS)
             add_subdirectory(auv3_editor_package)
         endif()
-
 
         # An AU v2 host opening a Vellum editor. The target defines a test-only
         # macro, so its definition lives under test/ with the other test targets.
