@@ -1842,9 +1842,14 @@ are ad-hoc signed before the containing framework is signed. iOS AUv3 keeps its
 flat-extension layout and rejects a UI package that declares runtime libraries
 until a dedicated iOS staging path exists. A package with no runtime libraries
 uses the ordinary AUv3 path unchanged.
-CMake also adds those shared libraries to the `.appex` stub's link line, so the
-stub gets an extra rpath into `<fw>.framework/Versions/A`; without it dyld cannot
-resolve the stub's own `@rpath/libvellum-*.dylib` references. The build leaves
+On macOS the generated editor-package source and the package link go to
+`${target}_AUv3Framework` only, never to the `.appex` stub (`_pulp_attach_ui_package`
+skips it when the framework target exists). The stub only `-force_load`s the
+framework, so the editor instantiation it would hold references the plug-in's
+editor code and fails to link (`undefined forge::...Editor::editor_idle()`), and
+the stub references no `@rpath/libvellum-*.dylib`, so it needs no rpath into the
+framework. `pulp_add_plugin` takes the AUv3 entry from `au_v3_entry.cpp` in the calling directory, or from `PULP_AUV3_ENTRY_SOURCE` when that is set. `vellum-auv3-appex-editor-package` (integrations/pulp-vellum/tests/
+auv3_editor_package) builds the pair and reads both symbol tables. The build leaves
 the dylibs ad-hoc signed, and `pulp ship sign` does not re-sign them with a real
 identity (it runs a single `codesign --force` on the path it is given, with no
 inner-out walk), so a distribution build must sign the nested dylibs, the

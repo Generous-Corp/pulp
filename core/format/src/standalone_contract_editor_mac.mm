@@ -289,6 +289,16 @@ bool standalone_contract_editor_supported() {
     return true;
 }
 
+bool standalone_text_input_has_focus() {
+    for (NSWindow* window in [NSApp windows]) {
+        // An editing NSTextField or NSTextView holds the field editor (an NSText).
+        NSResponder* responder = window.firstResponder;
+        if ([responder isKindOfClass:[NSText class]] && static_cast<NSText*>(responder).editable)
+            return true;
+    }
+    return false;
+}
+
 bool run_standalone_contract_editor(Processor& processor, state::StateStore& store,
                                     EditorFactory& factory,
                                     const StandaloneContractEditorOptions& options) {
@@ -493,6 +503,10 @@ bool run_standalone_contract_editor(Processor& processor, state::StateStore& sto
 namespace pulp::format::detail {
 
 bool standalone_contract_editor_supported() {
+    return false;
+}
+
+bool standalone_text_input_has_focus() {
     return false;
 }
 

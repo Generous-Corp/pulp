@@ -11,7 +11,7 @@
     {"name": "dataplane", "targets": ["pulp-dataplane"], "retire_after": "the first export after Vellum's view-core binds vellum::value instead of the pulp::dataplane value sources and host surfaces"},
     {"name": "design-ir", "carried_by": "view-core"},
     {"name": "view-core", "targets": ["pulp-view-core"], "pulp_kept": {
-      "targets": ["pulp-view-tooling"],
+      "targets": ["pulp-view-tooling", "pulp-editor-bridge"],
       "ownership_note": "Vellum owns the plug-in editor host implementation (gpu_plugin_editor_host_mac.mm and plugin_view_host.cpp in the Vellum framework). Pulp's legacy core/view plugin_view_host_* remains pulp_kept until deletion.",
       "files": [
         "core/view/src/inspector.cpp",
@@ -19,6 +19,7 @@
         "core/view/src/inspector_window.cpp",
         "core/view/include/pulp/view/inspector_window.hpp",
         "core/view/src/editor_bridge.cpp",
+        "core/view/src/editor_bridge_native_runtime.cpp",
         "core/view/include/pulp/view/editor_bridge.hpp",
         "core/view/include/pulp/view/host_param_surface.hpp",
         "core/view/src/script_inspector_bridge.cpp",

@@ -120,7 +120,11 @@ on a real PR. Do them in order.
      covers `Processor`, `PluginSlot`, and the experimental `GpuAudioNode`
      surface. New GPU-audio virtual hooks belong at the end of that class;
      inserting one in the middle shifts existing slots even though the SDK
-     remains source-rebuild oriented. The editor-host interfaces (`Editor`,
+     remains source-rebuild oriented. The gate reads
+     `PULP_FORMAT_LEGACY_VIEW_NAME(x)` in `processor.hpp` as `x` (the reserved
+     names a UI-free SDK gives the view hooks) and expands no other macro, so
+     a renamed spelling of an existing slot passes and a changed signature
+     inside the macro still fails. The editor-host interfaces (`Editor`,
      `EditorContext`, `EditorFactory`, `NativeSurfaceHost`) are checked under a
      stricter FROZEN policy: an appended virtual fails too, because a UI
      package and a format adapter are separate prebuilt binaries. Don't "fix"
@@ -14024,6 +14028,11 @@ main's SDK. A new optional Vellum integration package needs its option, its
 `pulp-test-*` target and a `paths:` entry added there, or no lane compiles it
 against main. The tests' ctest label should start with `pulp-vellum` so the
 lane's `-L pulp-vellum` filter runs them.
+
+The lane also runs the Yoga layout fixtures on Vellum's layout (`runner.py
+--verify --engine vellum`, `VELLUM_APP_HOST` set to the SDK's `bin/vellum-app-host`).
+Keep it a parallel mode: the `pulp-test-visual` lane stays until the UI cutover,
+and exit 3 (nothing measured) must keep failing the step.
 
 The lane's `-L pulp-vellum` run includes the GPU adapter probe and its
 empty-adapter negative control (`PASS_REGULAR_EXPRESSION` on the fail JSON, since

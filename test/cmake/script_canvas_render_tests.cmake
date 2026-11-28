@@ -49,7 +49,7 @@ pulp_add_test_suite(pulp-test-view-bridge GROUP pulp-test-group-script-format
     TEST_PREFIX "lifecycle::"
     LABELS lifecycle)
 pulp_test_data(pulp-test-view-bridge NO_DEFINE
-    PATHS core/format/include/pulp/format/clap_entry.hpp core/format/src/vst3_plug_view.cpp
+    PATHS core/format/src/clap_adapter.cpp core/format/src/vst3_plug_view.cpp
         core/format/src/au_view_controller_mac.mm integrations/legacy-platform-hosts/ios/src/au_view_controller_ios.mm
         core/format/src/au_v2_cocoa_view.mm core/format/src/aax_effect_gui.cpp
         core/format/src/standalone.cpp)
