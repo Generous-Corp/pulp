@@ -1058,13 +1058,42 @@ function applySerializedPaletteConfiguration(json) {
 }
 
 function normalizePaletteSavePath(path) {
-    if (!path || path.length === 0) return "/tmp/pulp-palette.colorsystem.json";
+    if (!path || path.length === 0) return "";
     if (path.toLowerCase().slice(-5) === ".json") return path;
     return path + ".colorsystem.json";
 }
 
+// Base64 of the UTF-8 bytes of a string. Shell commands carry file content
+// only in this form, so no user text is ever interpreted by the shell.
+function utf8Base64(text) {
+    var s = unescape(encodeURIComponent(String(text)));
+    var tbl = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    var out = "";
+    for (var i = 0; i < s.length; i += 3) {
+        var a = s.charCodeAt(i);
+        var hasB = i + 1 < s.length;
+        var hasC = i + 2 < s.length;
+        var b = hasB ? s.charCodeAt(i + 1) : 0;
+        var c = hasC ? s.charCodeAt(i + 2) : 0;
+        out += tbl.charAt(a >> 2) + tbl.charAt(((a & 3) << 4) | (b >> 4));
+        out += hasB ? tbl.charAt(((b & 15) << 2) | (c >> 6)) : "=";
+        out += hasC ? tbl.charAt(c & 63) : "=";
+    }
+    return out;
+}
+
 function writeTextFile(path, content) {
-    exec("cat > " + shellQuote(path) + " << 'PULPEOF'\n" + content + "\nPULPEOF");
+    exec("printf %s " + shellQuote(utf8Base64(content)) + " | base64 -d > " + shellQuote(path));
+}
+
+// Writes content into a fresh private directory (mode 0700, name chosen
+// exclusively by mktemp) and returns the file path, or "" on failure.
+function writePrivateTempFile(content, fileName) {
+    var cmd = "d=$(mktemp -d \"${TMPDIR:-/tmp}/pulp-design.XXXXXX\") && { "
+        + "{ printf %s " + shellQuote(utf8Base64(content)) + " | base64 -d > \"$d/\"" + shellQuote(fileName)
+        + " && printf %s \"$d/\"" + shellQuote(fileName)
+        + "; } || { rm -f \"$d/\"" + shellQuote(fileName) + "; rmdir \"$d\"; false; }; }";
+    return String(exec(cmd) || "").trim();
 }
 
 function readTextFile(path) {
@@ -1088,6 +1117,7 @@ function buildPaletteSaveLoadRow() {
     registerClick("palette-save-btn");
     on("palette-save-btn", "click", function() {
         var path = normalizePaletteSavePath(showSaveDialog("Save Palette", "Color System JSON", "json"));
+        if (path.length === 0) return;
         writeTextFile(path, serializePaletteConfiguration());
         showToast("Palette saved to " + path);
     });
@@ -1104,7 +1134,7 @@ function buildPaletteSaveLoadRow() {
     registerClick("palette-load-btn");
     on("palette-load-btn", "click", function() {
         var path = showOpenDialog("Load Palette", "Color System JSON", "json");
-        if (!path || path.length === 0) path = "/tmp/pulp-palette.colorsystem.json";
+        if (!path || path.length === 0) return;
         var json = readTextFile(path);
         if (json && json.length > 10) {
             if (applySerializedPaletteConfiguration(json)) {
