@@ -1,10 +1,12 @@
 // The catalogue builds each retained component by stable id and hands back a
 // Vellum view.
 
+#include "preset_test_sandbox.hpp"
 #include <pulp/vellum_components/catalogue.hpp>
 #include <pulp/vellum_components/lasso.hpp>
 #include <pulp/vellum_components/model_manager_view.hpp>
 #include <pulp/vellum_components/preferences_panel.hpp>
+#include <pulp/vellum_components/preset_program_editor.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -34,7 +36,8 @@ TEST_CASE("every catalogue id constructs a Vellum view of its component type",
     const auto ctx = serviced_context(&requests);
 
     const std::vector<std::string_view> expected = {"pulp.panic_button", "pulp.lasso",
-                                                    "pulp.preferences_panel", "pulp.model_manager"};
+                                                    "pulp.preferences_panel", "pulp.model_manager",
+                                                    "pulp.preset_program_editor"};
     REQUIRE(pulp_view_component_ids() == expected);
 
     auto panic = make_pulp_view_component("pulp.panic_button", ctx);
@@ -91,4 +94,20 @@ TEST_CASE("a catalogue preferences panel restores the stored page once bound",
     // Later selections write back.
     CHECK(panel->set_active_page(std::string_view("General")));
     CHECK(props.get_string("preferences.active_page") == std::optional<std::string>("General"));
+}
+
+TEST_CASE("the catalogue builds a program editor over the context's library",
+          "[pulp-vellum-components][catalogue]") {
+    pulp::test::PresetTestSandbox sandbox("pulp-catalogue-editor");
+    pulp::state::StateStore store;
+    pulp::state::PresetManager manager(store, "CatalogueCo", "CatalogueEditor");
+    pulp::state::PresetLibrary library(manager, sandbox.root / "library.json");
+
+    PulpViewComponentContext ctx;
+    CHECK(make_pulp_view_component("pulp.preset_program_editor", ctx) == nullptr);
+
+    ctx.preset_library = &library;
+    auto view = make_pulp_view_component("pulp.preset_program_editor", ctx);
+    REQUIRE(view);
+    CHECK(dynamic_cast<PresetProgramEditor*>(view.get()));
 }
