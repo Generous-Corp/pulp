@@ -92,6 +92,7 @@ target_sources(pulp-format-core PRIVATE
     src/transport_quantizer.cpp
     src/editor_prewarm.cpp
     src/standalone_panel.cpp
+    src/standalone_panel_installer.cpp
     src/app_updates.cpp
     src/third_party_notices.cpp
 )

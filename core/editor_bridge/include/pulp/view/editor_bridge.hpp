@@ -54,14 +54,28 @@
 
 namespace pulp::view {
 
-class WebViewPanel;
-class ScriptEngine;
-class ScriptedUiSession;
-
-// Forward-declared so EditorBridge can expose attach_native_runtime()
-// before the JS engine surface is fully available in this header. The
-// concrete JsRuntime type lives in pulp/view/js_engine.hpp.
-class JsRuntime;
+// The deprecated member spellings on EditorBridge forward through these. Each
+// call names the free function unqualified with arguments that depend on the
+// source's type, so argument-dependent lookup resolves it where the member is
+// used, to the function in pulp/view/editor_bridge_attach.hpp. Without that
+// header the use is a compile error, never an undefined symbol: this header
+// names no view type and the bridge library defines none of the attachments.
+namespace editor_bridge_forward {
+template <class Bridge, class Panel> void to_attach_webview(Bridge& bridge, Panel& panel) {
+    attach_webview(bridge, panel);
+}
+template <class Bridge, class Panel> void to_detach_webview(Bridge& bridge, Panel& panel) {
+    detach_webview(bridge, panel);
+}
+template <class Bridge, class Source>
+void to_attach_native_runtime(Bridge& bridge, Source& source, std::string_view handler_name) {
+    attach_native_runtime(bridge, source, handler_name);
+}
+template <class Bridge, class Session>
+void to_detach_native_runtime(Bridge& bridge, Session& session, std::string_view handler_name) {
+    detach_native_runtime(bridge, session, handler_name);
+}
+} // namespace editor_bridge_forward
 
 /// Renderer-agnostic dispatcher for editor↔processor JSON messages.
 ///
@@ -79,7 +93,11 @@ class JsRuntime;
 ///       apply_morph_to_live(t);
 ///       return pulp::view::EditorBridge::ok_response();
 ///   });
-///   bridge.attach_webview(*panel_);
+///   attach_webview(bridge, *panel_);   // pulp/view/editor_bridge_attach.hpp
+///
+/// This header is the view-free dispatch core (pulp::editor-bridge). Attaching
+/// the bridge to a WebView panel or a script engine is in
+/// pulp/view/editor_bridge_attach.hpp, which pulp::view-tooling provides.
 class EditorBridge {
 public:
     /// Handler signature. Receives the parsed payload (or an empty
@@ -93,8 +111,8 @@ public:
 
     // Non-copyable AND non-movable.
     //
-    // attach_webview() and attach_native_runtime() install callbacks
-    // that reference this bridge's internal state. Allowing moves
+    // attach_webview() and attach_native_runtime() (editor_bridge_attach.hpp)
+    // install callbacks that reference this bridge. Allowing moves
     // would let an attached bridge be relocated out from under those
     // callbacks (vector reallocation, std::optional emplace, move-
     // construction of an editor that contains one), and the next
@@ -140,48 +158,45 @@ public:
 
     /// Convenience: dispatch a WebViewPanel message that has already
     /// been split into `type` + `payload_json` by the platform layer.
-    /// Used internally by attach_webview but also useful directly when
+    /// Used by attach_webview() but also useful directly when
     /// a plugin wraps WebViewPanel itself.
     std::string dispatch_webview_message(std::string_view type,
                                          std::string_view payload_json) const noexcept;
 
-    /// Hook this bridge up to a WebViewPanel's structured message
-    /// channel. Equivalent to:
-    ///   panel.set_message_handler([this](const WebViewMessage& m) {
-    ///       return dispatch_webview_message(m.type, m.payload_json);
-    ///   });
-    void attach_webview(WebViewPanel& panel);
+    // ── Deprecated attachment spellings ──────────────────────────────
+    //
+    // The attachments are free functions in pulp/view/editor_bridge_attach.hpp,
+    // defined by pulp::view-tooling. These members keep the earlier spelling
+    // compiling; they are templates so this header names no view type, and a
+    // use still needs that header included.
 
-    /// Clear the message handler installed by attach_webview(). Safe
-    /// to call even when no WebView handler is currently installed.
-    /// Consumers that own both the bridge and panel can use this to
-    /// make teardown order explicit before the panel or native child
-    /// view is detached.
-    void detach_webview(WebViewPanel& panel);
+    template <class Panel>
+    [[deprecated(
+        "include <pulp/view/editor_bridge_attach.hpp> and call attach_webview(bridge, panel)")]]
+    void attach_webview(Panel& panel) {
+        editor_bridge_forward::to_attach_webview(*this, panel);
+    }
 
-    /// Hook this bridge up to a native JS runtime's postMessage source.
-    /// `handler_name` is the symbol the runtime exposes that calls back
-    /// into C++ (the equivalent of `__pulpPostMessage` in WebView).
-    ///
-    /// NOTE: This is the integration seam for pulp #468 (Claude Design
-    /// import lane). The full wiring lands when the import lane's
-    /// JsRuntime postMessage shape is concrete; until then the body is
-    /// a stub that records the binding so the call site doesn't have
-    /// to feature-flag itself out.
-    void attach_native_runtime(JsRuntime& runtime, std::string_view handler_name);
+    template <class Panel>
+    [[deprecated(
+        "include <pulp/view/editor_bridge_attach.hpp> and call detach_webview(bridge, panel)")]]
+    void detach_webview(Panel& panel) {
+        editor_bridge_forward::to_detach_webview(*this, panel);
+    }
 
-    /// Register a global function on a native ScriptEngine that accepts one
-    /// JSON envelope string and returns the bridge's JSON response string.
-    /// The EditorBridge must outlive calls through the registered symbol.
-    void attach_native_runtime(ScriptEngine& engine, std::string_view handler_name);
+    template <class Source>
+    [[deprecated("include <pulp/view/editor_bridge_attach.hpp> and call "
+                 "attach_native_runtime(bridge, source, name)")]]
+    void attach_native_runtime(Source& source, std::string_view handler_name) {
+        editor_bridge_forward::to_attach_native_runtime(*this, source, handler_name);
+    }
 
-    /// Attach to a ScriptedUiSession without borrowing its replaceable engine.
-    /// The endpoint is preserved across scripted-UI reloads. This bridge must
-    /// outlive the attachment; call detach_native_runtime() before teardown.
-    void attach_native_runtime(ScriptedUiSession& session,
-                               std::string_view handler_name);
-    void detach_native_runtime(ScriptedUiSession& session,
-                               std::string_view handler_name);
+    template <class Session>
+    [[deprecated("include <pulp/view/editor_bridge_attach.hpp> and call "
+                 "detach_native_runtime(bridge, session, name)")]]
+    void detach_native_runtime(Session& session, std::string_view handler_name) {
+        editor_bridge_forward::to_detach_native_runtime(*this, session, handler_name);
+    }
 
     // ── Static value-coercion helpers for handler authors ────────────
     //
@@ -216,12 +231,13 @@ private:
     std::unique_ptr<Impl> impl_;
 };
 
-/// Build the starter `bridge_handlers.cpp` text the CLI emits next to
-/// the generated JS view when `--from claude` runs. Pure string-builder;
-/// no I/O. The output references `pulp::view::EditorBridge` and shows
-/// add_handler() registrations + an attach_webview() call so users have
-/// a runnable shape to fill in. Defined in pulp-view-tooling with the
-/// bridge itself, so the extracted design-import headers do not declare it.
-std::string render_claude_bridge_scaffold(const std::string& generated_js_path);
-
 } // namespace pulp::view
+
+// A target that links pulp::view-tooling, which defines the attachments, gets
+// this definition and so the attachment declarations with this header, which
+// keeps the deprecated member spellings compiling for it. A target that links
+// only the dispatch core does not, and a use of an attachment there is a
+// compile error rather than an undefined symbol.
+#if defined(PULP_EDITOR_BRIDGE_VIEW_ATTACHMENTS) && PULP_EDITOR_BRIDGE_VIEW_ATTACHMENTS
+#include <pulp/view/editor_bridge_attach.hpp>
+#endif

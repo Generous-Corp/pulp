@@ -3,7 +3,7 @@
 # on Pulp runtime, signal and audio plus Vellum's value and view interfaces.
 find_package(Vellum CONFIG REQUIRED)
 
-add_library(pulp-vellum-audio STATIC src/audio_display_provider.cpp src/audio_widgets.cpp
+add_library(pulp-vellum-audio STATIC src/audio_display_provider.cpp src/audio_inspector_panel.cpp src/audio_widgets.cpp
     src/eq_curve_view.cpp src/graph_scale.cpp src/multi_meter.cpp src/musical_typing_keyboard.cpp src/piano_roll_pitch_ruler.cpp src/piano_roll_view.cpp
     src/musical_typing_keyboard_svg.cpp src/register_audio_widgets.cpp src/spectrogram_view.cpp
     src/standalone_typing_panel.cpp src/step_grid_view.cpp src/waveform_editor.cpp src/waveform_editor_primitives.cpp src/waveform_gpu_primitives.cpp src/waveform_gpu_render_controller.cpp
@@ -15,6 +15,17 @@ target_include_directories(pulp-vellum-audio PUBLIC
 target_compile_features(pulp-vellum-audio PUBLIC cxx_std_20)
 target_link_libraries(pulp-vellum-audio PUBLIC pulp::runtime pulp::dataplane-audio pulp::signal pulp::audio pulp::format-core pulp::midi
     pulp::timeline pulp::timeline-editor pulp::timebase Vellum::Value Vellum::MirrorView_core)
+# View-free standalones install the typing panel through their generated
+# registrar (tools/cmake/PulpAppTargets.cmake). This tree announces it through
+# the global property; the exported target property is what an installed SDK
+# consumer sees (PulpConfig.cmake.in turns it into the same global entry).
+set(_pulp_typing_panel_provider
+    "pulp/vellum_audio/standalone_typing_panel.hpp|pulp::vellum_audio::install_standalone_typing_panel")
+set_target_properties(pulp-vellum-audio PROPERTIES
+    PULP_STANDALONE_PANEL_PROVIDER "${_pulp_typing_panel_provider}"
+    EXPORT_PROPERTIES PULP_STANDALONE_PANEL_PROVIDER)
+set_property(GLOBAL APPEND PROPERTY PULP_STANDALONE_PANEL_PROVIDERS
+    "pulp::vellum-audio|${_pulp_typing_panel_provider}")
 if(TARGET pulp-vellum-scripted)
     target_link_libraries(pulp-vellum-scripted PUBLIC pulp::vellum-audio)
     target_compile_definitions(pulp-vellum-scripted PRIVATE PULP_VELLUM_AUDIO=1)

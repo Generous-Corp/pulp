@@ -15,6 +15,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include "pulp/view/editor_bridge.hpp"
+#include "pulp/view/editor_bridge_attach.hpp"
 #include "pulp/platform/child_process.hpp"
 #include "../tools/bridge/generated_editor_bridge.hpp"
 #include "pulp/view/script_engine.hpp"
@@ -947,9 +948,8 @@ private:
 
 } // namespace
 
-TEST_CASE("EditorBridge::attach_webview routes WebViewPanel messages through dispatch",
-          "[editor_bridge][issue-709]")
-{
+TEST_CASE("attach_webview routes WebViewPanel messages through dispatch",
+          "[editor_bridge][issue-709]") {
     EditorBridge bridge;
     int called_with = 0;
     bridge.add_handler("set_value", [&](const auto& payload) {
@@ -959,7 +959,7 @@ TEST_CASE("EditorBridge::attach_webview routes WebViewPanel messages through dis
     });
 
     StubWebViewPanel panel;
-    bridge.attach_webview(panel);
+    attach_webview(bridge, panel);
 
     pulp::view::WebViewMessage msg;
     msg.type = "set_value";
@@ -976,9 +976,7 @@ TEST_CASE("EditorBridge::attach_webview routes WebViewPanel messages through dis
     CHECK(response_has_error(resp2, "unknown message type"));
 }
 
-TEST_CASE("EditorBridge::detach_webview clears the WebViewPanel message handler",
-          "[editor_bridge][issue-726]")
-{
+TEST_CASE("detach_webview clears the WebViewPanel message handler", "[editor_bridge][issue-726]") {
     EditorBridge bridge;
     int calls = 0;
     bridge.add_handler("set_value", [&](const auto&) {
@@ -990,10 +988,10 @@ TEST_CASE("EditorBridge::detach_webview clears the WebViewPanel message handler"
     CHECK_FALSE(panel.has_message_handler());
 
     // No-op when nothing was attached yet.
-    bridge.detach_webview(panel);
+    detach_webview(bridge, panel);
     CHECK_FALSE(panel.has_message_handler());
 
-    bridge.attach_webview(panel);
+    attach_webview(bridge, panel);
     REQUIRE(panel.has_message_handler());
 
     pulp::view::WebViewMessage msg;
@@ -1002,14 +1000,59 @@ TEST_CASE("EditorBridge::detach_webview clears the WebViewPanel message handler"
     CHECK(response_ok(panel.deliver(msg)));
     CHECK(calls == 1);
 
-    bridge.detach_webview(panel);
+    detach_webview(bridge, panel);
     CHECK_FALSE(panel.has_message_handler());
+}
+
+// The deprecated member spellings forward to the free functions, so both
+// spellings attach, dispatch and detach the same way.
+TEST_CASE("deprecated EditorBridge member attachments match the free functions",
+          "[editor_bridge]") {
+    EditorBridge bridge;
+    int calls = 0;
+    bridge.add_handler("set_value", [&](const auto&) {
+        ++calls;
+        return EditorBridge::ok_response();
+    });
+    pulp::view::WebViewMessage msg;
+    msg.type = "set_value";
+    msg.payload_json = "{}";
+
+    StubWebViewPanel by_member;
+    StubWebViewPanel by_function;
+#if defined(__clang__) || defined(__GNUC__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+#endif
+    bridge.attach_webview(by_member);
+#if defined(__clang__) || defined(__GNUC__)
+#pragma GCC diagnostic pop
+#endif
+    attach_webview(bridge, by_function);
+    REQUIRE(by_member.has_message_handler());
+    REQUIRE(by_function.has_message_handler());
+    const auto member_reply = by_member.deliver(msg);
+    const auto function_reply = by_function.deliver(msg);
+    CHECK(member_reply == function_reply);
+    CHECK(response_ok(member_reply));
+    CHECK(calls == 2);
+
+#if defined(__clang__) || defined(__GNUC__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+#endif
+    bridge.detach_webview(by_member);
+#if defined(__clang__) || defined(__GNUC__)
+#pragma GCC diagnostic pop
+#endif
+    detach_webview(bridge, by_function);
+    CHECK_FALSE(by_member.has_message_handler());
+    CHECK_FALSE(by_function.has_message_handler());
 }
 #endif
 
-TEST_CASE("EditorBridge::attach_native_runtime is a no-op stub for #468",
-          "[editor_bridge][issue-709][issue-468]")
-{
+TEST_CASE("attach_native_runtime on a JsRuntime is a no-op stub for #468",
+          "[editor_bridge][issue-709][issue-468]") {
     // The native-JS-runtime attach path is a declared seam for pulp
     // #468; the body is intentionally empty until JsRuntime exposes a
     // concrete postMessage primitive. This test locks in the stub's
@@ -1020,7 +1063,7 @@ TEST_CASE("EditorBridge::attach_native_runtime is a no-op stub for #468",
     const auto count_before = bridge.handler_count();
 
     pulp::view::JsRuntime rt;
-    bridge.attach_native_runtime(rt, "spectr");
+    attach_native_runtime(bridge, rt, "spectr");
     CHECK(bridge.handler_count() == count_before);
 
     // Dispatch still works after the stub attach — no state mutated.
@@ -1038,9 +1081,8 @@ TEST_CASE("EditorBridge native ScriptEngine attachment dispatches JSON envelopes
     });
 
     pulp::view::ScriptEngine engine;
-    CHECK_THROWS_AS(bridge.attach_native_runtime(engine, ""),
-                    std::invalid_argument);
-    bridge.attach_native_runtime(engine, "__testEditorDispatch");
+    CHECK_THROWS_AS(attach_native_runtime(bridge, engine, ""), std::invalid_argument);
+    attach_native_runtime(bridge, engine, "__testEditorDispatch");
 
     const auto result = engine.evaluate(
         "__testEditorDispatch(JSON.stringify({type:'set_value',payload:{value:0.625}}))");
@@ -1051,6 +1093,40 @@ TEST_CASE("EditorBridge native ScriptEngine attachment dispatches JSON envelopes
     const auto bad = engine.evaluate("__testEditorDispatch(42)");
     REQUIRE(bad.isString());
     CHECK(response_has_error(std::string(bad.getString()), "expects one JSON string"));
+}
+
+// Both spellings on a ScriptEngine, which every configuration builds: the
+// deprecated member forwards to the free function and dispatches the same way.
+TEST_CASE("deprecated EditorBridge native attachment matches the free function",
+          "[editor_bridge][native_runtime]") {
+    EditorBridge bridge;
+    int calls = 0;
+    bridge.add_handler("ping", [&](const auto&) {
+        ++calls;
+        return EditorBridge::ok_response();
+    });
+
+    pulp::view::ScriptEngine by_member;
+    pulp::view::ScriptEngine by_function;
+#if defined(__clang__) || defined(__GNUC__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+#endif
+    bridge.attach_native_runtime(by_member, "__dispatch");
+    CHECK_THROWS_AS(bridge.attach_native_runtime(by_member, ""), std::invalid_argument);
+#if defined(__clang__) || defined(__GNUC__)
+#pragma GCC diagnostic pop
+#endif
+    attach_native_runtime(bridge, by_function, "__dispatch");
+
+    const char* call = "__dispatch(JSON.stringify({type:'ping'}))";
+    const auto member_reply = by_member.evaluate(call);
+    const auto function_reply = by_function.evaluate(call);
+    REQUIRE(member_reply.isString());
+    REQUIRE(function_reply.isString());
+    CHECK(std::string(member_reply.getString()) == std::string(function_reply.getString()));
+    CHECK(response_ok(std::string(member_reply.getString())));
+    CHECK(calls == 2);
 }
 
 TEST_CASE("EditorBridge ScriptedUiSession attachment survives realm replacement",
@@ -1083,9 +1159,8 @@ TEST_CASE("EditorBridge ScriptedUiSession attachment survives realm replacement"
                       .enable_hot_reload = false,
                       .enable_theme_reload = false});
 
-    CHECK_THROWS_AS(bridge.attach_native_runtime(session, ""),
-                    std::invalid_argument);
-    bridge.attach_native_runtime(session, "__testEditorDispatch");
+    CHECK_THROWS_AS(attach_native_runtime(bridge, session, ""), std::invalid_argument);
+    attach_native_runtime(bridge, session, "__testEditorDispatch");
     std::string error;
     REQUIRE(session.load(&error));
     CHECK(calls == 1);
@@ -1098,7 +1173,7 @@ TEST_CASE("EditorBridge ScriptedUiSession attachment survives realm replacement"
     CHECK(calls == 2);
     CHECK(received == Approx(0.75f));
 
-    bridge.detach_native_runtime(session, "__testEditorDispatch");
+    detach_native_runtime(bridge, session, "__testEditorDispatch");
     write_script(1.0f);
     CHECK_FALSE(session.reload(&error));
     CHECK(calls == 2);

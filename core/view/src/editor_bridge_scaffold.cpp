@@ -8,7 +8,7 @@
 #include <sstream>
 #include <string>
 
-#include <pulp/view/editor_bridge.hpp>
+#include <pulp/view/editor_bridge_scaffold.hpp>
 
 namespace pulp::view {
 
@@ -30,7 +30,7 @@ std::string render_claude_bridge_scaffold(const std::string& generated_js_path) 
           "// standard error vocabulary (malformed_json, unknown_type,\n"
           "// missing_field, wrong_type, internal_error).\n"
           "\n"
-          "#include <pulp/view/editor_bridge.hpp>\n"
+          "#include <pulp/view/editor_bridge_attach.hpp>\n"
           "#include <pulp/view/web_view.hpp>\n"
           "\n"
           "#include <memory>\n"
@@ -58,12 +58,12 @@ std::string render_claude_bridge_scaffold(const std::string& generated_js_path) 
           "            return pulp::view::EditorBridge::ok_response();\n"
           "        });\n"
           "\n"
-          "        bridge_.attach_webview(panel);\n"
+          "        pulp::view::attach_webview(bridge_, panel);\n"
           "    }\n"
           "\n"
           "    // For the pulp #468 native-JS-runtime import lane, swap the\n"
           "    // attach_webview() call above for:\n"
-          "    //   bridge_.attach_native_runtime(runtime, \"<handler_name>\");\n"
+          "    //   pulp::view::attach_native_runtime(bridge_, runtime, \"<handler_name>\");\n"
           "\n"
           "private:\n"
           "    pulp::view::EditorBridge bridge_;\n"

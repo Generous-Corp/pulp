@@ -1,0 +1,13 @@
+{
+  "schema_version": 1,
+  "event_id": "20261127-c4a-editor-bridge-home",
+  "kind": "exported-path-change",
+  "created_at": "2026-11-27T11:44:35Z",
+  "receipt_export_id": "20261107-f0ac0a4ff392",
+  "paths": [
+    "core/view/include/pulp/view/editor_bridge_attach.hpp",
+    "core/view/include/pulp/view/editor_bridge_scaffold.hpp"
+  ],
+  "vellum_inherits": false,
+  "rationale": "EditorBridge's view attachments and the import-design scaffold builder get their own Pulp-kept headers in core/view; they are pulp-view-tooling surfaces Vellum does not export, so a re-export has nothing to carry."
+}
