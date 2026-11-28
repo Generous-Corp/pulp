@@ -1,6 +1,7 @@
 #include <pulp/inspect/control_gpu_health_provider.hpp>
 #include <pulp/inspect/control_gpu_health_view_adapter.hpp>
 #include <pulp/view/screenshot.hpp>
+#include <pulp/view/screenshot_compare.hpp>
 #include <pulp/view/theme.hpp>
 #include <pulp/view/view.hpp>
 #include <pulp/view/widgets.hpp>
@@ -26,6 +27,17 @@ using namespace std::chrono_literals;
 namespace gh = pulp::tooling::gpu_health;
 
 namespace {
+
+// Content statistics for the adapter, decoded by the view layer.
+pulp::inspect::ControlGpuHealthViewAdapter::ContentStats
+analyze_view_png(const std::vector<std::uint8_t>& png) {
+    const auto stats = pulp::view::analyze_screenshot_content(png);
+    return {.valid = stats.valid,
+            .passes_content_floor = stats.passes_content_floor(),
+            .total_pixels = stats.total_pixels,
+            .opaque_coverage = stats.opaque_coverage,
+            .unique_colors = stats.unique_colors};
+}
 
 void require_valid(const pulp::inspect::ControlGpuHealthProvider& provider) {
     const auto snapshot = provider.snapshot();
@@ -802,6 +814,7 @@ TEST_CASE(
     auto capture_completed_at = std::chrono::steady_clock::time_point{};
     auto adapter = ControlGpuHealthViewAdapter::create({
         .provider = provider,
+        .analyze_png = analyze_view_png,
         .capture_back_buffer_png =
             [&root] {
                 return pulp::view::render_to_png(root, 160, 90, 1.0f,
@@ -852,6 +865,7 @@ TEST_CASE("GPU health view adapter reports a valid blank capture as failure") {
                                                             "headless-blank-negative"});
     auto adapter = pulp::inspect::ControlGpuHealthViewAdapter::create({
         .provider = provider,
+        .analyze_png = analyze_view_png,
         .capture_back_buffer_png =
             [&blank] {
                 return pulp::view::render_to_png(blank, 16, 16, 1.0f,
@@ -880,6 +894,7 @@ TEST_CASE("GPU health view adapter samples time immediately after capture return
     bool completion_sampled = false;
     auto adapter = pulp::inspect::ControlGpuHealthViewAdapter::create({
         .provider = provider,
+        .analyze_png = analyze_view_png,
         .capture_back_buffer_png =
             [&] {
                 auto png = pulp::view::render_to_png(visible, 16, 16, 1.0f,
@@ -916,6 +931,7 @@ TEST_CASE("GPU health view adapter recovers after a capture exception") {
     std::size_t attempts = 0;
     auto adapter = pulp::inspect::ControlGpuHealthViewAdapter::create({
         .provider = provider,
+        .analyze_png = analyze_view_png,
         .capture_back_buffer_png =
             [&] {
                 if (attempts++ == 0)

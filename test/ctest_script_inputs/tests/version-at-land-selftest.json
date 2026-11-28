@@ -3,6 +3,8 @@
  "record": {
   "entry": "tools/scripts/test_version_at_land.py",
   "inputs": [
+   ".claude-plugin/marketplace.json",
+   ".claude-plugin/plugin.json",
    ".github/workflows",
    "docs/status/agent-capabilities.json",
    "docs/status/agent-capability-surface",

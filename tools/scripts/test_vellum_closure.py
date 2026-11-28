@@ -808,6 +808,36 @@ class ExportProvenanceTests(unittest.TestCase):
 
 
 class ConfigureRecordTests(unittest.TestCase):
+    def test_external_view_prelude_directory_is_rejected_for_export(self):
+        from vellum_closure import configure_options_sha256, configure_violations, exportable_closure
+        configure = gpu_configure()
+        configure["options"] = {**configure["options"], "PULP_VIEW_JS_DIR": "@external-path"}
+        configure["options_sha256"] = configure_options_sha256(configure["options"])
+        manifest = {**canvas_manifest(configure), "targets": [{"name": "pulp-view-script"}]}
+        self.assertTrue(any("PULP_VIEW_JS_DIR" in violation for violation in configure_violations(manifest)))
+        with self.assertRaisesRegex(SystemExit, "PULP_VIEW_JS_DIR"):
+            exportable_closure(manifest, "view")
+
+    def test_record_normalizes_the_default_view_prelude_directory(self):
+        from vellum_closure import configure_record
+        with tempfile.TemporaryDirectory() as td:
+            build = Path(td)
+            (build / "CMakeCache.txt").write_text(
+                f"CMAKE_HOME_DIRECTORY:INTERNAL={REPO_ROOT}\n"
+                f"PULP_VIEW_JS_DIR:PATH={REPO_ROOT / 'core/view/js'}\n", encoding="utf-8")
+            record = configure_record(build)
+        self.assertEqual(record["options"]["PULP_VIEW_JS_DIR"], "core/view/js")
+
+    def test_record_captures_an_untyped_external_view_prelude_override(self):
+        from vellum_closure import configure_record
+        with tempfile.TemporaryDirectory() as td:
+            build = Path(td)
+            (build / "CMakeCache.txt").write_text(
+                "CMAKE_HOME_DIRECTORY:INTERNAL=/repo\n"
+                "PULP_VIEW_JS_DIR:UNINITIALIZED=/tmp/vellum-js\n", encoding="utf-8")
+            record = configure_record(build)
+        self.assertEqual(record["options"]["PULP_VIEW_JS_DIR"], "@host-path")
+
     def test_record_carries_options_and_identity_without_host_paths(self):
         from vellum_closure import configure_record
         with tempfile.TemporaryDirectory() as td:
