@@ -16,9 +16,13 @@ target_compile_features(pulp-vellum-audio PUBLIC cxx_std_20)
 target_link_libraries(pulp-vellum-audio PUBLIC pulp::runtime pulp::dataplane-audio pulp::signal pulp::audio pulp::format-core pulp::midi
     pulp::timeline pulp::timeline-editor pulp::timebase Vellum::Value Vellum::MirrorView_core)
 # View-free standalones install the typing panel through their generated
-# registrar (tools/cmake/PulpAppTargets.cmake).
-set_property(GLOBAL APPEND PROPERTY PULP_STANDALONE_PANEL_PROVIDERS
-    "pulp::vellum-audio|pulp/vellum_audio/standalone_typing_panel.hpp|pulp::vellum_audio::install_standalone_typing_panel")
+# registrar (tools/cmake/PulpAppTargets.cmake), which reads this property from
+# the target. It is exported, so an installed SDK consumer sees it on
+# Pulp::vellum-audio as an in-tree build does.
+set_target_properties(pulp-vellum-audio PROPERTIES
+    PULP_STANDALONE_PANEL_PROVIDER
+    "pulp/vellum_audio/standalone_typing_panel.hpp|pulp::vellum_audio::install_standalone_typing_panel"
+    EXPORT_PROPERTIES PULP_STANDALONE_PANEL_PROVIDER)
 if(TARGET pulp-vellum-scripted)
     target_link_libraries(pulp-vellum-scripted PUBLIC pulp::vellum-audio)
     target_compile_definitions(pulp-vellum-scripted PRIVATE PULP_VELLUM_AUDIO=1)

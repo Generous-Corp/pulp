@@ -15,6 +15,14 @@ foreach(_target IN ITEMS Pulp::vellum Pulp::vellum-audio)
     endif()
 endforeach()
 
+# The view-free standalone's generated panel registrar finds the typing panel
+# through this exported property; a consumer never runs the integration's own
+# CMakeLists.txt, so it must arrive with the imported target.
+get_target_property(_panel_provider Pulp::vellum-audio PULP_STANDALONE_PANEL_PROVIDER)
+if(NOT _panel_provider MATCHES "^pulp/vellum_audio/standalone_typing_panel\\.hpp\\|.+install_standalone_typing_panel$")
+    message(FATAL_ERROR "Pulp::vellum-audio does not export its standalone panel provider (got '${_panel_provider}')")
+endif()
+
 # Vellum must resolve to a real package, not to an unreferenced name.
 if(NOT Vellum_FOUND)
     message(FATAL_ERROR "the installed SDK's Vellum package was not found")

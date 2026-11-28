@@ -2,8 +2,10 @@
 
 // A tool window the standalone app offers beside its editor, supplied by a UI
 // integration: the musical typing keyboard is one. Format-core links no UI
-// library, so a panel arrives through a factory the integration installs at
-// static initialization, the way the control host does. The standalone
+// library, so a panel arrives through a factory the integration installs when
+// the standalone calls detail::install_standalone_panels() (a UI package
+// plug-in's view-free standalone gets a generated definition of it; see
+// tools/cmake/PulpAppTargets.cmake). The standalone
 // creates every installed panel before its audio starts, adds a menu item and
 // a shortcut that toggle it, hands it the main window so it can open beside
 // it, drains its MIDI on the audio thread, and shuts it down once its audio

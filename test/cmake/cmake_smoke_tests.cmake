@@ -129,6 +129,15 @@ add_test(NAME cmake-standalone-document-types
         -DPULP_DOC_TYPE_TEST_DIR=${CMAKE_CURRENT_BINARY_DIR}/standalone-document-types
         -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/test_standalone_document_types.cmake)
 
+# The generated panel registrar reads a provider from an exported target
+# property, so an installed SDK consumer gets the same panels as an in-tree build.
+add_test(NAME cmake-standalone-panel-registrar
+    COMMAND ${CMAKE_COMMAND}
+        -DPULP_SOURCE_DIR=${CMAKE_SOURCE_DIR}
+        -DFIXTURE_DIR=${CMAKE_CURRENT_BINARY_DIR}/standalone-panel-registrar
+        -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/test_standalone_panel_registrar.cmake)
+set_tests_properties(cmake-standalone-panel-registrar PROPERTIES TIMEOUT 120)
+
 add_test(NAME cmake-plugin-bundle-icon
     COMMAND ${CMAKE_COMMAND}
         -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/test_plugin_bundle_icon.cmake)

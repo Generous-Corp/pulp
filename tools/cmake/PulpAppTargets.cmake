@@ -71,12 +71,24 @@ endfunction()
 # factories UI integrations have announced. An integration announces one by
 # appending "<target>|<header>|<function>" to the global property
 # PULP_STANDALONE_PANEL_PROVIDERS from its own CMake, where <function> is a
-# callable returning bool that installs its StandalonePanelFactory. The
-# standalone calls the registrar before it builds its panels, so the factory is
+# callable returning bool that installs its StandalonePanelFactory. An
+# integration target that ships in the SDK declares the same thing as an
+# exported target property, PULP_STANDALONE_PANEL_PROVIDER = "<header>|<function>",
+# which is how an installed SDK consumer, that never runs the integration's own
+# CMakeLists.txt, still finds it. The standalone calls the registrar before it builds its panels, so the factory is
 # installed by an explicit call and not by a static-init object an archive could
 # drop. Adds nothing when no integration announced a provider.
 function(_pulp_add_standalone_panel_registrar exe)
     get_property(_providers GLOBAL PROPERTY PULP_STANDALONE_PANEL_PROVIDERS)
+    foreach(_declaring IN ITEMS pulp::vellum-audio)
+        if(TARGET ${_declaring})
+            get_target_property(_declared ${_declaring} PULP_STANDALONE_PANEL_PROVIDER)
+            if(_declared)
+                list(APPEND _providers "${_declaring}|${_declared}")
+            endif()
+        endif()
+    endforeach()
+    list(REMOVE_DUPLICATES _providers)
     set(_includes "")
     set(_calls "")
     foreach(_provider IN LISTS _providers)

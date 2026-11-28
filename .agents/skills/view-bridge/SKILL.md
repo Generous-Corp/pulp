@@ -4099,7 +4099,7 @@ same way `PulpPlugView`'s constructor always did.
 `pulp::standalone-contract` (a UI package plug-in's Standalone) cannot own a
 Pulp view, so tool windows such as the musical typing keyboard reach it as
 `StandalonePanel`s (`pulp/format/standalone_panel.hpp`) that a UI integration
-installs at static init. Things that are easy to get wrong:
+installs through an explicit registrar call. Things that are easy to get wrong:
 
 - The registrar must be linked into the Standalone. A static-init object in an
   archive member that nothing references is dropped, so the standalone calls
@@ -4107,7 +4107,11 @@ installs at static init. Things that are easy to get wrong:
   format-core's definition is empty and sits in its own archive member; the
   generated per-target source (`_pulp_add_standalone_panel_registrar`, view-free
   standalones only) defines the same symbol, so the linker takes it instead and
-  it installs the integration's factory.
+  it installs the integration's factory. The generator learns of a provider from
+  the global property `PULP_STANDALONE_PANEL_PROVIDERS` (in-tree) or from the
+  exported target property `PULP_STANDALONE_PANEL_PROVIDER` on `pulp::vellum-audio`
+  (`<header>|<function>`); an installed SDK consumer never runs the integration's
+  CMakeLists.txt, so only the target property reaches it.
 - The shortcut toggle runs from the editor content view's
   `performKeyEquivalent:`, not only from the menu. A headless run has no menu,
   and the key driver offers `performKeyEquivalent:` first, so
