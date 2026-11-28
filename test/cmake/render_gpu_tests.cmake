@@ -38,7 +38,7 @@ if(PULP_ENABLE_GPU)
     # Public API only (no Dawn headers); the cases SKIP when no device is available.
     pulp_add_test_suite(pulp-test-gpu-compute-kernel-override
         SOURCES test_gpu_compute_kernel_override.cpp
-        LIBRARIES pulp::render
+        LIBRARIES pulp::gpu-compute
         DISCOVERY_ARGS ${PULP_GPU_TEST_DISCOVERY_ARGS})
 endif()
 

@@ -14,7 +14,7 @@
     # test case per process: the first GPU object seals the policy.
     pulp_add_test_suite(pulp-test-gpu-proc-installer-host-policy
         SOURCES test_gpu_proc_installer_host_policy.cpp
-        LIBRARIES pulp::render
+        LIBRARIES pulp::gpu-compute
         DISCOVERY_ARGS ${PULP_GPU_TEST_DISCOVERY_ARGS})
 
     # The PULP_DAWN_PROCS_HOST_OWNED setting, without reconfiguring the build:
