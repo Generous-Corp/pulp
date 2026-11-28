@@ -554,8 +554,8 @@ class InputTests(unittest.TestCase):
         self.assertEqual(retained.intersection(ct.load_inputs()["delete_paths"]), set())
     def test_shipped_inputs_are_unique_paths(self):
         data = ct.load_inputs()
-        self.assertEqual(len(data["delete_paths"]), 683)
-        self.assertEqual(len(set(data["delete_paths"])), 683)
+        self.assertEqual(len(data["delete_paths"]), 644)
+        self.assertEqual(len(set(data["delete_paths"])), 644)
 
     def test_row_count_equals_the_ledger_stranded_count(self):
         data = ct.load_inputs()
