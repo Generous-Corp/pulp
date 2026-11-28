@@ -1,7 +1,7 @@
 {
   "schema": 1,
   "comment": "Per-file count of text I/O calls without encoding=. Only ever lowered; regenerate with text_encoding_lint.py --write.",
-  "total": 4150,
+  "total": 4149,
   "files": {
     "test/cmake/test_forge_catalog_install.py": 22,
     "test/harness/test_canvas2d_adapter.py": 1,
@@ -68,7 +68,7 @@
     "tools/ci/pr_head_affected_tests.py": 4,
     "tools/ci/read_audit.py": 2,
     "tools/ci/reuse_record.py": 3,
-    "tools/ci/source_selftests.py": 8,
+    "tools/ci/source_selftests.py": 7,
     "tools/ci/test_a2t_headroom_annotation.py": 1,
     "tools/ci/test_affected_tests_shadow.py": 3,
     "tools/ci/test_binary_identity_shadow.py": 6,

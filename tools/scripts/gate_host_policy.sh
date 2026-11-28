@@ -80,7 +80,12 @@ pulp_gate_host_builds_reserved() {
 #     PULP_BUILD_JOBS=1 (one background core), at nice 10. The dependency
 #     steps before it (setup.sh --deps-only, npm ci for the jsx runtime) run at
 #     nice 10 outside the governor: shared-cache fetches, no compile.
-# Compiles, ctest suites and diff-coverage stay refused (pulp_gate_host_skip_line).
+# Compiles, a kept build tree and diff-coverage stay refused (pulp_gate_host_skip_line).
+# The build-free Python lanes run here under gates.sh at nice 19 and background
+# QoS, at most two suites at a time, each lane under a wall-time cap that holds
+# even if the wrapper is killed (tools/scripts/run_capped.py). The suites that
+# configure or compile something are left out (source_selftests.py --no-compile).
+# There is no tartci lease on these lanes; the bound is priority, not a share.
 pulp_gate_host_configure_only_allowance() {
     echo "[gate-host] ALLOWED configure-only for the generated test manifests: a temporary build-configure-only.* tree under the worktree, governed (one background core), no compile, removed afterwards (tools/scripts/configure_only.py). Regenerate the families file here with: python3 tools/scripts/changed_surface_script_families.py --configure-only --write" >&2
 }

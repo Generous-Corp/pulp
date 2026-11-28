@@ -2,8 +2,10 @@
 
 // A tool window the standalone app offers beside its editor, supplied by a UI
 // integration: the musical typing keyboard is one. Format-core links no UI
-// library, so a panel arrives through a factory the integration installs at
-// static initialization, the way the control host does. The standalone
+// library, so a panel arrives through a factory the integration installs when
+// the standalone calls detail::install_standalone_panels() (a UI package
+// plug-in's view-free standalone gets a generated definition of it; see
+// tools/cmake/PulpAppTargets.cmake). The standalone
 // creates every installed panel before its audio starts, adds a menu item and
 // a shortcut that toggle it, hands it the main window so it can open beside
 // it, drains its MIDI on the audio thread, and shuts it down once its audio
@@ -74,6 +76,13 @@ namespace detail {
 /// the same factory again is a no-op that returns true; false when the
 /// factory is null or the fixed table is full.
 bool install_standalone_panel_factory(StandalonePanelFactory factory) noexcept;
+
+/// Called by the standalone before it builds its panels. The definition in
+/// format-core does nothing; an executable that offers UI-integration panels
+/// supplies its own definition (the generated registrar of a UI package
+/// plug-in's Standalone) that installs their factories. An explicit call from
+/// the standalone, so no static-init object has to survive the linker.
+void install_standalone_panels();
 
 /// One panel per installed factory that returned one, in install order.
 std::vector<std::unique_ptr<StandalonePanel>>

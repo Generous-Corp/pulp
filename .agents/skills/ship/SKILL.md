@@ -2381,3 +2381,12 @@ for the darwin-arm64 SDK leg. A new optional package must be listed in the same
 flag array, in `release_product_matrix.json` (darwin-arm64 stems) and in the
 conditional `PULP_SDK_TARGETS` append in `PulpInstallRules.cmake`, or the SDK
 archive silently omits it.
+
+## SDK archives are built by archive_sdk.py, never tar or Compress-Archive
+
+Every member mtime and the gzip header are set to the source commit time by
+`tools/scripts/archive_sdk.py`, and `tools/scripts/check_archive_mtimes.py`
+fails packaging on any later member. `Compress-Archive` stores host-local time
+and produced a Windows x64 SDK whose files read as hours in the future, which
+made Ninja re-run CMake on every build until the clock caught up. The Windows
+asset is now a real gzip tar, so it extracts with the same `tar` as the others.

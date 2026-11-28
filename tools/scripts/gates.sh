@@ -89,6 +89,7 @@
 # Usage:
 #     ./tools/scripts/gates.sh                     # uses origin/main as base
 #     ./tools/scripts/gates.sh main                # custom base
+#     ./tools/scripts/gates.sh --bootstrap         # also install what preflight finds missing
 #     PULP_GATES_BASE=develop ./tools/scripts/gates.sh
 #
 # Exit codes:
@@ -104,6 +105,27 @@ if [ -z "$ROOT" ]; then
     exit 2
 fi
 cd "$ROOT" || exit 2
+
+# Every prerequisite is checked once, up front, and reported as one list with
+# its fix command (gates_preflight.py); --bootstrap also performs the safe
+# fixes. PULP_GATES_SKIP_PREFLIGHT=1 skips it and is listed as NOT CHECKED.
+gates_bootstrap_args=()
+gates_positional=()
+for gates_arg in "$@"; do
+    case "$gates_arg" in
+        --bootstrap) gates_bootstrap_args+=(--bootstrap) ;;
+        *) gates_positional+=("$gates_arg") ;;
+    esac
+done
+set -- ${gates_positional[@]+"${gates_positional[@]}"}
+gates_preflight_skipped=0
+if [ "${PULP_GATES_SKIP_PREFLIGHT:-}" = "1" ]; then
+    gates_preflight_skipped=1
+elif [ -f "$ROOT/tools/scripts/gates_preflight.py" ]; then
+    "${PYTHON:-python3}" "$ROOT/tools/scripts/gates_preflight.py" --repo-root "$ROOT" \
+        --base "${1:-${PULP_GATES_BASE:-origin/main}}" \
+        ${gates_bootstrap_args[@]+"${gates_bootstrap_args[@]}"} || exit $?
+fi
 
 if git remote get-url origin >/dev/null 2>&1; then
     if ! git fetch --quiet origin main; then
@@ -132,9 +154,31 @@ fi
 # shellcheck source=gate_host_policy.sh
 source "$ROOT/tools/scripts/gate_host_policy.sh"
 gate_host_builds_skipped=0
-gate_host_skipped_what="compiles, a kept build-gate configure and the source-selftest suites (source-only, workflow-lint, pr-fast ctest, ctest-registered Python)"
+gate_host_skipped_what="compiles, a kept build-gate configure and diff-coverage"
+# The build-free Python suites (source-selftest lanes, the sync job's fixture
+# tests) still run on a gate host: they compile nothing, and both of the
+# 2026-11-26 misses were suites of that kind. They run at nice 19, two at a
+# time, each lane under a wall-time cap (PULP_GATES_GATE_HOST_CAP_S, default
+# 600); a lane that hits the cap is listed NOT CHECKED, never passed.
+# PULP_GATES_GATE_HOST_PYTHON=0 restores the old refusal, listed NOT CHECKED.
+gate_host_python_lanes=1
+gate_host_cap_s="${PULP_GATES_GATE_HOST_CAP_S:-600}"
+gate_python_runner=()
+gate_python_jobs=()
 if pulp_gate_host_builds_reserved; then
     gate_host_builds_skipped=1
+    if [ "${PULP_GATES_GATE_HOST_PYTHON:-1}" = "0" ]; then
+        gate_host_python_lanes=0
+        gate_host_skipped_what="$gate_host_skipped_what and the source-selftest suites (source-only, workflow-lint, pr-fast ctest, ctest-registered Python, sync-job fixtures)"
+    else
+        # nice 19 and background QoS, never above two concurrent suites (or the
+        # operator's lower PULP_BUILD_JOBS), and no suite that compiles. There is
+        # no tartci lease here: the configure-only lane takes one, these do not.
+        gate_host_jobs=2
+        case "${PULP_BUILD_JOBS:-}" in 1) gate_host_jobs=1 ;; esac
+        gate_python_runner=("$PYTHON" "$ROOT/tools/scripts/run_capped.py" --seconds "$gate_host_cap_s" --nice 19 --background --)
+        gate_python_jobs=(--jobs "$gate_host_jobs" --no-compile --shared-host-labels)
+    fi
     pulp_gate_host_skip_line "$gate_host_skipped_what" "tools/scripts/gates.sh $BASE"
 fi
 
@@ -221,6 +265,9 @@ failed_gates=()
 gate_fail() { fail=1; failed_gates+=("$1"); }
 # Every suite a lane could not run locally, collected for the summary.
 not_checked_log="$(mktemp "${TMPDIR:-/tmp}/pulp-gates-not-checked.XXXXXX")"
+if [ "$gates_preflight_skipped" -eq 1 ]; then
+    echo "[preflight] NOT CHECKED: prerequisites (PULP_GATES_SKIP_PREFLIGHT=1); a gate below can fail on a missing SDK, package, merge driver or history" >>"$not_checked_log"
+fi
 if [ "$gate_host_builds_skipped" -eq 1 ]; then
     # Listed in the summary, so the verdict reads "not a full pass" here.
     echo "[gate-host] NOT CHECKED: $gate_host_skipped_what — refused on this gate host (TARTCI_ROLE=${PULP_GATE_HOST_ROLE:-unknown}); run tools/scripts/gates.sh $BASE on a TARTCI_ROLE=light host (m1) or a disposable VM" >>"$not_checked_log"
@@ -689,7 +736,7 @@ fi
 # test it fails also fails there, it prints PRE-EXISTING ON BASE and does not
 # fail this script, so a red main is not chased as the branch's fault. A new
 # failing test inside that suite still fails. PULP_SKIP_SOURCE_SELFTESTS=1 skips both.
-if [ "$gate_host_builds_skipped" -eq 0 ] && [ -f "$ROOT/tools/ci/source_selftests.py" ] && [ "${PULP_SKIP_SOURCE_SELFTESTS:-0}" != "1" ]; then
+if [ "$gate_host_python_lanes" -eq 1 ] && [ -f "$ROOT/tools/ci/source_selftests.py" ] && [ "${PULP_SKIP_SOURCE_SELFTESTS:-0}" != "1" ]; then
     for src_lane in manifest workflow-lint pr-fast ctest-python; do
         echo "" >&2
         src_lane_args=()
@@ -714,11 +761,20 @@ if [ "$gate_host_builds_skipped" -eq 0 ] && [ -f "$ROOT/tools/ci/source_selftest
                 echo "▸ source-only selftests (diff-scoped; required on Enforce version & skill sync)" >&2 ;;
         esac
         src_selftest_log="$(mktemp "${TMPDIR:-/tmp}/pulp-gates-source-selftests.XXXXXX")"
-        if "$PYTHON" "$ROOT/tools/ci/source_selftests.py" run ${src_lane_args[@]+"${src_lane_args[@]}"} \
-                --changed-from "$BASE" --label-base-failures \
-                ${PULP_BUILD_JOBS:+--jobs "$PULP_BUILD_JOBS"} >"$src_selftest_log" 2>&1; then
+        src_rc=0
+        ${gate_python_runner[@]+"${gate_python_runner[@]}"} "$PYTHON" "$ROOT/tools/ci/source_selftests.py" run \
+                ${src_lane_args[@]+"${src_lane_args[@]}"} --changed-from "$BASE" --label-base-failures \
+                ${PULP_BUILD_JOBS:+--jobs "$PULP_BUILD_JOBS"} ${gate_python_jobs[@]+"${gate_python_jobs[@]}"} \
+                >"$src_selftest_log" 2>&1 || src_rc=$?
+        if [ "$src_rc" -eq 0 ]; then
             sed -n 's/^source-selftests: /  source-selftests: /p' "$src_selftest_log" >&2
+        elif [ "$src_rc" -eq 124 ] && [ "$gate_host_builds_skipped" -eq 1 ] \
+                && ! grep -qE '\*\*\*Failed|^FAIL:' "$src_selftest_log"; then
+            tail -n 5 "$src_selftest_log" >&2
+            echo "[$src_lane] NOT CHECKED: exceeded the ${gate_host_cap_s}s gate-host wall-time cap; CI runs it" >>"$not_checked_log"
         else
+            [ "$src_rc" -eq 124 ] && echo "  $src_lane: hit the ${gate_host_cap_s}s cap with failures already seen (not yet judged against the base):" >&2 \
+                && grep -E '\*\*\*Failed|^FAIL:' "$src_selftest_log" | head -n 20 >&2
             tail -n 40 "$src_selftest_log" >&2
             echo "  $src_lane: failing — CI runs these; fix before pushing." >&2
             gate_fail "$src_lane"
@@ -742,13 +798,14 @@ fi
 # tools/scripts/test_gates_sync_parity.py fails when the two disagree). Every
 # command runs every time except the two the manifest names as minutes long,
 # which run when the diff can reach them. A failing command is not re-run on the
-# base here: CI fails the same command. A gate host refuses local suites, so
-# there the checks run (a second each) and the fixture tests are listed NOT
-# CHECKED. PULP_SKIP_SOURCE_SELFTESTS=1 skips the lane.
+# base here: CI fails the same command. A gate host runs the whole lane too, at
+# nice 19 under the wall-time cap; unless PULP_GATES_GATE_HOST_PYTHON=0, which
+# keeps the checks (a second each) and lists the fixture tests NOT CHECKED.
+# PULP_SKIP_SOURCE_SELFTESTS=1 skips the lane.
 if [ -f "$ROOT/tools/ci/sync_job_parity.json" ] && [ "${PULP_SKIP_SOURCE_SELFTESTS:-0}" != "1" ]; then
     echo "" >&2
     sync_job_args=()
-    if [ "$gate_host_builds_skipped" -eq 1 ]; then
+    if [ "$gate_host_python_lanes" -eq 0 ]; then
         sync_job_args=(--sync-job-checks-only)
         echo "▸ required sync job's checks (read from version-skill-check.yml; docs-sync, screenshot-sync, release tags, CLI/MCP parity, source contracts; gate host: fixture tests not run)" >&2
     else
@@ -756,10 +813,17 @@ if [ -f "$ROOT/tools/ci/sync_job_parity.json" ] && [ "${PULP_SKIP_SOURCE_SELFTES
     fi
     sync_job_log="$(mktemp "${TMPDIR:-/tmp}/pulp-gates-sync-job.XXXXXX")"
     sync_job_base="$(git -C "$ROOT" merge-base "$BASE" HEAD)"
-    if "$PYTHON" "$ROOT/tools/ci/source_selftests.py" run --sync-job "$sync_job_base" \
-            --pr-title "${GITHUB_PR_TITLE:-}" ${sync_job_args[@]+"${sync_job_args[@]}"} \
-            ${PULP_BUILD_JOBS:+--jobs "$PULP_BUILD_JOBS"} >"$sync_job_log" 2>&1; then
+    sync_rc=0
+    ${gate_python_runner[@]+"${gate_python_runner[@]}"} "$PYTHON" "$ROOT/tools/ci/source_selftests.py" run \
+            --sync-job "$sync_job_base" --pr-title "${GITHUB_PR_TITLE:-}" \
+            ${sync_job_args[@]+"${sync_job_args[@]}"} ${PULP_BUILD_JOBS:+--jobs "$PULP_BUILD_JOBS"} \
+            ${gate_python_jobs[@]+"${gate_python_jobs[@]}"} >"$sync_job_log" 2>&1 || sync_rc=$?
+    if [ "$sync_rc" -eq 0 ]; then
         sed -n 's/^source-selftests: /  source-selftests: /p' "$sync_job_log" | tail -n 12 >&2
+    elif [ "$sync_rc" -eq 124 ] && [ "$gate_host_builds_skipped" -eq 1 ] \
+            && ! grep -qE '\*\*\*Failed|^FAIL:' "$sync_job_log"; then
+        tail -n 5 "$sync_job_log" >&2
+        echo "[sync-job] NOT CHECKED: exceeded the ${gate_host_cap_s}s gate-host wall-time cap; CI runs it" >>"$not_checked_log"
     else
         tail -n 60 "$sync_job_log" >&2
         echo "  sync-job: failing — the required \`Enforce version & skill sync\` check runs these; fix before pushing." >&2

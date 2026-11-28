@@ -150,3 +150,29 @@ TEST_CASE("AAX native geometry tolerates missing views", "[aax][view-bridge]") {
     aax_place_child_top_left(nullptr, nullptr);
     aax_fill_parent(nullptr, nullptr);
 }
+
+TEST_CASE("AAX reads the host container's size as it changes", "[aax][view-bridge][resize]") {
+    @autoreleasepool {
+        Fixture f(NSMakeSize(990, 645), NSMakeSize(990, 645));
+        std::uint32_t w = 0;
+        std::uint32_t h = 0;
+        REQUIRE(aax_native_parent_size(f.p(), w, h));
+        CHECK(w == 990);
+        CHECK(h == 645);
+
+        // The host resizes its own view without telling the plug-in.
+        [f.parent setFrameSize:NSMakeSize(1280, 720)];
+        REQUIRE(aax_native_parent_size(f.p(), w, h));
+        CHECK(w == 1280);
+        CHECK(h == 720);
+
+        // A missing or empty parent reports nothing and leaves the outputs alone.
+        w = 7;
+        h = 9;
+        CHECK_FALSE(aax_native_parent_size(nullptr, w, h));
+        [f.parent setFrameSize:NSMakeSize(0, 0)];
+        CHECK_FALSE(aax_native_parent_size(f.p(), w, h));
+        CHECK(w == 7);
+        CHECK(h == 9);
+    }
+}
