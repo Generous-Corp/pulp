@@ -827,6 +827,7 @@ the `clap` skill's Parameters section for the complete transport contract.
 | AU v3 | `viewDidLoad` | After `PluginViewHost::attach_to_parent` in `viewDidLoad` |
 | AU v3, processor with an `editor_factory()` | `rebuildEditorIfReady` opens a `ContractEditorSession` in `PulpAUv3ContractView` and never creates a ViewBridge | n/a: the contract editor's `attach()` is the attach point |
 | AAX | `AAX_CEffectGUI::CreateViewContainer()` — not `CreateViewContents()`, which runs before any window exists | After `try_attach_to_parent` succeeds |
+| AAX, processor with an `editor_factory()` | `CreateViewContents()` builds the contract editor unattached through `aax::ContractEditorShell`, so `GetViewSize` knows its size; no ViewBridge | n/a: `CreateViewContainer()` calls the editor's `attach()` |
 | Standalone | Before `WindowHost::create` | After `WindowHost::create` succeeds |
 
 AAX keeps a host-side data model and a real-time algorithm instance, but the
@@ -1923,10 +1924,10 @@ class MyEditor : public pulp::view::View {
             // ... apply to processor ...
             return pulp::view::EditorBridge::ok_response();
         });
-        bridge_.attach_webview(panel);          // routes WebView postMessage → handlers
+        attach_webview(bridge_, panel);         // routes WebView postMessage → handlers
     }
     void unwire(pulp::view::WebViewPanel& panel) {
-        bridge_.detach_webview(panel);          // clears the installed callback before teardown
+        detach_webview(bridge_, panel);         // clears the installed callback before teardown
     }
 private:
     pulp::view::EditorBridge bridge_;
@@ -1935,12 +1936,13 @@ private:
 
 Key invariants:
 
-- **Renderer-agnostic.** `attach_webview(WebViewPanel&)` today;
-  `attach_native_runtime(JsRuntime&, "<handler_name>")` for the low-level
-  native runtime, or `attach_native_runtime(ScriptEngine&, "<handler_name>")`
+- **Renderer-agnostic.** The attachments are free functions in
+  `pulp/view/editor_bridge_attach.hpp`: `attach_webview(bridge, WebViewPanel&)`
+  today; `attach_native_runtime(bridge, JsRuntime&, "<handler_name>")` for the low-level
+  native runtime, or `attach_native_runtime(bridge, ScriptEngine&, "<handler_name>")`
   when a product owns Pulp's public engine wrapper. A product built on
   `ScriptedUiSession` must use
-  `attach_native_runtime(session, "<handler_name>")`: the session owns the
+  `attach_native_runtime(bridge, session, "<handler_name>")`: the session owns the
   attachment, installs it before the live script runs, and reinstalls it after
   every realm replacement without exposing or borrowing the replaceable
   `ScriptEngine`. Native overloads register one global function that accepts a
@@ -1948,14 +1950,14 @@ Key invariants:
   same handler registrations and error vocabulary.
 - **Session attachment has explicit teardown.** An `EditorBridge` attached to
   a `ScriptedUiSession` must outlive the attachment. Call
-  `detach_native_runtime(session, "<handler_name>")` before either the bridge
+  `detach_native_runtime(bridge, session, "<handler_name>")` before either the bridge
   or a handler capture expires. The live realm's symbol then fails closed, and
   future realm replacements omit it.
 - **Reload validation does not replay product effects.** A scripted reload
   first executes code in a probe realm. That realm receives fail-closed native
   message stubs so script validation can resolve the globals without calling
   processor handlers twice; only the committed live realm dispatches messages.
-- **Explicit WebView teardown.** `detach_webview(WebViewPanel&)`
+- **Explicit WebView teardown.** `detach_webview(bridge, WebViewPanel&)`
   clears the callback installed by `attach_webview`. Use it when the
   bridge and `WebViewPanel` are side-by-side members and you want to
   sever queued WebView messages before native detach or panel destruction.
@@ -1974,17 +1976,29 @@ Key invariants:
   the framework explicitly does NOT carry `EditorBridgeState`-style
   per-session state. Capture it on `[this]` instead.
 
-EditorBridge's dispatch core (`core/view/src/editor_bridge.cpp`: handlers,
+EditorBridge's dispatch core (`core/editor_bridge/src/editor_bridge.cpp`: handlers,
 `dispatch`, `dispatch_json`, `dispatch_webview_message`, the response and
 `get_*` helpers) is its own view-free target, `pulp-editor-bridge`, which needs
-only CHOC and the runtime. The `attach_native_runtime` / `detach_native_runtime`
-overloads name view-script types, so they stay in `pulp-view-tooling`
-(`editor_bridge_native_runtime.cpp`), which links the core. Keep any new
+only CHOC and the runtime. Its header, `pulp/view/editor_bridge.hpp`, declares
+only what that library defines. The attachments (`attach_webview`,
+`detach_webview`, `attach_native_runtime`, `detach_native_runtime`) name view
+and view-script types, so they are free functions declared in
+`pulp/view/editor_bridge_attach.hpp` and defined in `pulp-view-tooling`, which
+links the core; `render_claude_bridge_scaffold` is in
+`pulp/view/editor_bridge_scaffold.hpp`. A member declared in the core header
+but defined in view-tooling compiles for a core-only consumer and fails only at
+link time. The old member spellings survive as deprecated member templates
+that forward through argument-dependent lookup, so the core header names no
+view type: `pulp::view-tooling` defines `PULP_EDITOR_BRIDGE_VIEW_ATTACHMENTS`,
+which makes `editor_bridge.hpp` include the attach header for its consumers,
+and a core-only consumer gets a compile error instead of an undefined symbol
+(`editor-bridge-deprecated-forwarders` proves both). Do not turn a forwarder
+back into a non-template member: that reintroduces the link-time trap. Keep any new
 dispatch code free of view-script includes; in an SDK that serves its UI names
 from Vellum, `Pulp::view-tooling` links the core and nothing else of Pulp's
 view, so a WebView editor's bridge comes from it.
 
-When you change `core/view/src/editor_bridge.cpp` or its header, the
+When you change `core/editor_bridge/src/editor_bridge.cpp` or its header, the
 skill-sync gate requires updates to either *this* skill or the
 `import-design` skill (or both). The path map maps both to the file.
 
@@ -2770,10 +2784,10 @@ this boundary. Parameter text and custom state have matching containment in
   unchanged — that include is the compatibility contract, not an incidental
   one. The same split moved `ProcessContext` to `process_context.hpp` and
   `PrepareContext` to `prepare_resources.hpp`.
-- `core/view/include/pulp/view/editor_bridge.hpp` — EditorBridge API
+- `core/editor_bridge/include/pulp/view/editor_bridge.hpp`: EditorBridge API
 - `core/view/include/pulp/view/scripted_ui.hpp` — session-owned native message
   attachment and realm-replacement persistence
-- `core/view/src/editor_bridge.cpp` — EditorBridge implementation
+- `core/editor_bridge/src/editor_bridge.cpp`: EditorBridge implementation
 - `docs/guides/view-bridge.md` — user-facing guide
 - `docs/reference/editor-bridge.md` — EditorBridge reference
 - `examples/view-bridge-demo/main.cpp` — runnable headless demo
@@ -3006,6 +3020,19 @@ session and a real host observer registry; publish a new surface after close to
 prove the subscription was removed, then reopen to prove it is re-established.
 Keep the prewarm recorder in its own executable so it can replace Vellum's
 external scheduler without changing the ordinary scripted editor tests.
+
+A script that fails to load opens no editor: the scripted root reports
+`editor_failed_to_open()`, `pulp::vellum::EditorFactory` then returns null
+before any `PluginViewHost` exists, and the adapter shows the host's own
+editor. It never opens an empty Vellum window.
+
+`ui-script-vellum-route-*` (test/fixtures/ui_script_plugin) prove the route on
+built images: each format of the `UI_ENGINE vellum` fixture defines
+`scripted_editor_factory` and no `pulp::view`, `ViewBridge` or legacy builder
+symbol, with the plain fixture as the control. The plug-ins are not test
+executables, so `ui-script-vellum-route-build` builds them first through
+`tools/ci/governed-build.sh`; a lane that builds only labelled executables
+would otherwise run the census on files that do not exist.
 
 `pulp_add_plugin(UI_SCRIPT)` no longer ships a plug-in that reads `ui.js` from
 the developer's absolute source path at every editor open. The script's bytes,

@@ -8058,6 +8058,18 @@ A new `core/<module>/` needs TWO entries even on a short-lived branch: the
 `codecov.yml` component, and the component's name in a producer's set in
 `ci/coverage-surfaces.yaml` (or an explicit `not_applicable` disposition) —
 `test_coverage_surface_contract.py` rejects a component no producer claims.
+The diff-coverage tiers in `ci/coverage-targets.yaml` want the new path too: a
+file no tier claims falls back to the global floor silently, so place it
+beside the module it was split from (`core/editor_bridge/**` sits with
+`core/view/**`).
+It is also a new link-floor module. `PulpLinkFloor.cmake` names a target's
+module after its source directory, so giving a target its own `core/<dir>`
+adds a module to every closure that reaches it, and every
+`pulp_assert_link_floor()` claimant whose tier does not name it fails at
+configure. Moving `pulp-editor-bridge` into `core/editor_bridge` did this to
+`StepSequencer_CLAP` and `TimelinePluginProof_CLAP` through
+`pulp-view -> pulp-view-tooling`; the fix is a debt entry beside the module the
+edge comes through, not a wider tier.
 Run `tools/scripts/gates.sh <integration-branch>` locally first — the fast gates
 are sub-second and catch all of this before a multi-minute ship cycle. Reconciling
 config you didn't author trips skill-sync/version-bump (config maps to the `ci`

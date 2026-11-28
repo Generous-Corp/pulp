@@ -1,0 +1,23 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20261127-c4a-editor-bridge-home-watch",
+  "created_at": "2026-11-27T11:40:50Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "design-output-and-packaging",
+    "design-source-ingest"
+  ],
+  "rationale": "Moves EditorBridge's view attachments (attach_webview, detach_webview, attach_native_runtime, detach_native_runtime) out of the view-free core header into pulp/view/editor_bridge_attach.hpp as free functions, and render_claude_bridge_scaffold into pulp/view/editor_bridge_scaffold.hpp; both stay defined in pulp-view-tooling with the same bodies. The import-design CLI and the scaffold it emits only follow the new include and call spelling. No design-import, Chromium, rendering, or packaging authority moves.",
+  "tests": [
+    "ctest --test-dir build -R pulp-test-design-import-codegen",
+    "ctest --test-dir build -R pulp-test-editor-bridge",
+    "ctest --test-dir build -R pulp-test-editor-bridge-core",
+    "python3 tools/scripts/test_gpu_handoff_provenance.py",
+    "python3 tools/scripts/vellum_expansion_watch_check.py --base <merge-base origin/main HEAD> --head <HEAD>",
+    "vellum-expansion-watch"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}

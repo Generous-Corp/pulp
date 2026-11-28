@@ -119,7 +119,8 @@ set(PULP_LINK_FLOOR_TIER_sequencer-plugin-editor
 #   pulp-view — every plugin links the view stack whether or not it draws.
 #     VST3, CLAP and AU each link the plugin's selected view target in
 #     tools/cmake/PulpPluginFormats.cmake and FATAL_ERROR if it is absent. The
-#     stack reaches canvas but stops below plugin hosting and playback. `render`
+#     stack reaches canvas, and editor_bridge through pulp-view-tooling, but
+#     stops below plugin hosting and playback. `render`
 #     is NOT charged to that edge: pulp_add_plugin links it directly per format
 #     under PULP_HAS_SKIA (tools/cmake/PulpUtils.cmake), which is the edge the
 #     closure report names.
@@ -134,14 +135,14 @@ set(PULP_LINK_FLOOR_TIER_sequencer-plugin-editor
 # presents, written down so the gate polices the artifact that exists instead
 # of passing green on a bound the binary never honoured.
 set(PULP_LINK_FLOOR_DEBT_StepSequencer_CLAP
-    canvas events graph native-components sample_bank_manifest signal state view)
+    canvas editor_bridge events graph native-components sample_bank_manifest signal state view)
 
 # The loadable editor proof plugin requires its document, editor, and piano-roll
 # modules as direct lower bounds. The tier includes the view and canvas rungs
 # that the concrete piano roll necessarily reaches. Format packaging contributes
 # the remaining modules by the same routes as the step-sequencer plugin.
 set(PULP_LINK_FLOOR_DEBT_TimelinePluginProof_CLAP
-    events graph native-components sample_bank_manifest signal state)
+    editor_bridge events graph native-components sample_bank_manifest signal state)
 
 # Entries whose edge only exists in some configurations, appended under the
 # condition that creates them. Appending rather than exempting is deliberate:

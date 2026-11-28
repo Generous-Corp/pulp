@@ -36,14 +36,22 @@ template <typename Session> class ScriptedEditorRoot final : public ::vellum::vi
                                    ? "standalone"
                                    : "plugin");
         std::string error;
-        if (!session_.load(&error))
+        if (!session_.load(&error)) {
             runtime::log_error("Vellum scripted editor failed to load '{}': {}",
                                session_.script_label(), error);
+            load_failed_ = true;
+        }
 #if defined(PULP_VELLUM_AUDIO)
         audio_widgets_.mount();
 #endif
         if (supports_reload_)
             reload_generation_ = processor_.editor_reload_generation();
+    }
+
+    /// A script that did not load opens no editor, so the host falls back to
+    /// its own instead of showing an empty one.
+    bool editor_failed_to_open() const {
+        return load_failed_;
     }
 
     format::ViewSize editor_view_size() const {
@@ -79,6 +87,7 @@ template <typename Session> class ScriptedEditorRoot final : public ::vellum::vi
     format::Processor& processor_;
     format::ViewSize preferred_;
     bool supports_reload_;
+    bool load_failed_ = false;
     std::uint64_t reload_generation_ = 0;
 #if defined(PULP_VELLUM_AUDIO)
     ::pulp::vellum_audio::detail::AudioWidgetSampler audio_widgets_;
