@@ -1,11 +1,15 @@
 #include <pulp/vellum_audio/waveform_gpu_primitives.hpp>
 
+#include <pulp/audio/waveform_overview.hpp>
+
 #include <algorithm>
 #include <cmath>
 #include <limits>
 #include <utility>
 
 namespace pulp::vellum_audio {
+
+static_assert(kWaveformAllChannels == pulp::audio::WaveformOverview::kAllChannels);
 namespace {
 
 std::uint32_t positive_ceil_px(float value) noexcept {

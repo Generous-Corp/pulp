@@ -14019,6 +14019,11 @@ main's SDK. A new optional Vellum integration package needs its option, its
 against main. The tests' ctest label should start with `pulp-vellum` so the
 lane's `-L pulp-vellum` filter runs them.
 
+The lane also runs the Yoga layout fixtures on Vellum's layout (`runner.py
+--verify --engine vellum`, `VELLUM_APP_HOST` set to the SDK's `bin/vellum-app-host`).
+Keep it a parallel mode: the `pulp-test-visual` lane stays until the UI cutover,
+and exit 3 (nothing measured) must keep failing the step.
+
 The lane's `-L pulp-vellum` run includes the GPU adapter probe and its
 empty-adapter negative control (`PASS_REGULAR_EXPRESSION` on the fail JSON, since
 the control must exit non-zero). The probe target is picked up by the
@@ -14028,3 +14033,10 @@ The same lane also runs the MCP UI tool cases (`pulp-test-mcp-server "[ui]"`)
 against the SDK's `bin/vellum-app-host` through `PULP_TEST_VELLUM_APP_HOST`. The
 step greps the output for `SKIPPED`, because Catch2 reports a skipped live case
 as a pass: keep that check if the step is edited.
+
+## Release SDK archive helpers are linted by workflow-lint
+
+`tools/scripts/test_archive_sdk.py` runs in `workflow-lint.yml` and its paths
+are in `tools/ci/workflow_lint_paths.txt`. A new script that a release step
+calls needs both, plus a regenerated `.shipyard/changed-surface-families.toml`
+(`changed_surface_script_families.py --configure-only --write`).

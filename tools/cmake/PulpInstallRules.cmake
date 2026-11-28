@@ -48,7 +48,7 @@ list(APPEND PULP_SDK_TARGETS
     pulp-interchange pulp-dawproject-import pulp-dawproject-export pulp-smf-interop pulp-smf-interchange
     pulp-audio pulp-midi pulp-signal pulp-dataplane pulp-dataplane-audio pulp-graph
     pulp-format pulp-format-core pulp-format-view pulp-sequence
-    pulp-osc pulp-canvas pulp-design-ir pulp-view-core pulp-view-tooling pulp-view-platform pulp-view-native pulp-view
+    pulp-osc pulp-canvas pulp-design-ir pulp-view-core pulp-editor-bridge pulp-view-tooling pulp-view-platform pulp-view-native pulp-view
     pulp-standalone pulp-standalone-native pulp-standalone-contract pulp-dsl pulp-native-components
 )
 if(TARGET pulp-audio-analysis)
@@ -126,6 +126,9 @@ if(TARGET pulp-gpu-device-api)
 endif()
 if(TARGET pulp-gpu-device)
     list(APPEND PULP_SDK_TARGETS pulp-gpu-device)
+endif()
+if(TARGET pulp-gpu-compute)
+    list(APPEND PULP_SDK_TARGETS pulp-gpu-compute)
 endif()
 if(TARGET pulp-render)
     list(APPEND PULP_SDK_TARGETS pulp-render)

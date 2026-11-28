@@ -822,7 +822,7 @@ the `clap` skill's Parameters section for the complete transport contract.
 | Format | `open()` is called here | `notify_attached()` is called here |
 |---|---|---|
 | VST3 | `CPluginView::attached()` before `attach_to_parent` | After `CPluginView::attached` returns `kResultTrue` |
-| CLAP | `gui_create` | Inside `gui_set_parent` on the matched window API |
+| CLAP | `gui_create` (the `create_view()` GUI at the end of `clap_adapter.cpp`; its `ViewBridge` lives in `LegacyClapGui`, not in `PulpClapPlugin`) | Inside `gui_set_parent` on the matched window API |
 | AU v2 | `uiViewForAudioUnit` — after fetching context via `kPulpEditorContextProperty` | After `PluginViewHost::create` succeeds |
 | AU v3 | `viewDidLoad` | After `PluginViewHost::attach_to_parent` in `viewDidLoad` |
 | AU v3, processor with an `editor_factory()` | `rebuildEditorIfReady` opens a `ContractEditorSession` in `PulpAUv3ContractView` and never creates a ViewBridge | n/a: the contract editor's `attach()` is the attach point |
@@ -1974,6 +1974,16 @@ Key invariants:
   the framework explicitly does NOT carry `EditorBridgeState`-style
   per-session state. Capture it on `[this]` instead.
 
+EditorBridge's dispatch core (`core/view/src/editor_bridge.cpp`: handlers,
+`dispatch`, `dispatch_json`, `dispatch_webview_message`, the response and
+`get_*` helpers) is its own view-free target, `pulp-editor-bridge`, which needs
+only CHOC and the runtime. The `attach_native_runtime` / `detach_native_runtime`
+overloads name view-script types, so they stay in `pulp-view-tooling`
+(`editor_bridge_native_runtime.cpp`), which links the core. Keep any new
+dispatch code free of view-script includes; in an SDK that serves its UI names
+from Vellum, `Pulp::view-tooling` links the core and nothing else of Pulp's
+view, so a WebView editor's bridge comes from it.
+
 When you change `core/view/src/editor_bridge.cpp` or its header, the
 skill-sync gate requires updates to either *this* skill or the
 `import-design` skill (or both). The path map maps both to the file.
@@ -2428,6 +2438,18 @@ construct, so the slot can only return null or do nothing. Gotchas:
   binary built in the other mode would call the wrong one without any error.
   `format-legacy-view-slot-layout` compares the slot positions of both modes
   and of a header with one slot removed; it fails if they drift.
+- **A ViewProcessor offers what `has_view(role)` says**, answered without
+  building anything (default: the editor only); `create_view()` is pure, and a
+  plug-in whose view can be null overrides `has_view`. It cannot be adopted
+  before the switch: in a mode-1 SDK its header `#error`s with the reason, and
+  docs/guides/editor-host-contract.md lists each downstream's changes.
+- **A plug-in keeps `create_view()` by deriving from `pulp::vellum::ViewProcessor<>`**
+  (`view_processor.hpp`), which `#error`s unless the macro is 0. Its factory is
+  one static per `Base`, shared by every processor; it reaches the processor
+  only through the `Processor&` the host passes to `create()`. Its test links a
+  mode-0 `format.cpp` ahead of the mode-1 `pulp-format-core` archive, which works
+  only because the slot layout matches; a duplicate-symbol or missing
+  `reserved_legacy_view_*` link error there means a slot or a name drifted.
 - **A new view-named virtual goes through the macro too.** `node_abi_gate.py`
   reads `PULP_FORMAT_LEGACY_VIEW_NAME(x)` as `x`, expands no other macro, and
   fails when the macro's default definition is anything but the plain name.
@@ -2455,10 +2477,25 @@ construct, so the slot can only return null or do nothing. Gotchas:
 `ParamPort`, `VisualPort`) is the toolkit-free way to open an editor; the guide
 is `docs/guides/editor-host-contract.md`. Things that are easy to get wrong:
 
-- **No adapter consumes `Processor::editor_factory()` yet.** A processor that
-  returns a factory still opens through `has_editor()` / `create_view()` /
-  `ViewBridge` in every format. Do not assume a factory changes what a DAW
-  shows until an adapter is wired to it.
+- **Every adapter except AAX prefers `Processor::editor_factory()`.** VST3,
+  AU v2, AU v3, CLAP and standalone open a non-null factory's editor through
+  `ContractEditorSession` and fall back to `has_editor()` / `create_view()` /
+  `ViewBridge` only when it is null. That fallback is what keeps a default
+  build's legacy editors unchanged; do not route `create_view()` through a
+  default factory in format-core.
+- **A `create_view()`-shaped tree on Vellum is `pulp::vellum::ViewEditorFactory`**
+  (`integrations/pulp-vellum/include/pulp/vellum/view_editor.hpp`). Its hooks
+  follow the ViewBridge protocol, with two differences worth knowing. An
+  offscreen `NativeParentKind::none` attach fires no opened hook, as for any
+  `pulp::vellum::Editor`. After the editor's `StateStoreParamPort` is
+  disconnected (the instance went away), no hook runs and the store is not
+  touched, so a gesture the view opened directly stays for the host's own
+  teardown. The root sizes the view in `layout_children()`, not `on_resized()`:
+  Vellum's flex layout runs after `on_resized()` and would replace the bounds.
+  The header only declares; the root lives in `src/view_editor.cpp`, and the
+  `pulp-vellum-header-weight-view-editor` test keeps `editor.hpp` and the
+  Vellum view layer out of it. A view anywhere in the hosted tree that
+  implements `EditorIdleTarget` gets the editor's idle tick while attached.
 - **The header must stay view-free.** It names no `pulp::view`, canvas, render,
   Dawn or Vellum type, and `format_header_view_boundary.py` classifies it as a
   `pulp-format-core` header automatically, so an include that reaches the view
@@ -4071,6 +4108,10 @@ installs at static init. Things that are easy to get wrong:
   `performKeyEquivalent:`, not only from the menu. A headless run has no menu,
   and the key driver offers `performKeyEquivalent:` first, so
   `PULP_TEST_KEY_SEQUENCE=cmd+k` reaches it.
+- A panel that listens for keys app-wide must leave them to a text field.
+  `StandalonePanelContext::text_input_focused` answers whether an editable
+  field in any app window has focus (macOS: the first responders' field
+  editors); without that check typing into a field also plays notes.
 - `drain_midi_into` runs on the audio thread until the standalone destroys the
   panel, which happens after audio stops. A panel must not free what drain reads
   in `shutdown()`.
