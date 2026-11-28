@@ -145,10 +145,12 @@ void bind_meter(pulp::state::StateStore& store);
 Bad: including `<pulp/state/store.hpp>` from a header that only names
 `StateStore&`.
 
-`tools/scripts/header_fanout_guard.py` enforces part of this. It counts how
-many translation units include each tracked header and fails a change that
-grows a header past its ceiling in `header_fanout_guard.json`. It cannot see
-a header that is merely heavier than it should be, so review includes by hand.
+`tools/scripts/header_fanout_guard.py` enforces part of this. It counts, from
+`#include` lines at a git ref, how many translation units reach each tracked
+header, and fails a change that grows that count for a header already over its
+`max_tus` ceiling in `header_fanout_guard.json`, unless a commit carries a
+`Fanout-Grow:` trailer. It cannot see a header that is merely heavier than it
+should be, so review includes by hand.
 
 ## 6. Documentation order
 
