@@ -10,11 +10,16 @@ hotspot-size guard cannot see it.
 
 The ledger (`header_fanout_guard.json`) lists the tracked headers with a
 `max_tus` reference ceiling each. The check is rebase-stable, like the
-hotspot guard: a header over its ceiling is a violation only when THIS range
-grew its fan-out (head vs merge-base) and no `Fanout-Grow: <path|all>`
-trailer authorizes it. A new test that includes a header directly grows it by
-one and passes while there is headroom; a new include edge between headers
-that pulls hundreds of existing translation units in goes red.
+hotspot guard: a header over its ceiling is a review item only when THIS
+range grew its fan-out (head vs merge-base). A new test that includes a header
+directly grows it by one and passes while there is headroom; a new include edge
+between headers that pulls hundreds of existing translation units in becomes
+the review item `fanout:<path>:+<added TUs>`. The standing reviewer accepts it
+by id in its exact-head verdict, and the `review-verdict` check refuses the
+head until it does (tools/scripts/review_items.py). Here the item is reported
+as needing that acknowledgement and does not fail, because no verdict exists
+before the push. A `Fanout-Grow: <path|all>` commit trailer on the branch also
+accepts it. `--review-items-json PATH` writes every item as JSON.
 
 Fan-out is computed statically from `#include` lines at a git ref: no build,
 the same answer on every host, and conditional includes counted on every
@@ -232,14 +237,23 @@ def _closure(graph: IncludeGraph, start: str) -> set[str]:
     return seen
 
 
+def review_item_id(path: str, grew_by: int) -> str:
+    """The stable review item id for a fan-out growth past a ceiling."""
+    return f"fanout:{path}:+{grew_by}"
+
+
 def check(
     headers: tuple[TrackedHeader, ...],
     head_graph: IncludeGraph,
     base_graph: IncludeGraph | None,
     overrides: frozenset[str],
-) -> tuple[list[str], list[str]]:
+) -> tuple[list[str], list[str], list[dict[str, Any]]]:
+    """(failures, notes, review items). A failure is a ledger the head cannot
+    satisfy; growth past a ceiling is a review item, accepted by trailer or by
+    the reviewer's verdict."""
     failures: list[str] = []
     notes: list[str] = []
+    items: list[dict[str, Any]] = []
     for tracked in headers:
         if tracked.path not in head_graph.files:
             failures.append(
@@ -260,24 +274,61 @@ def check(
                 f"did not grow it (merge-base {base_reach}); not a violation"
             )
             continue
-        if tracked.path in overrides or "all" in overrides:
+        edges = (new_include_edges(base_graph, head_graph, tracked.path)[:5]
+                 if base_graph is not None else [])
+        accepted = tracked.path in overrides or "all" in overrides
+        items.append({
+            "id": review_item_id(tracked.path, reach - base_reach),
+            "kind": "fanout-growth",
+            "path": tracked.path,
+            "base_tus": base_reach,
+            "head_tus": reach,
+            "max_tus": tracked.max_tus,
+            "new_edges": [{"from": src, "to": target, "tus": pulled} for src, target, pulled in edges],
+            "accepted_by": "trailer" if accepted else None,
+        })
+        if accepted:
             notes.append(
                 f"{tracked.path}: fan-out {base_reach} -> {reach} TUs, authorized by Fanout-Grow"
             )
-            continue
-        detail = [
-            f"{tracked.path}: fan-out grew {base_reach} -> {reach} translation units, over its "
-            f"ceiling {tracked.max_tus}."
-        ]
-        if base_graph is not None:
-            for src, target, pulled in new_include_edges(base_graph, head_graph, tracked.path)[:5]:
-                detail.append(f"    new include {src} -> {target} reaches {pulled} of them")
-        detail.append(
-            "    Include it where it is used (a .cpp, or a narrower header) or forward-declare; "
-            f"deliberate growth needs a `Fanout-Grow: {tracked.path} reason=\"...\"` trailer."
-        )
-        failures.append("\n".join(detail))
-    return failures, notes
+    return failures, notes, items
+
+
+def describe_item(item: dict[str, Any]) -> str:
+    detail = [
+        f"{item['path']}: fan-out grew {item['base_tus']} -> {item['head_tus']} translation units, "
+        f"over its ceiling {item['max_tus']}. review_item={item['id']}"
+    ]
+    for edge in item["new_edges"]:
+        detail.append(f"    new include {edge['from']} -> {edge['to']} reaches {edge['tus']} of them")
+    detail.append(
+        "    Include it where it is used (a .cpp, or a narrower header) or forward-declare. "
+        "If the growth is deliberate, it NEEDS REVIEWER ACKNOWLEDGEMENT (not a failure here): "
+        f"the standing reviewer accepts it with the line `accept-review-item: {item['id']}` in its "
+        "exact-head verdict, and the review-verdict check refuses the head until it does "
+        "(tools/scripts/review_items.py)."
+    )
+    return "\n".join(detail)
+
+
+def review_items_for_range(root: Path, base: str, head: str,
+                           config: Path | None = None) -> tuple[list[dict[str, Any]], list[str]]:
+    """(review items, failures) for `merge-base(base, head)..head`, from the
+    ledger at `config` (default: the working tree's ledger under `root`).
+
+    Raises OSError, ValueError, RuntimeError or json.JSONDecodeError."""
+    config = config or root / DEFAULT_CONFIG
+    headers = parse_config(json.loads(config.read_text(encoding="utf-8")))
+    head_graph = graph_at_ref(head, cwd=root)
+    if not head_graph.edges:
+        raise RuntimeError(f"no #include edges resolved at {head}; the graph is blind")
+    mb = merge_base(base, head, cwd=root)
+    if mb is None:
+        raise RuntimeError(f"no merge-base for {base}..{head}")
+    base_graph = graph_at_ref(mb, cwd=root)
+    failures, _notes, items = check(headers, head_graph, base_graph,
+                                    fanout_grow_overrides(mb, head, cwd=root))
+    return items, failures
 
 
 def suggested_ceiling(reach: int) -> int:
@@ -334,6 +385,8 @@ def build_parser() -> argparse.ArgumentParser:
                         help="print every tracked header's current fan-out and ceiling")
     parser.add_argument("--top", type=int, default=0,
                         help="print the N in-repo headers with the widest fan-out at --head")
+    parser.add_argument("--review-items-json", type=Path,
+                        help="write every review item (accepted or not) to this JSON file")
     parser.add_argument("--build-dir", type=Path,
                         help="also report executable reach per tracked header from this Ninja build")
     return parser
@@ -363,7 +416,7 @@ def main(argv: list[str] | None = None) -> int:
         mb = merge_base(args.base, args.head, cwd=root)
         base_graph = graph_at_ref(mb, cwd=root) if mb else None
         overrides = fanout_grow_overrides(mb, args.head, cwd=root) if mb else frozenset()
-        failures, notes = check(headers, head_graph, base_graph, overrides)
+        failures, notes, items = check(headers, head_graph, base_graph, overrides)
     except (OSError, ValueError, RuntimeError, json.JSONDecodeError) as exc:
         print(f"header_fanout_guard: error: {exc}", file=sys.stderr)
         return soft
@@ -395,13 +448,26 @@ def main(argv: list[str] | None = None) -> int:
         for reach, header in widest:
             print(f"{reach:>4}  suggested ceiling {suggested_ceiling(reach):>4}  {header}")
 
-    if failures:
+    if args.review_items_json:
+        args.review_items_json.write_text(
+            json.dumps({"schema": "pulp-review-items/v1", "items": items}, indent=1, sort_keys=True)
+            + "\n", encoding="utf-8")
+    pending = [item for item in items if item["accepted_by"] is None]
+    if pending:
         print("header_fanout_guard: tracked header fan-out grew past its ceiling:", file=sys.stderr)
+        for item in pending:
+            print(f"  {describe_item(item)}", file=sys.stderr)
+            if os.environ.get("GITHUB_ACTIONS") == "true":
+                print(f"::notice title=Review item::{item['id']} needs the standing reviewer's "
+                      "acknowledgement in its exact-head verdict")
+    if failures:
+        print("header_fanout_guard: the fan-out ledger does not match the tree:", file=sys.stderr)
         for failure in failures:
             print(f"  {failure}", file=sys.stderr)
         return 0 if args.mode == "hint" else 1
-    print(f"header_fanout_guard: {len(headers)} tracked header(s) within their fan-out ceilings",
-          file=sys.stderr)
+    if not pending:
+        print(f"header_fanout_guard: {len(headers)} tracked header(s) within their fan-out ceilings",
+              file=sys.stderr)
     return 0
 
 

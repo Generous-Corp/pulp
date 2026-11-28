@@ -823,9 +823,10 @@ if [ -f "$HSG" ] && [ -f "$HSG_CFG" ]; then
     esac
 fi
 
-# Header fan-out guard. A tracked header over its translation-unit ceiling is
-# a violation when this range grew it (a new umbrella include); deliberate
-# growth passes with a `Fanout-Grow:` trailer.
+# Header fan-out guard. A tracked header that this range grew past its
+# translation-unit ceiling (a new umbrella include) is reported as a review
+# item for the standing reviewer's verdict; review-verdict enforces it, since
+# no verdict exists before the push. A broken ledger still fails here.
 if [ -f "$HFG" ] && [ -f "$HFG_CFG" ]; then
     run_gate_captured "$PYTHON" "$HFG" --base "$BASE" --config "$HFG_CFG" --mode=report
     gate_rc=$?; case $gate_rc in

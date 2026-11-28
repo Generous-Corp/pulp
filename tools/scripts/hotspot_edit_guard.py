@@ -19,15 +19,21 @@ passes.
 
 Registered hotspots live in `tools/scripts/hotspot_edit_guard.json`.  A
 `serialized` entry is a generated aggregate that has not yet been split into
-fragments; it is refused by default and may only be changed by a coordinated
-single writer that declares itself in a commit on the branch with the line
+fragments. A change to it is a review item, `hotspot:<registered path>`: the
+standing reviewer must accept it by id in its exact-head verdict, and the
+`review-verdict` check refuses the head until it does
+(tools/scripts/review_items.py). Here the item is reported as needing that
+acknowledgement and does not fail, because no verdict exists before the push.
+A coordinated single writer may instead declare itself in a commit on the
+branch with the line
 
   Serialized-Hotspot: <registered path> reason=<why this branch is the writer>
 
 The guard reads that line from the commits in `merge-base(base, head)..head`,
 so CI sees it on the pull request checkout and a reviewer can audit it in the
 pull request's own history. A process environment variable is not an
-override: CI cannot see an author's local environment.
+override: CI cannot see an author's local environment. `--review-items-json
+PATH` writes every review item, accepted or not, as JSON.
 
   hotspot_edit_guard.py [--base REF] [--head REV]
 
@@ -39,8 +45,8 @@ on a pull request's merge checkout, then origin/main. Without that event
 context (a local run) it falls back to origin/main as the clone last fetched
 it, so on a stale clone it judges the branch against an old main; fetch first.
 
-Exit codes: 0 no registered hotspot edited; 1 a registered hotspot was added
-or modified; 2 the registry or the git range could not be read, or no base
+Exit codes: 0 no registered hotspot edited, or only serialized review items;
+1 a fragment-mode hotspot was added or modified; 2 the registry or the git range could not be read, or no base
 resolved; 77 no base resolved under --skip-without-base (the ctest
 registration's SKIP_RETURN_CODE: a checkout with no base to diff against, such
 as a scheduled run on main, has no branch edit to judge; a skip, not a pass).
@@ -187,12 +193,58 @@ def violations(hotspots: list[dict], changed: dict[str, str],
     return found
 
 
+def review_item_id(path: str) -> str:
+    """The stable review item id for a serialized hotspot edit."""
+    return f"hotspot:{path}"
+
+
+def serialized_review_items(bad: list[tuple[dict, str]], overrides: dict[str, str]) -> list[dict]:
+    """One review item per serialized hotspot edit, marked accepted when a
+    `Serialized-Hotspot:` commit line on the branch names its path."""
+    items = []
+    for spot, _status in bad:
+        if spot.get("mode", "fragment") != "serialized":
+            continue
+        accepted = spot["path"] in overrides
+        items.append({
+            "id": review_item_id(spot["path"]),
+            "kind": "serialized-hotspot",
+            "path": spot["path"],
+            "writer": spot["writer"],
+            "accepted_by": "trailer" if accepted else None,
+            "reason": overrides.get(spot["path"]),
+        })
+    return items
+
+
+def review_items_for_range(root: Path, base: str, head: str,
+                           registry: Path | None = None) -> tuple[list[dict], list[tuple[dict, str]]]:
+    """(review items, fragment-mode refusals) for `merge-base(base, head)..head`.
+
+    Raises ValueError for an unusable registry and RuntimeError for git."""
+    hotspots = load_registry(root, registry)
+    changed = changes(root, base, head)
+    bad = violations(hotspots, changed, lambda path: added_lines(root, base, head, path))
+    serialized = [entry for entry in bad if entry[0].get("mode", "fragment") == "serialized"]
+    overrides = serialized_overrides(root, base, head) if serialized else {}
+    refusals = [entry for entry in bad if entry[0].get("mode", "fragment") != "serialized"]
+    return serialized_review_items(serialized, overrides), refusals
+
+
+def write_review_items(path: str | None, items: list[dict]) -> None:
+    if path:
+        Path(path).write_text(json.dumps({"schema": "pulp-review-items/v1", "items": items},
+                                         indent=1, sort_keys=True) + "\n", encoding="utf-8")
+
+
 def main(argv: list[str]) -> int:
     ap = argparse.ArgumentParser(allow_abbrev=False, description=__doc__.splitlines()[0])
     ap.add_argument("--root", default=str(Path(__file__).resolve().parents[2]))
     ap.add_argument("--base", default=None)
     ap.add_argument("--head", default="HEAD")
     ap.add_argument("--registry", default=None, help=f"default {REGISTRY}")
+    ap.add_argument("--review-items-json", default=None,
+                    help="write every review item (accepted or not) to this JSON file")
     ap.add_argument("--skip-without-base", action="store_true",
                     help="exit 77 (skipped) instead of 2 when no base resolves")
     a = ap.parse_args(argv[1:])
@@ -223,33 +275,40 @@ def main(argv: list[str]) -> int:
         print(f"hotspot-edit-guard: ERROR: {exc}", file=sys.stderr)
         return 2
     if not bad:
+        write_review_items(a.review_items_json, [])
         print(f"hotspot-edit-guard: OK, no registered hotspot edited ({len(hotspots)} registered; "
               f"{len(changed)} path(s) changed since {base})")
         return 0
+    serialized = [entry for entry in bad if entry[0].get("mode", "fragment") == "serialized"]
+    try:
+        overrides = serialized_overrides(root, base, a.head) if serialized else {}
+    except RuntimeError as exc:
+        print(f"hotspot-edit-guard: ERROR: {exc}", file=sys.stderr)
+        return 2
+    items = serialized_review_items(serialized, overrides)
+    write_review_items(a.review_items_json, items)
     print(f"hotspot-edit-guard: {len(bad)} registered hotspot aggregate(s) edited directly "
           f"(against {base}):")
     refused = False
-    overrides: dict[str, str] | None = None
+    for item in items:
+        if item["accepted_by"] == "trailer":
+            print(f"  file={item['path']}; review_item={item['id']}; cause_class=SERIALIZED_HOTSPOT_EDIT; "
+                  f"override=Serialized-Hotspot commit line on this branch; "
+                  f"reason={item['reason']}; accepted")
+            continue
+        print(f"  file={item['path']}; review_item={item['id']}; cause_class=SERIALIZED_HOTSPOT_EDIT; "
+              "status=NEEDS REVIEWER ACKNOWLEDGEMENT (not a failure here); "
+              f"writer={item['writer']}; the standing reviewer accepts it with the line "
+              f"`accept-review-item: {item['id']}` in its exact-head verdict, and the "
+              "review-verdict check refuses the head until it does "
+              "(tools/scripts/review_items.py)")
+        if os.environ.get("GITHUB_ACTIONS") == "true":
+            print(f"::notice title=Review item::{item['id']} needs the standing reviewer's "
+                  "acknowledgement in its exact-head verdict")
     for spot, status in bad:
         if spot.get("mode", "fragment") == "serialized":
-            if overrides is None:
-                try:
-                    overrides = serialized_overrides(root, base, a.head)
-                except RuntimeError as exc:
-                    print(f"hotspot-edit-guard: ERROR: {exc}", file=sys.stderr)
-                    return 2
-            if spot["path"] in overrides:
-                print(f"  file={spot['path']}; cause_class=SERIALIZED_HOTSPOT_EDIT; "
-                      f"override=Serialized-Hotspot commit line on this branch; "
-                      f"reason={overrides[spot['path']]}; accepted")
-                continue
-            print(f"  file={spot['path']}; cause_class=SERIALIZED_HOTSPOT_EDIT; "
-                  f"fix=coordinate the single writer ({spot['writer']}) and add the line "
-                  f"`Serialized-Hotspot: {spot['path']} reason=<why this branch is the writer>` "
-                  "to a commit on this branch; safe_to_auto_apply=no")
-            if spot.get("why"):
+            if spot.get("why") and spot["path"] not in overrides:
                 print(f"    why: {spot['why']}")
-            refused = True
             continue
         if status == "L":
             print(f"  file={spot['path']}; cause_class=HOTSPOT_LITERAL_EDIT; evidence=adds a line matching "
@@ -269,7 +328,6 @@ def main(argv: list[str]) -> int:
             print(f"    why: {spot['why']}")
         refused = True
     return 1 if refused else 0
-
 
 if __name__ == "__main__":
     sys.exit(main(sys.argv))

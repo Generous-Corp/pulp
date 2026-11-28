@@ -164,14 +164,30 @@ class GuardEndToEndTests(unittest.TestCase):
         self.assertEqual(rc, 0, err)
         self.assertIn("within their fan-out ceilings", err)
 
-    def test_umbrella_include_fails_and_names_the_edge(self) -> None:
+    def items(self, *extra: str) -> tuple[int, str, list[dict]]:
+        out = Path(self._td.name) / "review-items.json"
+        rc, err = self.repo.run_guard("--review-items-json", str(out), *extra)
+        return rc, err, json.loads(out.read_text(encoding="utf-8"))["items"]
+
+    def test_umbrella_include_is_a_review_item_and_names_the_edge(self) -> None:
         write(self.repo.root, UMBRELLA, "#pragma once\n#include <pulp/a/heavy.hpp>\nstruct Umbrella {};\n")
         self.repo.commit("umbrella include")
-        rc, err = self.repo.run_guard()
-        self.assertEqual(rc, 1, err)
+        rc, err, items = self.items()
+        # Not a failure before the push: the reviewer's verdict accepts it, and
+        # review-verdict enforces that (review_items.py).
+        self.assertEqual(rc, 0, err)
         self.assertIn(f"{HEAVY}: fan-out grew 1 -> 31 translation units", err)
         self.assertIn(f"new include {UMBRELLA} -> {HEAVY} reaches 30 of them", err)
-        self.assertIn("Fanout-Grow:", err)
+        self.assertIn("NEEDS REVIEWER ACKNOWLEDGEMENT", err)
+        self.assertIn(f"accept-review-item: fanout:{HEAVY}:+30", err)
+        self.assertEqual([(i["id"], i["accepted_by"]) for i in items], [(f"fanout:{HEAVY}:+30", None)])
+
+    def test_review_items_for_range_matches_the_cli(self) -> None:
+        write(self.repo.root, UMBRELLA, "#pragma once\n#include <pulp/a/heavy.hpp>\n")
+        self.repo.commit("umbrella include")
+        items, failures = hfg.review_items_for_range(self.repo.root, "main", "HEAD")
+        self.assertEqual([i["id"] for i in items], [f"fanout:{HEAVY}:+30"])
+        self.assertEqual(failures, [])
 
     def test_edge_the_reach_does_not_depend_on_is_not_blamed(self) -> None:
         write(self.repo.root, UMBRELLA, "#pragma once\n#include <pulp/a/heavy.hpp>\n")
@@ -179,7 +195,7 @@ class GuardEndToEndTests(unittest.TestCase):
               '#include <pulp/a/umbrella.hpp>\n#include <pulp/a/heavy.hpp>\n#include "support/h.hpp"\n')
         self.repo.commit("umbrella include plus a redundant direct include")
         rc, err = self.repo.run_guard()
-        self.assertEqual(rc, 1, err)
+        self.assertEqual(rc, 0, err)
         self.assertIn(f"new include {UMBRELLA} -> {HEAVY}", err)
         self.assertNotIn("new include test/test_u0.cpp", err)
 
@@ -194,9 +210,11 @@ class GuardEndToEndTests(unittest.TestCase):
         write(self.repo.root, UMBRELLA, "#pragma once\n#include <pulp/a/heavy.hpp>\n")
         git(self.repo.root, "add", ".")
         git(self.repo.root, "commit", "-q", "-m", f"umbrella\n\nFanout-Grow: {HEAVY} reason=\"intended\"")
-        rc, err = self.repo.run_guard()
+        rc, err, items = self.items()
         self.assertEqual(rc, 0, err)
         self.assertIn("authorized by Fanout-Grow", err)
+        self.assertNotIn("NEEDS REVIEWER ACKNOWLEDGEMENT", err)
+        self.assertEqual([i["accepted_by"] for i in items], ["trailer"])
 
     def test_growth_within_ceiling_passes(self) -> None:
         write(self.repo.root, "test/test_direct.cpp", "#include <pulp/a/heavy.hpp>\n")

@@ -232,19 +232,44 @@ class GuardTests(unittest.TestCase):
         }), encoding="utf-8")
         return repo, serialized, registry
 
-    def test_serialized_hotspot_is_refused_without_a_trailer_even_with_the_old_env_var(self) -> None:
+    def _items(self, repo: Repo, registry: Path, env: dict | None = None
+               ) -> tuple[subprocess.CompletedProcess, list[dict]]:
+        out = repo.root.parent / "review-items.json"
+        res = repo.run("--base", "base-ref", "--registry", str(registry),
+                       "--review-items-json", str(out), env=env)
+        items = json.loads(out.read_text(encoding="utf-8"))["items"] if out.exists() else []
+        return res, items
+
+    def test_serialized_hotspot_without_a_trailer_is_a_review_item_not_a_failure(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             repo, serialized, registry = self._serialized_repo(tmp)
             repo.write(serialized, "{\"changed\": true}\n")
             repo.commit("regenerate", serialized)
-            blocked = repo.run("--base", "base-ref", "--registry", str(registry))
-            self.assertEqual(blocked.returncode, 1, blocked.stdout + blocked.stderr)
-            self.assertIn("SERIALIZED_HOTSPOT_EDIT", blocked.stdout)
-            self.assertIn("Serialized-Hotspot: " + serialized + " reason=", blocked.stdout)
-            # A process env var is invisible to CI and to a reviewer; it is not an override.
-            env_only = repo.run("--base", "base-ref", "--registry", str(registry),
-                                env={"PULP_ALLOW_SERIALIZED_HOTSPOT": "1"})
-            self.assertEqual(env_only.returncode, 1, env_only.stdout + env_only.stderr)
+            res, items = self._items(repo, registry)
+            self.assertEqual(res.returncode, 0, res.stdout + res.stderr)
+            self.assertIn("SERIALIZED_HOTSPOT_EDIT", res.stdout)
+            self.assertIn("NEEDS REVIEWER ACKNOWLEDGEMENT", res.stdout)
+            self.assertIn("accept-review-item: hotspot:" + serialized, res.stdout)
+            self.assertEqual([(i["id"], i["accepted_by"]) for i in items],
+                             [("hotspot:" + serialized, None)])
+            # A process env var is invisible to CI and to a reviewer; it accepts nothing.
+            _, env_items = self._items(repo, registry, env={"PULP_ALLOW_SERIALIZED_HOTSPOT": "1"})
+            self.assertEqual([i["accepted_by"] for i in env_items], [None])
+
+    def test_a_fragment_hotspot_edit_still_fails_beside_a_serialized_item(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo, serialized, registry = self._serialized_repo(tmp)
+            spots = json.loads(registry.read_text(encoding="utf-8"))
+            spots["hotspots"].append({"path": AGGREGATE, "fragments": "test/ctest_script_inputs/",
+                                      "writer": "w"})
+            registry.write_text(json.dumps(spots), encoding="utf-8")
+            repo.write(serialized, "{\"changed\": true}\n")
+            repo.write(AGGREGATE, "{}\n")
+            repo.commit("regenerate and hand edit", serialized, AGGREGATE)
+            res, items = self._items(repo, registry)
+            self.assertEqual(res.returncode, 1, res.stdout + res.stderr)
+            self.assertIn("HOTSPOT_AGGREGATE_EDIT", res.stdout)
+            self.assertEqual([i["id"] for i in items], ["hotspot:" + serialized])
 
     def test_serialized_hotspot_override_is_read_from_the_branch_commits(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -252,9 +277,10 @@ class GuardTests(unittest.TestCase):
             repo.write(serialized, "{\"changed\": true}\n")
             repo.commit("regenerate census\n\nSerialized-Hotspot: " + serialized
                         + " reason=single writer for the census refresh", serialized)
-            allowed = repo.run("--base", "base-ref", "--registry", str(registry))
-            self.assertEqual(allowed.returncode, 0, allowed.stdout + allowed.stderr)
-            self.assertIn("reason=single writer for the census refresh", allowed.stdout)
+            res, items = self._items(repo, registry)
+            self.assertEqual(res.returncode, 0, res.stdout + res.stderr)
+            self.assertIn("reason=single writer for the census refresh", res.stdout)
+            self.assertEqual([i["accepted_by"] for i in items], ["trailer"])
 
     def test_serialized_hotspot_override_needs_a_reason_and_the_exact_path(self) -> None:
         for trailer in ("Serialized-Hotspot: docs/status/consumption-profiles.json",
@@ -264,8 +290,8 @@ class GuardTests(unittest.TestCase):
                 repo, serialized, registry = self._serialized_repo(tmp)
                 repo.write(serialized, "{\"changed\": true}\n")
                 repo.commit("regenerate\n\n" + trailer, serialized)
-                res = repo.run("--base", "base-ref", "--registry", str(registry))
-                self.assertEqual(res.returncode, 1, res.stdout + res.stderr)
+                _, items = self._items(repo, registry)
+                self.assertEqual([i["accepted_by"] for i in items], [None])
 
     def test_serialized_hotspot_override_on_the_base_side_does_not_count(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -276,8 +302,18 @@ class GuardTests(unittest.TestCase):
             repo.git("checkout", "-q", "-b", "topic", "HEAD~1")
             repo.write(serialized, "{\"changed\": true}\n")
             repo.commit("regenerate", serialized)
-            res = repo.run("--base", "base-ref", "--registry", str(registry))
-            self.assertEqual(res.returncode, 1, res.stdout + res.stderr)
+            _, items = self._items(repo, registry)
+            self.assertEqual([i["accepted_by"] for i in items], [None])
+
+    def test_review_items_for_range_matches_the_cli(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo, serialized, registry = self._serialized_repo(tmp)
+            repo.write(serialized, "{\"changed\": true}\n")
+            repo.commit("regenerate", serialized)
+            items, refusals = guard.review_items_for_range(repo.root, "base-ref", "HEAD", registry)
+            self.assertEqual([i["id"] for i in items], ["hotspot:" + serialized])
+            self.assertEqual(refusals, [])
+
 
 if __name__ == "__main__":
     unittest.main()
