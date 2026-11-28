@@ -785,6 +785,45 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
+name = "script-readers-082bb70bf698"
+paths = ["tools/scripts/examples_manifest_guard.py"]
+tests = [
+  "build-parallelism-guard",
+  "changed-surface-policy-inventory",
+  "changed-surface-policy-selftest",
+  "changed-surface-script-families-drift",
+  "changed-surface-script-families-selftest",
+  "changed-surface-shadow-plans-selftest",
+  "clean-worktree-planning-selftest",
+  "configure-only-selftest",
+  "examples-manifest-guard",
+  "examples-manifest-guard-selftest",
+  "flake-exoneration-selftest",
+  "gate-common-selftest",
+  "gpu-audio-provider-identity-selftest",
+  "gpu-dpr-runner-selftest",
+  "gpu-first-visible-acceptance-selftest",
+  "gpu-first-visible-campaign-selftest",
+  "gpu-first-visible-external-adapter-selftest",
+  "gpu-first-visible-role-producers-selftest",
+  "gpu-handoff-provenance-selftest",
+  "pr-head-affected-tests-selftest",
+  "pr-head-diff-scoped-registrations",
+  "prepush-receipt",
+  "prepush-refresh-push",
+  "reuse-policy-replay-selftest",
+  "sample-region-compat-baseline-selftest",
+  "vellum-watch-preflight-selftest",
+  "wide-non-native-selftest",
+]
+build_targets = ["pulp-cli"]
+supported_build_types = [
+  "debug",
+  "release",
+]
+risk_class = "low"
+
+[[families]]
 name = "script-readers-b4e4cc6123f2"
 paths = ["tools/scripts/format_header_view_boundary.py"]
 tests = [
@@ -3925,6 +3964,44 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
+name = "script-readers-aed2b848ad3b"
+paths = ["tools/scripts/test_examples_manifest_guard.py"]
+tests = [
+  "build-parallelism-guard",
+  "changed-surface-policy-inventory",
+  "changed-surface-policy-selftest",
+  "changed-surface-script-families-drift",
+  "changed-surface-script-families-selftest",
+  "changed-surface-shadow-plans-selftest",
+  "clean-worktree-planning-selftest",
+  "configure-only-selftest",
+  "examples-manifest-guard-selftest",
+  "flake-exoneration-selftest",
+  "gate-common-selftest",
+  "gpu-audio-provider-identity-selftest",
+  "gpu-dpr-runner-selftest",
+  "gpu-first-visible-acceptance-selftest",
+  "gpu-first-visible-campaign-selftest",
+  "gpu-first-visible-external-adapter-selftest",
+  "gpu-first-visible-role-producers-selftest",
+  "gpu-handoff-provenance-selftest",
+  "pr-head-affected-tests-selftest",
+  "pr-head-diff-scoped-registrations",
+  "prepush-receipt",
+  "prepush-refresh-push",
+  "reuse-policy-replay-selftest",
+  "sample-region-compat-baseline-selftest",
+  "vellum-watch-preflight-selftest",
+  "wide-non-native-selftest",
+]
+build_targets = ["pulp-cli"]
+supported_build_types = [
+  "debug",
+  "release",
+]
+risk_class = "low"
+
+[[families]]
 name = "script-readers-8ccdd905b771"
 paths = ["tools/scripts/test_findskia_arch_assert.py"]
 tests = [
@@ -5546,6 +5623,44 @@ tests = [
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
   "integrations-boundary-check-negative-contract",
+  "pr-head-affected-tests-selftest",
+  "pr-head-diff-scoped-registrations",
+  "prepush-receipt",
+  "prepush-refresh-push",
+  "reuse-policy-replay-selftest",
+  "sample-region-compat-baseline-selftest",
+  "vellum-watch-preflight-selftest",
+  "wide-non-native-selftest",
+]
+build_targets = ["pulp-cli"]
+supported_build_types = [
+  "debug",
+  "release",
+]
+risk_class = "low"
+
+[[families]]
+name = "script-readers-b140eb695b8c"
+paths = ["tools/scripts/test_link_closure_check.py"]
+tests = [
+  "build-parallelism-guard",
+  "changed-surface-policy-inventory",
+  "changed-surface-policy-selftest",
+  "changed-surface-script-families-drift",
+  "changed-surface-script-families-selftest",
+  "changed-surface-shadow-plans-selftest",
+  "clean-worktree-planning-selftest",
+  "configure-only-selftest",
+  "flake-exoneration-selftest",
+  "gate-common-selftest",
+  "gpu-audio-provider-identity-selftest",
+  "gpu-dpr-runner-selftest",
+  "gpu-first-visible-acceptance-selftest",
+  "gpu-first-visible-campaign-selftest",
+  "gpu-first-visible-external-adapter-selftest",
+  "gpu-first-visible-role-producers-selftest",
+  "gpu-handoff-provenance-selftest",
+  "link-closure-check-rules",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
   "prepush-receipt",
@@ -9445,6 +9560,7 @@ paths = [
   "tools/scripts/date_sensitive_selftests_tz_matrix.py",
   "tools/scripts/design_unit_boundary_check.py",
   "tools/scripts/dsp_provenance_audit.py",
+  "tools/scripts/examples_manifest_guard.py",
   "tools/scripts/format_header_view_boundary.py",
   "tools/scripts/frontend_ir_codegen_artifact_gate.py",
   "tools/scripts/frontend_ir_codegen_artifacts.py",
@@ -9636,6 +9752,7 @@ paths = [
   "tools/scripts/test_encode_binary_data.py",
   "tools/scripts/test_example_validation_paths.py",
   "tools/scripts/test_examples_index_guard.py",
+  "tools/scripts/test_examples_manifest_guard.py",
   "tools/scripts/test_fetch_skia_for_release.py",
   "tools/scripts/test_fetch_skia_for_release_extra.py",
   "tools/scripts/test_fetch_v8_for_release.py",
@@ -9725,6 +9842,7 @@ paths = [
   "tools/scripts/test_lcov_cobertura.py",
   "tools/scripts/test_lcov_cobertura_extra.py",
   "tools/scripts/test_lcov_excl_propagation.py",
+  "tools/scripts/test_link_closure_check.py",
   "tools/scripts/test_live_build_check.py",
   "tools/scripts/test_mac_objc_source_list_guard.py",
   "tools/scripts/test_macos_reroute_watcher.py",
@@ -9972,6 +10090,8 @@ tests = [
   "dsp-capability-registry-selftest",
   "examples-index-guard",
   "examples-index-guard-selftest",
+  "examples-manifest-guard",
+  "examples-manifest-guard-selftest",
   "fleet-remote-probe-selftest",
   "forced-restore-lint",
   "forced-restore-lint-selftest",
@@ -10081,6 +10201,7 @@ paths = [
   "tools/scripts/date_sensitive_selftests_tz_matrix.py",
   "tools/scripts/design_unit_boundary_check.py",
   "tools/scripts/dsp_provenance_audit.py",
+  "tools/scripts/examples_manifest_guard.py",
   "tools/scripts/format_header_view_boundary.py",
   "tools/scripts/frontend_ir_codegen_artifact_gate.py",
   "tools/scripts/frontend_ir_codegen_artifacts.py",
@@ -10272,6 +10393,7 @@ paths = [
   "tools/scripts/test_encode_binary_data.py",
   "tools/scripts/test_example_validation_paths.py",
   "tools/scripts/test_examples_index_guard.py",
+  "tools/scripts/test_examples_manifest_guard.py",
   "tools/scripts/test_fetch_skia_for_release.py",
   "tools/scripts/test_fetch_skia_for_release_extra.py",
   "tools/scripts/test_fetch_v8_for_release.py",
@@ -10361,6 +10483,7 @@ paths = [
   "tools/scripts/test_lcov_cobertura.py",
   "tools/scripts/test_lcov_cobertura_extra.py",
   "tools/scripts/test_lcov_excl_propagation.py",
+  "tools/scripts/test_link_closure_check.py",
   "tools/scripts/test_live_build_check.py",
   "tools/scripts/test_mac_objc_source_list_guard.py",
   "tools/scripts/test_macos_reroute_watcher.py",

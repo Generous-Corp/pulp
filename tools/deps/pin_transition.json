@@ -1,15 +1,15 @@
 {
   "schema": "pulp.pin-transition.v1",
-  "issued_at": "2026-11-22T07:18:00Z",
-  "expires_at": "2026-12-06T07:17:59Z",
+  "issued_at": "2026-11-27T18:08:19Z",
+  "expires_at": "2026-12-11T18:08:19Z",
   "owner": "danielraffel",
-  "reason": "Daniel-approved expand/contract route for the published Vellum Metal/Dawn chrome/m158-attested.1 release; record authorizes the subsequent pin transition.",
+  "reason": "Allow Pulp to adopt the published chrome/m158-attested.2 macOS renderer before the Vellum lock and mirror closure converge. See https://github.com/Generous-Corp/vellum/pull/585#issuecomment-7159955875.",
   "entries": [
     {
       "artifact_id": "renderer/mac-universal",
-      "old_sha256": "1779c7d1ba5c73a0d6a1f33b77fbf30774bbd9f7542c1c42cc5129f57e99fbd4",
+      "old_sha256": "598c45fe77d926925c7bc37c1e5e2e3dddfe08fad26f89fb0c3e3be6788f8cba",
       "new_sha256": "dca73c0eee5b0f6d129fe357d0754f7165c6b436051e0de947aeedd3e1bde250",
-      "reason": "Published skia-builder chrome/m158-attested.1 release transition to the Vellum lock target.",
+      "reason": "The patched Dawn explicitly selects the Metal shading language version on supported macOS. The corrected archive rendered in Intel REAPER with zero Metal pipeline failures in the Spectr v1.0.12 diagnostic.",
       "owner": "danielraffel"
     }
   ]
