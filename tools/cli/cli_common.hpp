@@ -110,6 +110,18 @@ int delegate_to_build_binary(const fs::path& relative_binary,
                              const std::vector<std::string>& args,
                              const std::string& prepend_flag = {});
 
+// The first existing candidate for a build binary, or empty when none exists.
+fs::path find_build_binary(const fs::path& relative_binary);
+
+// The Vellum CLI: $PULP_VELLUM_CLI when set (empty if that file is missing),
+// otherwise `vellum` on PATH, otherwise empty.
+fs::path find_vellum_cli();
+
+// Run `vellum <vellum_command> <args...>` and return its exit status. When the
+// Vellum CLI is absent, explain how to install it and return 2.
+int forward_to_vellum(const std::string& pulp_command, const std::string& vellum_command,
+                      const std::vector<std::string>& args);
+
 // ── Path / Project Detection ────────────────────────────────────────────────
 
 fs::path user_home_dir();

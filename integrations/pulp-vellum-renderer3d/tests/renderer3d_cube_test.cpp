@@ -1,5 +1,7 @@
 #include <pulp/vellum_renderer3d/renderer3d.hpp>
 
+#include <pulp/scene/gltf_loader.hpp>
+
 #if defined(PULP_VELLUM_RENDERER3D_LEGACY_PROBE)
 #include "include/core/SkData.h"
 #include "include/core/SkImage.h"
@@ -78,6 +80,43 @@ TEST_CASE("Vellum Renderer3D draws the textured cube on gpu-runtime's device",
     }
 }
 
+TEST_CASE("Vellum Renderer3D draws BoxTextured with the recorded Metal fingerprint",
+          "[vellum-renderer3d][gpu]") {
+    const auto path = std::filesystem::path(PULP_VELLUM_RENDERER3D_FIXTURE_DIR) / "BoxTextured" /
+                      "BoxTextured.glb";
+    const auto loaded = pulp::scene::load_gltf_scene(path);
+    INFO(loaded.error);
+    REQUIRE(loaded.success);
+    r3d::SceneDataRenderConfig config;
+    config.width = 128;
+    config.height = 128;
+    const auto result = r3d::Renderer3D::render_scene_data(loaded.scene, config);
+    if (!result.gpu_available) {
+        SKIP("Dawn/WebGPU unavailable in this environment: " << result.error);
+    }
+    if (result.adapter_backend_type == "Null") {
+        SKIP("the Null adapter draws nothing, so its readback is not a frame");
+    }
+    INFO(result.error);
+    REQUIRE(result.success);
+    CHECK(result.primitive_count == 1);
+    CHECK(result.texture_uploaded);
+    CHECK(result.texture_sampler_applied);
+    if (result.adapter_backend_type == "Metal") {
+        // Recorded by renderer3d-goldens.json and the legacy probe test.
+        CHECK(r3d::rgba_fingerprint(result) == 5845745157752120258ULL);
+    }
+}
+
+TEST_CASE("Vellum Renderer3D refuses an empty scene before touching the GPU",
+          "[vellum-renderer3d]") {
+    const auto result = r3d::Renderer3D::render_scene_data(pulp::scene::SceneData{});
+    CHECK_FALSE(result.success);
+    CHECK_FALSE(result.gpu_available);
+    CHECK_FALSE(result.scene_data_consumed);
+    CHECK_FALSE(result.error.empty());
+}
+
 TEST_CASE("Vellum Renderer3D refuses a zero-sized render before touching the GPU",
           "[vellum-renderer3d]") {
     const auto result = render_cube(0, 64);
@@ -119,17 +158,22 @@ std::vector<std::uint8_t> read_file(const std::filesystem::path& path) {
 
 // Runs the legacy pulp-renderer3d-probe, which still draws through
 // pulp::render, and decodes the PNG it wrote back to unpremultiplied RGBA.
-LegacyFrame render_legacy_cube(std::uint32_t width, std::uint32_t height) {
+// `scene` is "hardcoded" or "boxtextured".
+LegacyFrame render_legacy(const std::string& scene, std::uint32_t width, std::uint32_t height) {
     const std::filesystem::path dir = PULP_VELLUM_RENDERER3D_PNG_DIR;
     std::filesystem::create_directories(dir);
     const std::string stem = std::to_string(width) + "x" + std::to_string(height);
-    const auto png_path = dir / ("legacy-cube-" + stem + ".png");
-    const auto out_path = dir / ("legacy-cube-" + stem + ".txt");
+    const auto png_path = dir / ("legacy-" + scene + "-" + stem + ".png");
+    const auto out_path = dir / ("legacy-" + scene + "-" + stem + ".txt");
+    const std::string fixture = scene == "boxtextured" ? std::string(" --fixture \"") +
+                                                             PULP_VELLUM_RENDERER3D_FIXTURE_DIR +
+                                                             "/BoxTextured/BoxTextured.glb\""
+                                                       : std::string();
     std::filesystem::remove(png_path);
     const std::string command =
-        std::string("\"") + PULP_VELLUM_RENDERER3D_LEGACY_PROBE + "\" --scene hardcoded --width " +
-        std::to_string(width) + " --height " + std::to_string(height) + " --output-png \"" +
-        png_path.string() + "\" > \"" + out_path.string() + "\" 2>/dev/null";
+        std::string("\"") + PULP_VELLUM_RENDERER3D_LEGACY_PROBE + "\" --scene " + scene + fixture +
+        " --width " + std::to_string(width) + " --height " + std::to_string(height) +
+        " --output-png \"" + png_path.string() + "\" > \"" + out_path.string() + "\" 2>/dev/null";
     LegacyFrame frame;
     if (std::system(command.c_str()) != 0)
         return frame;
@@ -154,63 +198,102 @@ LegacyFrame render_legacy_cube(std::uint32_t width, std::uint32_t height) {
     return frame;
 }
 
+struct Size {
+    std::uint32_t width;
+    std::uint32_t height;
+};
+
+// 100 wide makes every readback row 400 bytes, padded to 512, so the
+// de-padding is exercised as well as the draw.
+constexpr std::array<Size, 3> kParitySizes = {{{128, 128}, {100, 75}, {256, 256}}};
+
+// Same adapter, same Dawn, same shader: the tolerance is zero.
+void check_same_frame(const std::string& name, const Size size,
+                      const r3d::Scene3DRenderResult& ported, const LegacyFrame& legacy) {
+    const auto legacy_error = legacy.fields.find("error");
+    INFO(ported.error << " | legacy: "
+                      << (legacy_error == legacy.fields.end() ? "" : legacy_error->second));
+    REQUIRE(ported.success);
+    REQUIRE(legacy.fields.count("success") == 1);
+    REQUIRE(legacy.fields.at("success") == "true");
+    CHECK(legacy.fields.at("adapter_backend_type") == ported.adapter_backend_type);
+    CHECK(legacy.fields.at("adapter_name") == ported.adapter_name);
+    CHECK(legacy.fields.at("rgba_fingerprint") == std::to_string(r3d::rgba_fingerprint(ported)));
+    REQUIRE(legacy.width == size.width);
+    REQUIRE(legacy.height == size.height);
+    REQUIRE(legacy.rgba.size() == ported.rgba.size());
+
+    const std::string stem = std::to_string(size.width) + "x" + std::to_string(size.height);
+    write_png("vellum-" + name + "-" + stem + ".png", ported.png);
+
+    std::size_t mismatched_pixels = 0;
+    int max_channel_delta = 0;
+    for (std::size_t i = 0; i < ported.rgba.size(); i += 4) {
+        bool differs = false;
+        for (std::size_t c = 0; c < 4; ++c) {
+            const int delta = std::abs(int(ported.rgba[i + c]) - int(legacy.rgba[i + c]));
+            max_channel_delta = std::max(max_channel_delta, delta);
+            differs = differs || delta != 0;
+        }
+        mismatched_pixels += differs ? 1u : 0u;
+    }
+    INFO("mismatched pixels " << mismatched_pixels << ", max channel delta " << max_channel_delta);
+    CHECK(mismatched_pixels == 0);
+    CHECK(max_channel_delta == 0);
+    CHECK(legacy.fields.at("distinct_color_count") == std::to_string(ported.distinct_color_count));
+    CHECK(legacy.fields.at("non_transparent_pixel_count") ==
+          std::to_string(ported.non_transparent_pixel_count));
+    CHECK(legacy.fields.at("primitive_count") == std::to_string(ported.primitive_count));
+    CHECK(legacy.fields.at("pipeline_cache_entry_count") ==
+          std::to_string(ported.pipeline_cache_entry_count));
+    CHECK(legacy.fields.at("scene_data_consumed") ==
+          (ported.scene_data_consumed ? "true" : "false"));
+    CHECK(legacy.fields.at("texture_decoded") == (ported.texture_decoded ? "true" : "false"));
+}
+
+bool skip_without_drawing_adapter(const r3d::Scene3DRenderResult& ported) {
+    if (!ported.gpu_available) {
+        SKIP("Dawn/WebGPU unavailable in this environment: " << ported.error);
+    }
+    if (ported.adapter_backend_type == "Null") {
+        SKIP("the Null adapter draws nothing, so there is no frame to compare");
+    }
+    return false;
+}
+
 } // namespace
 
 TEST_CASE("Vellum Renderer3D cube matches the legacy renderer pixel for pixel",
           "[vellum-renderer3d][gpu][parity]") {
-    // 100 wide makes every readback row 400 bytes, padded to 512, so the
-    // de-padding is exercised as well as the draw.
-    struct Size {
-        std::uint32_t width;
-        std::uint32_t height;
-    };
-    for (const Size size : {Size{128, 128}, Size{100, 75}, Size{256, 256}}) {
+    for (const Size size : kParitySizes) {
         DYNAMIC_SECTION(size.width << "x" << size.height) {
             const auto ported = render_cube(size.width, size.height);
-            if (!ported.gpu_available) {
-                SKIP("Dawn/WebGPU unavailable in this environment: " << ported.error);
-            }
-            if (ported.adapter_backend_type == "Null") {
-                SKIP("the Null adapter draws nothing, so there is no frame to compare");
-            }
-            const auto legacy = render_legacy_cube(size.width, size.height);
-            const auto legacy_error = legacy.fields.find("error");
-            INFO(ported.error << " | legacy: "
-                              << (legacy_error == legacy.fields.end() ? "" : legacy_error->second));
-            REQUIRE(ported.success);
-            REQUIRE(legacy.fields.count("success") == 1);
-            REQUIRE(legacy.fields.at("success") == "true");
-            CHECK(legacy.fields.at("adapter_backend_type") == ported.adapter_backend_type);
-            CHECK(legacy.fields.at("adapter_name") == ported.adapter_name);
-            CHECK(legacy.fields.at("rgba_fingerprint") ==
-                  std::to_string(r3d::rgba_fingerprint(ported)));
-            REQUIRE(legacy.width == size.width);
-            REQUIRE(legacy.height == size.height);
-            REQUIRE(legacy.rgba.size() == ported.rgba.size());
+            skip_without_drawing_adapter(ported);
+            check_same_frame("cube", size, ported,
+                             render_legacy("hardcoded", size.width, size.height));
+        }
+    }
+}
 
-            const std::string stem = std::to_string(size.width) + "x" + std::to_string(size.height);
-            write_png("vellum-cube-" + stem + ".png", ported.png);
-
-            // Same adapter, same Dawn, same shader: the tolerance is zero.
-            std::size_t mismatched_pixels = 0;
-            int max_channel_delta = 0;
-            for (std::size_t i = 0; i < ported.rgba.size(); i += 4) {
-                bool differs = false;
-                for (std::size_t c = 0; c < 4; ++c) {
-                    const int delta = std::abs(int(ported.rgba[i + c]) - int(legacy.rgba[i + c]));
-                    max_channel_delta = std::max(max_channel_delta, delta);
-                    differs = differs || delta != 0;
-                }
-                mismatched_pixels += differs ? 1u : 0u;
-            }
-            INFO("mismatched pixels " << mismatched_pixels << ", max channel delta "
-                                      << max_channel_delta);
-            CHECK(mismatched_pixels == 0);
-            CHECK(max_channel_delta == 0);
-            CHECK(legacy.fields.at("distinct_color_count") ==
-                  std::to_string(ported.distinct_color_count));
-            CHECK(legacy.fields.at("non_transparent_pixel_count") ==
-                  std::to_string(ported.non_transparent_pixel_count));
+TEST_CASE("Vellum Renderer3D draws BoxTextured like the legacy renderer, pixel for pixel",
+          "[vellum-renderer3d][gpu][parity]") {
+    const auto path = std::filesystem::path(PULP_VELLUM_RENDERER3D_FIXTURE_DIR) / "BoxTextured" /
+                      "BoxTextured.glb";
+    const auto loaded = pulp::scene::load_gltf_scene(path);
+    INFO(loaded.error);
+    REQUIRE(loaded.success);
+    for (const Size size : kParitySizes) {
+        DYNAMIC_SECTION(size.width << "x" << size.height) {
+            r3d::SceneDataRenderConfig config;
+            config.width = size.width;
+            config.height = size.height;
+            const auto ported = r3d::Renderer3D::render_scene_data(loaded.scene, config);
+            skip_without_drawing_adapter(ported);
+            CHECK(ported.scene_data_consumed);
+            CHECK(ported.texture_decoded);
+            CHECK(ported.base_color_texture_srgb_applied);
+            check_same_frame("boxtextured", size, ported,
+                             render_legacy("boxtextured", size.width, size.height));
         }
     }
 }

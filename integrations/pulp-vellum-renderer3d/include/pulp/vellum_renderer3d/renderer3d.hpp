@@ -4,6 +4,10 @@
 #include <string>
 #include <vector>
 
+namespace pulp::scene {
+struct SceneData;
+}
+
 namespace pulp::vellum_renderer3d {
 
 enum class Renderer3DAdapterBackendPreference {
@@ -147,6 +151,11 @@ class Renderer3D {
     // A fixed textured cube drawn offscreen: no scene, no glTF.
     static Scene3DRenderResult
     render_hardcoded_textured_cube(const HardcodedCubeRenderConfig& config = {});
+
+    // Render already-normalized CPU SceneData offscreen, with no JS or glTF
+    // types crossing the renderer boundary.
+    static Scene3DRenderResult render_scene_data(const scene::SceneData& scene,
+                                                 const SceneDataRenderConfig& config = {});
 
     // Whether a completed readback holds a drawn frame: more than one colour,
     // some coverage, and an adapter that draws. Dawn's Null adapter accepts

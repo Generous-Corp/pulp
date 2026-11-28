@@ -3,6 +3,7 @@
 
 #include "cli_common.hpp"
 #include "content_commands.hpp"
+#include "import_design_moved.hpp"
 #include "kit_commands.hpp"
 #include "package_commands.hpp"
 #include "package_registry.hpp"
@@ -19,6 +20,7 @@
 #include <memory>
 #include <mutex>
 #include <string>
+#include <string_view>
 #include <system_error>
 #include <thread>
 
@@ -129,6 +131,9 @@ static int delegate_to_script(const ScriptCommand& sc, const std::vector<std::st
 }
 
 static int delegate_to_binary(const BinaryCommand& bc, const std::vector<std::string>& args) {
+    if (std::string_view(bc.name) == "import-design" && find_build_binary(bc.binary_path).empty()) {
+        return pulp::cli::report_import_design_moved(args);
+    }
     return delegate_to_build_binary(bc.binary_path, args,
                                     bc.extra_arg ? std::string(bc.extra_arg) : std::string{});
 }
