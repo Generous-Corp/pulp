@@ -45,6 +45,8 @@
    "external/fonts/Jost-Medium.ttf",
    "external/fonts/Jost-Regular.ttf",
    "external/fonts/Jost-SemiBold.ttf",
+   "test/cmake/motion_tests.cmake",
+   "test/cmake/view_host_tests.cmake",
    "tools/ci/governed-build.sh",
    "tools/cmake",
    "tools/cmake/PulpEmbedData.cmake",

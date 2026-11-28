@@ -485,7 +485,8 @@ class PlatformGuardedRegistrationTests(unittest.TestCase):
                 f'set(CMAKE_SYSTEM_NAME {system})\n{android}' + "\n".join(lines) +
                 f'\nfile(WRITE "{out}" "")\ninclude("{self.ROOT / manifest}")\n',
                 encoding="utf-8")
-            proc = subprocess.run([cmake, "-P", str(harness)], capture_output=True, text=True)
+            proc = subprocess.run([cmake, "-P", str(harness)], capture_output=True, text=True,
+                                  encoding="utf-8")
             self.assertEqual(proc.returncode, 0, proc.stderr)
             return out.read_text(encoding="utf-8").split()
 
