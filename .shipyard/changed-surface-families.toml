@@ -4,7 +4,7 @@
 # Resolve a merge conflict in this file by regenerating, never by hand.
 
 [[families]]
-name = "script-readers-860537b57923"
+name = "script-readers-2558e9b86192"
 paths = [
   "tools/scripts/action_pin_lint.py",
   "tools/scripts/archive_sdk.py",
@@ -90,6 +90,7 @@ paths = [
   "tools/scripts/test_build_skia_android_pin.py",
   "tools/scripts/test_build_skia_source_pin.py",
   "tools/scripts/test_build_workflow.py",
+  "tools/scripts/test_census_profiles.py",
   "tools/scripts/test_changed_surface_policy.py",
   "tools/scripts/test_changed_surface_script_families.py",
   "tools/scripts/test_changed_surface_shadow_plans.py",
@@ -297,6 +298,7 @@ tests = [
   "changed-surface-shadow-plans-selftest",
   "clean-worktree-planning-selftest",
   "configure-only-selftest",
+  "consumption-census-profiles-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
   "gates-preflight-selftest",
@@ -324,7 +326,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-75abcc46e479"
+name = "script-readers-8120a9b6ba15"
 paths = ["tools/scripts/check_bundled_font_lists.py"]
 tests = [
   "build-parallelism-guard",
@@ -336,6 +338,7 @@ tests = [
   "changed-surface-shadow-plans-selftest",
   "clean-worktree-planning-selftest",
   "configure-only-selftest",
+  "consumption-census-profiles-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
   "gates-preflight-selftest",
@@ -363,7 +366,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-c5929f4d1e1d"
+name = "script-readers-9bdc815492e7"
 paths = ["tools/scripts/check_host_adapter_tracing_contract.py"]
 tests = [
   "build-parallelism-guard",
@@ -374,6 +377,7 @@ tests = [
   "changed-surface-shadow-plans-selftest",
   "clean-worktree-planning-selftest",
   "configure-only-selftest",
+  "consumption-census-profiles-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
   "gates-preflight-selftest",
@@ -402,7 +406,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-7b5645d47751"
+name = "script-readers-d9ecdb5b1fe2"
 paths = ["tools/scripts/check_inspector_protocol_registry.py"]
 tests = [
   "build-parallelism-guard",
@@ -413,6 +417,7 @@ tests = [
   "changed-surface-shadow-plans-selftest",
   "clean-worktree-planning-selftest",
   "configure-only-selftest",
+  "consumption-census-profiles-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
   "gates-preflight-selftest",
@@ -442,7 +447,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-785758fffd7b"
+name = "script-readers-c3cc0df1b1e6"
 paths = ["tools/scripts/check_visual_python_deps.py"]
 tests = [
   "build-parallelism-guard",
@@ -453,6 +458,7 @@ tests = [
   "changed-surface-shadow-plans-selftest",
   "clean-worktree-planning-selftest",
   "configure-only-selftest",
+  "consumption-census-profiles-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
   "gates-preflight-selftest",
@@ -482,7 +488,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-5387e9729412"
+name = "script-readers-09d818b2f22a"
 paths = ["tools/scripts/ci_routing_digest.py"]
 tests = [
   "build-parallelism-guard",
@@ -495,6 +501,7 @@ tests = [
   "ci-routing-digest-selftest",
   "clean-worktree-planning-selftest",
   "configure-only-selftest",
+  "consumption-census-profiles-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
   "gates-preflight-selftest",
@@ -522,7 +529,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-09fa1d4aaf3e"
+name = "script-readers-0a488924e143"
 paths = ["tools/scripts/convolver_crossover_check.py"]
 tests = [
   "build-parallelism-guard",
@@ -533,6 +540,7 @@ tests = [
   "changed-surface-shadow-plans-selftest",
   "clean-worktree-planning-selftest",
   "configure-only-selftest",
+  "consumption-census-profiles-selftest",
   "convolver-crossover-table",
   "flake-exoneration-selftest",
   "gate-common-selftest",
@@ -561,7 +569,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-e53ed33d85f6"
+name = "script-readers-8b828b671524"
 paths = ["tools/scripts/ctest_inventory_parity.py"]
 tests = [
   "build-parallelism-guard",
@@ -572,6 +580,7 @@ tests = [
   "changed-surface-shadow-plans-selftest",
   "clean-worktree-planning-selftest",
   "configure-only-selftest",
+  "consumption-census-profiles-selftest",
   "ctest-inventory-parity-self-check",
   "flake-exoneration-selftest",
   "gate-common-selftest",
@@ -600,7 +609,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-e11d15623b79"
+name = "script-readers-4bf22fea9c6b"
 paths = ["tools/scripts/ctest_unique_names_check.py"]
 tests = [
   "build-parallelism-guard",
@@ -611,6 +620,7 @@ tests = [
   "changed-surface-shadow-plans-selftest",
   "clean-worktree-planning-selftest",
   "configure-only-selftest",
+  "consumption-census-profiles-selftest",
   "ctest-unique-names",
   "ctest-unique-names-selftest",
   "flake-exoneration-selftest",
@@ -640,7 +650,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-45ed38d3367f"
+name = "script-readers-7294a712fdce"
 paths = [
   "tools/scripts/cutover_trial.py",
   "tools/scripts/test_cutover_trial.py",
@@ -654,6 +664,7 @@ tests = [
   "changed-surface-shadow-plans-selftest",
   "clean-worktree-planning-selftest",
   "configure-only-selftest",
+  "consumption-census-profiles-selftest",
   "cutover-trial-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
@@ -683,7 +694,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-c3d205efaf99"
+name = "script-readers-085db56cede6"
 paths = ["tools/scripts/date_sensitive_selftests_tz_matrix.py"]
 tests = [
   "build-parallelism-guard",
@@ -694,6 +705,7 @@ tests = [
   "changed-surface-shadow-plans-selftest",
   "clean-worktree-planning-selftest",
   "configure-only-selftest",
+  "consumption-census-profiles-selftest",
   "date-sensitive-selftests-tz-matrix",
   "date-sensitive-selftests-tz-matrix-selftest",
   "flake-exoneration-selftest",
@@ -723,7 +735,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-32021bb39eb9"
+name = "script-readers-07410eaef9c2"
 paths = ["tools/scripts/design_unit_boundary_check.py"]
 tests = [
   "build-parallelism-guard",
@@ -734,6 +746,7 @@ tests = [
   "changed-surface-shadow-plans-selftest",
   "clean-worktree-planning-selftest",
   "configure-only-selftest",
+  "consumption-census-profiles-selftest",
   "design-unit-boundary",
   "design-unit-boundary-selftest",
   "flake-exoneration-selftest",
@@ -763,7 +776,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-e48cd546fa86"
+name = "script-readers-21fa423de33e"
 paths = ["tools/scripts/dsp_provenance_audit.py"]
 tests = [
   "build-parallelism-guard",
@@ -774,6 +787,7 @@ tests = [
   "changed-surface-shadow-plans-selftest",
   "clean-worktree-planning-selftest",
   "configure-only-selftest",
+  "consumption-census-profiles-selftest",
   "dsp-provenance-audit",
   "flake-exoneration-selftest",
   "gate-common-selftest",
@@ -802,7 +816,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-44b8a332fae5"
+name = "script-readers-8ebf853b9979"
 paths = ["tools/scripts/examples_manifest_guard.py"]
 tests = [
   "build-parallelism-guard",
@@ -813,6 +827,7 @@ tests = [
   "changed-surface-shadow-plans-selftest",
   "clean-worktree-planning-selftest",
   "configure-only-selftest",
+  "consumption-census-profiles-selftest",
   "examples-manifest-guard",
   "examples-manifest-guard-selftest",
   "flake-exoneration-selftest",
@@ -842,7 +857,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-6d622f6a2f5c"
+name = "script-readers-f953388540c9"
 paths = ["tools/scripts/format_header_view_boundary.py"]
 tests = [
   "build-parallelism-guard",
@@ -853,6 +868,7 @@ tests = [
   "changed-surface-shadow-plans-selftest",
   "clean-worktree-planning-selftest",
   "configure-only-selftest",
+  "consumption-census-profiles-selftest",
   "flake-exoneration-selftest",
   "format-header-view-boundary",
   "gate-common-selftest",
@@ -881,7 +897,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-93ccf45307cd"
+name = "script-readers-0ec9eb816817"
 paths = ["tools/scripts/gate_python_imports_check.py"]
 tests = [
   "build-parallelism-guard",
@@ -892,6 +908,7 @@ tests = [
   "changed-surface-shadow-plans-selftest",
   "clean-worktree-planning-selftest",
   "configure-only-selftest",
+  "consumption-census-profiles-selftest",
   "drift-fast-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
@@ -924,7 +941,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-93f551df5f39"
+name = "script-readers-0ad855098945"
 paths = ["tools/scripts/gpu_audio_header_vocabulary_guard.py"]
 tests = [
   "build-parallelism-guard",
@@ -935,6 +952,7 @@ tests = [
   "changed-surface-shadow-plans-selftest",
   "clean-worktree-planning-selftest",
   "configure-only-selftest",
+  "consumption-census-profiles-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
   "gates-preflight-selftest",
@@ -963,7 +981,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-7b8f50966e25"
+name = "script-readers-1c87fd3b66a8"
 paths = ["tools/scripts/gpu_fault_hooks_release_gate.py"]
 tests = [
   "build-parallelism-guard",
@@ -974,6 +992,7 @@ tests = [
   "changed-surface-shadow-plans-selftest",
   "clean-worktree-planning-selftest",
   "configure-only-selftest",
+  "consumption-census-profiles-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
   "gates-preflight-selftest",
@@ -1002,7 +1021,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-68cc69e7367d"
+name = "script-readers-5f4b9fe472eb"
 paths = ["tools/scripts/integrations_boundary_check.py"]
 tests = [
   "build-parallelism-guard",
@@ -1013,6 +1032,7 @@ tests = [
   "changed-surface-shadow-plans-selftest",
   "clean-worktree-planning-selftest",
   "configure-only-selftest",
+  "consumption-census-profiles-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
   "gates-preflight-selftest",
@@ -1041,7 +1061,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-ac59e75fddcc"
+name = "script-readers-9a8a4aa683cf"
 paths = ["tools/scripts/link_floor_selftest.py"]
 tests = [
   "build-parallelism-guard",
@@ -1053,6 +1073,7 @@ tests = [
   "clean-worktree-planning-selftest",
   "cmake-link-floor-selftest",
   "configure-only-selftest",
+  "consumption-census-profiles-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
   "gates-preflight-selftest",
@@ -1080,7 +1101,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-64a0d564bd12"
+name = "script-readers-debb858043a5"
 paths = ["tools/scripts/mac_objc_source_list_guard.py"]
 tests = [
   "build-parallelism-guard",
@@ -1091,6 +1112,7 @@ tests = [
   "changed-surface-shadow-plans-selftest",
   "clean-worktree-planning-selftest",
   "configure-only-selftest",
+  "consumption-census-profiles-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
   "gates-preflight-selftest",
@@ -1120,7 +1142,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-d8439d7370c0"
+name = "script-readers-637ec4ea18a8"
 paths = ["tools/scripts/msvc_string_literal_guard.py"]
 tests = [
   "build-parallelism-guard",
@@ -1131,6 +1153,7 @@ tests = [
   "changed-surface-shadow-plans-selftest",
   "clean-worktree-planning-selftest",
   "configure-only-selftest",
+  "consumption-census-profiles-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
   "gates-preflight-selftest",
@@ -1159,7 +1182,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-9cd6e9e401eb"
+name = "script-readers-6ae1fe1ea658"
 paths = ["tools/scripts/nonuniform_head_check.py"]
 tests = [
   "build-parallelism-guard",
@@ -1170,6 +1193,7 @@ tests = [
   "changed-surface-shadow-plans-selftest",
   "clean-worktree-planning-selftest",
   "configure-only-selftest",
+  "consumption-census-profiles-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
   "gates-preflight-selftest",
@@ -1198,7 +1222,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-6588f300110c"
+name = "script-readers-035e33c10555"
 paths = ["tools/scripts/pch_wiring_check.py"]
 tests = [
   "build-parallelism-guard",
@@ -1210,6 +1234,7 @@ tests = [
   "clean-worktree-planning-selftest",
   "cmake-test-group-discovery",
   "configure-only-selftest",
+  "consumption-census-profiles-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
   "gates-preflight-selftest",
@@ -1239,7 +1264,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-9d92737b2af8"
+name = "script-readers-1cce8f1cf80f"
 paths = ["tools/scripts/plugin_footprint_check.py"]
 tests = [
   "build-parallelism-guard",
@@ -1250,6 +1275,7 @@ tests = [
   "changed-surface-shadow-plans-selftest",
   "clean-worktree-planning-selftest",
   "configure-only-selftest",
+  "consumption-census-profiles-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
   "gates-preflight-selftest",
@@ -1282,7 +1308,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-289d2158bdef"
+name = "script-readers-d6aea84da267"
 paths = ["tools/scripts/pr_fast_tier_check.py"]
 tests = [
   "build-parallelism-guard",
@@ -1293,6 +1319,7 @@ tests = [
   "changed-surface-shadow-plans-selftest",
   "clean-worktree-planning-selftest",
   "configure-only-selftest",
+  "consumption-census-profiles-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
   "gates-preflight-selftest",
@@ -1321,7 +1348,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-2646f9d0e0c7"
+name = "script-readers-04a7d447b1c4"
 paths = [
   "tools/scripts/queue_admission_guard.py",
   "tools/scripts/test_queue_batch_attribute.py",
@@ -1335,6 +1362,7 @@ tests = [
   "changed-surface-shadow-plans-selftest",
   "clean-worktree-planning-selftest",
   "configure-only-selftest",
+  "consumption-census-profiles-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
   "gates-preflight-selftest",
@@ -1363,7 +1391,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-04d866bb284d"
+name = "script-readers-a9b30e1e05b7"
 paths = ["tools/scripts/raw_this_async_check.py"]
 tests = [
   "build-parallelism-guard",
@@ -1374,6 +1402,7 @@ tests = [
   "changed-surface-shadow-plans-selftest",
   "clean-worktree-planning-selftest",
   "configure-only-selftest",
+  "consumption-census-profiles-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
   "gates-preflight-selftest",
@@ -1403,7 +1432,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-622c8c4e2a6e"
+name = "script-readers-87536c71869b"
 paths = [
   "tools/scripts/regen_agent_capability_after_merge.py",
   "tools/scripts/test_regen_agent_capability_after_merge.py",
@@ -1417,6 +1446,7 @@ tests = [
   "changed-surface-shadow-plans-selftest",
   "clean-worktree-planning-selftest",
   "configure-only-selftest",
+  "consumption-census-profiles-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
   "gates-preflight-selftest",
@@ -1445,7 +1475,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-164153efae50"
+name = "script-readers-406c50c42ff9"
 paths = ["tools/scripts/relay_contract_check.py"]
 tests = [
   "build-parallelism-guard",
@@ -1456,6 +1486,7 @@ tests = [
   "changed-surface-shadow-plans-selftest",
   "clean-worktree-planning-selftest",
   "configure-only-selftest",
+  "consumption-census-profiles-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
   "gates-preflight-selftest",
@@ -1485,7 +1516,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-92d13f71d7f3"
+name = "script-readers-b78b46f97183"
 paths = ["tools/scripts/render_upward_edge_check.py"]
 tests = [
   "build-parallelism-guard",
@@ -1496,6 +1527,7 @@ tests = [
   "changed-surface-shadow-plans-selftest",
   "clean-worktree-planning-selftest",
   "configure-only-selftest",
+  "consumption-census-profiles-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
   "gates-preflight-selftest",
@@ -1525,7 +1557,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-e9761087ef56"
+name = "script-readers-d7af865aa6f3"
 paths = ["tools/scripts/rust_cli_build_edge_check.py"]
 tests = [
   "build-parallelism-guard",
@@ -1536,6 +1568,7 @@ tests = [
   "changed-surface-shadow-plans-selftest",
   "clean-worktree-planning-selftest",
   "configure-only-selftest",
+  "consumption-census-profiles-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
   "gates-preflight-selftest",
@@ -1565,7 +1598,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-c208d6e0c703"
+name = "script-readers-31154e2e845b"
 paths = ["tools/scripts/sample_region_compat_baseline.py"]
 tests = [
   "build-parallelism-guard",
@@ -1576,6 +1609,7 @@ tests = [
   "changed-surface-shadow-plans-selftest",
   "clean-worktree-planning-selftest",
   "configure-only-selftest",
+  "consumption-census-profiles-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
   "gates-preflight-selftest",
@@ -1604,7 +1638,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-2a9fba166cb0"
+name = "script-readers-02a5ca6ffa39"
 paths = ["tools/scripts/sequencer_control_skill_check.py"]
 tests = [
   "build-parallelism-guard",
@@ -1615,6 +1649,7 @@ tests = [
   "changed-surface-shadow-plans-selftest",
   "clean-worktree-planning-selftest",
   "configure-only-selftest",
+  "consumption-census-profiles-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
   "gates-preflight-selftest",
@@ -1644,7 +1679,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-1fdb6feff1a5"
+name = "script-readers-4c2c964db007"
 paths = ["tools/scripts/setup_bootstrap_plan_guard.py"]
 tests = [
   "build-parallelism-guard",
@@ -1655,6 +1690,7 @@ tests = [
   "changed-surface-shadow-plans-selftest",
   "clean-worktree-planning-selftest",
   "configure-only-selftest",
+  "consumption-census-profiles-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
   "gates-preflight-selftest",
@@ -1683,7 +1719,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-6865e0f4abcf"
+name = "script-readers-7326d074d731"
 paths = ["tools/scripts/shared_test_objects_check.py"]
 tests = [
   "build-parallelism-guard",
@@ -1694,6 +1730,7 @@ tests = [
   "changed-surface-shadow-plans-selftest",
   "clean-worktree-planning-selftest",
   "configure-only-selftest",
+  "consumption-census-profiles-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
   "gates-preflight-selftest",
@@ -1723,7 +1760,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-13c91d8ed745"
+name = "script-readers-9c1ad9cd490d"
 paths = ["tools/scripts/shipping_macro_guard.py"]
 tests = [
   "build-parallelism-guard",
@@ -1734,6 +1771,7 @@ tests = [
   "changed-surface-shadow-plans-selftest",
   "clean-worktree-planning-selftest",
   "configure-only-selftest",
+  "consumption-census-profiles-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
   "gates-preflight-selftest",
@@ -1762,7 +1800,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-dcff41021682"
+name = "script-readers-d6f31a432d4a"
 paths = ["tools/scripts/status_tone_signal_lint.py"]
 tests = [
   "build-parallelism-guard",
@@ -1773,6 +1811,7 @@ tests = [
   "changed-surface-shadow-plans-selftest",
   "clean-worktree-planning-selftest",
   "configure-only-selftest",
+  "consumption-census-profiles-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
   "gates-preflight-selftest",
@@ -1801,7 +1840,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-d950b452ce23"
+name = "script-readers-4d245d653969"
 paths = ["tools/scripts/swift_bridge_split_guard.py"]
 tests = [
   "build-parallelism-guard",
@@ -1812,6 +1851,7 @@ tests = [
   "changed-surface-shadow-plans-selftest",
   "clean-worktree-planning-selftest",
   "configure-only-selftest",
+  "consumption-census-profiles-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
   "gates-preflight-selftest",
@@ -1840,7 +1880,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-c9c10daa0b4f"
+name = "script-readers-4abce24a4d5d"
 paths = ["tools/scripts/test_advisory_macos_runner_policy.py"]
 tests = [
   "advisory-macos-runner-policy",
@@ -1852,6 +1892,7 @@ tests = [
   "changed-surface-shadow-plans-selftest",
   "clean-worktree-planning-selftest",
   "configure-only-selftest",
+  "consumption-census-profiles-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
   "gates-preflight-selftest",
@@ -1879,7 +1920,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-939cff42e911"
+name = "script-readers-cb06d09378f1"
 paths = ["tools/scripts/test_affected_targets.py"]
 tests = [
   "affected-targets-selftest",
@@ -1891,6 +1932,7 @@ tests = [
   "changed-surface-shadow-plans-selftest",
   "clean-worktree-planning-selftest",
   "configure-only-selftest",
+  "consumption-census-profiles-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
   "gates-preflight-selftest",
@@ -1918,7 +1960,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-59974a6276c2"
+name = "script-readers-0280f58475f3"
 paths = ["tools/scripts/test_agent_capability_store.py"]
 tests = [
   "agent-capability-store-selftest",
@@ -1930,6 +1972,7 @@ tests = [
   "changed-surface-shadow-plans-selftest",
   "clean-worktree-planning-selftest",
   "configure-only-selftest",
+  "consumption-census-profiles-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
   "gates-preflight-selftest",
@@ -1957,7 +2000,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-17f2436efb08"
+name = "script-readers-37de747bce5a"
 paths = ["tools/scripts/test_agent_hook_paths.py"]
 tests = [
   "agent-hook-paths",
@@ -1969,6 +2012,7 @@ tests = [
   "changed-surface-shadow-plans-selftest",
   "clean-worktree-planning-selftest",
   "configure-only-selftest",
+  "consumption-census-profiles-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
   "gates-preflight-selftest",
@@ -1996,7 +2040,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-fe3261566475"
+name = "script-readers-f4401a74eba7"
 paths = ["tools/scripts/test_android_surface_runtime_contract.py"]
 tests = [
   "android-surface-runtime-contract",
@@ -2008,6 +2052,7 @@ tests = [
   "changed-surface-shadow-plans-selftest",
   "clean-worktree-planning-selftest",
   "configure-only-selftest",
+  "consumption-census-profiles-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
   "gates-preflight-selftest",
@@ -2035,7 +2080,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-bc8b6ef072cc"
+name = "script-readers-2ce73fc80e9a"
 paths = ["tools/scripts/test_archive_symbol_closure_check.py"]
 tests = [
   "archive-symbol-closure-selftest",
@@ -2047,6 +2092,7 @@ tests = [
   "changed-surface-shadow-plans-selftest",
   "clean-worktree-planning-selftest",
   "configure-only-selftest",
+  "consumption-census-profiles-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
   "gates-preflight-selftest",
@@ -2074,7 +2120,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-006332c30974"
+name = "script-readers-7521a3c0c0fa"
 paths = ["tools/scripts/test_build_combined_installer.py"]
 tests = [
   "build-parallelism-guard",
@@ -2086,6 +2132,7 @@ tests = [
   "clean-worktree-planning-selftest",
   "combined-installer-selftest",
   "configure-only-selftest",
+  "consumption-census-profiles-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
   "gates-preflight-selftest",
@@ -2113,7 +2160,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-cbf4d1c4ee3b"
+name = "script-readers-545c76bd9e06"
 paths = ["tools/scripts/test_build_parallelism_guard.py"]
 tests = [
   "build-parallelism-guard",
@@ -2125,6 +2172,7 @@ tests = [
   "changed-surface-shadow-plans-selftest",
   "clean-worktree-planning-selftest",
   "configure-only-selftest",
+  "consumption-census-profiles-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
   "gates-preflight-selftest",
@@ -2152,7 +2200,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-67163090b2ae"
+name = "script-readers-669145531625"
 paths = ["tools/scripts/test_build_speed_proxies.py"]
 tests = [
   "build-parallelism-guard",
@@ -2164,6 +2212,7 @@ tests = [
   "changed-surface-shadow-plans-selftest",
   "clean-worktree-planning-selftest",
   "configure-only-selftest",
+  "consumption-census-profiles-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
   "gates-preflight-selftest",
@@ -2191,7 +2240,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-53c9f125f1bd"
+name = "script-readers-741d538cd8c1"
 paths = ["tools/scripts/test_build_speed_scorecard.py"]
 tests = [
   "build-parallelism-guard",
@@ -2203,6 +2252,7 @@ tests = [
   "changed-surface-shadow-plans-selftest",
   "clean-worktree-planning-selftest",
   "configure-only-selftest",
+  "consumption-census-profiles-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
   "gates-preflight-selftest",
@@ -2230,7 +2280,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-2e2551675de8"
+name = "script-readers-bed7346bf609"
 paths = ["tools/scripts/test_build_time_report.py"]
 tests = [
   "build-parallelism-guard",
@@ -2242,6 +2292,7 @@ tests = [
   "changed-surface-shadow-plans-selftest",
   "clean-worktree-planning-selftest",
   "configure-only-selftest",
+  "consumption-census-profiles-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
   "gates-preflight-selftest",
@@ -2269,7 +2320,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-74f98fafa414"
+name = "script-readers-a88aaca697e3"
 paths = ["tools/scripts/test_bump_fastpath.py"]
 tests = [
   "build-parallelism-guard",
@@ -2281,6 +2332,7 @@ tests = [
   "changed-surface-shadow-plans-selftest",
   "clean-worktree-planning-selftest",
   "configure-only-selftest",
+  "consumption-census-profiles-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
   "gates-preflight-selftest",
@@ -2308,7 +2360,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-7ee956cd1c77"
+name = "script-readers-1ad17b39e85c"
 paths = ["tools/scripts/test_bundle_vellum_sdk.py"]
 tests = [
   "build-parallelism-guard",
@@ -2319,6 +2371,7 @@ tests = [
   "changed-surface-shadow-plans-selftest",
   "clean-worktree-planning-selftest",
   "configure-only-selftest",
+  "consumption-census-profiles-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
   "gates-preflight-selftest",
@@ -2347,7 +2400,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-7a7b3a7f0c02"
+name = "script-readers-97143ec6006f"
 paths = ["tools/scripts/test_capability_contract_gate.py"]
 tests = [
   "build-parallelism-guard",
@@ -2359,6 +2412,7 @@ tests = [
   "changed-surface-shadow-plans-selftest",
   "clean-worktree-planning-selftest",
   "configure-only-selftest",
+  "consumption-census-profiles-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
   "gates-preflight-selftest",
@@ -2386,7 +2440,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-f5c9f61c0823"
+name = "script-readers-da00f6bfebcc"
 paths = ["tools/scripts/test_catch_discover_timeout_guard.py"]
 tests = [
   "build-parallelism-guard",
@@ -2398,6 +2452,7 @@ tests = [
   "changed-surface-shadow-plans-selftest",
   "clean-worktree-planning-selftest",
   "configure-only-selftest",
+  "consumption-census-profiles-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
   "gates-preflight-selftest",
@@ -2425,7 +2480,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-4e8e076a5aa5"
+name = "script-readers-5211349b8363"
 paths = ["tools/scripts/test_catch_multilabel_properties.py"]
 tests = [
   "build-parallelism-guard",
@@ -2437,6 +2492,7 @@ tests = [
   "clean-worktree-planning-selftest",
   "cmake-catch-multilabel-properties",
   "configure-only-selftest",
+  "consumption-census-profiles-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
   "gates-preflight-selftest",
@@ -2464,7 +2520,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-c63610ed2e1d"
+name = "script-readers-82713d50b17e"
 paths = ["tools/scripts/test_catch_test_name_guard.py"]
 tests = [
   "build-parallelism-guard",
@@ -2476,6 +2532,7 @@ tests = [
   "changed-surface-shadow-plans-selftest",
   "clean-worktree-planning-selftest",
   "configure-only-selftest",
+  "consumption-census-profiles-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
   "gates-preflight-selftest",
@@ -2503,7 +2560,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-c38123e42137"
+name = "script-readers-e1098f6a1afd"
 paths = ["tools/scripts/test_changed_surface_registration_projection.py"]
 tests = [
   "build-parallelism-guard",
@@ -2515,6 +2572,7 @@ tests = [
   "changed-surface-shadow-plans-selftest",
   "clean-worktree-planning-selftest",
   "configure-only-selftest",
+  "consumption-census-profiles-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
   "gates-preflight-selftest",
@@ -2542,7 +2600,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-86394373704a"
+name = "script-readers-b9cd3bcd7326"
 paths = ["tools/scripts/test_check_android_jni_exports.py"]
 tests = [
   "android-jni-exports-selftest",
@@ -2554,6 +2612,7 @@ tests = [
   "changed-surface-shadow-plans-selftest",
   "clean-worktree-planning-selftest",
   "configure-only-selftest",
+  "consumption-census-profiles-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
   "gates-preflight-selftest",
@@ -2581,7 +2640,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-68947aa40981"
+name = "script-readers-0906e8aae3f6"
 paths = ["tools/scripts/test_check_apple_bundle_signing.py"]
 tests = [
   "apple-bundle-signing-check",
@@ -2593,6 +2652,7 @@ tests = [
   "changed-surface-shadow-plans-selftest",
   "clean-worktree-planning-selftest",
   "configure-only-selftest",
+  "consumption-census-profiles-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
   "gates-preflight-selftest",
@@ -2620,7 +2680,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-d4f5368316e7"
+name = "script-readers-5f135c0a95f2"
 paths = ["tools/scripts/test_check_au_component_preflight.py"]
 tests = [
   "au-component-preflight-selftest",
@@ -2632,6 +2692,7 @@ tests = [
   "changed-surface-shadow-plans-selftest",
   "clean-worktree-planning-selftest",
   "configure-only-selftest",
+  "consumption-census-profiles-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
   "gates-preflight-selftest",
@@ -2659,7 +2720,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-42f9d1a75587"
+name = "script-readers-eaf901f50aa2"
 paths = ["tools/scripts/test_check_bundle_architectures.py"]
 tests = [
   "build-parallelism-guard",
@@ -2671,6 +2732,7 @@ tests = [
   "check-bundle-architectures-selftest",
   "clean-worktree-planning-selftest",
   "configure-only-selftest",
+  "consumption-census-profiles-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
   "gates-preflight-selftest",
@@ -2698,7 +2760,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-3ab0672ce041"
+name = "script-readers-5734858c29ea"
 paths = ["tools/scripts/test_check_canvas_path_flush.py"]
 tests = [
   "build-parallelism-guard",
@@ -2710,6 +2772,7 @@ tests = [
   "changed-surface-shadow-plans-selftest",
   "clean-worktree-planning-selftest",
   "configure-only-selftest",
+  "consumption-census-profiles-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
   "gates-preflight-selftest",
@@ -2737,7 +2800,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-d0edc4526a67"
+name = "script-readers-0be1056814b6"
 paths = ["tools/scripts/test_check_host_adapter_tracing_contract.py"]
 tests = [
   "build-parallelism-guard",
@@ -2748,6 +2811,7 @@ tests = [
   "changed-surface-shadow-plans-selftest",
   "clean-worktree-planning-selftest",
   "configure-only-selftest",
+  "consumption-census-profiles-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
   "gates-preflight-selftest",
@@ -2776,7 +2840,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-576681f739b0"
+name = "script-readers-8b72d02cd6fa"
 paths = ["tools/scripts/test_check_installed_rpaths.py"]
 tests = [
   "build-parallelism-guard",
@@ -2787,6 +2851,7 @@ tests = [
   "changed-surface-shadow-plans-selftest",
   "clean-worktree-planning-selftest",
   "configure-only-selftest",
+  "consumption-census-profiles-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
   "gates-preflight-selftest",
@@ -2816,7 +2881,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-4d0d8590d61c"
+name = "script-readers-db51589d7b24"
 paths = ["tools/scripts/test_check_skip_not_pass.py"]
 tests = [
   "build-parallelism-guard",
@@ -2827,6 +2892,7 @@ tests = [
   "changed-surface-shadow-plans-selftest",
   "clean-worktree-planning-selftest",
   "configure-only-selftest",
+  "consumption-census-profiles-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
   "gates-preflight-selftest",
@@ -2855,7 +2921,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-e394931573cf"
+name = "script-readers-93926d0b1b9b"
 paths = ["tools/scripts/test_check_test_file_paths.py"]
 tests = [
   "build-parallelism-guard",
@@ -2866,6 +2932,7 @@ tests = [
   "changed-surface-shadow-plans-selftest",
   "clean-worktree-planning-selftest",
   "configure-only-selftest",
+  "consumption-census-profiles-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
   "gates-preflight-selftest",
@@ -2894,7 +2961,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-b8379215ae98"
+name = "script-readers-e0dde49f619c"
 paths = ["tools/scripts/test_check_transient_interaction_trace.py"]
 tests = [
   "build-parallelism-guard",
@@ -2905,6 +2972,7 @@ tests = [
   "changed-surface-shadow-plans-selftest",
   "clean-worktree-planning-selftest",
   "configure-only-selftest",
+  "consumption-census-profiles-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
   "gates-preflight-selftest",
@@ -2933,7 +3001,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-a1bf5e5cdbe4"
+name = "script-readers-882ca4627e1a"
 paths = ["tools/scripts/test_check_vellum_sdk_staging.py"]
 tests = [
   "build-parallelism-guard",
@@ -2944,6 +3012,7 @@ tests = [
   "changed-surface-shadow-plans-selftest",
   "clean-worktree-planning-selftest",
   "configure-only-selftest",
+  "consumption-census-profiles-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
   "gates-preflight-selftest",
@@ -2972,7 +3041,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-36a15d710023"
+name = "script-readers-4717c1a54c91"
 paths = ["tools/scripts/test_check_visual_python_deps.py"]
 tests = [
   "build-parallelism-guard",
@@ -2983,6 +3052,7 @@ tests = [
   "changed-surface-shadow-plans-selftest",
   "clean-worktree-planning-selftest",
   "configure-only-selftest",
+  "consumption-census-profiles-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
   "gates-preflight-selftest",
@@ -3011,7 +3081,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-4b2ae5855513"
+name = "script-readers-74d811f7b696"
 paths = ["tools/scripts/test_check_yoga_oracle_pin.py"]
 tests = [
   "build-parallelism-guard",
@@ -3022,6 +3092,7 @@ tests = [
   "changed-surface-shadow-plans-selftest",
   "clean-worktree-planning-selftest",
   "configure-only-selftest",
+  "consumption-census-profiles-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
   "gates-preflight-selftest",
@@ -3050,7 +3121,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-4c21c70669ba"
+name = "script-readers-d9cd1a8d7047"
 paths = ["tools/scripts/test_ci_routing_digest.py"]
 tests = [
   "build-parallelism-guard",
@@ -3062,6 +3133,7 @@ tests = [
   "ci-routing-digest-selftest",
   "clean-worktree-planning-selftest",
   "configure-only-selftest",
+  "consumption-census-profiles-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
   "gates-preflight-selftest",
@@ -3089,7 +3161,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-3e0b567b49e8"
+name = "script-readers-a52505e8ed3e"
 paths = ["tools/scripts/test_clap_preset_library_gate.py"]
 tests = [
   "build-parallelism-guard",
@@ -3101,6 +3173,7 @@ tests = [
   "clap-preset-library-gate",
   "clean-worktree-planning-selftest",
   "configure-only-selftest",
+  "consumption-census-profiles-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
   "gates-preflight-selftest",
@@ -3128,7 +3201,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-51e880e9d134"
+name = "script-readers-1dac21f795bc"
 paths = ["tools/scripts/test_claude_plugin_command_discovery.py"]
 tests = [
   "build-parallelism-guard",
@@ -3140,6 +3213,7 @@ tests = [
   "claude-plugin-command-discovery-selftest",
   "clean-worktree-planning-selftest",
   "configure-only-selftest",
+  "consumption-census-profiles-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
   "gates-preflight-selftest",
@@ -3167,7 +3241,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-9a2cb723a4b3"
+name = "script-readers-577ae73f9952"
 paths = ["tools/scripts/test_clean_build_cov.py"]
 tests = [
   "build-parallelism-guard",
@@ -3179,6 +3253,7 @@ tests = [
   "clean-build-cov-selftest",
   "clean-worktree-planning-selftest",
   "configure-only-selftest",
+  "consumption-census-profiles-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
   "gates-preflight-selftest",
@@ -3206,7 +3281,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-079e30896cce"
+name = "script-readers-cd73762e1748"
 paths = ["tools/scripts/test_clean_worktree_builds.py"]
 tests = [
   "build-parallelism-guard",
@@ -3218,6 +3293,7 @@ tests = [
   "clean-worktree-builds-selftest",
   "clean-worktree-planning-selftest",
   "configure-only-selftest",
+  "consumption-census-profiles-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
   "gates-preflight-selftest",
@@ -3245,7 +3321,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-76b7b677fcbb"
+name = "script-readers-689fad2c31e0"
 paths = ["tools/scripts/test_clean_worktrees.py"]
 tests = [
   "build-parallelism-guard",
@@ -3257,6 +3333,7 @@ tests = [
   "clean-worktree-planning-selftest",
   "clean-worktrees-selftest",
   "configure-only-selftest",
+  "consumption-census-profiles-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
   "gates-preflight-selftest",
@@ -3284,7 +3361,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-3645593e6309"
+name = "script-readers-87e4fbbd1f92"
 paths = ["tools/scripts/test_clock_in_tests_lint.py"]
 tests = [
   "build-parallelism-guard",
@@ -3296,6 +3373,7 @@ tests = [
   "clean-worktree-planning-selftest",
   "clock-in-tests-lint-selftest",
   "configure-only-selftest",
+  "consumption-census-profiles-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
   "gates-preflight-selftest",
@@ -3323,7 +3401,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-482343645022"
+name = "script-readers-f58b67b4642d"
 paths = ["tools/scripts/test_clock_only_temp_key_guard.py"]
 tests = [
   "build-parallelism-guard",
@@ -3335,6 +3413,7 @@ tests = [
   "clean-worktree-planning-selftest",
   "clock-only-temp-key-guard-selftest",
   "configure-only-selftest",
+  "consumption-census-profiles-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
   "gates-preflight-selftest",
@@ -3362,7 +3441,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-deee90f69d3a"
+name = "script-readers-b59758377eed"
 paths = ["tools/scripts/test_cmake_manifest_parse.py"]
 tests = [
   "build-parallelism-guard",
@@ -3374,6 +3453,7 @@ tests = [
   "clean-worktree-planning-selftest",
   "cmake-manifest-parse",
   "configure-only-selftest",
+  "consumption-census-profiles-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
   "gates-preflight-selftest",
@@ -3401,7 +3481,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-3a275556910b"
+name = "script-readers-d87f1e0ea1d9"
 paths = ["tools/scripts/test_connected_git_history.py"]
 tests = [
   "build-parallelism-guard",
@@ -3412,6 +3492,7 @@ tests = [
   "changed-surface-shadow-plans-selftest",
   "clean-worktree-planning-selftest",
   "configure-only-selftest",
+  "consumption-census-profiles-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
   "gates-preflight-selftest",
@@ -3440,7 +3521,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-9e76dc3f41c7"
+name = "script-readers-42ae8a8c5761"
 paths = ["tools/scripts/test_consumption_census.py"]
 tests = [
   "build-parallelism-guard",
@@ -3452,6 +3533,7 @@ tests = [
   "clean-worktree-planning-selftest",
   "configure-only-selftest",
   "consumption-census-drift-description",
+  "consumption-census-profiles-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
   "gates-preflight-selftest",
@@ -3479,7 +3561,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-0c88d8ab22cb"
+name = "script-readers-be2fa8761156"
 paths = ["tools/scripts/test_control_profile_downgrade_is_announced.py"]
 tests = [
   "build-parallelism-guard",
@@ -3490,6 +3572,7 @@ tests = [
   "changed-surface-shadow-plans-selftest",
   "clean-worktree-planning-selftest",
   "configure-only-selftest",
+  "consumption-census-profiles-selftest",
   "control-profile-downgrade-announced",
   "flake-exoneration-selftest",
   "gate-common-selftest",
@@ -3518,7 +3601,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-97470f2df6d5"
+name = "script-readers-f6b41a9dc423"
 paths = ["tools/scripts/test_core_vellum_direction.py"]
 tests = [
   "build-parallelism-guard",
@@ -3529,6 +3612,7 @@ tests = [
   "changed-surface-shadow-plans-selftest",
   "clean-worktree-planning-selftest",
   "configure-only-selftest",
+  "consumption-census-profiles-selftest",
   "core-vellum-direction-negative-contract",
   "flake-exoneration-selftest",
   "gate-common-selftest",
@@ -3557,7 +3641,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-79a19f81df7d"
+name = "script-readers-732d322c48d9"
 paths = ["tools/scripts/test_ctest_coremidi_lock.py"]
 tests = [
   "build-parallelism-guard",
@@ -3568,6 +3652,7 @@ tests = [
   "changed-surface-shadow-plans-selftest",
   "clean-worktree-planning-selftest",
   "configure-only-selftest",
+  "consumption-census-profiles-selftest",
   "ctest-coremidi-lock-contract",
   "flake-exoneration-selftest",
   "gate-common-selftest",
@@ -3596,7 +3681,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-cb6043362c41"
+name = "script-readers-89c56108ca98"
 paths = ["tools/scripts/test_ctest_label_exclusion_guard.py"]
 tests = [
   "build-parallelism-guard",
@@ -3607,6 +3692,7 @@ tests = [
   "changed-surface-shadow-plans-selftest",
   "clean-worktree-planning-selftest",
   "configure-only-selftest",
+  "consumption-census-profiles-selftest",
   "ctest-label-exclusion-guard-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
@@ -3635,7 +3721,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-dcdbd1868a26"
+name = "script-readers-81abac5f97e8"
 paths = ["tools/scripts/test_ctest_unique_names_check.py"]
 tests = [
   "build-parallelism-guard",
@@ -3646,6 +3732,7 @@ tests = [
   "changed-surface-shadow-plans-selftest",
   "clean-worktree-planning-selftest",
   "configure-only-selftest",
+  "consumption-census-profiles-selftest",
   "ctest-unique-names-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
@@ -3674,7 +3761,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-a669e09d5fc0"
+name = "script-readers-6c88366ca01b"
 paths = ["tools/scripts/test_date_sensitive_selftests_tz_matrix.py"]
 tests = [
   "build-parallelism-guard",
@@ -3685,6 +3772,7 @@ tests = [
   "changed-surface-shadow-plans-selftest",
   "clean-worktree-planning-selftest",
   "configure-only-selftest",
+  "consumption-census-profiles-selftest",
   "date-sensitive-selftests-tz-matrix-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
@@ -3713,7 +3801,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-96eb1fc06eb6"
+name = "script-readers-ae0f781e6cd6"
 paths = ["tools/scripts/test_dawn_binding_census.py"]
 tests = [
   "build-parallelism-guard",
@@ -3724,6 +3812,7 @@ tests = [
   "changed-surface-shadow-plans-selftest",
   "clean-worktree-planning-selftest",
   "configure-only-selftest",
+  "consumption-census-profiles-selftest",
   "dawn-binding-census-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
@@ -3752,7 +3841,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-32fb49f6b8f3"
+name = "script-readers-f2d9117a6563"
 paths = ["tools/scripts/test_dead_test_guard.py"]
 tests = [
   "build-parallelism-guard",
@@ -3763,6 +3852,7 @@ tests = [
   "changed-surface-shadow-plans-selftest",
   "clean-worktree-planning-selftest",
   "configure-only-selftest",
+  "consumption-census-profiles-selftest",
   "dead-test-guard-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
@@ -3791,7 +3881,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-a529fa3a61dd"
+name = "script-readers-ef0fc2e9a4fb"
 paths = ["tools/scripts/test_design_unit_boundary_check.py"]
 tests = [
   "build-parallelism-guard",
@@ -3802,6 +3892,7 @@ tests = [
   "changed-surface-shadow-plans-selftest",
   "clean-worktree-planning-selftest",
   "configure-only-selftest",
+  "consumption-census-profiles-selftest",
   "design-unit-boundary-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
@@ -3830,7 +3921,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-2a26af27c388"
+name = "script-readers-725321e6edf3"
 paths = ["tools/scripts/test_doxygen_installed_header_check.py"]
 tests = [
   "build-parallelism-guard",
@@ -3841,6 +3932,7 @@ tests = [
   "changed-surface-shadow-plans-selftest",
   "clean-worktree-planning-selftest",
   "configure-only-selftest",
+  "consumption-census-profiles-selftest",
   "doxygen-installed-header-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
@@ -3869,7 +3961,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-889b77e3ceea"
+name = "script-readers-0d64bf110276"
 paths = ["tools/scripts/test_dsp_capability_registry.py"]
 tests = [
   "build-parallelism-guard",
@@ -3881,6 +3973,7 @@ tests = [
   "clean-worktree-planning-selftest",
   "cli-dsp-capabilities-dynamics-regression",
   "configure-only-selftest",
+  "consumption-census-profiles-selftest",
   "dsp-capability-registry-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
@@ -3909,7 +4002,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-78d222ae1bd0"
+name = "script-readers-e82358323184"
 paths = ["tools/scripts/test_dsp_provenance_audit.py"]
 tests = [
   "build-parallelism-guard",
@@ -3920,6 +4013,7 @@ tests = [
   "changed-surface-shadow-plans-selftest",
   "clean-worktree-planning-selftest",
   "configure-only-selftest",
+  "consumption-census-profiles-selftest",
   "dsp-provenance-audit-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
@@ -3948,7 +4042,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-cf263f3f1235"
+name = "script-readers-bb499b783aca"
 paths = ["tools/scripts/test_editor_host_acceptance.py"]
 tests = [
   "build-parallelism-guard",
@@ -3959,6 +4053,7 @@ tests = [
   "changed-surface-shadow-plans-selftest",
   "clean-worktree-planning-selftest",
   "configure-only-selftest",
+  "consumption-census-profiles-selftest",
   "editor-host-acceptance-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
@@ -3987,7 +4082,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-455f240aa0a7"
+name = "script-readers-15da5cb3dd59"
 paths = ["tools/scripts/test_example_validation_paths.py"]
 tests = [
   "build-parallelism-guard",
@@ -3998,6 +4093,7 @@ tests = [
   "changed-surface-shadow-plans-selftest",
   "clean-worktree-planning-selftest",
   "configure-only-selftest",
+  "consumption-census-profiles-selftest",
   "example-validation-paths",
   "flake-exoneration-selftest",
   "gate-common-selftest",
@@ -4026,7 +4122,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-8393aa1adb07"
+name = "script-readers-88c83d618cc7"
 paths = ["tools/scripts/test_examples_index_guard.py"]
 tests = [
   "build-parallelism-guard",
@@ -4037,6 +4133,7 @@ tests = [
   "changed-surface-shadow-plans-selftest",
   "clean-worktree-planning-selftest",
   "configure-only-selftest",
+  "consumption-census-profiles-selftest",
   "examples-index-guard-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
@@ -4065,7 +4162,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-31f730d6381a"
+name = "script-readers-c25ef3d91d22"
 paths = ["tools/scripts/test_examples_manifest_guard.py"]
 tests = [
   "build-parallelism-guard",
@@ -4076,6 +4173,7 @@ tests = [
   "changed-surface-shadow-plans-selftest",
   "clean-worktree-planning-selftest",
   "configure-only-selftest",
+  "consumption-census-profiles-selftest",
   "examples-manifest-guard-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
@@ -4104,7 +4202,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-63241fcce45c"
+name = "script-readers-d19345e020cc"
 paths = ["tools/scripts/test_findskia_arch_assert.py"]
 tests = [
   "build-parallelism-guard",
@@ -4115,6 +4213,7 @@ tests = [
   "changed-surface-shadow-plans-selftest",
   "clean-worktree-planning-selftest",
   "configure-only-selftest",
+  "consumption-census-profiles-selftest",
   "findskia-arch-assert-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
@@ -4143,7 +4242,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-86dec78bc18b"
+name = "script-readers-5d7c8ec1c967"
 paths = ["tools/scripts/test_findskia_windows_arm64_slice.py"]
 tests = [
   "build-parallelism-guard",
@@ -4154,6 +4253,7 @@ tests = [
   "changed-surface-shadow-plans-selftest",
   "clean-worktree-planning-selftest",
   "configure-only-selftest",
+  "consumption-census-profiles-selftest",
   "findskia-windows-arm64-slice-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
@@ -4182,7 +4282,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-e4c55d33f623"
+name = "script-readers-c430986952e8"
 paths = ["tools/scripts/test_fleet_snapshot.py"]
 tests = [
   "build-parallelism-guard",
@@ -4193,6 +4293,7 @@ tests = [
   "changed-surface-shadow-plans-selftest",
   "clean-worktree-planning-selftest",
   "configure-only-selftest",
+  "consumption-census-profiles-selftest",
   "flake-exoneration-selftest",
   "fleet-snapshot-selftest",
   "gate-common-selftest",
@@ -4221,7 +4322,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-f74a3c995c75"
+name = "script-readers-d899ff83f381"
 paths = ["tools/scripts/test_fold_migration_notes.py"]
 tests = [
   "build-parallelism-guard",
@@ -4232,6 +4333,7 @@ tests = [
   "changed-surface-shadow-plans-selftest",
   "clean-worktree-planning-selftest",
   "configure-only-selftest",
+  "consumption-census-profiles-selftest",
   "flake-exoneration-selftest",
   "fold-migration-notes-selftest",
   "gate-common-selftest",
@@ -4260,7 +4362,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-2fdd5928f0e7"
+name = "script-readers-3a6da4a32999"
 paths = ["tools/scripts/test_fork_pr_runner_routing.py"]
 tests = [
   "build-parallelism-guard",
@@ -4271,6 +4373,7 @@ tests = [
   "changed-surface-shadow-plans-selftest",
   "clean-worktree-planning-selftest",
   "configure-only-selftest",
+  "consumption-census-profiles-selftest",
   "flake-exoneration-selftest",
   "fork-pr-runner-routing",
   "gate-common-selftest",
@@ -4299,7 +4402,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-90f04ab988a9"
+name = "script-readers-7b048e48d118"
 paths = ["tools/scripts/test_format_baseline_diff.py"]
 tests = [
   "build-parallelism-guard",
@@ -4310,6 +4413,7 @@ tests = [
   "changed-surface-shadow-plans-selftest",
   "clean-worktree-planning-selftest",
   "configure-only-selftest",
+  "consumption-census-profiles-selftest",
   "flake-exoneration-selftest",
   "format-baseline-diff-selftest",
   "gate-common-selftest",
@@ -4338,7 +4442,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-12c212465f1a"
+name = "script-readers-e1d5f0163311"
 paths = ["tools/scripts/test_foundation_include_lint.py"]
 tests = [
   "build-parallelism-guard",
@@ -4349,6 +4453,7 @@ tests = [
   "changed-surface-shadow-plans-selftest",
   "clean-worktree-planning-selftest",
   "configure-only-selftest",
+  "consumption-census-profiles-selftest",
   "flake-exoneration-selftest",
   "foundation-include-lint-negative-contract",
   "gate-common-selftest",
@@ -4377,7 +4482,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-8bfe197bfb9b"
+name = "script-readers-f809581859c5"
 paths = ["tools/scripts/test_gallery_visual_diff.py"]
 tests = [
   "build-parallelism-guard",
@@ -4388,6 +4493,7 @@ tests = [
   "changed-surface-shadow-plans-selftest",
   "clean-worktree-planning-selftest",
   "configure-only-selftest",
+  "consumption-census-profiles-selftest",
   "flake-exoneration-selftest",
   "gallery-diff-selftest",
   "gate-common-selftest",
@@ -4416,7 +4522,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-414123655faf"
+name = "script-readers-1e416edebcd6"
 paths = ["tools/scripts/test_gate_python_imports_check.py"]
 tests = [
   "build-parallelism-guard",
@@ -4427,6 +4533,7 @@ tests = [
   "changed-surface-shadow-plans-selftest",
   "clean-worktree-planning-selftest",
   "configure-only-selftest",
+  "consumption-census-profiles-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
   "gate-python-imports-selftest",
@@ -4455,7 +4562,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-cb4c7e3e61f2"
+name = "script-readers-d9c84516d909"
 paths = ["tools/scripts/test_gate_suite_executed.py"]
 tests = [
   "build-parallelism-guard",
@@ -4466,6 +4573,7 @@ tests = [
   "changed-surface-shadow-plans-selftest",
   "clean-worktree-planning-selftest",
   "configure-only-selftest",
+  "consumption-census-profiles-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
   "gate-suite-executed-selftest",
@@ -4494,7 +4602,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-c040897dc1b2"
+name = "script-readers-31c7aa132312"
 paths = ["tools/scripts/test_gates_named_failures.py"]
 tests = [
   "build-parallelism-guard",
@@ -4505,6 +4613,7 @@ tests = [
   "changed-surface-shadow-plans-selftest",
   "clean-worktree-planning-selftest",
   "configure-only-selftest",
+  "consumption-census-profiles-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
   "gates-named-failures-selftest",
@@ -4533,7 +4642,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-da60e7e2477f"
+name = "script-readers-1a1bc7ffeeaf"
 paths = ["tools/scripts/test_generated_version_bump_check.py"]
 tests = [
   "build-parallelism-guard",
@@ -4544,6 +4653,7 @@ tests = [
   "changed-surface-shadow-plans-selftest",
   "clean-worktree-planning-selftest",
   "configure-only-selftest",
+  "consumption-census-profiles-selftest",
   "drift-fast-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
@@ -4574,7 +4684,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-3f9bab8cefa9"
+name = "script-readers-0edf1884cd1c"
 paths = ["tools/scripts/test_git_read_memo.py"]
 tests = [
   "build-parallelism-guard",
@@ -4585,6 +4695,7 @@ tests = [
   "changed-surface-shadow-plans-selftest",
   "clean-worktree-planning-selftest",
   "configure-only-selftest",
+  "consumption-census-profiles-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
   "gates-preflight-selftest",
@@ -4613,7 +4724,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-83e548bafd04"
+name = "script-readers-5923d63ee7d0"
 paths = ["tools/scripts/test_git_stdin_pipe_deadlock.py"]
 tests = [
   "build-parallelism-guard",
@@ -4624,6 +4735,7 @@ tests = [
   "changed-surface-shadow-plans-selftest",
   "clean-worktree-planning-selftest",
   "configure-only-selftest",
+  "consumption-census-profiles-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
   "gates-preflight-selftest",
@@ -4652,7 +4764,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-98032cb6faf0"
+name = "script-readers-fbd0fa4fc700"
 paths = ["tools/scripts/test_gpu_audio_comparator_v2.py"]
 tests = [
   "build-parallelism-guard",
@@ -4663,6 +4775,7 @@ tests = [
   "changed-surface-shadow-plans-selftest",
   "clean-worktree-planning-selftest",
   "configure-only-selftest",
+  "consumption-census-profiles-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
   "gates-preflight-selftest",
@@ -4691,7 +4804,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-5596804b428b"
+name = "script-readers-41736e431414"
 paths = ["tools/scripts/test_gpu_audio_header_vocabulary_guard.py"]
 tests = [
   "build-parallelism-guard",
@@ -4702,6 +4815,7 @@ tests = [
   "changed-surface-shadow-plans-selftest",
   "clean-worktree-planning-selftest",
   "configure-only-selftest",
+  "consumption-census-profiles-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
   "gates-preflight-selftest",
@@ -4730,7 +4844,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-d659fa1d4119"
+name = "script-readers-cd6e3a0fb746"
 paths = ["tools/scripts/test_gpu_audio_p2_campaign.py"]
 tests = [
   "build-parallelism-guard",
@@ -4741,6 +4855,7 @@ tests = [
   "changed-surface-shadow-plans-selftest",
   "clean-worktree-planning-selftest",
   "configure-only-selftest",
+  "consumption-census-profiles-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
   "gates-preflight-selftest",
@@ -4769,7 +4884,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-960e84b28844"
+name = "script-readers-708753e32b6e"
 paths = ["tools/scripts/test_gpu_audio_p2_host_preflight.py"]
 tests = [
   "build-parallelism-guard",
@@ -4780,6 +4895,7 @@ tests = [
   "changed-surface-shadow-plans-selftest",
   "clean-worktree-planning-selftest",
   "configure-only-selftest",
+  "consumption-census-profiles-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
   "gates-preflight-selftest",
@@ -4808,7 +4924,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-87feb89b4f72"
+name = "script-readers-ae735335dd56"
 paths = ["tools/scripts/test_gpu_audio_p4_evidence.py"]
 tests = [
   "build-parallelism-guard",
@@ -4819,6 +4935,7 @@ tests = [
   "changed-surface-shadow-plans-selftest",
   "clean-worktree-planning-selftest",
   "configure-only-selftest",
+  "consumption-census-profiles-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
   "gates-preflight-selftest",
@@ -4847,7 +4964,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-c7cce9d42fef"
+name = "script-readers-b94f64a3a4f0"
 paths = ["tools/scripts/test_gpu_clean_agent_journey.py"]
 tests = [
   "build-parallelism-guard",
@@ -4858,6 +4975,7 @@ tests = [
   "changed-surface-shadow-plans-selftest",
   "clean-worktree-planning-selftest",
   "configure-only-selftest",
+  "consumption-census-profiles-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
   "gates-preflight-selftest",
@@ -4886,7 +5004,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-aaa2cb561467"
+name = "script-readers-3281d0382ac6"
 paths = ["tools/scripts/test_gpu_device_link_closure_check.py"]
 tests = [
   "build-parallelism-guard",
@@ -4897,6 +5015,7 @@ tests = [
   "changed-surface-shadow-plans-selftest",
   "clean-worktree-planning-selftest",
   "configure-only-selftest",
+  "consumption-census-profiles-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
   "gates-preflight-selftest",
@@ -4925,7 +5044,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-a8346c1a8786"
+name = "script-readers-e90cd806022b"
 paths = ["tools/scripts/test_gpu_dpr_experiment.py"]
 tests = [
   "build-parallelism-guard",
@@ -4936,6 +5055,7 @@ tests = [
   "changed-surface-shadow-plans-selftest",
   "clean-worktree-planning-selftest",
   "configure-only-selftest",
+  "consumption-census-profiles-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
   "gates-preflight-selftest",
@@ -4964,7 +5084,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-8012941481d6"
+name = "script-readers-330981d2be50"
 paths = ["tools/scripts/test_gpu_dpr_pulp_native_adapter.py"]
 tests = [
   "build-parallelism-guard",
@@ -4975,6 +5095,7 @@ tests = [
   "changed-surface-shadow-plans-selftest",
   "clean-worktree-planning-selftest",
   "configure-only-selftest",
+  "consumption-census-profiles-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
   "gates-preflight-selftest",
@@ -5003,7 +5124,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-69c42bf35843"
+name = "script-readers-91c0eaee0593"
 paths = ["tools/scripts/test_gpu_dpr_v2_evidence.py"]
 tests = [
   "build-parallelism-guard",
@@ -5014,6 +5135,7 @@ tests = [
   "changed-surface-shadow-plans-selftest",
   "clean-worktree-planning-selftest",
   "configure-only-selftest",
+  "consumption-census-profiles-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
   "gates-preflight-selftest",
@@ -5042,7 +5164,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-716b7ba76e02"
+name = "script-readers-5391a7c0712a"
 paths = ["tools/scripts/test_gpu_dpr_web_adapter.py"]
 tests = [
   "build-parallelism-guard",
@@ -5053,6 +5175,7 @@ tests = [
   "changed-surface-shadow-plans-selftest",
   "clean-worktree-planning-selftest",
   "configure-only-selftest",
+  "consumption-census-profiles-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
   "gates-preflight-selftest",
@@ -5081,7 +5204,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-7861ce97d4d2"
+name = "script-readers-5db50e9cecfb"
 paths = ["tools/scripts/test_gpu_fault_hooks_release_gate.py"]
 tests = [
   "build-parallelism-guard",
@@ -5092,6 +5215,7 @@ tests = [
   "changed-surface-shadow-plans-selftest",
   "clean-worktree-planning-selftest",
   "configure-only-selftest",
+  "consumption-census-profiles-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
   "gates-preflight-selftest",
@@ -5121,7 +5245,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-04aa28d71e11"
+name = "script-readers-ee3ca8ee7f56"
 paths = ["tools/scripts/test_gpu_fault_hooks_release_gate_macos.py"]
 tests = [
   "build-parallelism-guard",
@@ -5132,6 +5256,7 @@ tests = [
   "changed-surface-shadow-plans-selftest",
   "clean-worktree-planning-selftest",
   "configure-only-selftest",
+  "consumption-census-profiles-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
   "gates-preflight-selftest",
@@ -5160,7 +5285,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-1cf0c44fb4b0"
+name = "script-readers-db2f734dc355"
 paths = ["tools/scripts/test_gpu_first_visible_a3_acceptance_v2.py"]
 tests = [
   "build-parallelism-guard",
@@ -5171,6 +5296,7 @@ tests = [
   "changed-surface-shadow-plans-selftest",
   "clean-worktree-planning-selftest",
   "configure-only-selftest",
+  "consumption-census-profiles-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
   "gates-preflight-selftest",
@@ -5199,7 +5325,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-fc9c1883a092"
+name = "script-readers-d8e2f7a818a1"
 paths = ["tools/scripts/test_gpu_handoff_pin_freshness.py"]
 tests = [
   "build-parallelism-guard",
@@ -5210,6 +5336,7 @@ tests = [
   "changed-surface-shadow-plans-selftest",
   "clean-worktree-planning-selftest",
   "configure-only-selftest",
+  "consumption-census-profiles-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
   "gates-preflight-selftest",
@@ -5238,7 +5365,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-7ccbcecc1c02"
+name = "script-readers-a5cb67ff6ec1"
 paths = ["tools/scripts/test_gpu_health_contract.py"]
 tests = [
   "build-parallelism-guard",
@@ -5249,6 +5376,7 @@ tests = [
   "changed-surface-shadow-plans-selftest",
   "clean-worktree-planning-selftest",
   "configure-only-selftest",
+  "consumption-census-profiles-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
   "gates-preflight-selftest",
@@ -5277,7 +5405,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-16e6c34eaa1c"
+name = "script-readers-371d7d9682bc"
 paths = ["tools/scripts/test_gpu_health_read_contract.py"]
 tests = [
   "build-parallelism-guard",
@@ -5288,6 +5416,7 @@ tests = [
   "changed-surface-shadow-plans-selftest",
   "clean-worktree-planning-selftest",
   "configure-only-selftest",
+  "consumption-census-profiles-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
   "gates-preflight-selftest",
@@ -5316,7 +5445,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-75fcb7199cfd"
+name = "script-readers-cef9a568a55b"
 paths = ["tools/scripts/test_gpu_health_run_attestation.py"]
 tests = [
   "build-parallelism-guard",
@@ -5327,6 +5456,7 @@ tests = [
   "changed-surface-shadow-plans-selftest",
   "clean-worktree-planning-selftest",
   "configure-only-selftest",
+  "consumption-census-profiles-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
   "gates-preflight-selftest",
@@ -5355,7 +5485,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-1f0a01e696c3"
+name = "script-readers-667065908653"
 paths = ["tools/scripts/test_gpu_probe_acceptance.py"]
 tests = [
   "build-parallelism-guard",
@@ -5366,6 +5496,7 @@ tests = [
   "changed-surface-shadow-plans-selftest",
   "clean-worktree-planning-selftest",
   "configure-only-selftest",
+  "consumption-census-profiles-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
   "gates-preflight-selftest",
@@ -5394,7 +5525,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-595294508631"
+name = "script-readers-ec60f9588b52"
 paths = ["tools/scripts/test_gpu_recipe_catalog.py"]
 tests = [
   "build-parallelism-guard",
@@ -5405,6 +5536,7 @@ tests = [
   "changed-surface-shadow-plans-selftest",
   "clean-worktree-planning-selftest",
   "configure-only-selftest",
+  "consumption-census-profiles-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
   "gates-preflight-selftest",
@@ -5433,7 +5565,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-77641093a2b6"
+name = "script-readers-0d46d9e633fd"
 paths = ["tools/scripts/test_gpu_test_resource_locks.py"]
 tests = [
   "build-parallelism-guard",
@@ -5444,6 +5576,7 @@ tests = [
   "changed-surface-shadow-plans-selftest",
   "clean-worktree-planning-selftest",
   "configure-only-selftest",
+  "consumption-census-profiles-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
   "gates-preflight-selftest",
@@ -5473,7 +5606,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-7958dadf6cac"
+name = "script-readers-45a4e32b53b5"
 paths = ["tools/scripts/test_hotspot_edit_guard.py"]
 tests = [
   "build-parallelism-guard",
@@ -5484,6 +5617,7 @@ tests = [
   "changed-surface-shadow-plans-selftest",
   "clean-worktree-planning-selftest",
   "configure-only-selftest",
+  "consumption-census-profiles-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
   "gates-preflight-selftest",
@@ -5512,7 +5646,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-d1c0fcaeec0b"
+name = "script-readers-9f788ebf6380"
 paths = ["tools/scripts/test_hydrate_gpu_provenance_commits.py"]
 tests = [
   "build-parallelism-guard",
@@ -5523,6 +5657,7 @@ tests = [
   "changed-surface-shadow-plans-selftest",
   "clean-worktree-planning-selftest",
   "configure-only-selftest",
+  "consumption-census-profiles-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
   "gates-preflight-selftest",
@@ -5551,7 +5686,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-11255209e40a"
+name = "script-readers-0da240182d28"
 paths = ["tools/scripts/test_hydrate_real_git.py"]
 tests = [
   "build-parallelism-guard",
@@ -5562,6 +5697,7 @@ tests = [
   "changed-surface-shadow-plans-selftest",
   "clean-worktree-planning-selftest",
   "configure-only-selftest",
+  "consumption-census-profiles-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
   "gates-preflight-selftest",
@@ -5590,7 +5726,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-0395064275ca"
+name = "script-readers-2272d90e5cfd"
 paths = ["tools/scripts/test_include_boundary.py"]
 tests = [
   "build-parallelism-guard",
@@ -5601,6 +5737,7 @@ tests = [
   "changed-surface-shadow-plans-selftest",
   "clean-worktree-planning-selftest",
   "configure-only-selftest",
+  "consumption-census-profiles-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
   "gates-preflight-selftest",
@@ -5629,7 +5766,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-44f41296e28d"
+name = "script-readers-989fdee8e4c1"
 paths = ["tools/scripts/test_inspector_truth_check.py"]
 tests = [
   "build-parallelism-guard",
@@ -5640,6 +5777,7 @@ tests = [
   "changed-surface-shadow-plans-selftest",
   "clean-worktree-planning-selftest",
   "configure-only-selftest",
+  "consumption-census-profiles-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
   "gates-preflight-selftest",
@@ -5668,7 +5806,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-b3c4fada73e6"
+name = "script-readers-0ada2422f117"
 paths = ["tools/scripts/test_install_sha256sums.py"]
 tests = [
   "build-parallelism-guard",
@@ -5679,6 +5817,7 @@ tests = [
   "changed-surface-shadow-plans-selftest",
   "clean-worktree-planning-selftest",
   "configure-only-selftest",
+  "consumption-census-profiles-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
   "gates-preflight-selftest",
@@ -5707,7 +5846,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-83d4487f1dff"
+name = "script-readers-b26f95ec5e24"
 paths = ["tools/scripts/test_install_shipyard_queue_repair.py"]
 tests = [
   "build-parallelism-guard",
@@ -5718,6 +5857,7 @@ tests = [
   "changed-surface-shadow-plans-selftest",
   "clean-worktree-planning-selftest",
   "configure-only-selftest",
+  "consumption-census-profiles-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
   "gates-preflight-selftest",
@@ -5746,7 +5886,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-39dc94641fa2"
+name = "script-readers-1a4febc64ecf"
 paths = ["tools/scripts/test_integrations_boundary_check.py"]
 tests = [
   "build-parallelism-guard",
@@ -5757,6 +5897,7 @@ tests = [
   "changed-surface-shadow-plans-selftest",
   "clean-worktree-planning-selftest",
   "configure-only-selftest",
+  "consumption-census-profiles-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
   "gates-preflight-selftest",
@@ -5785,7 +5926,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-77582338eb79"
+name = "script-readers-85d1f7fa980a"
 paths = ["tools/scripts/test_link_closure_check.py"]
 tests = [
   "build-parallelism-guard",
@@ -5796,6 +5937,7 @@ tests = [
   "changed-surface-shadow-plans-selftest",
   "clean-worktree-planning-selftest",
   "configure-only-selftest",
+  "consumption-census-profiles-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
   "gates-preflight-selftest",
@@ -5824,7 +5966,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-0f167f6dc1cb"
+name = "script-readers-f26da8ba4e8b"
 paths = ["tools/scripts/test_live_build_check.py"]
 tests = [
   "build-parallelism-guard",
@@ -5835,6 +5977,7 @@ tests = [
   "changed-surface-shadow-plans-selftest",
   "clean-worktree-planning-selftest",
   "configure-only-selftest",
+  "consumption-census-profiles-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
   "gates-preflight-selftest",
@@ -5863,7 +6006,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-f5d3801f719a"
+name = "script-readers-df162a6c8b45"
 paths = ["tools/scripts/test_mac_objc_source_list_guard.py"]
 tests = [
   "build-parallelism-guard",
@@ -5874,6 +6017,7 @@ tests = [
   "changed-surface-shadow-plans-selftest",
   "clean-worktree-planning-selftest",
   "configure-only-selftest",
+  "consumption-census-profiles-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
   "gates-preflight-selftest",
@@ -5902,7 +6046,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-b27ead229ec0"
+name = "script-readers-0d026bb1be52"
 paths = ["tools/scripts/test_measure_min_os.py"]
 tests = [
   "build-parallelism-guard",
@@ -5913,6 +6057,7 @@ tests = [
   "changed-surface-shadow-plans-selftest",
   "clean-worktree-planning-selftest",
   "configure-only-selftest",
+  "consumption-census-profiles-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
   "gates-preflight-selftest",
@@ -5941,7 +6086,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-5ada21bc2bbd"
+name = "script-readers-c36773037c55"
 paths = ["tools/scripts/test_migration_note_guard.py"]
 tests = [
   "build-parallelism-guard",
@@ -5952,6 +6097,7 @@ tests = [
   "changed-surface-shadow-plans-selftest",
   "clean-worktree-planning-selftest",
   "configure-only-selftest",
+  "consumption-census-profiles-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
   "gates-preflight-selftest",
@@ -5980,7 +6126,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-d065ad06e69a"
+name = "script-readers-528859740a72"
 paths = ["tools/scripts/test_minos_registry_absent.py"]
 tests = [
   "build-parallelism-guard",
@@ -5991,6 +6137,7 @@ tests = [
   "changed-surface-shadow-plans-selftest",
   "clean-worktree-planning-selftest",
   "configure-only-selftest",
+  "consumption-census-profiles-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
   "gates-preflight-selftest",
@@ -6019,7 +6166,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-58af0d7cd847"
+name = "script-readers-24882c4ca839"
 paths = ["tools/scripts/test_modules_yaml_dirs_check.py"]
 tests = [
   "build-parallelism-guard",
@@ -6030,6 +6177,7 @@ tests = [
   "changed-surface-shadow-plans-selftest",
   "clean-worktree-planning-selftest",
   "configure-only-selftest",
+  "consumption-census-profiles-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
   "gates-preflight-selftest",
@@ -6058,7 +6206,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-5cd7580484bf"
+name = "script-readers-ce292b672433"
 paths = ["tools/scripts/test_nm_symbols.py"]
 tests = [
   "build-parallelism-guard",
@@ -6069,6 +6217,7 @@ tests = [
   "changed-surface-shadow-plans-selftest",
   "clean-worktree-planning-selftest",
   "configure-only-selftest",
+  "consumption-census-profiles-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
   "gates-preflight-selftest",
@@ -6097,7 +6246,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-67218a59b7e6"
+name = "script-readers-68024b7b9f25"
 paths = ["tools/scripts/test_p0_layered_replay_receipt.py"]
 tests = [
   "build-parallelism-guard",
@@ -6108,6 +6257,7 @@ tests = [
   "changed-surface-shadow-plans-selftest",
   "clean-worktree-planning-selftest",
   "configure-only-selftest",
+  "consumption-census-profiles-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
   "gates-preflight-selftest",
@@ -6136,7 +6286,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-6370706b4cf0"
+name = "script-readers-56a290352681"
 paths = ["tools/scripts/test_param_designator_order.py"]
 tests = [
   "build-parallelism-guard",
@@ -6147,6 +6297,7 @@ tests = [
   "changed-surface-shadow-plans-selftest",
   "clean-worktree-planning-selftest",
   "configure-only-selftest",
+  "consumption-census-profiles-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
   "gates-preflight-selftest",
@@ -6175,7 +6326,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-23b27daf2b78"
+name = "script-readers-d05b3ff821b2"
 paths = ["tools/scripts/test_patched_os_name_path_lint.py"]
 tests = [
   "build-parallelism-guard",
@@ -6186,6 +6337,7 @@ tests = [
   "changed-surface-shadow-plans-selftest",
   "clean-worktree-planning-selftest",
   "configure-only-selftest",
+  "consumption-census-profiles-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
   "gates-preflight-selftest",
@@ -6214,7 +6366,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-fb647f5b608b"
+name = "script-readers-d787ddac2bce"
 paths = ["tools/scripts/test_pch_wiring_check.py"]
 tests = [
   "build-parallelism-guard",
@@ -6225,6 +6377,7 @@ tests = [
   "changed-surface-shadow-plans-selftest",
   "clean-worktree-planning-selftest",
   "configure-only-selftest",
+  "consumption-census-profiles-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
   "gates-preflight-selftest",
@@ -6253,7 +6406,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-f7de187e933b"
+name = "script-readers-c36518d4aa78"
 paths = ["tools/scripts/test_planning_gitlink_guard.py"]
 tests = [
   "build-parallelism-guard",
@@ -6264,6 +6417,7 @@ tests = [
   "changed-surface-shadow-plans-selftest",
   "clean-worktree-planning-selftest",
   "configure-only-selftest",
+  "consumption-census-profiles-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
   "gates-preflight-selftest",
@@ -6292,7 +6446,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-6d9ddfc9bb8a"
+name = "script-readers-cbd3b0b9c313"
 paths = ["tools/scripts/test_plugin_footprint_check.py"]
 tests = [
   "build-parallelism-guard",
@@ -6303,6 +6457,7 @@ tests = [
   "changed-surface-shadow-plans-selftest",
   "clean-worktree-planning-selftest",
   "configure-only-selftest",
+  "consumption-census-profiles-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
   "gates-preflight-selftest",
@@ -6331,7 +6486,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-6f943cd89799"
+name = "script-readers-2b7b84a179ab"
 paths = ["tools/scripts/test_pr_batch_advisor.py"]
 tests = [
   "build-parallelism-guard",
@@ -6342,6 +6497,7 @@ tests = [
   "changed-surface-shadow-plans-selftest",
   "clean-worktree-planning-selftest",
   "configure-only-selftest",
+  "consumption-census-profiles-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
   "gates-preflight-selftest",
@@ -6370,7 +6526,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-33ec31fd4785"
+name = "script-readers-27dce625957c"
 paths = ["tools/scripts/test_pr_check_triage.py"]
 tests = [
   "build-parallelism-guard",
@@ -6381,6 +6537,7 @@ tests = [
   "changed-surface-shadow-plans-selftest",
   "clean-worktree-planning-selftest",
   "configure-only-selftest",
+  "consumption-census-profiles-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
   "gates-preflight-selftest",
@@ -6409,7 +6566,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-e374427c1fbc"
+name = "script-readers-6c889ca1cfcf"
 paths = ["tools/scripts/test_pr_fast_tier_check.py"]
 tests = [
   "build-parallelism-guard",
@@ -6420,6 +6577,7 @@ tests = [
   "changed-surface-shadow-plans-selftest",
   "clean-worktree-planning-selftest",
   "configure-only-selftest",
+  "consumption-census-profiles-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
   "gates-preflight-selftest",
@@ -6448,7 +6606,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-c21bb6c24c2c"
+name = "script-readers-ea6572b44d63"
 paths = ["tools/scripts/test_pr_flow_audit.py"]
 tests = [
   "build-parallelism-guard",
@@ -6459,6 +6617,7 @@ tests = [
   "changed-surface-shadow-plans-selftest",
   "clean-worktree-planning-selftest",
   "configure-only-selftest",
+  "consumption-census-profiles-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
   "gates-preflight-selftest",
@@ -6487,7 +6646,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-8ed392d150ba"
+name = "script-readers-dd7434ae7679"
 paths = ["tools/scripts/test_prepush_affected_tests.py"]
 tests = [
   "build-parallelism-guard",
@@ -6498,6 +6657,7 @@ tests = [
   "changed-surface-shadow-plans-selftest",
   "clean-worktree-planning-selftest",
   "configure-only-selftest",
+  "consumption-census-profiles-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
   "gates-preflight-selftest",
@@ -6526,7 +6686,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-03a6128d0502"
+name = "script-readers-223f8a6b231f"
 paths = ["tools/scripts/test_prepush_claim_check.py"]
 tests = [
   "build-parallelism-guard",
@@ -6537,6 +6697,7 @@ tests = [
   "changed-surface-shadow-plans-selftest",
   "clean-worktree-planning-selftest",
   "configure-only-selftest",
+  "consumption-census-profiles-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
   "gates-preflight-selftest",
@@ -6565,7 +6726,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-c08fa6b442e5"
+name = "script-readers-e3aa1992be9a"
 paths = ["tools/scripts/test_prepush_format_gate.py"]
 tests = [
   "build-parallelism-guard",
@@ -6576,6 +6737,7 @@ tests = [
   "changed-surface-shadow-plans-selftest",
   "clean-worktree-planning-selftest",
   "configure-only-selftest",
+  "consumption-census-profiles-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
   "gates-preflight-selftest",
@@ -6604,7 +6766,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-6b7597390d94"
+name = "script-readers-b277d34038d1"
 paths = ["tools/scripts/test_prepush_gate_output.py"]
 tests = [
   "build-parallelism-guard",
@@ -6615,6 +6777,7 @@ tests = [
   "changed-surface-shadow-plans-selftest",
   "clean-worktree-planning-selftest",
   "configure-only-selftest",
+  "consumption-census-profiles-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
   "gates-preflight-selftest",
@@ -6643,7 +6806,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-00b754f83e0e"
+name = "script-readers-f8d14f75b1f7"
 paths = ["tools/scripts/test_prepush_queue_rebase_hint.py"]
 tests = [
   "build-parallelism-guard",
@@ -6654,6 +6817,7 @@ tests = [
   "changed-surface-shadow-plans-selftest",
   "clean-worktree-planning-selftest",
   "configure-only-selftest",
+  "consumption-census-profiles-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
   "gates-preflight-selftest",
@@ -6682,7 +6846,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-150d89984da8"
+name = "script-readers-2b9aac9dcf3e"
 paths = ["tools/scripts/test_protected_merge_receipt.py"]
 tests = [
   "build-parallelism-guard",
@@ -6693,6 +6857,7 @@ tests = [
   "changed-surface-shadow-plans-selftest",
   "clean-worktree-planning-selftest",
   "configure-only-selftest",
+  "consumption-census-profiles-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
   "gates-preflight-selftest",
@@ -6722,7 +6887,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-476659edfebb"
+name = "script-readers-a9b4cfd9f78f"
 paths = ["tools/scripts/test_pulp_test_data_cmake.py"]
 tests = [
   "build-parallelism-guard",
@@ -6733,6 +6898,7 @@ tests = [
   "changed-surface-shadow-plans-selftest",
   "clean-worktree-planning-selftest",
   "configure-only-selftest",
+  "consumption-census-profiles-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
   "gates-preflight-selftest",
@@ -6761,7 +6927,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-243d8755d95d"
+name = "script-readers-b1ef8a1febee"
 paths = ["tools/scripts/test_pulp_test_group.py"]
 tests = [
   "build-parallelism-guard",
@@ -6773,6 +6939,7 @@ tests = [
   "clean-worktree-planning-selftest",
   "cmake-test-group-discovery",
   "configure-only-selftest",
+  "consumption-census-profiles-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
   "gates-preflight-selftest",
@@ -6800,7 +6967,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-ef712aff7829"
+name = "script-readers-b5b9db26e2ff"
 paths = ["tools/scripts/test_pulp_uninstall.py"]
 tests = [
   "build-parallelism-guard",
@@ -6811,6 +6978,7 @@ tests = [
   "changed-surface-shadow-plans-selftest",
   "clean-worktree-planning-selftest",
   "configure-only-selftest",
+  "consumption-census-profiles-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
   "gates-preflight-selftest",
@@ -6839,7 +7007,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-51e7a7e6d0d1"
+name = "script-readers-be8ee38fb609"
 paths = ["tools/scripts/test_realtime_pool_resource_locks.py"]
 tests = [
   "build-parallelism-guard",
@@ -6850,6 +7018,7 @@ tests = [
   "changed-surface-shadow-plans-selftest",
   "clean-worktree-planning-selftest",
   "configure-only-selftest",
+  "consumption-census-profiles-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
   "gates-preflight-selftest",
@@ -6878,7 +7047,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-785d10d107e3"
+name = "script-readers-00ed5d66d7d6"
 paths = ["tools/scripts/test_relay_contract_check.py"]
 tests = [
   "build-parallelism-guard",
@@ -6889,6 +7058,7 @@ tests = [
   "changed-surface-shadow-plans-selftest",
   "clean-worktree-planning-selftest",
   "configure-only-selftest",
+  "consumption-census-profiles-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
   "gates-preflight-selftest",
@@ -6917,7 +7087,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-3139d3b7e1c3"
+name = "script-readers-0aaa593be6a1"
 paths = ["tools/scripts/test_release_trailer_guard.py"]
 tests = [
   "build-parallelism-guard",
@@ -6928,6 +7098,7 @@ tests = [
   "changed-surface-shadow-plans-selftest",
   "clean-worktree-planning-selftest",
   "configure-only-selftest",
+  "consumption-census-profiles-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
   "gates-preflight-selftest",
@@ -6956,7 +7127,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-ad1c28ab3a34"
+name = "script-readers-846921b7ee0d"
 paths = ["tools/scripts/test_render_upward_edge_check.py"]
 tests = [
   "build-parallelism-guard",
@@ -6967,6 +7138,7 @@ tests = [
   "changed-surface-shadow-plans-selftest",
   "clean-worktree-planning-selftest",
   "configure-only-selftest",
+  "consumption-census-profiles-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
   "gates-preflight-selftest",
@@ -6995,7 +7167,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-68331d55c704"
+name = "script-readers-67f9eeb56462"
 paths = ["tools/scripts/test_repo_source_scan.py"]
 tests = [
   "build-parallelism-guard",
@@ -7006,6 +7178,7 @@ tests = [
   "changed-surface-shadow-plans-selftest",
   "clean-worktree-planning-selftest",
   "configure-only-selftest",
+  "consumption-census-profiles-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
   "gates-preflight-selftest",
@@ -7034,7 +7207,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-64c018dd1c4e"
+name = "script-readers-678a70d8c702"
 paths = ["tools/scripts/test_resolve_classify_base.py"]
 tests = [
   "build-parallelism-guard",
@@ -7045,6 +7218,7 @@ tests = [
   "changed-surface-shadow-plans-selftest",
   "clean-worktree-planning-selftest",
   "configure-only-selftest",
+  "consumption-census-profiles-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
   "gates-preflight-selftest",
@@ -7073,7 +7247,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-f6b743616535"
+name = "script-readers-4ea0953bb29e"
 paths = ["tools/scripts/test_run_changed_surface_tests.py"]
 tests = [
   "build-parallelism-guard",
@@ -7085,6 +7259,7 @@ tests = [
   "changed-surface-shadow-plans-selftest",
   "clean-worktree-planning-selftest",
   "configure-only-selftest",
+  "consumption-census-profiles-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
   "gates-preflight-selftest",
@@ -7112,7 +7287,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-1c2a3a93051f"
+name = "script-readers-bdd36c7c56ea"
 paths = ["tools/scripts/test_runner_topology_check.py"]
 tests = [
   "build-parallelism-guard",
@@ -7123,6 +7298,7 @@ tests = [
   "changed-surface-shadow-plans-selftest",
   "clean-worktree-planning-selftest",
   "configure-only-selftest",
+  "consumption-census-profiles-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
   "gates-preflight-selftest",
@@ -7151,7 +7327,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-7e2a56553a74"
+name = "script-readers-414ecffe5170"
 paths = ["tools/scripts/test_runner_topology_static.py"]
 tests = [
   "build-parallelism-guard",
@@ -7162,6 +7338,7 @@ tests = [
   "changed-surface-shadow-plans-selftest",
   "clean-worktree-planning-selftest",
   "configure-only-selftest",
+  "consumption-census-profiles-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
   "gates-preflight-selftest",
@@ -7190,7 +7367,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-3c092e362cb9"
+name = "script-readers-b8489409d97f"
 paths = ["tools/scripts/test_rust_cli_build_edge_check.py"]
 tests = [
   "build-parallelism-guard",
@@ -7201,6 +7378,7 @@ tests = [
   "changed-surface-shadow-plans-selftest",
   "clean-worktree-planning-selftest",
   "configure-only-selftest",
+  "consumption-census-profiles-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
   "gates-preflight-selftest",
@@ -7229,7 +7407,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-502d0539422e"
+name = "script-readers-b98d86645d72"
 paths = ["tools/scripts/test_sample_region_catalogs.py"]
 tests = [
   "build-parallelism-guard",
@@ -7240,6 +7418,7 @@ tests = [
   "changed-surface-shadow-plans-selftest",
   "clean-worktree-planning-selftest",
   "configure-only-selftest",
+  "consumption-census-profiles-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
   "gates-preflight-selftest",
@@ -7268,7 +7447,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-f1184dccbd7f"
+name = "script-readers-8b58376bd3c5"
 paths = ["tools/scripts/test_schema_drift_check.py"]
 tests = [
   "build-parallelism-guard",
@@ -7279,6 +7458,7 @@ tests = [
   "changed-surface-shadow-plans-selftest",
   "clean-worktree-planning-selftest",
   "configure-only-selftest",
+  "consumption-census-profiles-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
   "gates-preflight-selftest",
@@ -7307,7 +7487,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-e1114a7366ba"
+name = "script-readers-675dfb451751"
 paths = ["tools/scripts/test_script_argv.py"]
 tests = [
   "build-parallelism-guard",
@@ -7318,6 +7498,7 @@ tests = [
   "changed-surface-shadow-plans-selftest",
   "clean-worktree-planning-selftest",
   "configure-only-selftest",
+  "consumption-census-profiles-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
   "gates-preflight-selftest",
@@ -7346,7 +7527,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-3f1e35da684c"
+name = "script-readers-2631a7f1a4fc"
 paths = ["tools/scripts/test_script_inputs_offline.py"]
 tests = [
   "build-parallelism-guard",
@@ -7357,6 +7538,7 @@ tests = [
   "changed-surface-shadow-plans-selftest",
   "clean-worktree-planning-selftest",
   "configure-only-selftest",
+  "consumption-census-profiles-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
   "gates-preflight-selftest",
@@ -7385,7 +7567,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-12fddc75f860"
+name = "script-readers-a3a9a8911606"
 paths = ["tools/scripts/test_script_inputs_precheck.py"]
 tests = [
   "build-parallelism-guard",
@@ -7396,6 +7578,7 @@ tests = [
   "changed-surface-shadow-plans-selftest",
   "clean-worktree-planning-selftest",
   "configure-only-selftest",
+  "consumption-census-profiles-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
   "gates-preflight-selftest",
@@ -7424,7 +7607,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-160105478095"
+name = "script-readers-bee4d1ef8754"
 paths = ["tools/scripts/test_script_inputs_store.py"]
 tests = [
   "build-parallelism-guard",
@@ -7435,6 +7618,7 @@ tests = [
   "changed-surface-shadow-plans-selftest",
   "clean-worktree-planning-selftest",
   "configure-only-selftest",
+  "consumption-census-profiles-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
   "gates-preflight-selftest",
@@ -7463,7 +7647,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-a8e13e567e92"
+name = "script-readers-89bdd377882f"
 paths = ["tools/scripts/test_script_test_inputs.py"]
 tests = [
   "build-parallelism-guard",
@@ -7474,6 +7658,7 @@ tests = [
   "changed-surface-shadow-plans-selftest",
   "clean-worktree-planning-selftest",
   "configure-only-selftest",
+  "consumption-census-profiles-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
   "gates-preflight-selftest",
@@ -7502,7 +7687,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-732981e638c6"
+name = "script-readers-ce8b0954d3d3"
 paths = ["tools/scripts/test_sdk_capability_handoff.py"]
 tests = [
   "agent-capability-sdk-handoff-selftest",
@@ -7514,6 +7699,7 @@ tests = [
   "changed-surface-shadow-plans-selftest",
   "clean-worktree-planning-selftest",
   "configure-only-selftest",
+  "consumption-census-profiles-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
   "gates-preflight-selftest",
@@ -7541,7 +7727,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-73ede8d1ee78"
+name = "script-readers-e64e8e0d4069"
 paths = ["tools/scripts/test_sdk_consumer_sweep.py"]
 tests = [
   "build-parallelism-guard",
@@ -7552,6 +7738,7 @@ tests = [
   "changed-surface-shadow-plans-selftest",
   "clean-worktree-planning-selftest",
   "configure-only-selftest",
+  "consumption-census-profiles-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
   "gates-preflight-selftest",
@@ -7580,7 +7767,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-75017cf16ace"
+name = "script-readers-0daeda598abd"
 paths = ["tools/scripts/test_sdk_consumer_update.py"]
 tests = [
   "build-parallelism-guard",
@@ -7591,6 +7778,7 @@ tests = [
   "changed-surface-shadow-plans-selftest",
   "clean-worktree-planning-selftest",
   "configure-only-selftest",
+  "consumption-census-profiles-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
   "gates-preflight-selftest",
@@ -7619,7 +7807,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-ffb718344018"
+name = "script-readers-32d1b8f3c49f"
 paths = ["tools/scripts/test_sdk_plist_templates_installed.py"]
 tests = [
   "build-parallelism-guard",
@@ -7630,6 +7818,7 @@ tests = [
   "changed-surface-shadow-plans-selftest",
   "clean-worktree-planning-selftest",
   "configure-only-selftest",
+  "consumption-census-profiles-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
   "gates-preflight-selftest",
@@ -7658,7 +7847,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-4b8e9b94dee6"
+name = "script-readers-e6d14b64f850"
 paths = ["tools/scripts/test_seed_build_dir.py"]
 tests = [
   "build-parallelism-guard",
@@ -7669,6 +7858,7 @@ tests = [
   "changed-surface-shadow-plans-selftest",
   "clean-worktree-planning-selftest",
   "configure-only-selftest",
+  "consumption-census-profiles-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
   "gates-preflight-selftest",
@@ -7697,7 +7887,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-bfda52fa5cc9"
+name = "script-readers-71b84c1686be"
 paths = ["tools/scripts/test_sequencer_control_skill_check.py"]
 tests = [
   "build-parallelism-guard",
@@ -7708,6 +7898,7 @@ tests = [
   "changed-surface-shadow-plans-selftest",
   "clean-worktree-planning-selftest",
   "configure-only-selftest",
+  "consumption-census-profiles-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
   "gates-preflight-selftest",
@@ -7736,7 +7927,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-a76733496b2e"
+name = "script-readers-880e922e1907"
 paths = ["tools/scripts/test_setup_bootstrap_plan_guard.py"]
 tests = [
   "build-parallelism-guard",
@@ -7747,6 +7938,7 @@ tests = [
   "changed-surface-shadow-plans-selftest",
   "clean-worktree-planning-selftest",
   "configure-only-selftest",
+  "consumption-census-profiles-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
   "gates-preflight-selftest",
@@ -7775,7 +7967,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-81331326c7a3"
+name = "script-readers-76677e7705d3"
 paths = ["tools/scripts/test_shared_test_objects_check.py"]
 tests = [
   "build-parallelism-guard",
@@ -7786,6 +7978,7 @@ tests = [
   "changed-surface-shadow-plans-selftest",
   "clean-worktree-planning-selftest",
   "configure-only-selftest",
+  "consumption-census-profiles-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
   "gates-preflight-selftest",
@@ -7814,7 +8007,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-837591245094"
+name = "script-readers-c95e1551cacc"
 paths = ["tools/scripts/test_shipping_macro_guard.py"]
 tests = [
   "build-parallelism-guard",
@@ -7825,6 +8018,7 @@ tests = [
   "changed-surface-shadow-plans-selftest",
   "clean-worktree-planning-selftest",
   "configure-only-selftest",
+  "consumption-census-profiles-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
   "gates-preflight-selftest",
@@ -7854,7 +8048,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-fbe57db19508"
+name = "script-readers-b985b2beb2ef"
 paths = ["tools/scripts/test_shipyard_merge_gate_evidence.py"]
 tests = [
   "build-parallelism-guard",
@@ -7865,6 +8059,7 @@ tests = [
   "changed-surface-shadow-plans-selftest",
   "clean-worktree-planning-selftest",
   "configure-only-selftest",
+  "consumption-census-profiles-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
   "gates-preflight-selftest",
@@ -7893,7 +8088,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-6b3017092025"
+name = "script-readers-eede644ec591"
 paths = ["tools/scripts/test_silent_revert_guard.py"]
 tests = [
   "build-parallelism-guard",
@@ -7904,6 +8099,7 @@ tests = [
   "changed-surface-shadow-plans-selftest",
   "clean-worktree-planning-selftest",
   "configure-only-selftest",
+  "consumption-census-profiles-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
   "gates-preflight-selftest",
@@ -7932,7 +8128,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-434519c9385d"
+name = "script-readers-5863d281452e"
 paths = ["tools/scripts/test_skills_doc_check.py"]
 tests = [
   "build-parallelism-guard",
@@ -7943,6 +8139,7 @@ tests = [
   "changed-surface-shadow-plans-selftest",
   "clean-worktree-planning-selftest",
   "configure-only-selftest",
+  "consumption-census-profiles-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
   "gates-preflight-selftest",
@@ -7971,7 +8168,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-b841f4b86fa1"
+name = "script-readers-501c20b88320"
 paths = ["tools/scripts/test_status_tone_signal_lint.py"]
 tests = [
   "build-parallelism-guard",
@@ -7982,6 +8179,7 @@ tests = [
   "changed-surface-shadow-plans-selftest",
   "clean-worktree-planning-selftest",
   "configure-only-selftest",
+  "consumption-census-profiles-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
   "gates-preflight-selftest",
@@ -8010,7 +8208,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-13170ce00870"
+name = "script-readers-6f2367aff93a"
 paths = ["tools/scripts/test_swift_bridge_split_guard.py"]
 tests = [
   "build-parallelism-guard",
@@ -8021,6 +8219,7 @@ tests = [
   "changed-surface-shadow-plans-selftest",
   "clean-worktree-planning-selftest",
   "configure-only-selftest",
+  "consumption-census-profiles-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
   "gates-preflight-selftest",
@@ -8049,7 +8248,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-ea6db7ec02df"
+name = "script-readers-1381596956d9"
 paths = ["tools/scripts/test_tart_home_resolution.py"]
 tests = [
   "build-parallelism-guard",
@@ -8060,6 +8259,7 @@ tests = [
   "changed-surface-shadow-plans-selftest",
   "clean-worktree-planning-selftest",
   "configure-only-selftest",
+  "consumption-census-profiles-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
   "gates-preflight-selftest",
@@ -8088,7 +8288,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-0f1ce969471b"
+name = "script-readers-f289e2468153"
 paths = ["tools/scripts/test_timeline_fixture_coverage_check.py"]
 tests = [
   "build-parallelism-guard",
@@ -8099,6 +8299,7 @@ tests = [
   "changed-surface-shadow-plans-selftest",
   "clean-worktree-planning-selftest",
   "configure-only-selftest",
+  "consumption-census-profiles-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
   "gates-preflight-selftest",
@@ -8127,7 +8328,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-15c5cba34d4e"
+name = "script-readers-fdcfd9018c66"
 paths = ["tools/scripts/test_tmp_leak_guard.py"]
 tests = [
   "build-parallelism-guard",
@@ -8138,6 +8339,7 @@ tests = [
   "changed-surface-shadow-plans-selftest",
   "clean-worktree-planning-selftest",
   "configure-only-selftest",
+  "consumption-census-profiles-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
   "gates-preflight-selftest",
@@ -8166,7 +8368,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-73631823da04"
+name = "script-readers-f841a7345477"
 paths = ["tools/scripts/test_tools_registry_check.py"]
 tests = [
   "build-parallelism-guard",
@@ -8177,6 +8379,7 @@ tests = [
   "changed-surface-shadow-plans-selftest",
   "clean-worktree-planning-selftest",
   "configure-only-selftest",
+  "consumption-census-profiles-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
   "gates-preflight-selftest",
@@ -8205,7 +8408,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-620e9c9ea494"
+name = "script-readers-c75b43f3671f"
 paths = ["tools/scripts/test_trace_frame_cost.py"]
 tests = [
   "build-parallelism-guard",
@@ -8216,6 +8419,7 @@ tests = [
   "changed-surface-shadow-plans-selftest",
   "clean-worktree-planning-selftest",
   "configure-only-selftest",
+  "consumption-census-profiles-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
   "gates-preflight-selftest",
@@ -8244,7 +8448,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-c6e8a78ea04c"
+name = "script-readers-223db52e7fe4"
 paths = ["tools/scripts/test_trace_span_category_lint.py"]
 tests = [
   "build-parallelism-guard",
@@ -8255,6 +8459,7 @@ tests = [
   "changed-surface-shadow-plans-selftest",
   "clean-worktree-planning-selftest",
   "configure-only-selftest",
+  "consumption-census-profiles-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
   "gates-preflight-selftest",
@@ -8283,7 +8488,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-8b392c64e887"
+name = "script-readers-86215ae847a6"
 paths = ["tools/scripts/test_unbounded_wait_lint.py"]
 tests = [
   "build-parallelism-guard",
@@ -8294,6 +8499,7 @@ tests = [
   "changed-surface-shadow-plans-selftest",
   "clean-worktree-planning-selftest",
   "configure-only-selftest",
+  "consumption-census-profiles-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
   "gates-preflight-selftest",
@@ -8322,7 +8528,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-2821c822a4b5"
+name = "script-readers-c8841af9422d"
 paths = ["tools/scripts/test_undefined_names_check.py"]
 tests = [
   "build-parallelism-guard",
@@ -8333,6 +8539,7 @@ tests = [
   "changed-surface-shadow-plans-selftest",
   "clean-worktree-planning-selftest",
   "configure-only-selftest",
+  "consumption-census-profiles-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
   "gates-preflight-selftest",
@@ -8361,7 +8568,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-d3d3d92a6d76"
+name = "script-readers-cede8a9d22f0"
 paths = ["tools/scripts/test_unregistered_tests_check.py"]
 tests = [
   "build-parallelism-guard",
@@ -8372,6 +8579,7 @@ tests = [
   "changed-surface-shadow-plans-selftest",
   "clean-worktree-planning-selftest",
   "configure-only-selftest",
+  "consumption-census-profiles-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
   "gates-preflight-selftest",
@@ -8400,7 +8608,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-c13475d33156"
+name = "script-readers-fd809be4ec30"
 paths = ["tools/scripts/test_validate_gpu_audio_trace_captures.py"]
 tests = [
   "build-parallelism-guard",
@@ -8411,6 +8619,7 @@ tests = [
   "changed-surface-shadow-plans-selftest",
   "clean-worktree-planning-selftest",
   "configure-only-selftest",
+  "consumption-census-profiles-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
   "gates-preflight-selftest",
@@ -8439,7 +8648,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-41e4b11d5636"
+name = "script-readers-5550786460f4"
 paths = ["tools/scripts/test_vellum_boundary_lint.py"]
 tests = [
   "build-parallelism-guard",
@@ -8450,6 +8659,7 @@ tests = [
   "changed-surface-shadow-plans-selftest",
   "clean-worktree-planning-selftest",
   "configure-only-selftest",
+  "consumption-census-profiles-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
   "gates-preflight-selftest",
@@ -8478,7 +8688,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-6e13161fbfe6"
+name = "script-readers-4ad9ea530570"
 paths = ["tools/scripts/test_vellum_inheritance_ledger_check.py"]
 tests = [
   "build-parallelism-guard",
@@ -8489,6 +8699,7 @@ tests = [
   "changed-surface-shadow-plans-selftest",
   "clean-worktree-planning-selftest",
   "configure-only-selftest",
+  "consumption-census-profiles-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
   "gates-preflight-selftest",
@@ -8517,7 +8728,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-d40acf042828"
+name = "script-readers-627ab6426b5a"
 paths = ["tools/scripts/test_vellum_trusted_merge.py"]
 tests = [
   "build-parallelism-guard",
@@ -8528,6 +8739,7 @@ tests = [
   "changed-surface-shadow-plans-selftest",
   "clean-worktree-planning-selftest",
   "configure-only-selftest",
+  "consumption-census-profiles-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
   "gates-preflight-selftest",
@@ -8556,7 +8768,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-c95475398e55"
+name = "script-readers-29dc055d44bf"
 paths = ["tools/scripts/test_vellum_ui_drift_report.py"]
 tests = [
   "build-parallelism-guard",
@@ -8567,6 +8779,7 @@ tests = [
   "changed-surface-shadow-plans-selftest",
   "clean-worktree-planning-selftest",
   "configure-only-selftest",
+  "consumption-census-profiles-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
   "gates-preflight-selftest",
@@ -8595,7 +8808,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-e8ceafbfa7bf"
+name = "script-readers-55ea2e94b879"
 paths = ["tools/scripts/test_vellum_view_core_pulp_kept_check.py"]
 tests = [
   "build-parallelism-guard",
@@ -8606,6 +8819,7 @@ tests = [
   "changed-surface-shadow-plans-selftest",
   "clean-worktree-planning-selftest",
   "configure-only-selftest",
+  "consumption-census-profiles-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
   "gates-preflight-selftest",
@@ -8634,7 +8848,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-d61b9d3361a1"
+name = "script-readers-d7b46e7bdd61"
 paths = ["tools/scripts/test_vellum_workflow_dispatch.py"]
 tests = [
   "build-parallelism-guard",
@@ -8645,6 +8859,7 @@ tests = [
   "changed-surface-shadow-plans-selftest",
   "clean-worktree-planning-selftest",
   "configure-only-selftest",
+  "consumption-census-profiles-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
   "gates-preflight-selftest",
@@ -8673,7 +8888,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-6f3d2a18d5d9"
+name = "script-readers-f974e8a5fcc0"
 paths = ["tools/scripts/test_verify_create_templates.py"]
 tests = [
   "build-parallelism-guard",
@@ -8684,6 +8899,7 @@ tests = [
   "changed-surface-shadow-plans-selftest",
   "clean-worktree-planning-selftest",
   "configure-only-selftest",
+  "consumption-census-profiles-selftest",
   "create-templates-verify",
   "flake-exoneration-selftest",
   "gate-common-selftest",
@@ -8712,7 +8928,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-55ace3572f02"
+name = "script-readers-c7c0e949a655"
 paths = ["tools/scripts/test_verify_gpu_dpr_inconclusive_receipt.py"]
 tests = [
   "build-parallelism-guard",
@@ -8723,6 +8939,7 @@ tests = [
   "changed-surface-shadow-plans-selftest",
   "clean-worktree-planning-selftest",
   "configure-only-selftest",
+  "consumption-census-profiles-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
   "gates-preflight-selftest",
@@ -8751,7 +8968,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-c94aeaa896fd"
+name = "script-readers-ed2135262a2c"
 paths = ["tools/scripts/test_verify_gpu_probe_acceptance.py"]
 tests = [
   "build-parallelism-guard",
@@ -8762,6 +8979,7 @@ tests = [
   "changed-surface-shadow-plans-selftest",
   "clean-worktree-planning-selftest",
   "configure-only-selftest",
+  "consumption-census-profiles-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
   "gates-preflight-selftest",
@@ -8790,7 +9008,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-36dbeaa83ef5"
+name = "script-readers-a72af0ceb25d"
 paths = ["tools/scripts/test_verify_rendered_panel.py"]
 tests = [
   "build-parallelism-guard",
@@ -8801,6 +9019,7 @@ tests = [
   "changed-surface-shadow-plans-selftest",
   "clean-worktree-planning-selftest",
   "configure-only-selftest",
+  "consumption-census-profiles-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
   "gates-preflight-selftest",
@@ -8829,7 +9048,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-811d6a0a7009"
+name = "script-readers-c5e169ebb44c"
 paths = ["tools/scripts/test_version_at_land.py"]
 tests = [
   "build-parallelism-guard",
@@ -8840,6 +9059,7 @@ tests = [
   "changed-surface-shadow-plans-selftest",
   "clean-worktree-planning-selftest",
   "configure-only-selftest",
+  "consumption-census-profiles-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
   "gates-preflight-selftest",
@@ -8868,7 +9088,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-509f05aaee09"
+name = "script-readers-4c9f39f174cc"
 paths = ["tools/scripts/test_view_audio_symbol_floor.py"]
 tests = [
   "build-parallelism-guard",
@@ -8879,6 +9099,7 @@ tests = [
   "changed-surface-shadow-plans-selftest",
   "clean-worktree-planning-selftest",
   "configure-only-selftest",
+  "consumption-census-profiles-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
   "gates-preflight-selftest",
@@ -8907,7 +9128,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-5bdf6f80f19d"
+name = "script-readers-c0eb28284be4"
 paths = ["tools/scripts/test_web_timeline_source_closure_check.py"]
 tests = [
   "build-parallelism-guard",
@@ -8918,6 +9139,7 @@ tests = [
   "changed-surface-shadow-plans-selftest",
   "clean-worktree-planning-selftest",
   "configure-only-selftest",
+  "consumption-census-profiles-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
   "gates-preflight-selftest",
@@ -8946,7 +9168,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-a821223d8862"
+name = "script-readers-d961ab7ecbe9"
 paths = ["tools/scripts/test_windows_posix_shims.py"]
 tests = [
   "build-parallelism-guard",
@@ -8957,6 +9179,7 @@ tests = [
   "changed-surface-shadow-plans-selftest",
   "clean-worktree-planning-selftest",
   "configure-only-selftest",
+  "consumption-census-profiles-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
   "gates-preflight-selftest",
@@ -8985,7 +9208,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-0eecfbb733ca"
+name = "script-readers-450697614db6"
 paths = ["tools/scripts/timeline_command_doc_check.py"]
 tests = [
   "build-parallelism-guard",
@@ -8996,6 +9219,7 @@ tests = [
   "changed-surface-shadow-plans-selftest",
   "clean-worktree-planning-selftest",
   "configure-only-selftest",
+  "consumption-census-profiles-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
   "gates-preflight-selftest",
@@ -9024,7 +9248,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-68f0f7072aad"
+name = "script-readers-70b64b222ddb"
 paths = ["tools/scripts/timeline_engine_dependency_floor_check.py"]
 tests = [
   "build-parallelism-guard",
@@ -9035,6 +9259,7 @@ tests = [
   "changed-surface-shadow-plans-selftest",
   "clean-worktree-planning-selftest",
   "configure-only-selftest",
+  "consumption-census-profiles-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
   "gates-preflight-selftest",
@@ -9064,7 +9289,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-c10ffdb91176"
+name = "script-readers-3edc8b535b40"
 paths = ["tools/scripts/timeline_fixture_coverage_check.py"]
 tests = [
   "build-parallelism-guard",
@@ -9075,6 +9300,7 @@ tests = [
   "changed-surface-shadow-plans-selftest",
   "clean-worktree-planning-selftest",
   "configure-only-selftest",
+  "consumption-census-profiles-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
   "gates-preflight-selftest",
@@ -9103,7 +9329,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-baab4c7d0031"
+name = "script-readers-4787852b57ed"
 paths = ["tools/scripts/token_coverage_check.py"]
 tests = [
   "build-parallelism-guard",
@@ -9114,6 +9340,7 @@ tests = [
   "changed-surface-shadow-plans-selftest",
   "clean-worktree-planning-selftest",
   "configure-only-selftest",
+  "consumption-census-profiles-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
   "gates-preflight-selftest",
@@ -9142,7 +9369,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-2303de425410"
+name = "script-readers-c8645830b112"
 paths = ["tools/scripts/token_key_check.py"]
 tests = [
   "build-parallelism-guard",
@@ -9153,6 +9380,7 @@ tests = [
   "changed-surface-shadow-plans-selftest",
   "clean-worktree-planning-selftest",
   "configure-only-selftest",
+  "consumption-census-profiles-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
   "gates-preflight-selftest",
@@ -9181,7 +9409,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-b60e559562bc"
+name = "script-readers-fb38f3a328bd"
 paths = ["tools/scripts/trace_span_category_lint.py"]
 tests = [
   "build-parallelism-guard",
@@ -9192,6 +9420,7 @@ tests = [
   "changed-surface-shadow-plans-selftest",
   "clean-worktree-planning-selftest",
   "configure-only-selftest",
+  "consumption-census-profiles-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
   "gates-preflight-selftest",
@@ -9220,7 +9449,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-0adef6b30bb9"
+name = "script-readers-1dc139958301"
 paths = ["tools/scripts/vellum_view_core_pulp_kept_check.py"]
 tests = [
   "build-parallelism-guard",
@@ -9231,6 +9460,7 @@ tests = [
   "changed-surface-shadow-plans-selftest",
   "clean-worktree-planning-selftest",
   "configure-only-selftest",
+  "consumption-census-profiles-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
   "gates-preflight-selftest",
@@ -9259,7 +9489,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-f199e789dcbd"
+name = "script-readers-7ddf0b5e9a98"
 paths = ["tools/scripts/verify_downstream_consumers.py"]
 tests = [
   "build-parallelism-guard",
@@ -9270,6 +9500,7 @@ tests = [
   "changed-surface-shadow-plans-selftest",
   "clean-worktree-planning-selftest",
   "configure-only-selftest",
+  "consumption-census-profiles-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
   "gates-preflight-selftest",
@@ -9299,7 +9530,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-23ffbfe1e11a"
+name = "script-readers-8c5b94ad8077"
 paths = ["tools/scripts/verify_downstream_consumers_contract.py"]
 tests = [
   "build-parallelism-guard",
@@ -9310,6 +9541,7 @@ tests = [
   "changed-surface-shadow-plans-selftest",
   "clean-worktree-planning-selftest",
   "configure-only-selftest",
+  "consumption-census-profiles-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
   "gates-preflight-selftest",
@@ -9338,7 +9570,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-303b6e087bdc"
+name = "script-readers-ffe7d2dd6d3d"
 paths = ["tools/scripts/verify_refactor_baselines.py"]
 tests = [
   "build-parallelism-guard",
@@ -9349,6 +9581,7 @@ tests = [
   "changed-surface-shadow-plans-selftest",
   "clean-worktree-planning-selftest",
   "configure-only-selftest",
+  "consumption-census-profiles-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
   "gates-preflight-selftest",
@@ -9378,7 +9611,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-3b87a68820c2"
+name = "script-readers-97f7af4b38c4"
 paths = ["tools/scripts/verify_refactor_baselines_contract.py"]
 tests = [
   "build-parallelism-guard",
@@ -9389,6 +9622,7 @@ tests = [
   "changed-surface-shadow-plans-selftest",
   "clean-worktree-planning-selftest",
   "configure-only-selftest",
+  "consumption-census-profiles-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
   "gates-preflight-selftest",
@@ -9417,7 +9651,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-dfff7d59744f"
+name = "script-readers-66c56b440b31"
 paths = ["tools/scripts/verify_timeline_launcher_resource_contract.py"]
 tests = [
   "build-parallelism-guard",
@@ -9428,6 +9662,7 @@ tests = [
   "changed-surface-shadow-plans-selftest",
   "clean-worktree-planning-selftest",
   "configure-only-selftest",
+  "consumption-census-profiles-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
   "gates-preflight-selftest",
@@ -9458,7 +9693,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-f46b93af8135"
+name = "script-readers-b8902400c6fe"
 paths = ["tools/scripts/verify_timeline_live_capture.py"]
 tests = [
   "build-parallelism-guard",
@@ -9469,6 +9704,7 @@ tests = [
   "changed-surface-shadow-plans-selftest",
   "clean-worktree-planning-selftest",
   "configure-only-selftest",
+  "consumption-census-profiles-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
   "gates-preflight-selftest",
@@ -9497,7 +9733,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-bcb352000064"
+name = "script-readers-f9af7074f0b5"
 paths = ["tools/scripts/verify_timeline_transaction_launcher_complexity.py"]
 tests = [
   "build-parallelism-guard",
@@ -9508,6 +9744,7 @@ tests = [
   "changed-surface-shadow-plans-selftest",
   "clean-worktree-planning-selftest",
   "configure-only-selftest",
+  "consumption-census-profiles-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
   "gates-preflight-selftest",
@@ -9537,7 +9774,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-2ea1b33a1590"
+name = "script-readers-8b2af51941f7"
 paths = ["tools/scripts/verify_wasm_skia_slice.py"]
 tests = [
   "build-parallelism-guard",
@@ -9548,6 +9785,7 @@ tests = [
   "changed-surface-shadow-plans-selftest",
   "clean-worktree-planning-selftest",
   "configure-only-selftest",
+  "consumption-census-profiles-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
   "gates-preflight-selftest",
@@ -9577,7 +9815,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-9166e7b1a2f3"
+name = "script-readers-b0d1fc5583dd"
 paths = ["tools/scripts/view_audio_seam_debts.py"]
 tests = [
   "build-parallelism-guard",
@@ -9588,6 +9826,7 @@ tests = [
   "changed-surface-shadow-plans-selftest",
   "clean-worktree-planning-selftest",
   "configure-only-selftest",
+  "consumption-census-profiles-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
   "gates-preflight-selftest",
@@ -9616,7 +9855,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-bae064b2e85c"
+name = "script-readers-c2e8292168f4"
 paths = ["tools/scripts/web_timeline_source_closure_check.py"]
 tests = [
   "build-parallelism-guard",
@@ -9627,6 +9866,7 @@ tests = [
   "changed-surface-shadow-plans-selftest",
   "clean-worktree-planning-selftest",
   "configure-only-selftest",
+  "consumption-census-profiles-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
   "gates-preflight-selftest",
@@ -9680,6 +9920,7 @@ tests = [
   "classify-changes-selftest",
   "claude-plugin-command-discovery-selftest",
   "configure-only-selftest",
+  "consumption-census-profiles-selftest",
   "control-product-b-absence",
   "control-product-b-absence-selftest",
   "control-product-b-rust-cli-absence",
@@ -9920,6 +10161,7 @@ paths = [
   "tools/scripts/test_catch_discover_timeout_guard.py",
   "tools/scripts/test_catch_multilabel_properties.py",
   "tools/scripts/test_catch_test_name_guard.py",
+  "tools/scripts/test_census_profiles.py",
   "tools/scripts/test_changed_surface_policy.py",
   "tools/scripts/test_changed_surface_registration_projection.py",
   "tools/scripts/test_changed_surface_script_families.py",
@@ -10328,6 +10570,7 @@ tests = [
   "consumption-census-drift",
   "consumption-census-drift-description",
   "consumption-census-negative-contract",
+  "consumption-census-profiles-selftest",
   "consumption-census-schema",
   "ctest-inventory-parity-self-check",
   "ctest-label-exclusion-guard",
@@ -10565,6 +10808,7 @@ paths = [
   "tools/scripts/test_catch_discover_timeout_guard.py",
   "tools/scripts/test_catch_multilabel_properties.py",
   "tools/scripts/test_catch_test_name_guard.py",
+  "tools/scripts/test_census_profiles.py",
   "tools/scripts/test_changed_surface_policy.py",
   "tools/scripts/test_changed_surface_registration_projection.py",
   "tools/scripts/test_changed_surface_script_families.py",

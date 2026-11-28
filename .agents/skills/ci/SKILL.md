@@ -2093,6 +2093,18 @@ consequences worth knowing before you debug:
   `python3 tools/scripts/consumption_census.py --build-dir <build> --write`. A
   host that cannot configure reports it NOT CHECKED. The pre-push hook's own
   merge-tree script-state check does not run it.
+  The census holds one profile per feature set and a build tree measures one, so
+  the same lane then runs `tools/scripts/census_profiles.py --check --cached`: it
+  configures a throwaway tree (configure only, one governed core) for each other
+  profile this host can reach and fails on a stale one, which is what a CMake
+  change that refreshed only the author's own profile used to leave behind. A
+  profile with no VST3 or AU SDK is configured from a symlink view of the
+  checkout without them; the checkout is never touched. Results are cached per
+  digest of the tracked CMake files, header inventory and census (under the git
+  common dir, never committed), so an unchanged input costs no configure.
+  Regenerate all of them in one command: `python3 tools/scripts/census_profiles.py
+  --write`. `PULP_GATES_CENSUS_LOCAL_ONLY=1` checks only the local build's profile
+  and lists the rest NOT CHECKED.
 - `gates.sh` now runs this lane scoped to your diff
   (`source_selftests.py run --changed-from "$BASE"`): an entry runs when its own
   script changed or its source names a changed file (full path, a distinctive
