@@ -549,6 +549,13 @@ TEST_CASE("InspectorWindow console tab lists the source's rows and colours the l
     rows.clear();
     collect(*tabs->child_at(1), rows);
     REQUIRE(rows.size() == 1);
+
+    // Removing the source empties the tab.
+    window.set_console_source({});
+    window.refresh();
+    rows.clear();
+    collect(*tabs->child_at(1), rows);
+    REQUIRE(rows.empty());
 }
 
 TEST_CASE("InspectorWindow performance tab reads its source",
@@ -598,6 +605,43 @@ TEST_CASE("InspectorWindow performance tab reads its source",
     // The pass list is rebuilt, not appended to.
     REQUIRE_FALSE(has_label_containing(*page, "overlay: 1.75 ms"));
 
+    // A data-to-no-data transition clears every line, not just the FPS label.
+    window.set_performance_source([] {
+        PerformanceFrame frame;
+        frame.total_ms = 2.5f;
+        frame.budget_ms = 1.0f;
+        frame.over_budget = true;
+        frame.passes = {{"background", 0.75f, 3}};
+        return std::optional<PerformanceFrame>{frame};
+    });
+    window.refresh();
+    REQUIRE(has_label_containing(*page, "Frame time: 2.50 ms"));
+    for (const bool remove_source : {false, true}) {
+        if (remove_source)
+            window.set_performance_source({});
+        else
+            window.set_performance_source([] { return std::optional<PerformanceFrame>{}; });
+        window.refresh();
+        REQUIRE(has_label_containing(*page, "FPS: (no data)"));
+        REQUIRE_FALSE(has_label_containing(*page, "Frame time: 2.50"));
+        REQUIRE_FALSE(has_label_containing(*page, "[OVER BUDGET]"));
+        REQUIRE_FALSE(has_label_containing(*page, "Budget: 1.0"));
+        REQUIRE_FALSE(has_label_containing(*page, "View count: 3"));
+        REQUIRE_FALSE(has_label_containing(*page, "GPU render: unavailable"));
+        REQUIRE_FALSE(has_label_containing(*page, "background: 0.75"));
+        // Restore data for the second iteration.
+        window.set_performance_source([] {
+            PerformanceFrame frame;
+            frame.total_ms = 2.5f;
+            frame.budget_ms = 1.0f;
+            frame.over_budget = true;
+            frame.passes = {{"background", 0.75f, 3}};
+            return std::optional<PerformanceFrame>{frame};
+        });
+        window.refresh();
+        REQUIRE(has_label_containing(*page, "Frame time: 2.50 ms"));
+    }
+
     window.set_bounds({0, 0, 320, 300});
     window.layout_children();
     maybe_write_png(window, 320, 300, "inspector-performance.png");
@@ -638,6 +682,12 @@ TEST_CASE("InspectorWindow state tab lists each parameter with its range and uni
     REQUIRE_FALSE(has_label_containing(*page, "Mix: 0.250 ("));
     REQUIRE(has_label_containing(*page, "Range: [0.00, 1.00]"));
     REQUIRE_FALSE(has_label_containing(*page, "Range: [0.00, 1.00] step"));
+
+    // Removing the source empties the tab again.
+    window.set_param_source({});
+    window.refresh();
+    REQUIRE_FALSE(has_label_containing(*page, "Gain: -6.000"));
+    REQUIRE_FALSE(has_label_containing(*page, "Range: ["));
 
     window.set_bounds({0, 0, 320, 300});
     window.layout_children();

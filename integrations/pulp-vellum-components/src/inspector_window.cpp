@@ -1015,10 +1015,11 @@ void InspectorWindow::show_properties_for(View* view) {
 // ── Console refresh ─────────────────────────────────────────────────────────
 
 void InspectorWindow::refresh_console() {
-    if (!console_list_ || !console_source_)
+    if (!console_list_)
         return;
 
-    const auto entries = console_source_();
+    // An unset source shows an empty tab, not the previous source's rows.
+    const auto entries = console_source_ ? console_source_() : std::vector<ConsoleRow>{};
     while (console_list_->child_count() > 0)
         console_list_->remove_child(console_list_->child_at(0));
 
@@ -1039,8 +1040,22 @@ void InspectorWindow::refresh_console() {
 void InspectorWindow::refresh_performance() {
     const auto frame = performance_source_ ? performance_source_() : std::nullopt;
     if (!frame) {
+        // No source or no frame yet: every line reads as no data, so values
+        // from an earlier frame are never shown as current.
         if (fps_label_)
             fps_label_->set_text("FPS: (no data)");
+        if (frame_time_label_)
+            frame_time_label_->set_text("Frame time: —");
+        if (gpu_render_label_)
+            gpu_render_label_->set_text("GPU render: —");
+        if (budget_label_)
+            budget_label_->set_text("Budget: —");
+        if (view_count_label_)
+            view_count_label_->set_text("View count: —");
+        if (pass_list_) {
+            while (pass_list_->child_count() > 0)
+                pass_list_->remove_child(pass_list_->child_at(0));
+        }
         return;
     }
 
@@ -1082,10 +1097,11 @@ void InspectorWindow::refresh_performance() {
 // ── State refresh ───────────────────────────────────────────────────────────
 
 void InspectorWindow::refresh_state() {
-    if (!state_list_ || !param_source_)
+    if (!state_list_)
         return;
 
-    const auto params = param_source_();
+    // An unset source shows an empty tab, not the previous source's rows.
+    const auto params = param_source_ ? param_source_() : std::vector<ParamRow>{};
     while (state_list_->child_count() > 0)
         state_list_->remove_child(state_list_->child_at(0));
 
