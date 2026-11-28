@@ -69,6 +69,15 @@ class ArchiveSdkTest(unittest.TestCase):
                 header = raw.read(8)
             self.assertEqual(int.from_bytes(header[4:8], "little"), 123456789)
 
+    def test_gzip_header_does_not_depend_on_output_name(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = self._build_tree(Path(temporary))
+            first = Path(temporary) / "one" / "first.tar.gz"
+            second = Path(temporary) / "two" / "second-name.tar.gz"
+            archive_tree(root, first, BASE)
+            archive_tree(root, second, BASE)
+            self.assertEqual(first.read_bytes(), second.read_bytes())
+
     def test_checker_rejects_future_tar_member(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             archive = Path(temporary) / "future.tar.gz"

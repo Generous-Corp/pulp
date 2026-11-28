@@ -42,7 +42,7 @@ class ReleaseContentWiring(unittest.TestCase):
     def test_installed_macho_is_resigned_before_handoff_hash_and_sdk_archive(self) -> None:
         resign = RELEASE.index("python3 tools/scripts/resign_macos_release_tree.py sdk-staging")
         stamp = RELEASE.index('python3 "$PULP_SDK_PROVENANCE_HELPER" stamp')
-        archive = RELEASE.index("tools/scripts/archive_sdk.py")
+        archive = RELEASE.index('python3 "$PULP_SDK_ARCHIVE_HELPER"')
         self.assertLess(resign, stamp)
         self.assertLess(stamp, archive)
 
@@ -52,7 +52,7 @@ class ReleaseContentWiring(unittest.TestCase):
         found = []
         lines = RELEASE.splitlines()
         for index, line in enumerate(lines):
-            if script not in line:
+            if script not in line or line.lstrip().startswith("echo"):
                 continue
             text = line
             while text.rstrip().endswith(("\\", "`")) and index + 1 < len(lines):
@@ -68,8 +68,8 @@ class ReleaseContentWiring(unittest.TestCase):
     def test_sdk_archives_are_built_and_checked_by_the_normalizing_helper(self) -> None:
         self.assertNotIn("tar czf pulp-sdk-", RELEASE)
         self.assertNotIn("Compress-Archive -Path pulp-sdk", RELEASE)
-        builds = self._invocations("tools/scripts/archive_sdk.py")
-        checks = self._invocations("tools/scripts/check_archive_mtimes.py")
+        builds = self._invocations("PULP_SDK_ARCHIVE_HELPER")
+        checks = self._invocations("PULP_SDK_ARCHIVE_MTIME_CHECK")
         self.assertEqual(len(builds), 2)
         self.assertEqual(len(checks), 2)
         for build, check, epoch in zip(builds, checks, ("$SOURCE_DATE_EPOCH", "$sourceEpoch")):
@@ -79,6 +79,21 @@ class ReleaseContentWiring(unittest.TestCase):
             self.assertEqual(options["--epoch"], epoch)
             self.assertIn("pulp-sdk-PLATFORM.tar.gz", check)
             self.assertEqual(self._options(check)["--max-mtime"], options["--epoch"])
+
+    def test_backfill_overlays_archive_helpers_from_main(self) -> None:
+        # A dispatched backfill checks out a tag that predates the archive
+        # helpers, so both must come from the compatibility directory.
+        for helper, variable in (
+            ("archive_sdk.py", "PULP_SDK_ARCHIVE_HELPER"),
+            ("check_archive_mtimes.py", "PULP_SDK_ARCHIVE_MTIME_CHECK"),
+        ):
+            path = f"tools/scripts/{helper}"
+            self.assertIn(f"              {path} \\\n", RELEASE)
+            self.assertIn(f'[ "$path" = {path} ]', RELEASE)
+            self.assertIn(f'echo "{variable}=$compat_dir/{helper}"', RELEASE)
+            self.assertIn(f'echo "{variable}=tools/scripts/{helper}"', RELEASE)
+            self.assertNotIn(f"python3 {path}", RELEASE)
+            self.assertNotIn(f"python {path}", RELEASE)
 
     def test_backfill_uses_tag_matrix_or_pre_contract_fallback(self) -> None:
         self.assertIn('if [ ! -f "$path" ]', RELEASE)

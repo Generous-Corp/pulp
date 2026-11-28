@@ -13,7 +13,7 @@ def archive_tree(source: Path, output: Path, epoch: int) -> None:
     if not source.is_dir():
         raise ValueError(f"SDK staging directory does not exist: {source}")
     output.parent.mkdir(parents=True, exist_ok=True)
-    with output.open("wb") as raw, gzip.GzipFile(fileobj=raw, mode="wb", mtime=epoch) as compressed:
+    with output.open("wb") as raw, gzip.GzipFile(filename="", fileobj=raw, mode="wb", mtime=epoch) as compressed:
         with tarfile.open(fileobj=compressed, mode="w|", format=tarfile.PAX_FORMAT) as archive:
             paths = [source, *sorted(source.rglob("*"), key=lambda path: path.relative_to(source).as_posix())]
             for path in paths:
