@@ -7,9 +7,9 @@
     # includes the source header rather than going through a public link.
     add_executable(pulp-test-gpu-compute-pool test_gpu_compute_pool.cpp)
     target_link_libraries(pulp-test-gpu-compute-pool
-        PRIVATE pulp::render Catch2::Catch2WithMain)
+        PRIVATE pulp::gpu-compute Catch2::Catch2WithMain)
     # Pool tests need Dawn headers directly (webgpu/webgpu_cpp.h,
-    # dawn/native/DawnNative.h). pulp::render pulls these in privately,
+    # dawn/native/DawnNative.h). pulp::gpu-compute pulls these in privately,
     # so we mirror the include paths here. `SKIA_INCLUDE_DIRS` is set
     # by FindSkia.cmake; the `/dawn` suffix targets the generated-
     # header directory where `webgpu/webgpu_cpp.h` lives.
@@ -31,5 +31,5 @@
     # headers); the cases SKIP when no GPU compute device is available.
     pulp_add_test_suite(pulp-test-gpu-compute-async
         SOURCES test_gpu_compute_async.cpp harness/rt_allocation_probe.cpp
-        LIBRARIES pulp::render pulp::gpu-audio pulp::audio
+        LIBRARIES pulp::gpu-compute pulp::gpu-audio pulp::audio
         DISCOVERY_ARGS ${PULP_GPU_TEST_DISCOVERY_ARGS})
