@@ -29,7 +29,6 @@ VIEW_SIDE = frozenset({
     "include/pulp/inspect/inspector_window.hpp",
     "include/pulp/inspect/motion_inspector.hpp",
     "include/pulp/inspect/motion_scrubber.hpp",
-    "src/control_gpu_health_view_adapter.cpp",
     "src/control_standalone_host.cpp",
     "src/control_standalone_ui_adapter.cpp",
     "src/domain_handler.cpp",

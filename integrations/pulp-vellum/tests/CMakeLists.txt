@@ -54,6 +54,27 @@ if(PULP_BUILD_TESTS AND TARGET Catch2::Catch2WithMain)
         target_link_libraries(pulp-test-pulp-vellum-editor PRIVATE
             pulp::vellum Vellum::MirrorView_core Catch2::Catch2WithMain
             Threads::Threads)
+        # ViewProcessor<> in the mode an SDK with Vellum UI builds:
+        # PULP_FORMAT_LEGACY_VIEW=0. format.cpp is compiled here in that mode
+        # and wins over the archive's copy; every other Processor slot keeps
+        # its position in both modes, which format-legacy-view-slot-layout
+        # proves, so the rest of pulp-format-core links as built.
+        add_executable(pulp-test-pulp-vellum-view-processor
+            test_view_processor.cpp
+            ${PULP_ROOT_DIR}/core/format/src/format.cpp)
+        target_compile_definitions(pulp-test-pulp-vellum-view-processor PRIVATE
+            PULP_FORMAT_LEGACY_VIEW=0)
+        target_link_libraries(pulp-test-pulp-vellum-view-processor PRIVATE
+            pulp::vellum Vellum::MirrorView_core Catch2::Catch2WithMain Threads::Threads)
+        catch_discover_tests(pulp-test-pulp-vellum-view-processor
+            PROPERTIES LABELS pulp-vellum-editor)
+        # Header weight: each public header preprocesses on its own within
+        # budget and pulls in none of the implementation headers it keeps out.
+        include("${PULP_ROOT_DIR}/test/support/PulpHeaderWeight.cmake")
+        pulp_add_header_weight_test(pulp-vellum-header-weight-view-editor
+            HEADER pulp/vellum/view_editor.hpp USAGE pulp-vellum
+            FORBID "pulp/vellum/editor\\.hpp|/vellum/view/view\\.hpp"
+            MAX_LINES 80000 LABELS "pulp-vellum;header-weight")
         # A CLAP host opening a Vellum editor through the view-free contract
         # GUI: the plug-in entry compiles without PULP_CLAP_GUI and links the
         # view-free CLAP adapter, as a `UI <package>` plug-in does.

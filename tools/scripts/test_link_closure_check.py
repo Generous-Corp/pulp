@@ -11,6 +11,7 @@ PRIVATE static link and require it to be found.
 from __future__ import annotations
 
 import io
+import json
 import sys
 import tempfile
 import unittest
@@ -214,10 +215,157 @@ class ClosureWalk(unittest.TestCase):
         self.assertEqual(code, 2)
         self.assertIn("not a real build graph", err)
 
+    def run_raw(self, text: str, roots: list[str]) -> tuple[int, str]:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "graph.tsv"
+            path.write_text(text, encoding="utf-8")
+            argv = ["--graph", str(path), "--forbid", "pulp-view*"]
+            for root in roots:
+                argv += ["--root", root]
+            err = io.StringIO()
+            with redirect_stdout(io.StringIO()), redirect_stderr(err):
+                code = lcc.main(argv)
+            return code, err.getvalue()
+
+    def test_missing_intermediate_record_is_inconclusive_not_a_pass(self) -> None:
+        records = {"pulp-root": ("pulp::mid", "pulp::mid")}
+        code, _, err = self.run_check(records, ["pulp-root"], ["pulp-view*"])
+        self.assertEqual(code, 2)
+        self.assertIn("pulp-mid", err)
+        self.assertIn("no record", err)
+
+    def test_missing_namespaced_target_record_is_inconclusive_when_writer_lists_it(self) -> None:
+        text = graph_text({"pulp-root": ("vendor::lib", "", "", "vendor::lib")})
+        code, _ = self.run_raw(text, ["pulp-root"])
+        self.assertEqual(code, 2)
+
+    def test_directory_scoped_imported_target_the_writer_cannot_see_is_not_held_against(self) -> None:
+        records = {"pulp-root": ("Threads::Threads", "$<LINK_ONLY:Threads::Threads>", "", "Threads::Threads")}
+        code, _, _ = self.run_check(records, ["pulp-root"], ["pulp-view*"])
+        self.assertEqual(code, 0)
+
+    def test_unresolved_directory_scoped_import_is_inconclusive(self) -> None:
+        # The writer records a directory-scoped import in REFS even though its
+        # properties cannot be read from the top-level deferred callback.
+        text = graph_text({"pulp-root": ("helper_import", "", "", "helper_import")})
+        code, err = self.run_raw(text, ["pulp-root"])
+        self.assertEqual(code, 2)
+        self.assertIn("helper_import", err)
+
+    def test_unresolved_directory_scoped_alias_is_inconclusive(self) -> None:
+        code, _, err = self.run_check({"pulp-root": ("helper_alias", "")}, ["pulp-root"],
+                                      ["pulp-view*"])
+        self.assertEqual(code, 2)
+        self.assertIn("helper_alias", err)
+
+    def test_missing_target_objects_record_is_inconclusive(self) -> None:
+        for expr in ("$<TARGET_OBJECTS:canvas_objs>", "$<TARGET_FILE:canvas_objs>",
+                     "$<TARGET_PROPERTY:canvas_objs,INTERFACE_SOURCES>"):
+            code, _, err = self.run_check({"pulp-root": ("", "", expr)}, ["pulp-root"],
+                                          ["pulp-view*"])
+            self.assertEqual(code, 2, expr)
+            self.assertIn("canvas_objs", err)
+
+    def test_present_target_objects_record_is_walked(self) -> None:
+        records = {"pulp-root": ("", "", "$<TARGET_OBJECTS:objs>"),
+                   "objs": ("pulp::view-core", "")}
+        code, _, err = self.run_check(records, ["pulp-root"], ["pulp-view*"])
+        self.assertEqual(code, 1)
+        self.assertIn("reaches pulp-view-core", err)
+
+    def test_missing_ordinary_named_target_record_is_inconclusive(self) -> None:
+        # The writer's REFS field says gpu_helper is a CMake target.
+        text = graph_text({"pulp-root": ("gpu_helper", "", "", "gpu_helper")})
+        code, err = self.run_raw(text, ["pulp-root"])
+        self.assertEqual(code, 2)
+        self.assertIn("gpu_helper", err)
+
+    def test_opaque_directory_scoped_import_record_is_inconclusive(self) -> None:
+        text = graph_text({"pulp-root": ("helper_import", ""),
+                           "helper_import": ("", "")})
+        text = text.replace("helper_import\tSTATIC_LIBRARY",
+                            "helper_import\tIMPORTED_DIRECTORY_SCOPED", 1)
+        code, err = self.run_raw(text, ["pulp-root"])
+        self.assertEqual(code, 2)
+        self.assertIn("helper_import", err)
+
+    def test_ordinary_named_target_with_record_is_walked(self) -> None:
+        records = {"pulp-root": ("gpu_helper", "", "", "gpu_helper"),
+                   "gpu_helper": ("pulp::view-core", "")}
+        code, _, err = self.run_check(records, ["pulp-root"], ["pulp-view*"])
+        self.assertEqual(code, 1)
+        self.assertIn("gpu_helper -> pulp-view-core", err)
+
+    def test_truncated_record_is_inconclusive_not_a_pass(self) -> None:
+        text = graph_text({"pulp-root": ("pulp::mid", "")})
+        text += "pulp-mid\tSTATIC_LIBRARY\n"
+        code, err = self.run_raw(text, ["pulp-root"])
+        self.assertEqual(code, 2)
+        self.assertIn("malformed", err)
+
+    def test_unseen_non_leaf_imported_target_is_inconclusive(self) -> None:
+        records = {"pulp-root": ("Vendor::Bridge", "$<LINK_ONLY:Vendor::Bridge>")}
+        code, _, err = self.run_check(records, ["pulp-root"], ["pulp-view*"])
+        self.assertEqual(code, 2)
+        self.assertIn("vendor::bridge", err)
+        self.assertIn("--external-ok", err)
+
+    def test_external_ok_exempts_a_named_leaf(self) -> None:
+        records = {"pulp-root": ("Vendor::Bridge", "", "", "Vendor::Bridge")}
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "graph.tsv"
+            path.write_text(graph_text(records), encoding="utf-8")
+            with redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
+                code = lcc.main(["--graph", str(path), "--root", "pulp-root", "--forbid",
+                                 "pulp-view*", "--external-ok", "Vendor::Bridge"])
+        self.assertEqual(code, 0)
+
+    def test_paths_flags_and_generator_tokens_are_not_unresolved_targets(self) -> None:
+        records = {"pulp-root": ("-lm;/opt/x/libfoo.a;$<BUILD_INTERFACE:/src/include>;"
+                                 "$<LINK_ONLY:pthread>;src/pulp-thing.cpp", "")}
+        code, _, _ = self.run_check(records, ["pulp-root"], ["pulp-view*"])
+        self.assertEqual(code, 0)
+
     def test_malformed_allow_is_inconclusive(self) -> None:
         code, _, _ = self.run_check({"pulp-a": ("", "")}, ["pulp-a"], ["pulp-view*"],
                                     allow=["nonsense"])
         self.assertEqual(code, 2)
+
+
+class CodemodelWalk(unittest.TestCase):
+    """The File API `dependencies` field is the only edge source for these targets."""
+
+    def write_model(self, root: Path, targets: dict[str, list[str]]) -> Path:
+        reply = root / ".cmake" / "api" / "v1" / "reply"
+        reply.mkdir(parents=True)
+        entries = []
+        for name, deps in targets.items():
+            ident = f"{name}::@abc"
+            entries.append({"name": name, "id": ident, "jsonFile": f"target-{name}.json"})
+            (reply / f"target-{name}.json").write_text(json.dumps({
+                "name": name, "id": ident, "type": "STATIC_LIBRARY",
+                "dependencies": [{"id": f"{dep}::@abc"} for dep in deps]}), encoding="utf-8")
+        (reply / "codemodel-v2-x.json").write_text(json.dumps({
+            "version": {"major": 2, "minor": 9},
+            "configurations": [{"targets": entries}]}), encoding="utf-8")
+        return root
+
+    def test_dependencies_field_edges_are_traversed(self) -> None:
+        targets = {"app": ["mid"], "mid": ["pulp-canvas"], "pulp-canvas": []}
+        targets.update({f"pulp-pad-{i}": [] for i in range(25)})
+        with tempfile.TemporaryDirectory() as tmp:
+            build = self.write_model(Path(tmp) / "build", targets)
+            graph = lcc.Graph.from_codemodel(build)
+            paths = lcc.find_paths(graph, "app", ["pulp-canvas"], set())
+        self.assertEqual(len(paths), 1)
+        self.assertIn("mid", [graph.display(n) for n in paths[0]])
+
+    def test_clean_dependencies_do_not_report(self) -> None:
+        targets = {"app": ["mid"], "mid": [], "pulp-canvas": []}
+        with tempfile.TemporaryDirectory() as tmp:
+            build = self.write_model(Path(tmp) / "build", targets)
+            graph = lcc.Graph.from_codemodel(build)
+            self.assertEqual(lcc.find_paths(graph, "app", ["pulp-canvas"], set()), [])
 
 
 if __name__ == "__main__":
