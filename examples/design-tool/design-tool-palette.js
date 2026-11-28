@@ -1089,9 +1089,10 @@ function writeTextFile(path, content) {
 // Writes content into a fresh private directory (mode 0700, name chosen
 // exclusively by mktemp) and returns the file path, or "" on failure.
 function writePrivateTempFile(content, fileName) {
-    var cmd = "d=$(mktemp -d \"${TMPDIR:-/tmp}/pulp-design.XXXXXX\") && "
-        + "printf %s " + shellQuote(utf8Base64(content)) + " | base64 -d > \"$d/\"" + shellQuote(fileName)
-        + " && printf %s \"$d/\"" + shellQuote(fileName);
+    var cmd = "d=$(mktemp -d \"${TMPDIR:-/tmp}/pulp-design.XXXXXX\") && { "
+        + "{ printf %s " + shellQuote(utf8Base64(content)) + " | base64 -d > \"$d/\"" + shellQuote(fileName)
+        + " && printf %s \"$d/\"" + shellQuote(fileName)
+        + "; } || { rm -f \"$d/\"" + shellQuote(fileName) + "; rmdir \"$d\"; false; }; }";
     return String(exec(cmd) || "").trim();
 }
 

@@ -2095,3 +2095,80 @@ TEST_CASE("Design tool: file writes carry content as data, never as shell text",
         REQUIRE(engine.evaluate("__cmds[0].indexOf('PULPEOF')").getWithDefault<int>(0) == -1);
     }
 }
+
+TEST_CASE("Design tool: theme export Save asks for a destination and cleans up prompt files",
+          "[design-tool][security]") {
+    if (find_js_file("design-tool-palette.js").empty()) {
+        SKIP("design-tool modules not found");
+        return;
+    }
+
+    View root;
+    root.set_theme(Theme::dark());
+    root.flex().direction = FlexDirection::column;
+    root.set_bounds({0, 0, 1100, 700});
+
+    pulp::state::StateStore store;
+    ScriptEngine engine;
+    WidgetBridge bridge(engine, root, store);
+    load_design_tool(root, engine, bridge);
+
+    SECTION("a cancelled save dialog writes nothing and never targets a shared path") {
+        REQUIRE_NOTHROW(
+            engine.evaluate("var __execLog = [];"
+                            "exec = function(cmd) { __execLog.push(String(cmd)); return ''; };"
+                            "showSaveDialog = function() { return ''; };"
+                            "__dispatch__('export-btn-pill', 'click', 0);"
+                            "__dispatch__('exp-save-btn', 'click', 0);"));
+        REQUIRE(engine.evaluate("__execLog.length").getWithDefault<int>(-1) == 0);
+    }
+
+    SECTION("a chosen destination is written through the safe writer") {
+        REQUIRE_NOTHROW(
+            engine.evaluate("var __execLog = [];"
+                            "exec = function(cmd) { __execLog.push(String(cmd)); return ''; };"
+                            "showSaveDialog = function() { return '/Users/example/Documents/theme'; };"
+                            "__dispatch__('export-btn-pill', 'click', 0);"
+                            "__dispatch__('exp-save-btn', 'click', 0);"));
+        REQUIRE(engine.evaluate("__execLog.length").getWithDefault<int>(-1) == 1);
+        REQUIRE(engine.evaluate("__execLog[0].indexOf('/Users/example/Documents/theme.json') >= 0")
+                    .getWithDefault<bool>(false));
+        REQUIRE(engine.evaluate("__execLog[0].indexOf('/tmp/pulp-theme') >= 0")
+                    .getWithDefault<bool>(true) == false);
+        REQUIRE(engine.evaluate("__execLog[0].indexOf('PULPEOF')").getWithDefault<int>(0) == -1);
+    }
+
+#if !defined(_WIN32)
+    SECTION("the AI command removes its private prompt directory after the run") {
+        const auto base = fs::temp_directory_path() / "pulp-design-cleanup-test";
+        fs::remove_all(base);
+        fs::create_directories(base);
+        ::setenv("TMPDIR", base.string().c_str(), 1);
+        REQUIRE_NOTHROW(engine.evaluate("var __file = writePrivateTempFile('hello', 'prompt.txt');"
+                                        "getAICli = function() { return 'cat'; };"));
+        ::unsetenv("TMPDIR");
+        REQUIRE_FALSE(engine.evaluate("__file").toString().empty());
+        REQUIRE(read_file(engine.evaluate("__file").toString()) == "hello");
+        REQUIRE_NOTHROW(engine.evaluate("exec(buildAiCliCommand(__file, 'm', 'claude', ''));"));
+        std::size_t left = 0;
+        for (const auto& e : fs::directory_iterator(base)) { (void)e; ++left; }
+        REQUIRE(left == 0);
+        fs::remove_all(base);
+    }
+
+    SECTION("a failed write leaves no private directory behind") {
+        const auto base = fs::temp_directory_path() / "pulp-design-failed-alloc-test";
+        fs::remove_all(base);
+        fs::create_directories(base);
+        ::setenv("TMPDIR", base.string().c_str(), 1);
+        const auto result =
+            engine.evaluate("writePrivateTempFile('x', 'no/such/dir/prompt.txt')").toString();
+        ::unsetenv("TMPDIR");
+        REQUIRE(result.empty());
+        std::size_t left = 0;
+        for (const auto& e : fs::directory_iterator(base)) { (void)e; ++left; }
+        REQUIRE(left == 0);
+        fs::remove_all(base);
+    }
+#endif
+}

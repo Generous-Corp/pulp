@@ -39,6 +39,8 @@ function buildAiCliCommand(promptFile, model, provider, reasoningEffort) {
     var usesReasoningEffort = aiCli.indexOf("{reasoning_effort}") >= 0;
     var usesOutputFile = aiCli.indexOf("{output_file}") >= 0;
     var outputFile = promptFile + ".out.txt";
+    var promptDir = promptFile.lastIndexOf("/") > 0 ? promptFile.slice(0, promptFile.lastIndexOf("/")) : "";
+    var rmDir = promptDir.length > 0 ? "; rmdir " + shellQuote(promptDir) + " 2>/dev/null" : "";
     var cmd = aiCli;
     if (usesPromptFile) cmd = cmd.split("{prompt_file}").join(shellQuote(promptFile));
     if (usesModel) cmd = cmd.split("{model}").join(shellQuote(model));
@@ -49,9 +51,9 @@ function buildAiCliCommand(promptFile, model, provider, reasoningEffort) {
         cmd = "cat " + shellQuote(promptFile) + " | " + cmd;
     }
     if (usesOutputFile) {
-        return "{ " + cmd + "; __pulp_status=$?; if [ -f " + shellQuote(outputFile) + " ]; then cat " + shellQuote(outputFile) + "; fi; printf '\\n__PULP_AI_EXIT_CODE__:%s\\n' \"$__pulp_status\"; rm -f " + shellQuote(promptFile) + " " + shellQuote(outputFile) + "; } 2>&1";
+        return "{ " + cmd + "; __pulp_status=$?; if [ -f " + shellQuote(outputFile) + " ]; then cat " + shellQuote(outputFile) + "; fi; printf '\\n__PULP_AI_EXIT_CODE__:%s\\n' \"$__pulp_status\"; rm -f " + shellQuote(promptFile) + " " + shellQuote(outputFile) + rmDir + "; } 2>&1";
     }
-    return "{ " + cmd + "; __pulp_status=$?; printf '\\n__PULP_AI_EXIT_CODE__:%s\\n' \"$__pulp_status\"; rm -f " + shellQuote(promptFile) + "; } 2>&1";
+    return "{ " + cmd + "; __pulp_status=$?; printf '\\n__PULP_AI_EXIT_CODE__:%s\\n' \"$__pulp_status\"; rm -f " + shellQuote(promptFile) + rmDir + "; } 2>&1";
 }
 
 function parseAiCliResponse(response) {
@@ -2015,6 +2017,12 @@ function getExportFileExtension(formatIdx) {
     return extensions[formatIdx] || ".txt";
 }
 
+function normalizeThemeExportPath(path, ext) {
+    if (!path || path.length === 0) return "";
+    if (path.toLowerCase().slice(-ext.length) === ext) return path;
+    return path + ext;
+}
+
 function hideExportPopup() {
     exportPopupOpen = false;
     setVisible("export-popup", false);
@@ -2243,8 +2251,9 @@ function buildExportPopup() {
     on("exp-save-btn", "click", function() {
         var code = generateExport(activeExportFormat);
         var ext = getExportFileExtension(activeExportFormat);
-        var path = "/tmp/pulp-theme" + ext;
-        exec("cat > " + path + " << 'PULPEOF'\n" + code + "\nPULPEOF");
+        var path = normalizeThemeExportPath(showSaveDialog("Save Theme Export", "Theme Export", ext.slice(1)), ext);
+        if (path.length === 0) return;
+        writeTextFile(path, code);
         showToast("Saved to " + path);
     });
 
