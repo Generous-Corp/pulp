@@ -117,10 +117,107 @@ foreach(_target IN LISTS _control_targets)
     endif()
 endforeach()
 
+# The data plane is the control SDK's value-channel home: a consumer that
+# includes only pulp/dataplane headers links the telemetry target and no view
+# target. The walker below reads the installed link interface, so a control
+# target that starts requiring a view target fails here; the Standalone UI
+# adapter, which does, must be reported, or the walker proves nothing.
+function(_pulp_closure_resolve name out)
+    # The identity a name stands for: an ALIAS resolves to the target it names.
+    set(_resolved "${name}")
+    if(TARGET "${name}")
+        get_target_property(_aliased "${name}" ALIASED_TARGET)
+        if(_aliased)
+            set(_resolved "${_aliased}")
+        endif()
+    endif()
+    set(${out} "${_resolved}" PARENT_SCOPE)
+endfunction()
+
+function(_pulp_closure_reaches_view root out)
+    set(_queue "${root}")
+    set(_seen "")
+    set(_found FALSE)
+    while(_queue)
+        list(POP_FRONT _queue _t)
+        if(NOT TARGET "${_t}")
+            continue()
+        endif()
+        _pulp_closure_resolve("${_t}" _t)
+        if(_t IN_LIST _seen)
+            continue()
+        endif()
+        list(APPEND _seen "${_t}")
+        if(_t MATCHES "^Pulp::view" OR _t MATCHES "^pulp-view")
+            set(_found TRUE)
+        endif()
+        get_target_property(_l ${_t} INTERFACE_LINK_LIBRARIES)
+        if(_l)
+            # Follow every target-valued word, whatever its namespace: a
+            # non-Pulp intermediary can link a view target just the same.
+            # "::" is kept inside a name; a lone ":" or "$<LINK_ONLY:...>"
+            # wrapper (a PRIVATE static link) is stripped.
+            string(REPLACE "::" "@NS@" _text "${_l}")
+            string(REGEX MATCHALL "[A-Za-z0-9_+.@-]+" _words "${_text}")
+            foreach(_word IN LISTS _words)
+                string(REPLACE "@NS@" "::" _word "${_word}")
+                list(APPEND _queue "${_word}")
+            endforeach()
+        endif()
+    endwhile()
+    set(${out} ${_found} PARENT_SCOPE)
+endfunction()
+_pulp_closure_reaches_view(Pulp::inspect-telemetry _telemetry_reaches_view)
+if(_telemetry_reaches_view)
+    message(FATAL_ERROR "Pulp::inspect-telemetry requires a view target; the control SDK must not")
+endif()
+_pulp_closure_reaches_view(Pulp::inspect-ui-runtime _ui_reaches_view)
+if(NOT _ui_reaches_view)
+    message(FATAL_ERROR "Walker control failed: Pulp::inspect-ui-runtime reached no view target")
+endif()
+# Planted controls: a non-Pulp intermediary that links a view target must be
+# found, and one that does not must pass, so the walker cannot be Pulp-only.
+add_library(Pulp::view-planted INTERFACE IMPORTED)
+add_library(PlantedBridge::view INTERFACE IMPORTED)
+set_target_properties(PlantedBridge::view PROPERTIES INTERFACE_LINK_LIBRARIES Pulp::view-planted)
+add_library(PlantedBridge::dirty INTERFACE IMPORTED)
+set_target_properties(PlantedBridge::dirty PROPERTIES INTERFACE_LINK_LIBRARIES PlantedBridge::view)
+add_library(PlantedBridge::wrapped INTERFACE IMPORTED)
+set_target_properties(PlantedBridge::wrapped PROPERTIES
+    INTERFACE_LINK_LIBRARIES "$<LINK_ONLY:PlantedBridge::view>")
+add_library(PlantedBridge::clean INTERFACE IMPORTED)
+set_target_properties(PlantedBridge::clean PROPERTIES INTERFACE_LINK_LIBRARIES "m;Threads::Threads")
+_pulp_closure_reaches_view(PlantedBridge::dirty _planted_dirty)
+if(NOT _planted_dirty)
+    message(FATAL_ERROR "Walker control failed: a non-Pulp intermediary hid a view target")
+endif()
+_pulp_closure_reaches_view(PlantedBridge::wrapped _planted_wrapped)
+if(NOT _planted_wrapped)
+    message(FATAL_ERROR "Walker control failed: a LINK_ONLY non-Pulp intermediary hid a view target")
+endif()
+_pulp_closure_reaches_view(PlantedBridge::clean _planted_clean)
+if(_planted_clean)
+    message(FATAL_ERROR "Walker control failed: a clean non-Pulp intermediary reached a view target")
+endif()
+add_executable(pulp-control-dataplane-consumer dataplane_consumer.cpp)
+target_compile_features(pulp-control-dataplane-consumer PRIVATE cxx_std_20)
+target_link_libraries(pulp-control-dataplane-consumer PRIVATE Pulp::inspect-telemetry)
+
 add_executable(pulp-control-sdk-consumer main.cpp)
 target_compile_features(pulp-control-sdk-consumer PRIVATE cxx_std_20)
 target_link_libraries(pulp-control-sdk-consumer PRIVATE ${_control_targets})
 add_subdirectory(standalone-consumer)
+]=])
+
+file(WRITE "${_consumer_source}/dataplane_consumer.cpp" [=[
+#include <pulp/dataplane/value_channel_set.hpp>
+#include <pulp/inspect/control_telemetry_tap.hpp>
+
+int main() {
+  pulp::dataplane::ValueChannelSet channels;
+  pulp::inspect::ControlTelemetryTap tap(pulp::inspect::ControlTelemetryTapConfig{});
+  return channels.size() == 0 && tap.subscription_count() == 0 ? 0 : 1;
+}
 ]=])
 
 file(WRITE "${_consumer_source}/main.cpp" [=[
@@ -357,7 +454,8 @@ file(WRITE "${_consumer_source}/standalone-consumer/standalone.cpp" [=[
 #include <pulp/view/motion.hpp>
 #include <pulp/view/motion_cost.hpp>
 #include <pulp/view/ui_components.hpp>
-#include <pulp/view/value_channel_set.hpp>
+#include <pulp/dataplane/fwd.hpp>
+#include <pulp/dataplane/value_channel_set.hpp>
 #include <pulp/view/view.hpp>
 
 #include <algorithm>
