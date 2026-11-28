@@ -112,9 +112,15 @@ int delegate_to_python_script(const fs::path& relative_script,
     return run(cmd);
 }
 
-int delegate_to_build_binary(const fs::path& relative_binary,
-                             const std::vector<std::string>& args,
-                             const std::string& prepend_flag) {
+namespace {
+
+struct BuildBinaryLookup {
+    fs::path binary;
+    std::vector<fs::path> candidates;
+    fs::path project_root;
+};
+
+BuildBinaryLookup lookup_build_binary(const fs::path& relative_binary) {
     // pulp #-friction-1+#-friction-2 - delegate lookup must NOT require
     // cwd to be inside a Pulp project. Sibling binaries (pulp-import-design,
     // pulp-design-debug) live next to the CLI binary itself, so we can
@@ -208,7 +214,21 @@ int delegate_to_build_binary(const fs::path& relative_binary,
             break;
         }
     }
+    return {std::move(binary), std::move(candidates), std::move(root)};
+}
 
+} // namespace
+
+fs::path find_build_binary(const fs::path& relative_binary) {
+    return lookup_build_binary(relative_binary).binary;
+}
+
+int delegate_to_build_binary(const fs::path& relative_binary, const std::vector<std::string>& args,
+                             const std::string& prepend_flag) {
+    auto lookup = lookup_build_binary(relative_binary);
+    const auto& binary = lookup.binary;
+    const auto& candidates = lookup.candidates;
+    const auto& root = lookup.project_root;
     if (binary.empty()) {
         const auto leaf = fs::path(relative_binary).filename().string();
         std::cerr << "Error: " << leaf << " helper not found.\n";
@@ -234,6 +254,37 @@ int delegate_to_build_binary(const fs::path& relative_binary,
     std::string cmd = shell_quote(binary);
     if (!prepend_flag.empty()) cmd += " " + prepend_flag;
     for (auto& arg : args) cmd += " " + shell_quote(arg);
+    return run(cmd);
+#endif
+}
+
+fs::path find_vellum_cli() {
+    if (const char* env = std::getenv("PULP_VELLUM_CLI"); env && *env) {
+        fs::path explicit_path(env);
+        std::error_code ec;
+        return fs::is_regular_file(explicit_path, ec) ? explicit_path : fs::path{};
+    }
+    return fs::path(find_executable_in_path("vellum"));
+}
+
+int forward_to_vellum(const std::string& pulp_command, const std::string& vellum_command,
+                      const std::vector<std::string>& args) {
+    const auto vellum = find_vellum_cli();
+    if (vellum.empty()) {
+        std::cerr << "pulp " << pulp_command << ": this command is provided by the Vellum CLI, "
+                  << "which was not found.\n"
+                  << "  Install the Vellum SDK so `vellum` is on PATH, or set PULP_VELLUM_CLI,\n"
+                  << "  then run: vellum " << vellum_command << " ...\n";
+        return 2;
+    }
+    std::vector<std::string> forwarded{vellum_command};
+    forwarded.insert(forwarded.end(), args.begin(), args.end());
+#ifdef _WIN32
+    return run_delegate_inheriting_stdio(vellum, forwarded);
+#else
+    std::string cmd = shell_quote(vellum);
+    for (const auto& arg : forwarded)
+        cmd += " " + shell_quote(arg);
     return run(cmd);
 #endif
 }

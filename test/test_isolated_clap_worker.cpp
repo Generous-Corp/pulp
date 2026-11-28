@@ -86,6 +86,37 @@ bool live_process(int pid) {
         return ::kill(pid, 0) == 0;
     return size != 0 && info.kp_proc.p_stat != SZOMB;
 }
+// Blocks the worker has started, read from the witness file the fixture
+// appends to on every process call; zero when no witness is armed.
+std::size_t worker_blocks_started() {
+    const char* path = std::getenv("PULP_G9_WITNESS");
+    if (!path)
+        return 0;
+    std::ifstream input(path);
+    std::string stage;
+    int pid, ppid, frames;
+    std::size_t started = 0;
+    while (input >> stage >> pid >> ppid >> frames)
+        if (stage == "process")
+            ++started;
+    return started;
+}
+// The host consumes block N-1's completion while submitting block N, so the
+// worker must have been scheduled for N-1 first. A fixed sleep assumed an
+// unloaded machine; under load the worker can start late and the host
+// reports deadline_missed, which is terminal. Wait for the worker to have
+// started the previous block (bounded), then keep a short slack for it to
+// publish. Without a witness the fixed slack is all there is.
+void wait_for_previous_block(int block) {
+    if (std::getenv("PULP_G9_WITNESS")) {
+        const auto limit = std::chrono::steady_clock::now() + 10s;
+        while (worker_blocks_started() < static_cast<std::size_t>(block) &&
+               std::chrono::steady_clock::now() < limit)
+            std::this_thread::sleep_for(1ms);
+    }
+    // Functional scheduling slack, not a realtime qualification result.
+    std::this_thread::sleep_for(10ms);
+}
 void healthy_render(IsolatedClapResult& result, float gain, int count = 8) {
     REQUIRE(result);
     REQUIRE(result.control->status().worker_pid != ::getpid());
@@ -96,8 +127,7 @@ void healthy_render(IsolatedClapResult& result, float gain, int count = 8) {
     buffers.process(*result.slot);
     REQUIRE(buffers.silent());
     for (int block = 1; block <= count; ++block) {
-        // Functional scheduling slack, not a realtime qualification result.
-        std::this_thread::sleep_for(10ms);
+        wait_for_previous_block(block);
         buffers.process(*result.slot);
         INFO("block=" << block << " reason=" << static_cast<int>(result.control->status().reason));
         REQUIRE(result.control->status().reason == IsolationReason::none);

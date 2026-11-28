@@ -1512,7 +1512,7 @@ commands:
 
   - name: ui
     status: experimental
-    summary: Build or verify a deterministic owned UI source snapshot and manifest.
+    summary: Build or verify a deterministic owned UI source snapshot and manifest. Outside a checkout that carries tools/ui-build, forwards its arguments and exit status to `vellum ui` (`$PULP_VELLUM_CLI` or `vellum` on PATH), and exits 2 naming the install step when Vellum is absent.
     subcommands:
       - name: build
         summary: Emit a deterministic UI source snapshot and ui-build-manifest.json.

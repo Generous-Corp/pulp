@@ -3,9 +3,32 @@
 #include <pulp/state/store.hpp>
 
 #include <algorithm>
+#include <atomic>
 #include <cmath>
 
 namespace pulp::slice {
+
+namespace {
+std::atomic<bool> g_fixed_size_editors{false};
+std::atomic<std::uint32_t> g_fixed_set_size_calls{0};
+} // namespace
+
+void slice_set_fixed_size_editors(bool fixed) {
+    g_fixed_size_editors.store(fixed);
+}
+
+bool slice_fixed_size_editors() {
+    return g_fixed_size_editors.load();
+}
+
+std::uint32_t slice_fixed_editor_set_size_calls() {
+    return g_fixed_set_size_calls.load();
+}
+
+bool FixedSizeEditor::set_size(const format::EditorSize& size) {
+    g_fixed_set_size_calls.fetch_add(1);
+    return inner_->set_size(size);
+}
 
 std::unique_ptr<format::Processor> GainMeterProcessor::create() {
     return std::make_unique<GainMeterProcessor>();

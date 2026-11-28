@@ -131,6 +131,14 @@ struct PulpPluginEditorFactoryRegistrar {
     get_property(_vellum_scripted TARGET "${ui}" PROPERTY PULP_VELLUM_SCRIPTED_EDITOR)
     foreach(_suffix IN LISTS _PULP_UI_PACKAGE_TARGET_SUFFIXES)
         set(_format_target "${target}_${_suffix}")
+        # A macOS AUv3 appex is a stub that only loads its framework, and the
+        # framework holds the plug-in's code. The editor-package source
+        # instantiates the editor, which needs the plug-in's own editor code,
+        # so it compiles once, into the framework. The iOS AUv3 appex carries
+        # the code itself and keeps the source.
+        if(_suffix STREQUAL "AUv3" AND TARGET "${target}_AUv3Framework")
+            continue()
+        endif()
         if(TARGET "${_format_target}")
             target_sources("${_format_target}" PRIVATE "${_source}")
             target_link_libraries("${_format_target}" PRIVATE "${ui}")

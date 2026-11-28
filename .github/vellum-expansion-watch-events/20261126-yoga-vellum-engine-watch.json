@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20261126-yoga-vellum-engine-watch",
+  "created_at": "2026-11-26T02:41:02Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "visual-proof-harness"
+  ],
+  "rationale": "Adds a parallel layout engine to the visual-harness runner (--engine vellum): it maps Yoga fixtures onto a Vellum bundle and compares node rectangles from vellum-app-host --dump-tree with the Yoga goldens. The pulp-test-visual lane and its goldens are unchanged; no design-import, Chromium, rendering, or packaging authority moves.",
+  "tests": [
+    "python3 tools/harness/visual/tests/test_vellum_layout.py",
+    "python3 tools/scripts/vellum_expansion_watch_check.py --base <merge-base origin/main HEAD> --head <HEAD>",
+    "vellum-expansion-watch"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}
