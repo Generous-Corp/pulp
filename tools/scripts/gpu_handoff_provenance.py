@@ -29,6 +29,7 @@ owning revision and re-stales the row that was just repaired.
 from __future__ import annotations
 
 import argparse
+import concurrent.futures
 import hashlib
 import importlib.util
 import json
@@ -63,6 +64,9 @@ LEDGER_SENTINEL = "regenerate-me"
 # the ledger's bytes move, which is the case this tool calls a real move.
 RECEIPT_CHURN_FIELDS = frozenset({"source_commit"})
 GIT_TIMEOUT_SECONDS = 30
+# Git subprocesses overlap across the inventory's rows; see
+# resolve_inventory_identities.
+RESOLVE_WORKERS = 8
 
 # Identity is immutable for a given (checkout, source commit, HEAD, path), and
 # the validator module keeps Git caches of its own that only pay off when it is
@@ -290,6 +294,7 @@ def resolve_identity(
     commit: str,
     path: str,
     require_current: bool = False,
+    head_revision: str | None = None,
 ) -> Identity:
     """Derive one row's identity fields from the single source commit.
 
@@ -303,9 +308,13 @@ def resolve_identity(
     cannot satisfy a currency-checking consumer no matter how faithfully it
     describes its source commit; raising here names the problem instead of
     emitting a ledger that fails later.
+
+    ``head_revision`` is HEAD's object id when the caller already holds it, so
+    a run over a hundred rows asks Git for it once instead of once per row.
     """
 
-    head_revision = git_output(root, ["rev-parse", "HEAD"])
+    if head_revision is None:
+        head_revision = git_output(root, ["rev-parse", "HEAD"])
     cache_key = (str(root), commit, head_revision, path, require_current)
     cached = _IDENTITY_CACHE.get(cache_key)
     if cached is not None:
@@ -362,13 +371,33 @@ def resolve_inventory_identities(
     ``require_current`` is forwarded unchanged; see ``resolve_identity``.
     """
 
-    identities: dict[str, Identity] = {}
-    for row in inventory:
-        if row.path not in identities:
-            identities[row.path] = resolve_identity(
-                root, commit, row.path, require_current=require_current
-            )
-    return identities
+    paths = list(dict.fromkeys(row.path for row in inventory))
+    if not paths:
+        return {}
+    head_revision = git_output(root, ["rev-parse", "HEAD"])
+    # Resolved once here so the workers below never race to compute it.
+    shallow_boundaries_for(root)
+
+    def resolve(path: str) -> Identity:
+        return resolve_identity(
+            root,
+            commit,
+            path,
+            require_current=require_current,
+            head_revision=head_revision,
+        )
+
+    # Each path costs a few Git subprocesses, which is where nearly all of the
+    # run goes, so they overlap. Results are collected in inventory order, so
+    # the first failure reported is the one a serial pass would have reported.
+    with concurrent.futures.ThreadPoolExecutor(max_workers=RESOLVE_WORKERS) as pool:
+        futures = [pool.submit(resolve, path) for path in paths]
+        try:
+            return {path: future.result() for path, future in zip(paths, futures)}
+        except BaseException:
+            for future in futures:
+                future.cancel()
+            raise
 
 
 def dirty_canonical_paths(root: pathlib.Path, paths: list[str]) -> list[str]:

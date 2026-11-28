@@ -167,6 +167,14 @@ Skia-enabled build: without Skia the Windows host falls back to the no-op
 factory and the plugin loads with no editor at all. If you opt in, validate in
 Pro Tools yourself before shipping.
 
+A processor that supplies `Processor::editor_factory()` can use that editor
+through the custom AAX GUI on macOS. The contract editor follows the host
+container's size from the AAX timer. Windows currently keeps the legacy
+`create_view()` path because its AAX container-size reader is not implemented;
+the factory editor is neither created nor used to answer size queries there.
+A factory-only editor therefore needs another format on Windows. AAX control
+highlight forwarding to contract editors remains unimplemented.
+
 ## Validation Workflow
 
 When DigiShell + AAX Validator are installed:
