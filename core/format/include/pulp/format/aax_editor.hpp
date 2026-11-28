@@ -532,7 +532,8 @@ private:
 ///                                      size is read from the host's timer and
 ///                                      handed to host_resized(), so the editor
 ///                                      takes the size inside its hints
-///   SetControlHighlightInfo         -> parameter_highlight()
+///   SetControlHighlightInfo         -> parameter_highlight() (SDK forwarding
+///                                      not yet implemented)
 ///   DeleteViewContainer             -> detach(): every gesture released,
 ///                                      Editor::detach()
 ///   GUI destroyed                   -> close(): the editor is destroyed
@@ -559,10 +560,13 @@ class ContractEditorShell {
                processor->editor_factory() != nullptr;
     }
 
-    /// Build the processor's editor, unattached. False, with nothing built,
-    /// when the shell does not apply or the factory builds no editor. A
-    /// second call keeps the editor already built.
-    bool create(EditorHost& model, PublishSize publish) {
+    /// Build the processor's editor, unattached. The adapter passes whether it
+    /// can follow host frame changes; without that reader no factory is called.
+    /// False when the reader is unavailable, the shell does not apply or the
+    /// factory builds no editor. A supported second call keeps the editor built.
+    bool create(EditorHost& model, PublishSize publish, bool parent_size_readable = true) {
+        if (!parent_size_readable)
+            return false;
         if (session_)
             return true;
         if (!applies(model))

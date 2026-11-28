@@ -1092,6 +1092,30 @@ TEST_CASE("AAX closes a factory editor before the model deletes its processor",
     CHECK_FALSE(model.invalidation);
 }
 
+TEST_CASE("AAX does not build or size a factory editor without a parent size reader",
+          "[aax][editor-host][aax-contract][negative]") {
+    reset_contract_recording();
+    contract_config() = {};
+    RecordingContractFactory factory;
+    FakeModel model(&factory);
+    ContractEditorShell shell;
+    REQUIRE(ContractEditorShell::applies(model));
+
+    CHECK_FALSE(shell.create(model, {}, false));
+    CHECK(contract_log().calls.empty());
+    CHECK_FALSE(shell.built());
+    CHECK_FALSE(shell.plan());
+    CHECK(contract_log().live == 0);
+    CHECK_FALSE(model.invalidation);
+    CHECK_FALSE(shell.attach(aax_parent()));
+
+    // The same factory is usable when the adapter can follow parent resizes.
+    REQUIRE(shell.create(model, {}, true));
+    CHECK(shell.built());
+    CHECK(shell.plan());
+    CHECK(contract_log().live == 1);
+}
+
 TEST_CASE("AAX leaves the create_view() path to a processor without an editor factory",
           "[aax][editor-host][aax-contract][negative]") {
     using pulp::format::aax::ContractEditorShell;

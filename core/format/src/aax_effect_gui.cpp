@@ -88,12 +88,17 @@ private:
   /// where the parent is known, so a plug-in whose window never appears never
   /// builds a view tree.
   void CreateViewContents() override {
+      if (!kAaxParentSizeReadable)
+          return;
       auto* model = host_model();
       if (model == nullptr || !ContractEditorShell::applies(*model))
           return;
-      if (!contract_.create(*model, [this](uint32_t w, uint32_t h) {
-              return publish_view_size(w, h, "editor request") == AAX_SUCCESS;
-          }))
+      if (!contract_.create(
+              *model,
+              [this](uint32_t w, uint32_t h) {
+                  return publish_view_size(w, h, "editor request") == AAX_SUCCESS;
+              },
+              kAaxParentSizeReadable))
           runtime::log_error("AAX editor: the editor factory built no editor");
   }
 
@@ -287,9 +292,12 @@ private:
     /// Attach the factory-built editor to the host's view, building it first
     /// when CreateViewContents() ran before the model had a processor.
     void attach_contract_editor(EditorHost& model, void* parent) {
-        if (!contract_.create(model, [this](uint32_t w, uint32_t h) {
-                return publish_view_size(w, h, "editor request") == AAX_SUCCESS;
-            })) {
+        if (!contract_.create(
+                model,
+                [this](uint32_t w, uint32_t h) {
+                    return publish_view_size(w, h, "editor request") == AAX_SUCCESS;
+                },
+                kAaxParentSizeReadable)) {
             runtime::log_error("AAX editor: the editor factory built no editor");
             return;
         }
@@ -515,8 +523,10 @@ private:
     /// The sizing plan the host queries answer from: the contract editor's
     /// own when one is built, else the create_view() editor's hints.
     std::optional<EditorSizePlan> size_plan() const {
-        if (auto plan = contract_.plan())
-            return plan;
+        if (kAaxParentSizeReadable) {
+            if (auto plan = contract_.plan())
+                return plan;
+        }
         const auto hints = size_hints();
         if (!hints)
             return std::nullopt;

@@ -82,9 +82,14 @@ file built against Vellum as `pulp-test-aax-vellum-editor`). It builds the
 editor in `CreateViewContents()`, unattached, because Pro Tools asks
 `GetViewSize` before it makes the window and only a built editor knows its
 size; it attaches in `CreateViewContainer()`. AAX has no host resize callback,
-so a `SetViewSize` the host accepts is applied to the editor at once. Still to
-wire with the SDK present: the container's own frame changes into
-`host_resized()`, and `SetControlHighlightInfo` into `parameter_highlight()`.
+so a `SetViewSize` the host accepts is applied to the editor at once. The host
+container is read from `TimerWakeup()` to follow host-driven frame changes.
+Contract creation, attachment and sizing are enabled only where that reader
+exists (currently macOS). Windows retains the legacy `create_view()` path;
+a factory-only editor is not created or used for contract sizing there.
+The SDK-free shell's creation gate is tested with the reader disabled and
+with it enabled against the same recording factory. Still to wire with the
+SDK present: `SetControlHighlightInfo` into `parameter_highlight()`.
 
 **The editor is opt-in, and defaulting it off is deliberate — do not "fix" it.**
 `PULP_AAX_PLUGIN` registers no editor, so a plugin gets Pro Tools'

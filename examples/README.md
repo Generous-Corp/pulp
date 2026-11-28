@@ -7,6 +7,8 @@ Every directory under `examples/` is listed below, in one of two groups.
 
 The proof consumers are also listed with their intended future home under `test/consumers/`. That move is not done yet; see the end of this page.
 
+Every directory is also classified in `docs/status/examples-manifest.json` for the phased Vellum cut: audio-only, moves to Vellum, quarantined for a later platform phase, or deleted. `tools/scripts/examples_manifest_guard.py` fails when a directory and its entry disagree.
+
 ## Building and running
 
 Examples are off in a default source build. Add `--examples`:
