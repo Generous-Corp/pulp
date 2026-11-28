@@ -14033,3 +14033,10 @@ The same lane also runs the MCP UI tool cases (`pulp-test-mcp-server "[ui]"`)
 against the SDK's `bin/vellum-app-host` through `PULP_TEST_VELLUM_APP_HOST`. The
 step greps the output for `SKIPPED`, because Catch2 reports a skipped live case
 as a pass: keep that check if the step is edited.
+
+## Release SDK archive helpers are linted by workflow-lint
+
+`tools/scripts/test_archive_sdk.py` runs in `workflow-lint.yml` and its paths
+are in `tools/ci/workflow_lint_paths.txt`. A new script that a release step
+calls needs both, plus a regenerated `.shipyard/changed-surface-families.toml`
+(`changed_surface_script_families.py --configure-only --write`).
