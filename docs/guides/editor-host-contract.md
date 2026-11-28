@@ -144,6 +144,41 @@ when the editor closes. Detach them with
 `session.detach_native_message_handler(name)` before destroying their captures,
 and register fresh handlers when reopening the same root.
 
+## Moving a create_view() plug-in to a Vellum-UI SDK
+
+An SDK that serves its UI from Vellum builds `pulp-format-core` with
+`PULP_FORMAT_LEGACY_VIEW=0`: `Processor` keeps its view hooks only as reserved
+slots, so `create_view()` and the `on_view_*` hooks are no longer `Processor`
+members. `pulp::vellum::ViewProcessor<>` (`pulp/vellum/view_processor.hpp`,
+pulp-vellum) declares them again, with Vellum types, and opens the tree through
+this contract. The two spellings cannot share a build: a plug-in moves at the
+switch to such an SDK, not before. What changes:
+
+| Today (Pulp's view layer) | With a Vellum-UI SDK |
+|---|---|
+| `class P : public pulp::format::Processor` | `class P : public pulp::vellum::ViewProcessor<>` |
+| `std::unique_ptr<pulp::view::View> create_view() override` | `std::unique_ptr<::vellum::view::View> create_view() override` |
+| `on_view_opened/closed/resized(pulp::view::View&)` | the same names over `::vellum::view::View&` |
+| a `create_view()` that can return null | also override `has_view(role)` to say when it does not |
+| `active_scripted_ui()` / `visit_active_scripted_ui()` | no equivalent; a scripted editor comes from `UI_ENGINE vellum` |
+| the editor's body, written against `pulp::view` | rewritten against `vellum::view` (the widget port) |
+| `pulp_add_plugin(... NATIVE_UI/GPU_UI/FULL_EDITOR/LITE_EDITOR)` | no editor keyword |
+
+A plug-in compiled with the macro 0 but linked against a pulp-format-core built
+with Pulp's view layer fails to link on
+`pulp_format_core_was_built_with_PULP_FORMAT_LEGACY_VIEW_0`, which names the
+mismatch. Per downstream, at the switch:
+
+- **Forge**: `include/forge/shell.hpp` and `modular_shell.hpp` (base class,
+  `create_view()`, `on_view_closed()`), and the generator's
+  `src/gen/cpp_export.cpp`, which emits a `create_view()` into every exported
+  plug-in, so regenerated plug-ins follow.
+- **Spectr**: `include/spectr/spectr.hpp` (base class, `create_view()`, the
+  three `on_view_*` hooks). Its two `active_scripted_ui()` overrides have no
+  equivalent and go; its scripted editor is the Vellum one.
+- **Meru**: `beadsy.hpp` (base class, `create_view()`).
+- **GPU NAM**: `src/gpu_nam_processor.hpp` (base class, `create_view()`).
+
 ## Extending the contract
 
 `Editor` and `EditorContext` are implemented in different binaries (a UI
