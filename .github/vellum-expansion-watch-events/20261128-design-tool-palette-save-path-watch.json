@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20261128-design-tool-palette-save-path-watch",
+  "created_at": "2026-11-28T05:11:49Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "design-source-ingest"
+  ],
+  "rationale": "Closes a predictable shared temp-path write and read in the design-tool palette and chat-export JS: a cancelled dialog now does nothing. Only file-dialog handling changes; no design-import, Chromium, rendering, packaging or authority moves.",
+  "tests": [
+    "ctest --test-dir build -R pulp-test-design-tool-layout",
+    "python3 tools/scripts/vellum_expansion_watch_check.py --base <merge-base origin/main HEAD> --head <HEAD>",
+    "vellum-expansion-watch"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}
