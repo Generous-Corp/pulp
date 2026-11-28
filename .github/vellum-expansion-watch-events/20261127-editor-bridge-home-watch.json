@@ -1,0 +1,20 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20261127-editor-bridge-home-watch",
+  "created_at": "2026-11-27T10:00:54Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "visual-proof-harness"
+  ],
+  "rationale": "Moves EditorBridge's dispatch core (editor_bridge.cpp and its header, unchanged) from core/view into core/editor_bridge and defines pulp-editor-bridge there, so the target exists without core/view. The installed header path pulp/view/editor_bridge.hpp, the target name and its link closure are unchanged; the GPU handoff ledger, the coverage registry and the generated test inputs follow the new path. No design-import, Chromium, rendering, or packaging authority moves.",
+  "tests": [
+    "ctest --test-dir build -R pulp-test-editor-bridge-core",
+    "python3 tools/scripts/test_gpu_handoff_provenance.py",
+    "python3 tools/scripts/vellum_expansion_watch_check.py --base <merge-base origin/main HEAD> --head <HEAD>",
+    "vellum-expansion-watch"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}

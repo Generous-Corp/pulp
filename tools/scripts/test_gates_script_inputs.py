@@ -310,8 +310,11 @@ class GatesScriptInputsTests(unittest.TestCase):
                 self.cmake_log.write_text("", encoding="utf-8")
                 governor_log.write_text("", encoding="utf-8")
                 # Source selftests left enabled: the refusal, not the opt-out, must stop them.
+                # The Python lanes a gate host now runs by default are covered by
+                # test_gates_gate_host_python.py; this case pins the refusal path.
                 r = self.gates(FAKE_SERVES_GATE="1", FAKE_TARTCI_ROLE=role,
-                               PULP_SKIP_SOURCE_SELFTESTS="", FAKE_GOVERNOR_LOG=str(governor_log))
+                               PULP_SKIP_SOURCE_SELFTESTS="", PULP_GATES_GATE_HOST_PYTHON="0",
+                               FAKE_GOVERNOR_LOG=str(governor_log))
                 # The one allowance: a single configure, into a temporary tree
                 # under the checkout, governed as one background core, never a build.
                 calls = self.configures()

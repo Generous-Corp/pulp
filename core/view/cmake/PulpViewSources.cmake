@@ -138,21 +138,13 @@ target_sources(pulp-view-core PRIVATE
     src/bubble_message.cpp
 )
 
-# The editor bridge's dispatch core (handlers, JSON and WebView dispatch,
-# response helpers) needs only CHOC and the runtime, so it is its own target and
-# a Vellum-backed Pulp::view-tooling can link it without Pulp's view libraries.
-# The attach_native_runtime overloads that name view-script types stay in
-# pulp-view-tooling (editor_bridge_native_runtime.cpp).
-add_library(pulp-editor-bridge)
-add_library(pulp::editor-bridge ALIAS pulp-editor-bridge)
-target_sources(pulp-editor-bridge PRIVATE src/editor_bridge.cpp)
-target_include_directories(pulp-editor-bridge PUBLIC
-    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
-    $<BUILD_INTERFACE:${choc_SOURCE_DIR}>
-    $<INSTALL_INTERFACE:include>)
-target_compile_features(pulp-editor-bridge PUBLIC cxx_std_20)
-target_link_libraries(pulp-editor-bridge PUBLIC pulp::runtime)
+# EditorBridge's dispatch core is pulp-editor-bridge (core/editor_bridge).
+# The attach_native_runtime overloads below name view-script types, so they
+# stay in pulp-view-tooling, which links the core.
 target_link_libraries(pulp-view-tooling PUBLIC pulp::editor-bridge)
+# Consumers of the tooling layer, where the attachments are defined, see their
+# declarations through pulp/view/editor_bridge.hpp too.
+target_compile_definitions(pulp-view-tooling PUBLIC PULP_EDITOR_BRIDGE_VIEW_ATTACHMENTS=1)
 
 # Pulp-kept plugin-host and editor facilities: the component inspector and the
 # editor bridge attachments. They stay outside pulp-view-core's extractable closure; their

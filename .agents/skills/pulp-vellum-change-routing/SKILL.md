@@ -282,6 +282,12 @@ python3 tools/scripts/gpu_handoff_provenance.py write --receipt             # re
 Pass `--receipt`. The published receipt is asserted against the ledger's bytes,
 so regenerating without it leaves a second gate red for the next reader.
 
+Renaming a pinned path has two more traps. The validator wants each entry's
+`pulp_paths` rows and its `retained_paths` bytewise sorted, so a moved path
+usually changes position and `write` refuses until you re-sort it. And
+`test_gpu_handoff_provenance.py` keeps a floor baseline that names every pinned
+path, so rename the path there in the same commit as the ledger edit.
+
 When a stale identity *does* surface, it surfaces through
 `gpu-recipe-catalog-selftest`, far from the file you edited:
 
@@ -386,6 +392,14 @@ pinned path, so a bare `write` alongside an inventory change turns it green, and
 ```bash
 python3 -B tools/scripts/test_gpu_handoff_provenance.py -k published_receipt
 ```
+
+That selftest takes about 20 s, down from about 47 s: the generator and the
+catalog validator resolve their per-path Git queries side by side
+(`resolve_inventory_identities`, and the prewarm in
+`validate_handoff_routing`) instead of one subprocess at a time. The pre-push
+fixture step caps itself at 60 s, so a test over the cap is reported NOT
+CHECKED; if this one creeps back up, look for a Git query that was moved back
+inside a per-row loop before touching the cap.
 
 **A capability-registry change stales a handoff pin without touching any GPU or
 Vellum file.** `tools/scripts/test_release_artifact_contents.py` is a pinned

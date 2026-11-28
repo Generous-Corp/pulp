@@ -7,8 +7,17 @@
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 
+// Before the using-directives below: Vellum's headers name `vellum::`
+// unqualified, which `using namespace pulp` would make ambiguous.
+#if defined(PULP_TEST_AAX_VELLUM)
+#include <pulp/vellum/editor.hpp>
+#include <vellum/view/plugin_view_host.hpp>
+#include <vellum/view/view.hpp>
+#endif
+
 #include <pulp/format/aax_editor.hpp>
 #include <pulp/format/aax_model.hpp>
+#include <pulp/format/aax_native_view.hpp>
 #include <pulp/format/processor.hpp>
 #include <pulp/state/store.hpp>
 
@@ -826,3 +835,491 @@ TEST_CASE("AAX host dimensions stay in logical points on Retina hosts",
     CHECK(aax_host_dimension(0, 2.0f) == 0);
     CHECK(aax_host_dimension(990, 0.0f) == 990);
 }
+
+// ── Contract editors ─────────────────────────────────────────────────────────
+//
+// ContractEditorShell, the AAX GUI's path for a processor with an editor
+// factory, driven the way PulpAaxEffectGUI drives it, over a fake data model.
+// The editor records every contract call.
+
+#include "support/recording_contract_editor.hpp"
+
+namespace {
+
+using pulp::test_support::contract_config;
+using pulp::test_support::contract_log;
+using pulp::test_support::RecordingContractFactory;
+using pulp::test_support::reset_contract_recording;
+
+class FactoryProcessor final : public pulp::format::Processor {
+  public:
+    explicit FactoryProcessor(pulp::format::EditorFactory* factory) : factory_(factory) {}
+    pulp::format::PluginDescriptor descriptor() const override {
+        pulp::format::PluginDescriptor d;
+        d.name = "AAX contract editor";
+        d.bundle_id = "dev.pulp.test.aax-contract-editor";
+        return d;
+    }
+    void define_parameters(pulp::state::StateStore& store) override {
+        pulp::state::ParamInfo info;
+        info.id = 1;
+        info.name = "Gain";
+        info.range = {0.0f, 1.0f, 0.5f};
+        store.add_parameter(info);
+    }
+    void prepare(const pulp::format::PrepareContext&) override {}
+    void process(pulp::audio::BufferView<float>&, const pulp::audio::BufferView<const float>&,
+                 pulp::midi::MidiBuffer&, pulp::midi::MidiBuffer&,
+                 const pulp::format::ProcessContext&) override {}
+    pulp::format::EditorFactory* editor_factory() override {
+        return factory_;
+    }
+
+  private:
+    pulp::format::EditorFactory* factory_;
+};
+
+/// The data model the AAX GUI reaches through GetEffectParameters().
+class FakeModel final : public pulp::format::aax::EditorHost {
+  public:
+    explicit FakeModel(pulp::format::EditorFactory* factory) : processor(factory) {
+        processor.set_state_store(&store);
+        processor.define_parameters(store);
+    }
+    pulp::format::Processor* editor_processor() override {
+        return has_processor ? &processor : nullptr;
+    }
+    pulp::state::StateStore* editor_store() override {
+        return has_processor ? &store : nullptr;
+    }
+    std::optional<pulp::format::ViewSize> editor_view_size() override {
+        return processor.view_size();
+    }
+    const pulp::format::aax::PluginDefinition& editor_definition() const override {
+        return definition;
+    }
+    void release_editor_gestures() override {
+        ++gesture_releases;
+    }
+    void set_editor_invalidation_handler(std::function<void()> handler) override {
+        invalidation = std::move(handler);
+    }
+    // The model's own call: it copies the handler first, as aax_runtime does.
+    void invalidate_processor() {
+        if (auto handler = invalidation)
+            handler();
+    }
+
+    pulp::state::StateStore store;
+    FactoryProcessor processor;
+    pulp::format::aax::PluginDefinition definition;
+    bool has_processor = true;
+    int gesture_releases = 0;
+    std::function<void()> invalidation;
+};
+
+int g_aax_fake_view = 0;
+pulp::format::NativeParent aax_parent() {
+    return {.kind = pulp::format::NativeParentKind::cocoa_view, .handle = &g_aax_fake_view};
+}
+
+} // namespace
+
+TEST_CASE("AAX builds a factory editor before its window, sizes from it and attaches it",
+          "[aax][editor-host][aax-contract]") {
+    using pulp::format::aax::ContractEditorShell;
+    reset_contract_recording();
+    contract_config() = {};
+    RecordingContractFactory factory;
+    FakeModel model(&factory);
+    REQUIRE(ContractEditorShell::applies(model));
+
+    std::vector<std::pair<uint32_t, uint32_t>> published;
+    ContractEditorShell shell;
+    // CreateViewContents: built, not attached, already able to size the host.
+    REQUIRE(shell.create(model, [&published](uint32_t w, uint32_t h) {
+        published.emplace_back(w, h);
+        return true;
+    }));
+    REQUIRE(shell.built());
+    REQUIRE_FALSE(shell.attached());
+    REQUIRE_FALSE(contract_log().saw("attach:cocoa_view"));
+    auto plan = shell.plan();
+    REQUIRE(plan);
+    CHECK(plan->width == 400);
+    CHECK(plan->height == 300);
+    CHECK(plan->min_width == 200);
+    CHECK(plan->min_height == 150);
+    CHECK(plan->resizable);
+
+    // CreateViewContainer.
+    REQUIRE(shell.attach(aax_parent()));
+    CHECK(contract_log().saw("attach:cocoa_view"));
+    CHECK(contract_log().parent_handle == &g_aax_fake_view);
+
+    // An editor resize request becomes SetViewSize, and the editor takes the
+    // size the host accepted.
+    REQUIRE(contract_log().context->request_resize({640, 480, 1.0}));
+    REQUIRE(published.size() == 1);
+    CHECK(published[0] == std::pair<uint32_t, uint32_t>{640, 480});
+    CHECK(contract_log().saw("set_size:640x480"));
+    plan = shell.plan();
+    CHECK(plan->width == 640);
+    CHECK(plan->height == 480);
+
+    // A native frame change from the host lands inside the editor's hints.
+    REQUIRE(shell.host_resized(100, 100));
+    CHECK(contract_log().saw("set_size:200x150"));
+
+    // DeleteViewContainer: gestures released, editor detached and kept.
+    shell.detach();
+    CHECK(contract_log().saw("detach"));
+    CHECK(model.gesture_releases == 1);
+    CHECK(shell.built());
+    CHECK(contract_log().live == 1);
+    // A second container reattaches the same editor.
+    REQUIRE(shell.attach(aax_parent()));
+
+    // GUI destroyed.
+    shell.close();
+    CHECK_FALSE(shell.built());
+    CHECK(contract_log().live == 0);
+    CHECK_FALSE(contract_log().saw("invalidate"));
+    CHECK(model.gesture_releases == 2);
+    CHECK_FALSE(model.invalidation);
+}
+
+TEST_CASE("AAX follows the host container when it is resized",
+          "[aax][editor-host][aax-contract][resize]") {
+    using pulp::format::aax::ContractEditorShell;
+    reset_contract_recording();
+    contract_config() = {};
+    RecordingContractFactory factory;
+    FakeModel model(&factory);
+    std::vector<std::pair<uint32_t, uint32_t>> published;
+    ContractEditorShell shell;
+    REQUIRE(shell.create(model, [&published](uint32_t w, uint32_t h) {
+        published.emplace_back(w, h);
+        return true;
+    }));
+
+    // The container's size as the host last set it.
+    uint32_t parent_width = 400;
+    uint32_t parent_height = 300;
+    int reads = 0;
+    void* read_from = nullptr;
+    const ContractEditorShell::ParentSizeReader reader = [&](void* parent, uint32_t& w,
+                                                             uint32_t& h) {
+        ++reads;
+        read_from = parent;
+        w = parent_width;
+        h = parent_height;
+        return true;
+    };
+
+    // Nothing to follow before the container exists.
+    CHECK_FALSE(shell.follow_parent_frame(reader));
+    CHECK(reads == 0);
+
+    REQUIRE(shell.attach(aax_parent()));
+    // A container at the editor's own size changes nothing.
+    CHECK_FALSE(shell.follow_parent_frame(reader));
+    CHECK(read_from == &g_aax_fake_view);
+    CHECK_FALSE(contract_log().saw("set_size:400x300"));
+
+    // The host or user drags the window larger: the editor takes the new size.
+    parent_width = 640;
+    parent_height = 480;
+    CHECK(shell.follow_parent_frame(reader));
+    CHECK(contract_log().saw("set_size:640x480"));
+    CHECK(shell.plan()->width == 640);
+    CHECK(shell.plan()->height == 480);
+
+    // The same container size is not applied twice.
+    contract_log().calls.clear();
+    CHECK_FALSE(shell.follow_parent_frame(reader));
+    CHECK_FALSE(contract_log().saw("set_size:640x480"));
+
+    // The editor's own request is echoed back by the host at the size it
+    // already took, and is not applied a second time.
+    REQUIRE(contract_log().context->request_resize({560, 420, 1.0}));
+    CHECK(published.back() == std::pair<uint32_t, uint32_t>{560, 420});
+    contract_log().calls.clear();
+    parent_width = 560;
+    parent_height = 420;
+    CHECK_FALSE(shell.follow_parent_frame(reader));
+    CHECK_FALSE(contract_log().saw("set_size:560x420"));
+
+    // A container that cannot be read, or no reader, leaves the editor alone.
+    const ContractEditorShell::ParentSizeReader unreadable = [](void*, uint32_t&, uint32_t&) {
+        return false;
+    };
+    CHECK_FALSE(shell.follow_parent_frame(unreadable));
+    CHECK_FALSE(shell.follow_parent_frame({}));
+
+    // A container the host took away is no longer followed.
+    shell.detach();
+    parent_width = 800;
+    parent_height = 600;
+    reads = 0;
+    CHECK_FALSE(shell.follow_parent_frame(reader));
+    CHECK(reads == 0);
+
+    // A new container is followed from scratch.
+    REQUIRE(shell.attach(aax_parent()));
+    contract_log().calls.clear();
+    CHECK(shell.follow_parent_frame(reader));
+    CHECK(contract_log().saw("set_size:800x600"));
+    shell.close();
+}
+
+TEST_CASE("AAX exposes the requested size during host publication and restores rejected sizes",
+          "[aax][editor-host][aax-contract][resize]") {
+    for (const bool fixed : {false, true}) {
+        for (const bool accept : {false, true}) {
+            reset_contract_recording();
+            contract_config() = {};
+            contract_config().fixed_size = fixed;
+            RecordingContractFactory factory;
+            FakeModel model(&factory);
+            ContractEditorShell shell;
+            int publications = 0;
+            REQUIRE(shell.create(model, [&](uint32_t width, uint32_t height) {
+                ++publications;
+                const auto during = shell.plan();
+                REQUIRE(during);
+                CHECK(during->width == width);
+                CHECK(during->height == height);
+                // Only the host-facing answer is staged before acceptance.
+                CHECK(shell.session()->size().width == 400);
+                CHECK(shell.session()->size().height == 300);
+                return accept;
+            }));
+            REQUIRE(shell.attach(aax_parent()));
+            CHECK(contract_log().context->request_resize({640, 480, 1.0}) == accept);
+            CHECK(publications == 1);
+            const auto after = shell.plan();
+            REQUIRE(after);
+            CHECK(after->width == (accept ? 640 : 400));
+            CHECK(after->height == (accept ? 480 : 300));
+            CHECK(shell.session()->size().width == after->width);
+            CHECK(shell.session()->size().height == after->height);
+        }
+    }
+    contract_config() = {};
+}
+
+TEST_CASE("AAX closes a factory editor before the model deletes its processor",
+          "[aax][editor-host][aax-contract]") {
+    using pulp::format::aax::ContractEditorShell;
+    reset_contract_recording();
+    contract_config() = {};
+    RecordingContractFactory factory;
+    FakeModel model(&factory);
+    ContractEditorShell shell;
+    REQUIRE(shell.create(model, {}));
+    REQUIRE(shell.attach(aax_parent()));
+    REQUIRE(model.invalidation);
+
+    model.invalidate_processor();
+    CHECK_FALSE(shell.built());
+    CHECK(contract_log().saw("detach"));
+    CHECK(contract_log().live == 0);
+    CHECK_FALSE(model.invalidation);
+}
+
+TEST_CASE("AAX does not build or size a factory editor without a parent size reader",
+          "[aax][editor-host][aax-contract][negative]") {
+    reset_contract_recording();
+    contract_config() = {};
+    RecordingContractFactory factory;
+    FakeModel model(&factory);
+    ContractEditorShell shell;
+    REQUIRE(ContractEditorShell::applies(model));
+
+    CHECK_FALSE(shell.create(model, {}, false));
+    CHECK(contract_log().calls.empty());
+    CHECK_FALSE(shell.built());
+    CHECK_FALSE(shell.plan());
+    CHECK(contract_log().live == 0);
+    CHECK_FALSE(model.invalidation);
+    CHECK_FALSE(shell.attach(aax_parent()));
+
+    // The same factory is usable when the adapter can follow parent resizes.
+    REQUIRE(shell.create(model, {}, true));
+    CHECK(shell.built());
+    CHECK(shell.plan());
+    CHECK(contract_log().live == 1);
+}
+
+TEST_CASE("AAX leaves the create_view() path to a processor without an editor factory",
+          "[aax][editor-host][aax-contract][negative]") {
+    using pulp::format::aax::ContractEditorShell;
+    reset_contract_recording();
+    contract_config() = {};
+    FakeModel no_factory(nullptr);
+    ContractEditorShell shell;
+    CHECK_FALSE(ContractEditorShell::applies(no_factory));
+    CHECK_FALSE(shell.create(no_factory, {}));
+    CHECK_FALSE(shell.plan());
+
+    RecordingContractFactory factory;
+    FakeModel no_processor(&factory);
+    no_processor.has_processor = false;
+    CHECK_FALSE(ContractEditorShell::applies(no_processor));
+    CHECK_FALSE(shell.create(no_processor, {}));
+}
+
+TEST_CASE("AAX keeps a factory editor unattached when the host's view refuses it",
+          "[aax][editor-host][aax-contract][negative]") {
+    using pulp::format::aax::ContractEditorShell;
+    reset_contract_recording();
+    contract_config() = {};
+    contract_config().attach_succeeds = false;
+    RecordingContractFactory factory;
+    FakeModel model(&factory);
+    int publishes = 0;
+    ContractEditorShell shell;
+    REQUIRE(shell.create(model, [&publishes](uint32_t, uint32_t) {
+        ++publishes;
+        return true;
+    }));
+    CHECK_FALSE(shell.attach(aax_parent()));
+    CHECK_FALSE(shell.attached());
+    // An unattached editor never resizes the host's window.
+    CHECK_FALSE(contract_log().context->request_resize({640, 480, 1.0}));
+    CHECK(publishes == 0);
+    CHECK_FALSE(shell.host_resized(640, 480));
+    shell.close();
+    CHECK(contract_log().live == 0);
+    contract_config() = {};
+}
+
+// ── A Vellum editor in the AAX shell ─────────────────────────────────────────
+//
+// This source built a second time against Pulp's Vellum bridge: the same
+// shell over a pulp::vellum editor and its Vellum PluginViewHost, attached
+// offscreen to another Vellum host's native view. Only these cases run in
+// that executable.
+
+#if defined(PULP_TEST_AAX_VELLUM)
+
+namespace {
+
+struct AaxRootLog {
+    int opens = 0;
+    int closes = 0;
+    ::vellum::view::View* root = nullptr;
+};
+AaxRootLog g_aax_root;
+
+class AaxRootView final : public ::vellum::view::View {
+  public:
+    explicit AaxRootView(pulp::vellum::EditorEnv&) {
+        g_aax_root.root = this;
+    }
+    ~AaxRootView() override {
+        g_aax_root.root = nullptr;
+    }
+    pulp::format::ViewSize editor_view_size() const {
+        return {.preferred_width = 400,
+                .preferred_height = 300,
+                .min_width = 200,
+                .min_height = 150,
+                .max_width = 800,
+                .max_height = 600,
+                .aspect_ratio = 4.0 / 3.0};
+    }
+    void editor_opened() {
+        ++g_aax_root.opens;
+    }
+    void editor_closing() {
+        ++g_aax_root.closes;
+    }
+};
+
+struct AaxHostFactoryReset {
+    ~AaxHostFactoryReset() {
+        ::vellum::view::PluginViewHost::clear_factory();
+    }
+};
+
+} // namespace
+
+TEST_CASE("AAX opens, sizes and closes a Vellum editor", "[aax][vellum][editor-host]") {
+#if !defined(__APPLE__)
+    SKIP("Vellum's SDK ships its GPU plug-in view host on macOS only");
+#endif
+    using pulp::format::aax::ContractEditorShell;
+    g_aax_root = {};
+    FakeModel model(pulp::vellum::editor_factory<AaxRootView>());
+    ContractEditorShell shell;
+    REQUIRE(shell.create(model, [](uint32_t, uint32_t) { return true; }));
+    REQUIRE(g_aax_root.root != nullptr);
+    auto* host = g_aax_root.root->plugin_view_host();
+    REQUIRE(host != nullptr);
+    // GetViewSize before any window: the root's declared size.
+    const auto plan = shell.plan();
+    REQUIRE(plan);
+    CHECK(plan->width == 400);
+    CHECK(plan->height == 300);
+    CHECK(g_aax_root.opens == 0);
+
+    ::vellum::view::View parent_root;
+    auto parent = ::vellum::view::PluginViewHost::create(
+        parent_root, ::vellum::view::PluginViewHost::Size{800, 600});
+    REQUIRE(parent != nullptr);
+    REQUIRE(shell.attach(
+        {.kind = pulp::format::NativeParentKind::cocoa_view, .handle = parent->native_handle()}));
+    CHECK(g_aax_root.opens == 1);
+    CHECK(host->is_attached());
+
+    REQUIRE(shell.host_resized(640, 480));
+    CHECK(host->get_size().width == 640);
+    CHECK(host->get_size().height == 480);
+
+    shell.detach();
+    CHECK(g_aax_root.closes == 1);
+    CHECK_FALSE(host->is_attached());
+    shell.close();
+    CHECK(g_aax_root.root == nullptr);
+}
+
+TEST_CASE("AAX keeps a Vellum editor closed when its view host cannot be created",
+          "[aax][vellum][editor-host][negative]") {
+    using pulp::format::aax::ContractEditorShell;
+    AaxHostFactoryReset reset;
+    ::vellum::view::PluginViewHost::set_factory(
+        [](::vellum::view::View&, const ::vellum::view::PluginViewHost::Options&)
+            -> std::unique_ptr<::vellum::view::PluginViewHost> { return nullptr; });
+    g_aax_root = {};
+    FakeModel model(pulp::vellum::editor_factory<AaxRootView>());
+    ContractEditorShell shell;
+    REQUIRE(shell.create(model, {}));
+    int parent_stand_in = 0;
+    CHECK_FALSE(shell.attach(
+        {.kind = pulp::format::NativeParentKind::cocoa_view, .handle = &parent_stand_in}));
+    CHECK(g_aax_root.opens == 0);
+    shell.close();
+    CHECK(g_aax_root.closes == 0);
+}
+
+TEST_CASE("AAX offers the contract editor only where the host container size is readable",
+          "[aax][vellum][resize]") {
+    using namespace pulp::format::aax;
+    std::uint32_t w = 0, h = 0;
+    int stand_in = 0;
+    // A platform without a container size reader cannot follow a host resize,
+    // so the flag must be false there and true wherever the reader works.
+#if defined(__APPLE__)
+    CHECK(kAaxParentSizeReadable);
+#else
+    CHECK_FALSE(kAaxParentSizeReadable);
+    CHECK_FALSE(aax_native_parent_size(&stand_in, w, h));
+#endif
+    (void)w;
+    (void)h;
+    (void)stand_in;
+}
+
+#endif // PULP_TEST_AAX_VELLUM

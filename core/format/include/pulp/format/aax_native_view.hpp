@@ -57,7 +57,24 @@ inline float aax_display_scale(void*) noexcept {
 }
 #endif
 
+/// Whether the host container's size can be read back. Pro Tools resizes the
+/// container without calling into the plug-in, so a contract editor is offered
+/// only on platforms where this is true; elsewhere the editor could not follow a
+/// host resize and the legacy editor path keeps its own sizing.
 #if defined(__APPLE__)
+inline constexpr bool kAaxParentSizeReadable = true;
+#else
+inline constexpr bool kAaxParentSizeReadable = false;
+#endif
+
+#if defined(__APPLE__)
+/// The host container's current size in its own logical units (the parent's
+/// bounds, rounded to whole units). False, leaving the outputs untouched, when
+/// the parent is null or reports an empty size. Pro Tools resizes this view
+/// without calling into the plug-in, so the editor reads it to follow.
+bool aax_native_parent_size(void* native_parent, std::uint32_t& width,
+                            std::uint32_t& height) noexcept;
+
 /// Read the parent/child/window frames. Never throws; `valid` is false when a
 /// view is missing.
 AaxNativeGeometry aax_native_geometry(void* native_parent, void* native_child) noexcept;
@@ -82,6 +99,9 @@ void aax_fill_parent(void* native_parent, void* native_child) noexcept;
 /// parent and child agree.
 void aax_set_child_tracks_parent(void* native_child, bool tracks) noexcept;
 #else
+inline bool aax_native_parent_size(void*, std::uint32_t&, std::uint32_t&) noexcept {
+    return false;
+}
 inline AaxNativeGeometry aax_native_geometry(void*, void*) noexcept {
     return {};
 }

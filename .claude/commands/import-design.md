@@ -43,7 +43,7 @@ Ask the user or detect from context:
 **Claude Design (manual HTML export)**:
 - Anthropic Labs has no MCP / public API; the user manually exports the design (Standalone HTML / Send to Local Coding Agent) and hands you the file
 - Run `pulp import-design --from claude --file <path>` — parser delegates to the Stitch HTML pipeline and tags the IR as Claude
-- The CLI also writes a `bridge_handlers.cpp` scaffold next to the generated JS (see pulp #709). Open it, fill in the `add_handler()` registrations for the messages your editor will postMessage from JS, then `bridge_.attach_webview(*panel_)` (or `attach_native_runtime(...)` if hosting in a JS runtime instead of a WebView)
+- The CLI also writes a `bridge_handlers.cpp` scaffold next to the generated JS (see pulp #709). Open it, fill in the `add_handler()` registrations for the messages your editor will postMessage from JS, then `pulp::view::attach_webview(bridge_, *panel_)` (or `attach_native_runtime(bridge_, ...)` if hosting in a JS runtime instead of a WebView)
 
 **DESIGN.md**:
 - Run `pulp import-design --from designmd --file DESIGN.md --tokens tokens.json`
@@ -233,6 +233,6 @@ See `.agents/skills/import-design/SKILL.md` § "Knob rendering — silver by def
 
 ## Bridge Handler Scaffold (Claude Design)
 
-When `--from claude` runs, the CLI also writes `bridge_handlers.cpp` (override path with `--bridge-output`). The scaffold demonstrates how to wire `pulp::view::EditorBridge` so editor JS can `postMessage` into the C++ processor. Replace the `MyPluginEditor` placeholder with your editor class, register one `add_handler("type", ...)` per message kind, and call `bridge_.attach_webview(*panel_)`.
+When `--from claude` runs, the CLI also writes `bridge_handlers.cpp` (override path with `--bridge-output`). The scaffold demonstrates how to wire `pulp::view::EditorBridge` so editor JS can `postMessage` into the C++ processor. Replace the `MyPluginEditor` placeholder with your editor class, register one `add_handler("type", ...)` per message kind, and call `pulp::view::attach_webview(bridge_, *panel_)` from `pulp/view/editor_bridge_attach.hpp`.
 
 See `docs/reference/editor-bridge.md` for the full API and the standard error vocabulary (`malformed_json`, `unknown_type`, `missing_field`, `wrong_type`, `internal_error`).

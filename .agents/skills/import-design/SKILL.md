@@ -6228,8 +6228,8 @@ For `--from claude`, the CLI emits a starter C++ file demonstrating how to wire 
 
 - Replace the `MyPluginEditor` placeholder with the editor class that owns the `WebViewPanel`.
 - Register one `bridge_.add_handler("type", ...)` per message type your editor emits. Use `EditorBridge::get_float / get_uint / get_string` for safe payload reads, and `EditorBridge::ok_response() / ok_response(extras) / err_response(msg)` for replies.
-- Call `bridge_.attach_webview(*panel_)` to route WebView messages through the dispatcher.
-- For the native-JS-runtime path, swap `attach_webview(...)` for `bridge_.attach_native_runtime(runtime, "<handler_name>")` once the runtime exposes its postMessage primitive.
+- Call `pulp::view::attach_webview(bridge_, *panel_)` (`pulp/view/editor_bridge_attach.hpp`) to route WebView messages through the dispatcher.
+- For the native-JS-runtime path, swap `attach_webview(...)` for `pulp::view::attach_native_runtime(bridge_, runtime, "<handler_name>")` once the runtime exposes its postMessage primitive.
 
 See `docs/reference/editor-bridge.md` for the full API and the standard envelope-level error vocabulary (`malformed_json`, `unknown_type`, `missing_field`, `wrong_type`, `internal_error`).
 

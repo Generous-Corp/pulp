@@ -1,12 +1,19 @@
 #include "../src/scripted_editor_root.hpp"
 
 #include <catch2/catch_test_macros.hpp>
+#include <pulp/format/editor_assets.hpp>
 #include <pulp/format/editor_prewarm.hpp>
+#include <pulp/format/registry.hpp>
 #include <pulp/vellum/scripted_editor.hpp>
 #include <vellum/view/scripted_ui_prewarm.hpp>
 
+#include "support/portable_env.hpp"
+#include "support/unique_temp_dir.hpp"
+
 #include <cstdint>
+#include <fstream>
 #include <memory>
+#include <optional>
 #include <string>
 #include <utility>
 #include <vector>
@@ -28,7 +35,7 @@ class Processor final : public pulp::format::Processor {
   public:
     pulp::format::PluginDescriptor descriptor() const override {
         pulp::format::PluginDescriptor descriptor;
-        descriptor.bundle_id = "test.vellum.scripted-wiring";
+        descriptor.bundle_id = bundle_id;
         descriptor.name = "Scripted wiring";
         return descriptor;
     }
@@ -41,6 +48,7 @@ class Processor final : public pulp::format::Processor {
         return sizing;
     }
     pulp::format::ViewSize sizing;
+    std::string bundle_id = "test.vellum.scripted-wiring";
     EditorPrewarm editor_prewarm() const override {
         return {{"first script", "second script"}, {"first document", "second document"}};
     }
@@ -48,7 +56,9 @@ class Processor final : public pulp::format::Processor {
 
 class Context final : public pulp::format::EditorContext {
   public:
-    explicit Context(pulp::format::ParamPort& port) : port_(port) {}
+    explicit Context(pulp::format::ParamPort& port,
+                     pulp::format::EditorHostKind kind = pulp::format::EditorHostKind::plugin)
+        : port_(port), kind_(kind) {}
     pulp::format::ParamPort& params() override {
         return port_;
     }
@@ -62,20 +72,30 @@ class Context final : public pulp::format::EditorContext {
         return false;
     }
     pulp::format::EditorHostKind host_kind() const override {
-        return pulp::format::EditorHostKind::plugin;
+        return kind_;
     }
 
   private:
     pulp::format::ParamPort& port_;
+    pulp::format::EditorHostKind kind_;
 };
 
 struct RecordingSession {
     static inline std::vector<::vellum::render::GpuSurface*> attachments;
+    static inline std::optional<::vellum::view::ScriptedUiOptions> options;
+    static inline std::string host_kind;
+    static inline bool load_succeeds = true;
     RecordingSession(::vellum::view::View&, ::vellum::value::ParamModel&,
-                     ::vellum::view::ScriptedUiOptions) {}
-    void set_host_kind(const char*) {}
-    bool load(std::string*) {
-        return true;
+                     ::vellum::view::ScriptedUiOptions opened_with) {
+        options = std::move(opened_with);
+    }
+    void set_host_kind(const char* kind) {
+        host_kind = kind;
+    }
+    bool load(std::string* error) {
+        if (!load_succeeds && error)
+            *error = "no such script";
+        return load_succeeds;
     }
     const char* script_label() const {
         return "recording session";
@@ -241,4 +261,154 @@ TEST_CASE("Scripted root preserves processor resize bounds and design viewport",
     REQUIRE(editor.set_size({1800, 1200, 1.0}));
     CHECK(editor.size().width == 1200);
     CHECK(editor.size().height == 800);
+}
+
+namespace {
+
+constexpr unsigned char kEmbeddedScript[] = "createLabel('status', 'embedded', '');\n";
+
+// The binary-wide editor record a UI_SCRIPT target registers, plus the on-disk
+// copy a dev build also records, cleared again when the case ends.
+struct RegisteredEditorScript {
+    pulp::test::ScopedTempDir dir{"pulp-vellum-scripted-assets"};
+    std::string dev_path = (dir.path / "main.js").string();
+    std::optional<std::string> saved_hot_reload;
+
+    RegisteredEditorScript() {
+        std::ofstream(dev_path) << "createLabel('status', 'disk', '');\n";
+        if (const char* value = std::getenv("PULP_DEV_HOT_RELOAD"))
+            saved_hot_reload = value;
+        pulp::test::unset_env_var("PULP_DEV_HOT_RELOAD");
+        pulp::format::EditorAssets assets;
+        assets.script_path = dev_path.c_str();
+        assets.script_name = "main.js";
+        assets.script = kEmbeddedScript;
+        assets.script_size = sizeof(kEmbeddedScript) - 1;
+        pulp::format::register_editor_assets(assets);
+        RecordingSession::options.reset();
+        RecordingSession::host_kind.clear();
+    }
+    ~RegisteredEditorScript() {
+        pulp::format::reset_editor_assets_for_testing();
+        pulp::format::reset_registry_for_testing();
+        if (saved_hot_reload)
+            pulp::test::set_env_var("PULP_DEV_HOT_RELOAD", saved_hot_reload->c_str());
+        else
+            pulp::test::unset_env_var("PULP_DEV_HOT_RELOAD");
+    }
+};
+
+// Opens the scripted root the way a format adapter does and returns the
+// options its script session was built with.
+::vellum::view::ScriptedUiOptions open_scripted_root(Processor& processor,
+                                                     pulp::format::EditorHostKind kind) {
+    FactoryReset reset;
+    pulp::state::StateStore store;
+    pulp::format::StateStoreParamPort port(store);
+    Context context(port, kind);
+    ::vellum::view::PluginViewHost::set_factory(
+        [](::vellum::view::View&, const ::vellum::view::PluginViewHost::Options&) {
+            return std::make_unique<RecordingHost>();
+        });
+    using Root = pulp::vellum::detail::ScriptedEditorRoot<RecordingSession>;
+    pulp::vellum::Editor<Root> editor(context, processor);
+    REQUIRE(RecordingSession::options);
+    return *RecordingSession::options;
+}
+
+} // namespace
+
+TEST_CASE("Scripted root evaluates the embedded script in a plug-in host",
+          "[pulp-vellum][scripted-wiring][editor-assets]") {
+    RegisteredEditorScript registered;
+    Processor processor;
+    const auto options = open_scripted_root(processor, pulp::format::EditorHostKind::plugin);
+    CHECK(RecordingSession::host_kind == "plugin");
+    CHECK(options.script_source == reinterpret_cast<const char*>(kEmbeddedScript));
+    CHECK(options.script_name == "main.js");
+    CHECK(options.script_path.empty());
+    CHECK_FALSE(options.enable_hot_reload);
+    CHECK(options.storage_identity == "test.vellum.scripted-wiring/main.js");
+}
+
+TEST_CASE("Scripted root reads the dev build's script file only when it hot reloads",
+          "[pulp-vellum][scripted-wiring][editor-assets]") {
+    RegisteredEditorScript registered;
+    Processor processor;
+
+    SECTION("the standalone app is the dev tool and always reloads") {
+        const auto options =
+            open_scripted_root(processor, pulp::format::EditorHostKind::standalone);
+        CHECK(RecordingSession::host_kind == "standalone");
+        CHECK(options.enable_hot_reload);
+        CHECK(options.script_source.empty());
+        CHECK(options.script_path == std::filesystem::path(registered.dev_path));
+    }
+    SECTION("a plug-in host reloads when the developer exports PULP_DEV_HOT_RELOAD") {
+        REQUIRE(pulp::test::set_env_var("PULP_DEV_HOT_RELOAD", "1") == 0);
+        const auto options = open_scripted_root(processor, pulp::format::EditorHostKind::plugin);
+        CHECK(RecordingSession::host_kind == "plugin");
+        CHECK(options.enable_hot_reload);
+        CHECK(options.script_path == std::filesystem::path(registered.dev_path));
+    }
+    SECTION("a reloading editor keeps the embedded script once the file is gone") {
+        std::filesystem::remove(registered.dev_path);
+        const auto options =
+            open_scripted_root(processor, pulp::format::EditorHostKind::standalone);
+        CHECK(options.enable_hot_reload);
+        CHECK(options.script_source == reinterpret_cast<const char*>(kEmbeddedScript));
+        CHECK(options.script_path.empty());
+    }
+}
+
+TEST_CASE("Scripted root opens the editor its own bundle entry registered",
+          "[pulp-vellum][scripted-wiring][editor-assets]") {
+    RegisteredEditorScript registered;
+    const auto keyed_path = (registered.dir.path / "keyed.js").string();
+    std::ofstream(keyed_path) << "createLabel('status', 'keyed', '');\n";
+    pulp::format::register_plugin(pulp::format::PluginRegistration{
+        .id = "test.vellum.keyed",
+        .factory = nullptr,
+        .ui_script = keyed_path.c_str(),
+    });
+
+    Processor keyed;
+    keyed.bundle_id = "test.vellum.keyed";
+    const auto keyed_options = open_scripted_root(keyed, pulp::format::EditorHostKind::plugin);
+    CHECK(keyed_options.script_path == std::filesystem::path(keyed_path));
+    CHECK(keyed_options.script_source.empty());
+
+    // Another plug-in in the same image falls back to the binary-wide record.
+    Processor other;
+    other.bundle_id = "test.vellum.other";
+    const auto other_options = open_scripted_root(other, pulp::format::EditorHostKind::plugin);
+    CHECK(other_options.script_source == reinterpret_cast<const char*>(kEmbeddedScript));
+    CHECK(other_options.storage_identity == "test.vellum.other/main.js");
+}
+
+TEST_CASE("A scripted editor whose script does not load opens no editor",
+          "[pulp-vellum][scripted-wiring][editor-open]") {
+    FactoryReset reset;
+    pulp::state::StateStore store;
+    pulp::format::StateStoreParamPort port(store);
+    Context context(port);
+    Processor processor;
+    int hosts_created = 0;
+    ::vellum::view::PluginViewHost::set_factory(
+        [&](::vellum::view::View&, const ::vellum::view::PluginViewHost::Options&) {
+            ++hosts_created;
+            return std::make_unique<RecordingHost>();
+        });
+    using Root = pulp::vellum::detail::ScriptedEditorRoot<RecordingSession>;
+    pulp::vellum::EditorFactory<Root> factory;
+
+    RecordingSession::load_succeeds = false;
+    auto failed = factory.create(processor, context, pulp::format::EditorRole::editor);
+    RecordingSession::load_succeeds = true;
+    CHECK(failed == nullptr);
+    CHECK(hosts_created == 0);
+
+    auto opened = factory.create(processor, context, pulp::format::EditorRole::editor);
+    CHECK(opened != nullptr);
+    CHECK(hosts_created == 1);
 }

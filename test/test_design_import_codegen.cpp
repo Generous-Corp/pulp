@@ -1,6 +1,6 @@
 #include "test_design_import_shared.hpp"
 #include <pulp/canvas/font_resolver.hpp>
-#include <pulp/view/editor_bridge.hpp>
+#include <pulp/view/editor_bridge_scaffold.hpp>
 #include <pulp/view/pointer_dispatch.hpp>
 
 TEST_CASE("parse_v0_tsx normalizes JSON and unsupported-source fallback diagnostics",
@@ -1358,7 +1358,7 @@ TEST_CASE("render_claude_bridge_scaffold emits a buildable EditorBridge starter"
     // The framework surface MUST be referenced by full name — that's
     // the whole point of the scaffold (#709 acceptance criterion).
     REQUIRE(scaffold.find("pulp::view::EditorBridge") != std::string::npos);
-    REQUIRE(scaffold.find("#include <pulp/view/editor_bridge.hpp>") != std::string::npos);
+    REQUIRE(scaffold.find("#include <pulp/view/editor_bridge_attach.hpp>") != std::string::npos);
     REQUIRE(scaffold.find("#include <pulp/view/web_view.hpp>") != std::string::npos);
 
     // Demonstrates each of the patterns plugin authors will copy:
@@ -1370,7 +1370,7 @@ TEST_CASE("render_claude_bridge_scaffold emits a buildable EditorBridge starter"
     REQUIRE(scaffold.find(R"(add_handler("set_value")") != std::string::npos);
     REQUIRE(scaffold.find("EditorBridge::get_float") != std::string::npos);
     REQUIRE(scaffold.find("EditorBridge::ok_response()") != std::string::npos);
-    REQUIRE(scaffold.find("attach_webview(panel)") != std::string::npos);
+    REQUIRE(scaffold.find("attach_webview(bridge_, panel)") != std::string::npos);
     REQUIRE(scaffold.find("attach_native_runtime") != std::string::npos);
     REQUIRE(scaffold.find("MyPluginEditor") != std::string::npos);
 

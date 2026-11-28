@@ -6,7 +6,6 @@
    ".claude/commands/trace.md",
    "core/render",
    "core/view/platform/mac/window_host_mac.mm",
-   "core/view/src/editor_bridge.cpp",
    "core/view/src/plugin_frame_renderer.cpp",
    "core/view/src/view.cpp",
    "core/view/src/widget_bridge.cpp",
