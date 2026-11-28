@@ -168,9 +168,15 @@ class CheckCli(unittest.TestCase):
 
     def test_quoted_or_fenced_acks_do_not_count(self) -> None:
         head = grow(self.root)
-        pasted = (f"> accept-review-item: {HOTSPOT_ID}\n```\naccept-review-item: {FANOUT_ID}\n```\n")
-        rc, out = self.check(head, [verdict(head, extra=pasted)])
-        self.assertEqual(rc, 1, out)
+        lines = f"accept-review-item: {HOTSPOT_ID}\naccept-review-item: {FANOUT_ID}\n"
+        quoted = "".join("> " + line + "\n" for line in lines.splitlines())
+        for name, pasted in (("fenced", "```\n" + lines + "```\n"), ("quoted", quoted)):
+            with self.subTest(name):
+                rc, out = self.check(head, [verdict(head, extra=pasted)])
+                self.assertEqual(rc, 1, out)
+        # The same lines outside the fence do count.
+        rc, out = self.check(head, [verdict(head, extra="```\nlog\n```\n" + lines)])
+        self.assertEqual(rc, 0, out)
 
     def test_the_newest_qualifying_verdict_decides(self) -> None:
         head = grow(self.root)

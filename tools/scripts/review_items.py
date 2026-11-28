@@ -183,14 +183,15 @@ def disqualification(comment: dict[str, Any], head: str, policy: dict[str, list[
 
 
 def accepted_ids(body: str) -> set[str]:
-    """Ids the body accepts, outside fenced code blocks and `>` quotes."""
+    """Ids the body accepts, outside fenced code blocks. A `>` quote never
+    matches, since the line must start with the key."""
     found: set[str] = set()
     fenced = False
     for line in body.splitlines():
         if FENCE.match(line):
             fenced = not fenced
             continue
-        if fenced or line.lstrip().startswith(">"):
+        if fenced:
             continue
         match = ACCEPT_LINE.match(line)
         if match:
