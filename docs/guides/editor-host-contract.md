@@ -52,8 +52,11 @@ systems, so `PULP_AUDIO_DEVICE=null` shows the null device.
 
 The same standalone hosts tool windows that a UI integration supplies, such as
 a musical typing keyboard, through `pulp/format/standalone_panel.hpp`. An
-integration installs a `StandalonePanelFactory` at static initialization with
-`detail::install_standalone_panel_factory`. The standalone builds every
+integration installs a `StandalonePanelFactory` with
+`detail::install_standalone_panel_factory` from its own definition of
+`detail::install_standalone_panels()`, which the standalone calls before it
+builds its panels (a UI package plug-in's Standalone gets that definition
+generated). The standalone builds every
 installed panel before its audio starts, so a factory can decline based on the
 config. It then adds one menu item per panel and toggles the panel on Command
 plus the panel's letter from the editor window, which also works headless. The
