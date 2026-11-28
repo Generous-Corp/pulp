@@ -71,6 +71,12 @@ struct StandaloneContractEditorOptions {
 /// True when this platform can host a contract editor in a native window.
 bool standalone_contract_editor_supported();
 
+/// True when an editable text field in any of the app's windows has keyboard
+/// focus. A tool window that listens for keys app-wide asks this so typing
+/// into a field is never also played as notes. False on platforms without a
+/// native contract editor.
+bool standalone_text_input_has_focus();
+
 /// Open the processor's contract editor in a native window and run until the
 /// window closes (or, headless, until the frame is captured). False when the
 /// editor cannot be opened or, headless, nothing could be captured.
