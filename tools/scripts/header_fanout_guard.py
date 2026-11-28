@@ -331,6 +331,14 @@ def review_items_for_range(root: Path, base: str, head: str,
     return items, failures
 
 
+def missing_tracked_headers(root: Path, head: str, config: Path | None = None) -> list[str]:
+    """Ledger headers (from `config`) that do not exist at `head`."""
+    config = config or root / DEFAULT_CONFIG
+    headers = parse_config(json.loads(config.read_text(encoding="utf-8")))
+    files = set(_git("ls-tree", "-r", "--name-only", head, cwd=root).splitlines())
+    return [tracked.path for tracked in headers if tracked.path not in files]
+
+
 def suggested_ceiling(reach: int) -> int:
     """Headroom for ordinary growth (new tests); an umbrella include blows well past it."""
     return reach + max(10, math.ceil(reach * 0.1))

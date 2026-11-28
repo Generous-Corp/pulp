@@ -21,6 +21,9 @@ GIT_ENV = {"PATH": "/usr/bin:/bin:/opt/homebrew/bin:/usr/local/bin", "HOME": "/n
 HEAVY = "core/a/include/pulp/a/heavy.hpp"
 UMBRELLA = "core/a/include/pulp/a/umbrella.hpp"
 CENSUS = "docs/status/consumption-profiles.json"
+AGGREGATE = "test/agg.json"
+FANOUT_LEDGER = "tools/scripts/header_fanout_guard.json"
+HOTSPOT_LEDGER = "tools/scripts/hotspot_edit_guard.json"
 HOTSPOT_ID = f"hotspot:{CENSUS}"
 FANOUT_ID = f"fanout:{HEAVY}:+30"
 CONFIG = """[auto_merge]
@@ -49,7 +52,8 @@ def fixture(root: Path) -> None:
         git(root, "config", key, value)
     write(root, "tools/scripts/hotspot_edit_guard.json", json.dumps({
         "schema": "pulp-hotspot-edit-guard/v1",
-        "hotspots": [{"mode": "serialized", "path": CENSUS, "writer": "census --write"}]}))
+        "hotspots": [{"mode": "serialized", "path": CENSUS, "writer": "census --write"},
+                     {"path": AGGREGATE, "fragments": "test/agg/", "writer": "agg --write"}]}))
     write(root, "tools/scripts/header_fanout_guard.json", json.dumps({
         "schema_version": 1, "headers": [{"path": HEAVY, "max_tus": 5}]}))
     write(root, ".shipyard/config.toml", CONFIG)
@@ -82,7 +86,7 @@ def verdict(head: str, *accepts: str, login: str = "shipyard-local[bot]", kind: 
             "created_at": created, "updated_at": updated or created}
 
 
-class CheckCli(unittest.TestCase):
+class RepoCase(unittest.TestCase):
     def setUp(self) -> None:
         self._td = tempfile.TemporaryDirectory()
         self.addCleanup(self._td.cleanup)
@@ -100,6 +104,8 @@ class CheckCli(unittest.TestCase):
                           "--comments-json", str(path), *extra])
         return rc, out.getvalue()
 
+
+class CheckCli(RepoCase):
     def test_the_branch_has_both_review_items(self) -> None:
         head = grow(self.root)
         items, failures = ri.collect_items(self.root, "main", head)
@@ -223,6 +229,101 @@ class CheckCli(unittest.TestCase):
             self.assertIn("context=review-verdict", args)
             description = next(a for a in args if a.startswith("description="))
             self.assertLessEqual(len(description) - len("description="), ri.DESCRIPTION_LIMIT)
+
+
+class HardFailures(RepoCase):
+    """A guard's outright refusal fails the check whatever the verdict says."""
+
+    def commit(self, message: str = "change") -> str:
+        git(self.root, "add", "--all")
+        git(self.root, "commit", "-q", "-m", message)
+        return git(self.root, "rev-parse", "HEAD").strip()
+
+    def accept_all(self, head: str) -> list[dict]:
+        items, _ = ri.collect_items(self.root, "main", head)
+        return [verdict(head, *[i["id"] for i in items])]
+
+    def test_a_missing_tracked_header_fails_even_when_every_item_is_accepted(self) -> None:
+        git(self.root, "rm", "-q", HEAVY)
+        head = self.commit("remove the heavy header but keep its ledger entry")
+        rc, out = self.check(head, self.accept_all(head))
+        self.assertEqual(rc, 1, out)
+        self.assertIn("no longer exists", out)
+
+    def test_a_fragment_hotspot_edit_fails_even_when_every_item_is_accepted(self) -> None:
+        write(self.root, AGGREGATE, "{}\n")
+        head = self.commit("re-add the split aggregate")
+        rc, out = self.check(head, self.accept_all(head))
+        self.assertEqual(rc, 1, out)
+        self.assertIn(f"hotspot edit refused: {AGGREGATE}", out)
+
+    def test_a_ledger_edit_cannot_hide_a_fragment_hotspot_edit(self) -> None:
+        # The head drops the aggregate from its own registry, so the head's
+        # guard passes; the default branch's registry still refuses it.
+        write(self.root, HOTSPOT_LEDGER, json.dumps({
+            "schema": "pulp-hotspot-edit-guard/v1",
+            "hotspots": [{"mode": "serialized", "path": CENSUS, "writer": "census --write"}]}))
+        write(self.root, AGGREGATE, "{}\n")
+        head = self.commit("unregister the aggregate and edit it")
+        rc, out = self.check(head, self.accept_all(head))
+        self.assertEqual(rc, 1, out)
+        self.assertIn(f"hotspot edit refused: {AGGREGATE}", out)
+
+    def test_a_raised_ceiling_in_the_head_ledger_is_still_measured_against_main(self) -> None:
+        write(self.root, FANOUT_LEDGER, json.dumps({
+            "schema_version": 1, "headers": [{"path": HEAVY, "max_tus": 500}]}))
+        head = grow(self.root, "raise the ceiling and add an umbrella include")
+        rc, out = self.check(head, [verdict(head, HOTSPOT_ID, f"ledger:{FANOUT_LEDGER}")])
+        self.assertEqual(rc, 1, out)
+        self.assertIn(f"unaccepted: {FANOUT_ID}", out)
+
+    def test_removing_a_header_with_its_ledger_entry_is_a_ledger_review_item(self) -> None:
+        git(self.root, "rm", "-q", HEAVY, "core/a/src/heavy.cpp")
+        write(self.root, FANOUT_LEDGER, json.dumps({
+            "schema_version": 1, "headers": [{"path": UMBRELLA, "max_tus": 100}]}))
+        head = self.commit("remove the heavy header and its ledger entry")
+        rc, out = self.check(head, [verdict(head)])
+        self.assertEqual(rc, 1, out)
+        self.assertIn(f"unaccepted: ledger:{FANOUT_LEDGER}", out)
+        rc, out = self.check(head, [verdict(head, f"ledger:{FANOUT_LEDGER}")])
+        self.assertEqual(rc, 0, out)
+
+    def test_the_ledgers_come_from_the_base_ref_not_the_working_tree(self) -> None:
+        head = grow(self.root)
+        # An uncommitted, looser ledger in the checkout changes nothing.
+        write(self.root, FANOUT_LEDGER, json.dumps({
+            "schema_version": 1, "headers": [{"path": HEAVY, "max_tus": 500}]}))
+        items, _ = ri.collect_items(self.root, "main", head)
+        self.assertIn(FANOUT_ID, [i["id"] for i in items])
+
+    def test_a_hard_failure_posts_a_failure_status(self) -> None:
+        write(self.root, AGGREGATE, "{}\n")
+        head = self.commit("re-add the split aggregate")
+        posted: list[list[str]] = []
+        original = ri.gh_json
+        ri.gh_json = lambda args: posted.append(args) or {}
+        try:
+            rc, out = self.check(head, [], "--post-status", "--event", "pull_request_target")
+        finally:
+            ri.gh_json = original
+        self.assertEqual(rc, 1, out)
+        self.assertEqual(len(posted), 1, out)
+        self.assertIn("state=failure", posted[0])
+
+
+class ItemsRoundTrip(RepoCase):
+    def test_the_printed_lines_pasted_into_a_verdict_satisfy_check(self) -> None:
+        head = grow(self.root)
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            rc = ri.main(["review_items.py", "items", "--root", str(self.root), "--base", "main",
+                          "--head", head])
+        self.assertEqual(rc, 0, out.getvalue())
+        pasted = "".join(line + "\n" for line in out.getvalue().splitlines()
+                         if line.startswith("accept-review-item:"))
+        self.assertEqual(pasted.count("accept-review-item:"), 2, out.getvalue())
+        rc, check_out = self.check(head, [verdict(head, extra=pasted)])
+        self.assertEqual(rc, 0, out.getvalue() + check_out)
 
 
 class Parsing(unittest.TestCase):

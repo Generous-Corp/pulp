@@ -10,6 +10,12 @@ standing reviewer's exact-head verdict must accept every id. Ids:
 
   hotspot:<registered path>            a serialized hotspot was changed
   fanout:<header path>:+<added TUs>    a tracked header grew past its ceiling
+  ledger:<ledger path>                 the branch changed a guard's ledger
+
+Both ledgers are read from the base ref, never from the working tree or the
+pull request. Anything the guards refuse outright (a fragment-mode hotspot
+edit, a tracked header missing at the head) is a hard failure: `check`
+refuses the head whatever the verdict says.
 
 The reviewer accepts an item with one line per id in its verdict comment,
 above the final `verdict: APPROVE head:<sha>` line:
@@ -31,8 +37,7 @@ hard to forge as the approval. An item a `Serialized-Hotspot:` or
 
   review_items.py items --base REF --head REV [--root DIR] [--json PATH]
       List the head's review items, as a reviewer runs it before posting a
-      verdict. Run it from a checkout of the base branch: the ledgers it reads
-      are that checkout's, never the pull request's.
+      verdict. Each `accept-review-item:` line it prints is pasted as is.
 
   review_items.py check --repo O/R --pr N --head SHA --base REF [--root DIR]
                         [--comments-json FILE] [--post-status] [--event NAME]
@@ -43,7 +48,8 @@ hard to forge as the approval. An item a `Serialized-Hotspot:` or
       `review-verdict` status on the head, so Shipyard's `success` status
       cannot satisfy the required context while an item is unaccepted.
 
-Exit codes: 0 every item accepted (or none); 1 an item is unaccepted (for
+Exit codes: 0 every item accepted (or none); 1 an item is unaccepted or the
+guards refuse the head outright (for
 `check` on a non-head event, 0 once the status is posted); 2 anything could
 not be read or posted.
 """
@@ -54,6 +60,7 @@ import json
 import re
 import subprocess
 import sys
+import tempfile
 import tomllib
 from pathlib import Path
 from typing import Any, Callable
@@ -90,16 +97,81 @@ class ReviewItemError(RuntimeError):
 # ---------------------------------------------------------------------------
 
 
+# The ledgers the trusted check reads from the default branch. A pull request
+# that changes one carries the review item `ledger:<path>`: the change decides
+# what the guards measure, so a reviewer must see it.
+LEDGERS = ("tools/scripts/hotspot_edit_guard.json", "tools/scripts/header_fanout_guard.json")
+FANOUT_LEDGER = "tools/scripts/header_fanout_guard.json"
+
+
+def _git(root: Path, *args: str) -> str:
+    proc = subprocess.run(["git", "-C", str(root), *args], capture_output=True, text=True,
+                          encoding="utf-8")
+    if proc.returncode != 0:
+        raise ReviewItemError(f"git {' '.join(args)}: {proc.stderr.strip()}")
+    return proc.stdout
+
+
+def ledger_items(root: Path, base: str, head: str) -> list[dict[str, Any]]:
+    """One review item per guard ledger the range changes."""
+    anchor = _git(root, "merge-base", base, head).strip()
+    changed = set(_git(root, "diff", "--name-only", "--no-renames", anchor, head, "--",
+                       *LEDGERS).splitlines())
+    return [{"id": f"ledger:{path}", "kind": "guard-ledger", "path": path, "accepted_by": None}
+            for path in LEDGERS if path in changed]
+
+
+def head_ledger_headers(root: Path, head: str) -> set[str] | None:
+    """The tracked header paths in the head's own fan-out ledger, or None when
+    the head has no readable ledger."""
+    proc = subprocess.run(["git", "-C", str(root), "show", f"{head}:{FANOUT_LEDGER}"],
+                          capture_output=True, text=True, encoding="utf-8")
+    if proc.returncode != 0:
+        return None
+    try:
+        return {h.path for h in header_fanout_guard.parse_config(json.loads(proc.stdout))}
+    except (ValueError, json.JSONDecodeError):
+        return None
+
+
+def base_ledgers(root: Path, base: str, into: Path) -> dict[str, Path]:
+    """Both ledgers as the base ref holds them, written under `into`. Never the
+    working tree: a checkout of the pull request would hold its own copies."""
+    out: dict[str, Path] = {}
+    for path in LEDGERS:
+        target = into / Path(path).name
+        target.write_text(_git(root, "show", f"{base}:{path}"), encoding="utf-8")
+        out[path] = target
+    return out
+
+
 def collect_items(root: Path, base: str, head: str) -> tuple[list[dict[str, Any]], list[str]]:
     """(review items, hard failures) for `merge-base(base, head)..head`, with
-    both ledgers read from `root`'s working tree."""
+    both ledgers read from the base ref.
+
+    A hard failure is anything the guards refuse outright: a fragment-mode
+    hotspot edit, or a tracked header missing at the head. No verdict accepts
+    one. A header the head removes together with its ledger entry is not a
+    failure: the ledger change is a review item instead."""
     try:
-        hotspot_items, refusals = hotspot_edit_guard.review_items_for_range(root, base, head)
-        fanout_items, fanout_failures = header_fanout_guard.review_items_for_range(root, base, head)
+        with tempfile.TemporaryDirectory(prefix="review-items-") as tmp:
+            ledgers_at_base = base_ledgers(root, base, Path(tmp))
+            hotspot_items, refusals = hotspot_edit_guard.review_items_for_range(
+                root, base, head, ledgers_at_base[LEDGERS[0]])
+            fanout_items, fanout_failures = header_fanout_guard.review_items_for_range(
+                root, base, head, ledgers_at_base[FANOUT_LEDGER])
+            missing = header_fanout_guard.missing_tracked_headers(
+                root, head, ledgers_at_base[FANOUT_LEDGER])
     except (OSError, ValueError, RuntimeError) as exc:
         raise ReviewItemError(f"cannot compute review items: {exc}") from exc
-    failures = [f"hotspot edit refused: {spot['path']}" for spot, _ in refusals] + fanout_failures
-    return hotspot_items + fanout_items, failures
+    ledgers = ledger_items(root, base, head)
+    still_tracked = head_ledger_headers(root, head)
+    dropped = {path for path in missing
+               if still_tracked is not None and path not in still_tracked
+               and any(item["path"] == FANOUT_LEDGER for item in ledgers)}
+    failures = [f"hotspot edit refused: {spot['path']}" for spot, _ in refusals]
+    failures += [f for f in fanout_failures if f.split(":", 1)[0] not in dropped]
+    return hotspot_items + fanout_items + ledgers, failures
 
 
 def pending(items: list[dict[str, Any]]) -> list[str]:
@@ -260,8 +332,8 @@ def gh_json(args: list[str]) -> Any:
     raise ReviewItemError(f"gh api {' '.join(args)}: unexpected output")
 
 
-def describe_status(missing: list[str]) -> str:
-    text = "unaccepted review items: " + ", ".join(missing)
+def describe_status(missing: list[str], prefix: str = "unaccepted review items: ") -> str:
+    text = prefix + ", ".join(missing)
     return text if len(text) <= DESCRIPTION_LIMIT else text[: DESCRIPTION_LIMIT - 1] + "…"
 
 
@@ -291,13 +363,18 @@ def cmd_items(a: argparse.Namespace) -> int:
         Path(a.json).write_text(json.dumps({"schema": "pulp-review-items/v1", "items": items},
                                            indent=1, sort_keys=True) + "\n", encoding="utf-8")
     for failure in failures:
-        print(f"review-items: hard failure (not a review item): {failure}")
+        print(f"review-items: hard failure, no verdict can accept it: {failure}")
     if not items:
         print(f"review-items: none for {a.head} against {a.base}")
+    # Each acceptance line is printed bare, so it can be pasted into a verdict
+    # as is; what it is goes on the line before it.
     for item in items:
-        state = "accepted by commit trailer" if item["accepted_by"] else "needs the verdict line"
-        print(f"accept-review-item: {item['id']}    # {item['kind']}; {state}")
-    return 0
+        if item["accepted_by"]:
+            print(f"review-items: {item['id']} ({item['kind']}) is accepted by a commit trailer")
+            continue
+        print(f"review-items: {item['kind']}; review it, then paste the next line into the verdict:")
+        print(f"accept-review-item: {item['id']}")
+    return 1 if failures else 0
 
 
 def cmd_check(a: argparse.Namespace) -> int:
@@ -313,10 +390,25 @@ def cmd_check(a: argparse.Namespace) -> int:
                 print(f"review-items: ERROR: {exc}", file=sys.stderr)
         return 2
 
+    def refuse(what: list[str], why: str) -> int:
+        print(f"review-items: head {head[:12]}: {why}: {', '.join(what)}")
+        if a.post_status:
+            try:
+                post_failure(a.repo, head, describe_status(what, "refused by the guards: "),
+                             a.target_url)
+            except ReviewItemError as exc:
+                print(f"review-items: ERROR: {exc}", file=sys.stderr)
+                return 2
+            print(f"review-items: posted a failure {CONTEXT} status on {head}")
+        off_head = a.post_status and a.event is not None and a.event not in HEAD_CHECK_EVENTS
+        return 0 if off_head else 1
+
     if not re.fullmatch(r"[0-9a-f]{40}", head):
         return fail_closed(f"--head must be a full commit sha, not {a.head!r}")
     try:
-        items, _failures = collect_items(root, a.base, head)
+        items, failures = collect_items(root, a.base, head)
+        if failures:
+            return refuse(failures, "the guards refuse this head outright; no verdict accepts it")
         needed = pending(items)
         if not needed:
             print(f"review-items: head {head[:12]}: "

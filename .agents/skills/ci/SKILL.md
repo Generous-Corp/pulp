@@ -795,6 +795,7 @@ stable id:
 |---|---|
 | `hotspot:<registered path>` | a serialized hotspot (today `docs/status/consumption-profiles.json`) changed |
 | `fanout:<header path>:+<added TUs>` | the range grew a tracked header's fan-out past its `max_tus` |
+| `ledger:<ledger path>` | the range changed `hotspot_edit_guard.json` or `header_fanout_guard.json` (checked in `review-verdict` only) |
 
 Locally (pre-push, `gates.sh`), in `drift-fast` and in `Enforce version & skill
 sync` the guards print the id as `NEEDS REVIEWER ACKNOWLEDGEMENT` and pass,
@@ -816,9 +817,13 @@ verdict: APPROVE head:<sha>
 run from a checkout of `main` with the head fetched, prints those lines.
 
 **Enforcement.** `.github/workflows/review-verdict.yml` runs
-`review_items.py check` after Shipyard's rule allows a head. The checker comes
-from a default-branch checkout, and so do the two ledgers and
-`.shipyard/config.toml`. It reads the head as git objects only and never
+`review_items.py check` after Shipyard's rule allows a head. The checker and
+`.shipyard/config.toml` come from a default-branch checkout, and the two
+ledgers are read from the base ref (`git show`), never from a working tree, so
+a branch that loosens its own ledger is still measured against main's. A guard's
+outright refusal (a fragment-mode hotspot edit, a tracked header missing at the
+head) refuses the head whatever the verdict says; removing a header together
+with its ledger entry is the `ledger:` item instead. It reads the head as git objects only and never
 checks it out or runs it. It takes acceptances only from the newest APPROVE
 comment that names the exact head and qualifies:
 - posted by `shipyard-local[bot]` with account type `Bot`;
