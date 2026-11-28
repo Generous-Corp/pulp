@@ -282,6 +282,8 @@ IOS_COMPILE_REQUIRED_PATTERNS = (
     "test/test_pulp_vellum_editor.cpp",
     "test/test_pulp_vellum_about_notices.cpp",
     "test/test_au_v2_contract_view.mm",
+    "test/test_au_v3_contract_view.mm",
+    "test/test_standalone_contract_editor.mm",
     "test/cmake/au_v2_vellum_view_tests.cmake",
     "test/test_control_phase15_aggregate_e2e.cpp",
     "test/mac_objc_coload_probe.cpp",
