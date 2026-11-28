@@ -933,3 +933,16 @@ hot_files = [
     "tools/scripts/text_encoding_baseline.json",
 ]
 require_counted_approval = true
+
+# Derived files `shipyard apply-derived` may commit from a failed run's
+# artifact (read from the base branch's copy of this file, never the PR's).
+# A trailing `/` admits a directory; anything else is one exact file.
+[derived_files]
+paths = ["test/ctest_script_inputs/", ".shipyard/changed-surface-families.toml"]
+drift_tests = ["script-test-inputs-drift", "changed-surface-script-families-drift"]
+carry_trailers = ["Version-Bump", "Skill-Update", "Release"]
+commit_trailers = []
+
+[[derived_files.artifacts]]
+name = "script-inputs-expected"
+root = "test/ctest_script_inputs"
