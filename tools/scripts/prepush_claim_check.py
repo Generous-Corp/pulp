@@ -36,11 +36,9 @@ CLAIM = re.compile(
 )
 RELEASE = re.compile(r"^repair-claim-released:(?P<tail>[^\r\n]*)", re.M)
 # `repair-claim-taken: <new> from <old> reason=...` (`shipyard claim take`) moves the old
-# claim, with its expiry, to the new owner, as Shipyard reads it.
-TAKE = re.compile(
-    rf"^[ \t]*repair-claim-taken:[ \t]*(?P<owner>{CLAIM_ID})[ \t]+from[ \t]+(?P<source>{CLAIM_ID})(?=\s|$)",
-    re.M,
-)
+# claim, with its expiry, to the new owner, as Shipyard reads it. Both ids are read as any
+# non-space run, as Shipyard does: `shipyard claim take` accepts ids such as `team@m3`.
+TAKE = re.compile(r"^[ \t]*repair-claim-taken:[ \t]*(?P<owner>\S+)[ \t]+from[ \t]+(?P<source>\S+)", re.M)
 RECORD_KEY = re.compile(r"^shipyard\.claim\.(?P<repo>[^#\s]+)#(?P<pr>\d+)\.record$")
 # Environment that points git at another repository than the cwd's; a hook exports GIT_DIR.
 GIT_REPOSITORY_ENV = ("GIT_DIR", "GIT_WORK_TREE", "GIT_COMMON_DIR", "GIT_INDEX_FILE", "GIT_PREFIX",

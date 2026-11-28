@@ -120,6 +120,10 @@ print(json.dumps({'data': {'repository': result}}))
             [{"id": 10, "body": self.MINE}, {"id": 11, "body": "repair-claim-released: lane-a"}, again],
             [{"id": 10, "body": self.MINE},
              {"id": 11, "body": "repair-claim-taken: lane-b from lane-a reason=idle"}],
+            # Taken by ids outside Pulp's claim grammar, which `shipyard claim take` accepts.
+            *[[{"id": 10, "body": self.MINE},
+               {"id": 11, "body": f"repair-claim-taken: {taker} from lane-a reason=idle"}]
+              for taker in ["team@m3", "lane:3", "a/b/c"]],
         ]:
             with self.subTest(comments=comments):
                 result = self.run_check(comments, cwd=lane)
