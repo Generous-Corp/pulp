@@ -1864,11 +1864,9 @@ every agent (Claude and Codex) and contributor, not optional:
 2. **Adversarial review** (complete-feature bar, not happy-path) — hunt for
    correctness bugs, missed edge cases, and unverified claims.
 
-Run both **inline by default** (cheap — you read the diff and apply the two
-lenses) or via `/code-review`. The heavier `autoreview` (Codex panel) and
-`thermo-nuclear-code-quality-review` skills are **opt-in** — use them only when
-you want the deep/expensive pass. Either way the review happens and findings are
-swept before the PR lands.
+Run both **inline by default** or via `/code-review`; `autoreview` and the thermo-nuclear
+skills are **opt-in**. Depth scales with risk ([`docs/guides/code-review.md`](docs/guides/code-review.md));
+new public headers follow [`docs/guides/api-design.md`](docs/guides/api-design.md) (`api-design` skill).
 
 ---
 
@@ -1981,6 +1979,7 @@ Alphabetical. One line of purpose per skill. Each directory at `.agents/skills/<
 | `ableton-link` | Configure, implement, and test Pulp's optional desktop Ableton Link tempo-sync adapter while preserving the developer-supplied SDK, licensing, realtime, latency-compensation, and no-install boundaries. |
 | `agent-capabilities` | Maintain Pulp's installed design-time agent capability manifest and public-surface ledger. |
 | `android` | Android platform development for Pulp — NDK cross-compilation, Oboe audio, Dawn/Skia GPU rendering, JNI bridge, touch interaction, emulator workflows, and end-to-end smoke validation. |
+| `api-design` | Design rules for new public headers and APIs in Pulp: layering of the audio core, strong types for quantities, small composable processors, separation of processing, model and presentation, lean includes, and docs order. |
 | `ara` | Optional ARA support for Pulp, including developer-supplied ARA SDK setup, CMake enablement, adapter companion APIs, validation, and ARA-aware plugin implementation guidance. |
 | `audio-harness` | The measurement surface for ALL Pulp DSP and audio-pipeline work — read it BEFORE writing or gating DSP, not only when something already sounds wrong. |
 | `audio-headless-debug` | Reproduce and debug "only happens in a DAW" audio plugin bugs (cutouts, glitches, parameter-change failures) entirely offline — headless Processor scenes for DSP bugs and a standalone AudioUnit host probe for adapter/host-interaction bugs. |
@@ -2050,7 +2049,7 @@ Alphabetical. One line of purpose per skill. Each directory at `.agents/skills/<
 | `web-plugins` | Pulp in the browser — the WAM v2 and WebCLAP adapters, the wasm runtime, the Skia/WebGL2 browser window host, and the WebGPU (emdawnwebgpu) GPU-audio lane. |
 | `webview-ui` | Build or iterate on a Pulp WebView UI using the native WebView bridge, embedded assets, directory-backed dev resources, and focused WebView validation. |
 
-This table of 72 skills is GENERATED from each
+This table of 73 skills is GENERATED from each
 `.agents/skills/<name>/SKILL.md` frontmatter by
 `tools/scripts/skills_doc_check.py --write`. Do not edit it by hand.
 <!-- generated:end id=skills-digest -->
