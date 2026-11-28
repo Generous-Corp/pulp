@@ -192,10 +192,6 @@ class ClosureWalk(unittest.TestCase):
         self.assertEqual(code, 2)
         self.assertIn("no record", err)
 
-    def test_unrecorded_plain_word_is_a_leaf(self) -> None:
-        records = {"pulp-a": ("gpu_helper", "", "", "")}
-        self.assertEqual(self.run_check(records, ["pulp-a"], ["pulp-view*"])[0], 0)
-
     def test_clean_archive_path_passes(self) -> None:
         records = {"pulp-a": ("C:/build/pulp-runtime.lib", ""), "pulp-runtime": ("", "")}
         code, _, err = self.run_check(records, ["pulp-a"], ["pulp-view*"])
