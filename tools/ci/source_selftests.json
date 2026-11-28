@@ -386,6 +386,20 @@
       "timeout": 120.0
     },
     {
+      "name": "examples-manifest-guard-selftest",
+      "argv": [
+        "{repo}/tools/scripts/test_examples_manifest_guard.py"
+      ],
+      "timeout": 120.0
+    },
+    {
+      "name": "examples-manifest-guard",
+      "argv": [
+        "{repo}/tools/scripts/examples_manifest_guard.py"
+      ],
+      "timeout": 120.0
+    },
+    {
       "name": "fleet-remote-probe-selftest",
       "argv": [
         "{repo}/tools/fleet/test_probe_remote.py"

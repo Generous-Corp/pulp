@@ -14038,6 +14038,11 @@ main's SDK. A new optional Vellum integration package needs its option, its
 against main. The tests' ctest label should start with `pulp-vellum` so the
 lane's `-L pulp-vellum` filter runs them.
 
+The lane also runs the Yoga layout fixtures on Vellum's layout (`runner.py
+--verify --engine vellum`, `VELLUM_APP_HOST` set to the SDK's `bin/vellum-app-host`).
+Keep it a parallel mode: the `pulp-test-visual` lane stays until the UI cutover,
+and exit 3 (nothing measured) must keep failing the step.
+
 The lane's `-L pulp-vellum` run includes the GPU adapter probe and its
 empty-adapter negative control (`PASS_REGULAR_EXPRESSION` on the fail JSON, since
 the control must exit non-zero). The probe target is picked up by the

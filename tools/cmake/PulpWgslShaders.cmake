@@ -27,8 +27,6 @@
 
 include_guard(GLOBAL)
 
-set(_PULP_WGSL_SHADERS_DIR "${CMAKE_CURRENT_LIST_DIR}")
-
 function(pulp_add_wgsl_shaders target)
     cmake_parse_arguments(WGSL "NO_VALIDATE" "NAMESPACE" "FILES" ${ARGN})
     if(NOT TARGET ${target})
@@ -46,7 +44,9 @@ function(pulp_add_wgsl_shaders target)
     endif()
 
     find_package(Python3 COMPONENTS Interpreter REQUIRED)
-    set(_embed "${_PULP_WGSL_SHADERS_DIR}/scripts/embed_wgsl.py")
+    # The function's own directory, not a variable set at include time: with
+    # the global include guard, only the first including directory would see it.
+    set(_embed "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/scripts/embed_wgsl.py")
     if(NOT EXISTS "${_embed}")
         message(FATAL_ERROR "pulp_add_wgsl_shaders: ${_embed} is missing")
     endif()
