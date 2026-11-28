@@ -1948,8 +1948,14 @@ function submitChat(text) {
     var prompt = buildDesignChatPrompt(text);
 
     var requestId = chatRequestCounter++;
-    var tmpFile = "/tmp/pulp-design-prompt-" + requestId + ".txt";
-    exec("cat > " + tmpFile + " << 'PULPEOF'\n" + prompt + "\nPULPEOF");
+    var tmpFile = writePrivateTempFile(prompt, "prompt.txt");
+    if (tmpFile.length === 0) {
+        showToast("Could not create a private prompt file");
+        hideChatTypingIndicator();
+        chatRequestPending = false;
+        setChatPendingUi(false);
+        return;
+    }
     chatActiveRequestId = requestId;
     chatPendingStartedAt = performance.now();
     var callbackId = "__design-chat__-" + requestId;

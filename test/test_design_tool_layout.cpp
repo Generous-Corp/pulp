@@ -2024,3 +2024,74 @@ TEST_CASE("Design tool: palette and chat file actions never fall back to a share
             engine.evaluate("__execLog[0].indexOf('/tmp/') >= 0").getWithDefault<bool>(false));
     }
 }
+
+TEST_CASE("Design tool: file writes carry content as data, never as shell text",
+          "[design-tool][security]") {
+    if (find_js_file("design-tool-palette.js").empty()) {
+        SKIP("design-tool modules not found");
+        return;
+    }
+
+    View root;
+    root.set_theme(Theme::dark());
+    root.flex().direction = FlexDirection::column;
+    root.set_bounds({0, 0, 1100, 700});
+
+    pulp::state::StateStore store;
+    ScriptEngine engine;
+    WidgetBridge bridge(engine, root, store);
+    load_design_tool(root, engine, bridge);
+
+    SECTION("base64 encoder matches the standard alphabet and padding") {
+        REQUIRE(engine.evaluate("utf8Base64('')").toString().empty());
+        REQUIRE(engine.evaluate("utf8Base64('a')").toString() == "YQ==");
+        REQUIRE(engine.evaluate("utf8Base64('ab')").toString() == "YWI=");
+        REQUIRE(engine.evaluate("utf8Base64('abc')").toString() == "YWJj");
+        REQUIRE(engine.evaluate("utf8Base64('h\\u00e9llo')").toString() == "aMOpbGxv");
+    }
+
+    SECTION("a chat line equal to the old heredoc delimiter cannot run commands") {
+        const auto dir = fs::temp_directory_path() / "pulp-design-write-test";
+        fs::remove_all(dir);
+        fs::create_directories(dir);
+        const auto out = dir / "chat.md";
+        const auto marker = dir / "injected";
+        const std::string script = "writeTextFile('" + out.string() +
+                                   "', 'hello\\nPULPEOF\\ntouch " + marker.string() +
+                                   "\\n\\u00e9 done');";
+        REQUIRE_NOTHROW(engine.evaluate(script));
+        REQUIRE_FALSE(fs::exists(marker));
+        REQUIRE(read_file(out) == "hello\nPULPEOF\ntouch " + marker.string() + "\n\xc3\xa9 done");
+        fs::remove_all(dir);
+    }
+
+    SECTION("private temp files are fresh, unpredictable and owner-only") {
+        auto a = engine.evaluate("writePrivateTempFile('one', 'prompt.txt')").toString();
+        auto b = engine.evaluate("writePrivateTempFile('two', 'prompt.txt')").toString();
+        REQUIRE_FALSE(a.empty());
+        REQUIRE_FALSE(b.empty());
+        REQUIRE(a != b);
+        REQUIRE(a.find("pulp-design-prompt-") == std::string::npos);
+        REQUIRE(read_file(a) == "one");
+        REQUIRE(read_file(b) == "two");
+        const auto perms = fs::status(fs::path(a).parent_path()).permissions();
+        REQUIRE((perms & (fs::perms::group_all | fs::perms::others_all)) == fs::perms::none);
+        fs::remove_all(fs::path(a).parent_path());
+        fs::remove_all(fs::path(b).parent_path());
+    }
+
+    SECTION("chat submission uses a private file, not a counter path under /tmp") {
+        REQUIRE_NOTHROW(
+            engine.evaluate("var __cmds = [];"
+                            "var __realExec = exec;"
+                            "exec = function(c) { __cmds.push(String(c)); return __realExec(c); };"
+                            "execAsync = function(c, id) { __cmds.push(String(c)); };"
+                            "submitChat('make it blue\\nPULPEOF');"));
+        const auto n = engine.evaluate("__cmds.length").getWithDefault<int>(-1);
+        REQUIRE(n >= 1);
+        REQUIRE(engine.evaluate("__cmds.join('\\n').indexOf('/tmp/pulp-design-prompt-')")
+                    .getWithDefault<int>(0) == -1);
+        REQUIRE(engine.evaluate("__cmds[0].indexOf('mktemp -d')").getWithDefault<int>(-1) >= 0);
+        REQUIRE(engine.evaluate("__cmds[0].indexOf('PULPEOF')").getWithDefault<int>(0) == -1);
+    }
+}
