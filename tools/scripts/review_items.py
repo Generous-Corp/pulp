@@ -242,7 +242,7 @@ def unaccepted(items: list[dict[str, Any]], comments: list[dict[str, Any]], head
 
 def gh_json(args: list[str]) -> Any:
     """`gh api` output; `--paginate` pages concatenated into one list."""
-    proc = subprocess.run(["gh", "api", *args], capture_output=True, text=True)
+    proc = subprocess.run(["gh", "api", *args], capture_output=True, text=True, encoding="utf-8")
     if proc.returncode != 0:
         raise ReviewItemError(f"gh api {' '.join(args)}: {proc.stderr.strip()}")
     decoder = json.JSONDecoder()

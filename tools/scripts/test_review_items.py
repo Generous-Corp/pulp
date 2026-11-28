@@ -33,7 +33,7 @@ REVIEWER_STAMP = ("<!-- session: Daniels-Mac-Studio-m3/fleet-pass-reviewer-m3-20
 
 def git(root: Path, *args: str) -> str:
     return subprocess.run(["git", "-C", str(root), *args], env=GIT_ENV, capture_output=True,
-                          text=True, check=True).stdout
+                          text=True, encoding="utf-8", check=True).stdout
 
 
 def write(root: Path, rel: str, text: str) -> None:
