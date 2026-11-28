@@ -49,6 +49,11 @@
     view->_resizeRequest = [resizeRequest copy];
 
     pulp::format::ContractEditorSession::HostHooks hooks;
+#if TARGET_OS_OSX
+    // Keys reach this view from AppKit, after its key-equivalent pass has
+    // already shown them to the editor's own view.
+    hooks.keys_after_native_pass = true;
+#endif
     // The view owns the session, so it outlives every hook call.
     hooks.request_resize = [view](const pulp::format::EditorSize& requested) {
         return [view requestEditorSize:CGSizeMake(requested.width, requested.height)];

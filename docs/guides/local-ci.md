@@ -2282,6 +2282,26 @@ Detecting a partially degraded gate pool needs capacity measured against demand 
 a busy pool and a pool at a third of capacity look alike from host presence — and
 nothing implements that today.
 
+## Running `gates.sh` in a fresh checkout or worktree
+
+`tools/scripts/gates.sh origin/main` checks its prerequisites once, before any
+gate, with `gates_preflight.py`, and prints one list with the exact command for
+each. `tools/scripts/gates.sh --bootstrap origin/main` performs the automatic
+ones and continues:
+
+- a shallow clone (`git fetch --unshallow`) and the `pulp-gpu-ledger` merge driver
+  plus hooks path (set for this worktree only) always apply;
+- the VST3/AU SDKs (`./setup.sh --deps-only`), the jsx-runtime packages (`npm ci`)
+  and the CMake file-API reply of an existing build dir block only when the diff
+  reaches a lane that configures a build, and are otherwise printed as notes;
+- a Vellum-enabled build dir is never chosen as the gate build dir and is never
+  moved.
+
+Knobs, each of which prints NOT CHECKED when it skips something:
+`PULP_GATES_SKIP_PREFLIGHT=1`, `PULP_GATES_GATE_HOST_PYTHON=0` (refuse the Python
+lanes on a gate host), `PULP_GATES_GATE_HOST_CAP_S` (per-lane wall-time cap,
+default 600).
+
 ## Host resource governance
 
 Pulp's local Macs are shared: CI validation builds run alongside agent and

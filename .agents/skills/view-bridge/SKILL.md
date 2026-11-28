@@ -827,6 +827,7 @@ the `clap` skill's Parameters section for the complete transport contract.
 | AU v3 | `viewDidLoad` | After `PluginViewHost::attach_to_parent` in `viewDidLoad` |
 | AU v3, processor with an `editor_factory()` | `rebuildEditorIfReady` opens a `ContractEditorSession` in `PulpAUv3ContractView` and never creates a ViewBridge | n/a: the contract editor's `attach()` is the attach point |
 | AAX | `AAX_CEffectGUI::CreateViewContainer()` — not `CreateViewContents()`, which runs before any window exists | After `try_attach_to_parent` succeeds |
+| AAX, processor with an `editor_factory()` | `CreateViewContents()` builds the contract editor unattached through `aax::ContractEditorShell`, so `GetViewSize` knows its size; no ViewBridge | n/a: `CreateViewContainer()` calls the editor's `attach()` |
 | Standalone | Before `WindowHost::create` | After `WindowHost::create` succeeds |
 
 AAX keeps a host-side data model and a real-time algorithm instance, but the
@@ -3007,6 +3008,19 @@ prove the subscription was removed, then reopen to prove it is re-established.
 Keep the prewarm recorder in its own executable so it can replace Vellum's
 external scheduler without changing the ordinary scripted editor tests.
 
+A script that fails to load opens no editor: the scripted root reports
+`editor_failed_to_open()`, `pulp::vellum::EditorFactory` then returns null
+before any `PluginViewHost` exists, and the adapter shows the host's own
+editor. It never opens an empty Vellum window.
+
+`ui-script-vellum-route-*` (test/fixtures/ui_script_plugin) prove the route on
+built images: each format of the `UI_ENGINE vellum` fixture defines
+`scripted_editor_factory` and no `pulp::view`, `ViewBridge` or legacy builder
+symbol, with the plain fixture as the control. The plug-ins are not test
+executables, so `ui-script-vellum-route-build` builds them first through
+`tools/ci/governed-build.sh`; a lane that builds only labelled executables
+would otherwise run the census on files that do not exist.
+
 `pulp_add_plugin(UI_SCRIPT)` no longer ships a plug-in that reads `ui.js` from
 the developer's absolute source path at every editor open. The script's bytes,
 the `theme.json` beside it, and the asset files beside it (images, fonts,
@@ -4099,11 +4113,19 @@ same way `PulpPlugView`'s constructor always did.
 `pulp::standalone-contract` (a UI package plug-in's Standalone) cannot own a
 Pulp view, so tool windows such as the musical typing keyboard reach it as
 `StandalonePanel`s (`pulp/format/standalone_panel.hpp`) that a UI integration
-installs at static init. Things that are easy to get wrong:
+installs through an explicit registrar call. Things that are easy to get wrong:
 
 - The registrar must be linked into the Standalone. A static-init object in an
-  archive member that nothing references is dropped, so an integration needs a
-  generated per-target source that calls its install function.
+  archive member that nothing references is dropped, so the standalone calls
+  `detail::install_standalone_panels()` itself before it builds its panels.
+  format-core's definition is empty and sits in its own archive member; the
+  generated per-target source (`_pulp_add_standalone_panel_registrar`, view-free
+  standalones only) defines the same symbol, so the linker takes it instead and
+  it installs the integration's factory. The generator learns of a provider from
+  the global property `PULP_STANDALONE_PANEL_PROVIDERS`. In-tree the integration
+  appends to it; an installed SDK consumer never runs the integration's
+  CMakeLists.txt, so `PulpConfig.cmake` appends it from the exported target
+  property `PULP_STANDALONE_PANEL_PROVIDER` (`<header>|<function>`) instead.
 - The shortcut toggle runs from the editor content view's
   `performKeyEquivalent:`, not only from the menu. A headless run has no menu,
   and the key driver offers `performKeyEquivalent:` first, so
