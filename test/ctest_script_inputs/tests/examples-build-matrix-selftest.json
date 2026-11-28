@@ -3,7 +3,7 @@
  "record": {
   "entry": "tools/scripts/test_examples_build_matrix.py",
   "inputs": [
-   "docs/status/examples-build-record.json",
+   "core/audio",
    "docs/status/examples-manifest.json",
    "tools/scripts/examples_build_matrix.py",
    "tools/scripts/test_examples_build_matrix.py"
