@@ -1257,7 +1257,9 @@ TEST_CASE("AAX offers the contract editor only where the host container size is 
     CHECK_FALSE(kAaxParentSizeReadable);
     CHECK_FALSE(aax_native_parent_size(&stand_in, w, h));
 #endif
-    (void)w; (void)h; (void)stand_in;
+    (void)w;
+    (void)h;
+    (void)stand_in;
 }
 
 #endif // PULP_TEST_AAX_VELLUM
