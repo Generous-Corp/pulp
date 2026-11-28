@@ -209,6 +209,41 @@ class PreflightTests(unittest.TestCase):
             "mkdir -p build/.cmake/api/v1/query && touch build/.cmake/api/v1/query/codemodel-v2",
             "cmake -S . -B build"])
 
+    def reserved_host(self, role: str) -> Path:
+        """A checkout carrying the real host policy, with tartci faked to report ``role``."""
+        root = self.complete(f"host-{role}")
+        (root / "tools/scripts").mkdir(parents=True, exist_ok=True)
+        shutil.copy2(HERE / "gate_host_policy.sh", root / "tools/scripts/gate_host_policy.sh")
+        write(self.bin / "tartci", f'#!/bin/sh\necho "TARTCI_SERVES_GATE=1"\necho "TARTCI_ROLE={role}"\n', executable=True)
+        self.env["PULP_TARTCI_BIN"] = str(self.bin / "tartci")
+        self.env["CMAKE_LOG"] = str(self.base / "cmake.log")
+        return root
+
+    def test_bootstrap_never_reconfigures_a_kept_build_dir_on_a_gate_host(self) -> None:
+        for role in ("dev-overflow", "dedicated-builder", "a-role-added-later"):
+            with self.subTest(role=role):
+                root = self.reserved_host(role)
+                build = self.make_build(root, f"build-{role}", reply=False)
+                write(self.bin / "cmake", FAKE_CMAKE + f'echo "$@" >> "{self.base / "cmake.log"}"\n', executable=True)
+                report = self.collect(root)
+                self.assertEqual(self.keys(report), [], "no blocking finding to act on")
+                self.assertTrue(any("serves the required gate" in n for n in report.notes), report.notes)
+                proc = self.run_cli(root, "--bootstrap")
+                self.assertEqual(proc.returncode, 0, proc.stderr)
+                self.assertFalse((self.base / "cmake.log").exists(), "cmake must never run on the kept build dir")
+                self.assertFalse(pre.has_codemodel_reply(build))
+                self.assertFalse((build / pre.CODEMODEL_QUERY).exists(), "the query is not even touched")
+
+    def test_control_a_light_host_does_reconfigure_the_kept_build_dir(self) -> None:
+        root = self.reserved_host("light")
+        build = self.make_build(root, "build", reply=False)
+        write(self.bin / "cmake", FAKE_CMAKE + f'echo "$@" >> "{self.base / "cmake.log"}"\n', executable=True)
+        self.only(self.collect(root), "file-api")
+        proc = self.run_cli(root, "--bootstrap")
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertTrue((self.base / "cmake.log").exists())
+        self.assertTrue(pre.has_codemodel_reply(build))
+
     def test_control_a_build_dir_with_the_reply_reports_nothing(self) -> None:
         root = self.complete()
         self.make_build(root, "build", reply=True)

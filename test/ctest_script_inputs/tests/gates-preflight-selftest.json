@@ -32,6 +32,7 @@
    "tools/scripts/configure_only.py",
    "tools/scripts/consumption_census.py",
    "tools/scripts/gate_common.py",
+   "tools/scripts/gate_host_policy.sh",
    "tools/scripts/gate_python_imports_check.py",
    "tools/scripts/gates.sh",
    "tools/scripts/gates_preflight.py",

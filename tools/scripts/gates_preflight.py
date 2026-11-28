@@ -23,7 +23,8 @@ use for a prerequisite is never told to install it:
 Bootstrap performs only the automatic ones, and says what each touches: a fetch
 (unshallow), this worktree's git config (never the shared one), gitignored
 symlinks and packages under the checkout (setup.sh, npm ci, both at nice 10), and
-a configure-only rerun of an existing build dir for the file-API reply. It never
+a configure-only rerun of an existing build dir for the file-API reply (never on a host that
+serves the required gate). It never
 moves or deletes a build dir: a Vellum-enabled tree is left alone and the gates
 choose another.
 
@@ -257,6 +258,18 @@ def vellum_dirs(root: Path) -> list[tuple[Path, list[str]]]:
     return found
 
 
+def host_is_reserved(root: Path, env: dict[str, str] | None = None) -> bool:
+    """Whether gate_host_policy.sh reserves this host for the required gate (tartci says it serves the
+    gate and is not a `light` host). Asked of the policy itself, so the answer is the one gates.sh uses."""
+    policy = root / "tools" / "scripts" / "gate_host_policy.sh"
+    if not policy.is_file():
+        return False
+    proc = subprocess.run(["bash", "-c", 'source "$1" && pulp_gate_host_builds_reserved', "_", str(policy)],
+                          capture_output=True, text=True, encoding="utf-8", check=False,
+                          env={**os.environ, **(env or {})})
+    return proc.returncode == 0
+
+
 def check_build_dir(root: Path, env: dict[str, str], report: Report) -> None:
     declared = env.get(sst.GATES_BUILD_DIR_ENV, "").strip()
     if declared:
@@ -283,6 +296,14 @@ def check_build_dir(root: Path, env: dict[str, str], report: Report) -> None:
     if has_codemodel_reply(build):
         return
     shown = build.name
+    if host_is_reserved(root, env):
+        # A kept build dir is never configured on a host that serves the required gate; the generated-manifest
+        # lane takes its one allowance in a temporary configure-only tree instead.
+        report.notes.append(
+            f"{shown} has no CMake file-API reply, and this host serves the required gate, so neither the "
+            "preflight nor --bootstrap reconfigures a kept build dir here; the generated-manifest lane uses a "
+            "temporary configure-only tree. To use this one, run the cmake command from a TARTCI_ROLE=light host.")
+        return
     report.findings.append(Finding(
         "file-api", f"{shown} has no CMake file-API codemodel reply (the changed-surface families check "
         "cannot read the target graph from it); --bootstrap reruns cmake -S . -B on it, configure only",

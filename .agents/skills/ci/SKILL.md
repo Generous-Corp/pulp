@@ -76,7 +76,8 @@ on a real PR. Do them in order.
    printed as notes, so a docs-only diff in a fresh worktree is not stopped.
    `gates.sh --bootstrap` performs the blocking ones (setup.sh and `npm ci` at
    nice 10, npm cache under the git dir or `npm_config_cache`, a configure-only
-   rerun of your existing build dir for the file-API reply, announced first) and
+   rerun of your existing build dir for the file-API reply, announced first, and never on a
+   host that serves the required gate, where it only prints a note) and
    continues. A Vellum-enabled build dir (`PULP_ENABLE_PULP_VELLUM*`,
    `PULP_ENABLE_RMLUI_ADAPTER` ON) is never chosen as the gate build dir, so it
    stays where it is and the gates use `build/` or configure `build-gate`; naming
