@@ -393,6 +393,13 @@
       "timeout": 120.0
     },
     {
+      "name": "examples-build-matrix-selftest",
+      "argv": [
+        "{repo}/tools/scripts/test_examples_build_matrix.py"
+      ],
+      "timeout": 120.0
+    },
+    {
       "name": "examples-manifest-guard",
       "argv": [
         "{repo}/tools/scripts/examples_manifest_guard.py"

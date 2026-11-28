@@ -4026,6 +4026,45 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
+name = "script-readers-3f638338750e"
+paths = ["tools/scripts/test_examples_build_matrix.py"]
+tests = [
+  "build-parallelism-guard",
+  "changed-surface-policy-inventory",
+  "changed-surface-policy-selftest",
+  "changed-surface-script-families-drift",
+  "changed-surface-script-families-selftest",
+  "changed-surface-shadow-plans-selftest",
+  "clean-worktree-planning-selftest",
+  "configure-only-selftest",
+  "examples-build-matrix-selftest",
+  "flake-exoneration-selftest",
+  "gate-common-selftest",
+  "gates-preflight-selftest",
+  "gpu-audio-provider-identity-selftest",
+  "gpu-dpr-runner-selftest",
+  "gpu-first-visible-acceptance-selftest",
+  "gpu-first-visible-campaign-selftest",
+  "gpu-first-visible-external-adapter-selftest",
+  "gpu-first-visible-role-producers-selftest",
+  "gpu-handoff-provenance-selftest",
+  "pr-head-affected-tests-selftest",
+  "pr-head-diff-scoped-registrations",
+  "prepush-receipt",
+  "prepush-refresh-push",
+  "reuse-policy-replay-selftest",
+  "sample-region-compat-baseline-selftest",
+  "vellum-watch-preflight-selftest",
+  "wide-non-native-selftest",
+]
+build_targets = ["pulp-cli"]
+supported_build_types = [
+  "debug",
+  "release",
+]
+risk_class = "low"
+
+[[families]]
 name = "script-readers-8393aa1adb07"
 paths = ["tools/scripts/test_examples_index_guard.py"]
 tests = [
@@ -10000,6 +10039,7 @@ paths = [
   "tools/scripts/test_embed_js.py",
   "tools/scripts/test_encode_binary_data.py",
   "tools/scripts/test_example_validation_paths.py",
+  "tools/scripts/test_examples_build_matrix.py",
   "tools/scripts/test_examples_index_guard.py",
   "tools/scripts/test_examples_manifest_guard.py",
   "tools/scripts/test_fetch_skia_for_release.py",
@@ -10645,6 +10685,7 @@ paths = [
   "tools/scripts/test_embed_js.py",
   "tools/scripts/test_encode_binary_data.py",
   "tools/scripts/test_example_validation_paths.py",
+  "tools/scripts/test_examples_build_matrix.py",
   "tools/scripts/test_examples_index_guard.py",
   "tools/scripts/test_examples_manifest_guard.py",
   "tools/scripts/test_fetch_skia_for_release.py",
