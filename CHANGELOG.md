@@ -9,6 +9,24 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
      release's bullet block. See docs/guides/versioning.md § Release pipeline
      for the full end-to-end flow. -->
 
+<a id="v12360"></a>
+## [1.236.0] - 2026-11-28
+
+- chore/deps dependabot alerts ([#13042](https://github.com/Generous-Corp/pulp/pull/13042))
+- release/version bump ([#13046](https://github.com/Generous-Corp/pulp/pull/13046))
+- test/release cli runner temp ([#13039](https://github.com/Generous-Corp/pulp/pull/13039))
+- feature/g4 aax contract editor ([#12900](https://github.com/Generous-Corp/pulp/pull/12900))
+- fix/prepush gpu handoff selftest budget ([#13017](https://github.com/Generous-Corp/pulp/pull/13017))
+- feature/gates preflight bootstrap ([#13020](https://github.com/Generous-Corp/pulp/pull/13020))
+
+<a id="v12350"></a>
+## [1.235.0] - 2026-11-28
+
+- release/version bump ([#13041](https://github.com/Generous-Corp/pulp/pull/13041))
+- feature/vellum standalone panel registrar ([#12958](https://github.com/Generous-Corp/pulp/pull/12958))
+- fix/sdk archive mtimes ([#12946](https://github.com/Generous-Corp/pulp/pull/12946))
+- lane/w cutover inspect view inspector ([#12922](https://github.com/Generous-Corp/pulp/pull/12922))
+
 <a id="v12340"></a>
 ## [1.234.0] - 2026-11-28
 
@@ -13948,6 +13966,8 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/Generous-Corp/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/Generous-Corp/pulp/pull/2))
 
+[1.236.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.236.0
+[1.235.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.235.0
 [1.234.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.234.0
 [1.233.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.233.0
 [1.232.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.232.0

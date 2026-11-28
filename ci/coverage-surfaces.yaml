@@ -20,6 +20,7 @@ component_sets:
     - dataplane
     - dawproject
     - dsl
+    - editor_bridge
     - events
     - format
     - gpu_audio

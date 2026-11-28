@@ -27,6 +27,7 @@ INPUT                  = ../../core/audio/include \
                          ../../core/canvas/include \
                          ../../core/content/include \
                          ../../core/dataplane/include \
+                         ../../core/editor_bridge/include \
                          ../../core/events/include \
                          ../../core/format/include \
                          ../../core/gpu_audio/include \
