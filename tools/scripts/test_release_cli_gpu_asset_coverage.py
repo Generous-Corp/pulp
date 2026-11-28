@@ -167,7 +167,7 @@ class SharedAudioSdkRecipe(unittest.TestCase):
                 fake_cmake.chmod(0o755)
                 env = dict(os.environ, RELEASE_TAG="v9.8.7", CAPTURE=str(capture),
                            NUMBER_OF_PROCESSORS="2",
-                           HOME=temp, XDG_STATE_HOME=temp,
+                           HOME=temp, XDG_STATE_HOME=temp, RUNNER_TEMP=temp,
                            PATH=f"{temp}:{os.environ.get('PATH', '')}")
                 result = subprocess.run(
                     ["bash", "-c", script.replace("${{ matrix.platform }}", platform)],
