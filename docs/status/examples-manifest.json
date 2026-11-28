@@ -642,9 +642,9 @@
    "evidence": "links pulp::view; piano roll editor through create_view()"
   },
   "timeline-sdk-consumer": {
-   "class": "audio-only",
+   "class": "moves-to-vellum",
    "platform": "cross",
-   "evidence": "SDK consumer project (find_package(Pulp)) with no view, render or canvas reference",
+   "evidence": "SDK consumer project (find_package(Pulp)) whose CMakeLists links Pulp::view, Pulp::render and Pulp::canvas",
    "editor": "none"
   },
   "timeline-session": {

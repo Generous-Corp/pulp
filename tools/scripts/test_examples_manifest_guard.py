@@ -99,6 +99,24 @@ class ExamplesManifestGuardTest(unittest.TestCase):
         files = {"examples/plain/main.cpp": '#include <pulp/signal/biquad.hpp>\n#include <pulp/inspect/x.hpp>\n'}
         self.assertEqual(run(GOOD, files), [])
 
+    def test_audio_only_view_include_in_every_cxx_extension_fails(self):
+        for ext in (".cxx", ".c++", ".c", ".hh", ".hxx", ".h++", ".inl", ".ipp", ".tpp"):
+            with self.subTest(ext=ext):
+                files = {f"examples/plain/x{ext}": "#include <pulp/view/view.hpp>\n"}
+                self.assertTrue(any("pulp/view/" in p for p in run(GOOD, files)))
+
+    def test_unreadable_tracked_source_fails_closed(self):
+        with make_repo(GOOD, {"examples/plain/main.cpp": "int main() {}\n"}) as tmp:
+            (Path(tmp) / "examples" / "plain" / "main.cpp").unlink()
+            problems = guard.check(Path(tmp))
+        self.assertTrue(any("could not be scanned" in p for p in problems), problems)
+
+    def test_audio_only_mixed_case_pulp_target_fails(self):
+        for target in ("Pulp::view", "Pulp::render", "Pulp::canvas"):
+            with self.subTest(target=target):
+                files = {"examples/plain/CMakeLists.txt": f"target_link_libraries(x PRIVATE {target})\n"}
+                self.assertTrue(any("references the UI layer" in p for p in run(GOOD, files)))
+
     def test_real_repository_manifest_is_clean(self):
         self.assertEqual(guard.check(REPO_ROOT), [])
 
