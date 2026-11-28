@@ -169,6 +169,16 @@
       "timeout": 30.0
     },
     {
+      "name": "claude-plugin-command-discovery-selftest",
+      "argv": [
+        "-m",
+        "unittest",
+        "test_claude_plugin_command_discovery"
+      ],
+      "cwd": "{repo}/tools/scripts",
+      "timeout": 60.0
+    },
+    {
       "name": "clean-build-cov-selftest",
       "argv": [
         "-m",

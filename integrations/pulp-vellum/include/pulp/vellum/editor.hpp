@@ -96,7 +96,10 @@ class Editor final : public format::Editor, public format::EditorAttachDiagnosti
     template <typename MakeRoot>
     Editor(format::EditorContext& context, std::string_view bundle_id, MakeRoot make_root,
            std::optional<std::uint32_t> background = std::nullopt)
-        : model_(context.params()), env_{context, model_, nullptr} {
+        : model_(context.params()), env_{context, model_, nullptr},
+          keys_after_native_pass_(
+              context.query_extension(format::editor_keys_after_native_pass_extension_id) !=
+              nullptr) {
         if (auto* visuals = context.visuals()) {
             visual_feed_ = std::make_unique<VisualPortFeed>(*visuals);
             env_.visuals = visual_feed_.get();
@@ -267,7 +270,7 @@ class Editor final : public format::Editor, public format::EditorAttachDiagnosti
     format::KeyDisposition offer_key(const format::EditorKeyEvent& event) override {
         if (invalidated_ || root_ == nullptr)
             return format::KeyDisposition::forward;
-        return offer_editor_key(*root_, event);
+        return offer_editor_key(*root_, event, !keys_after_native_pass_);
     }
 
     format::EditorAutomation* automation() override {
@@ -375,6 +378,9 @@ class Editor final : public format::Editor, public format::EditorAttachDiagnosti
     bool attached_ = false;
     bool closing_ = false;
     bool invalidated_ = false;
+    // Set when the host's key offers follow the native key-equivalent pass,
+    // which already offered the root's global hook the press.
+    bool keys_after_native_pass_ = false;
 };
 
 template <typename ViewType> class EditorFactory final : public format::EditorFactory {

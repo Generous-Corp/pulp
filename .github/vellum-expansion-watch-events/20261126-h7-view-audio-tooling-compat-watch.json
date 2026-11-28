@@ -1,0 +1,18 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20261126-h7-view-audio-tooling-compat-watch",
+  "created_at": "2026-11-26T15:06:21Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "render-assets-and-backends"
+  ],
+  "rationale": "Splits EditorBridge's dispatch core into the view-free pulp-editor-bridge target and maps the Vellum-backed Pulp::view-tooling onto it. The installed header path and the symbols the default build links are unchanged; no design-import, Chromium, rendering, or packaging authority moves.",
+  "tests": [
+    "python3 tools/scripts/vellum_expansion_watch_check.py --base <merge-base origin/main HEAD> --head <HEAD>",
+    "vellum-expansion-watch"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}

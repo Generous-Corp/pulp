@@ -32,9 +32,10 @@ MANIFEST = Path("docs/status/examples-manifest.json")
 CLASSES = ("audio-only", "moves-to-vellum", "quarantined", "deleted")
 PLATFORMS = ("cross", "macos", "ios", "android", "web")
 QUARANTINE_PHASE = re.compile(r"^C4b-(ios|win|linux|android|web)$")
-UI_LINK = re.compile(r"pulp::(?:view|render|canvas)\b")
+UI_LINK = re.compile(r"pulp::(?:view|render|canvas)\b", re.IGNORECASE)
 UI_INCLUDE = re.compile(r"#\s*include\s*[<\"]pulp/(?:view|render|canvas)/")
-SOURCE_SUFFIXES = (".cpp", ".cc", ".hpp", ".h", ".mm", ".m", ".swift")
+SOURCE_SUFFIXES = (".cpp", ".cc", ".cxx", ".c++", ".c", ".hpp", ".hh", ".hxx", ".h++", ".h",
+                   ".inl", ".ipp", ".tpp", ".mm", ".m", ".swift")
 
 
 def tracked_files(root: Path) -> list[str]:
@@ -52,9 +53,10 @@ def tracked_example_dirs(files: list[str]) -> set[str]:
     return dirs
 
 
-def ui_references(root: Path, files: list[str], name: str) -> list[str]:
-    """Return 'path: reference' lines for UI-layer links and includes in one example."""
+def ui_references(root: Path, files: list[str], name: str) -> tuple[list[str], list[str]]:
+    """Return ('path: reference' lines, read errors) for UI-layer links and includes in one example."""
     found = []
+    errors = []
     prefix = f"examples/{name}/"
     for path in files:
         if not path.startswith(prefix):
@@ -64,12 +66,13 @@ def ui_references(root: Path, files: list[str], name: str) -> list[str]:
             continue
         try:
             text = (root / path).read_text(encoding="utf-8", errors="replace")
-        except OSError:
+        except OSError as exc:
+            errors.append(f"{path}: cannot read ({exc.__class__.__name__})")
             continue
         match = (UI_LINK if is_cmake else UI_INCLUDE).search(text)
         if match:
             found.append(f"{path}: {match.group(0).strip()}")
-    return found
+    return found, errors
 
 
 def check(root: Path) -> list[str]:
@@ -108,8 +111,11 @@ def check(root: Path) -> list[str]:
         if cls == "deleted" and not str(entry.get("reason", "")).strip():
             problems.append(f"{name}: deleted entries need a reason")
         if cls == "audio-only":
-            for ref in ui_references(root, files, name):
+            refs, errors = ui_references(root, files, name)
+            for ref in refs:
                 problems.append(f"{name}: classified audio-only but references the UI layer ({ref})")
+            for err in errors:
+                problems.append(f"{name}: classified audio-only but a source could not be scanned ({err})")
     return problems
 
 

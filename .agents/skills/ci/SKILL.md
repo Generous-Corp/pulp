@@ -38,8 +38,22 @@ on a real PR. Do them in order.
    VMs it refuses its heavy half.** `tools/scripts/gate_host_policy.sh` reads
    `tartci host-profile`, not the hostname: when `TARTCI_SERVES_GATE=1` and
    `TARTCI_ROLE` is anything but `light` (today m3 `dedicated-builder`, m5 and
-   m5s `dev-overflow`), `gates.sh` compiles nothing and skips every
-   source-selftest lane. The generated-manifest lane keeps the one allowance
+   m5s `dev-overflow`), `gates.sh` compiles nothing and runs no diff-coverage.
+   The build-free Python lanes (source-only selftests, workflow-lint, pr-fast,
+   ctest-registered Python, and the sync job's fixture tests) still run there, at
+   `nice -n 19` and background QoS (`taskpolicy -b`), at most two suites at a time
+   (one when `PULP_BUILD_JOBS=1`), each lane under a wall-time cap
+   (`PULP_GATES_GATE_HOST_CAP_S`, default 600 s, via `run_capped.py`; the cap holds
+   if the wrapper is killed, and a descendant that ignores TERM is SIGKILLed).
+   Suites that configure or compile something (`--no-compile`: `test_object_deps`,
+   `test_ccache_pch_isolation`, `test_check_installed_rpaths`,
+   `test_vellum_sdk_consumer`) are listed NOT CHECKED there. This is a priority
+   bound, not a tartci lease: unlike the configure-only lane these lanes take no
+   share, and a suite may still fan out its own processes. A lane that hits the
+   cap is NOT CHECKED unless its log already shows a failure, in which case the
+   gate fails. A cap during the base re-run leaves no `.source-selftests-base-*`
+   worktree behind.
+   `PULP_GATES_GATE_HOST_PYTHON=0` restores the old refusal. The generated-manifest lane keeps the one allowance
    the policy names (`pulp_gate_host_configure_only_allowance`): a
    configure-only tree in a temporary `build-configure-only.*` directory under
    the worktree, governed as one background core (`governed-build.sh`,
@@ -47,8 +61,27 @@ on a real PR. Do them in order.
    leaves a `.ninja_log` or a target object, and removed when the lane ends
    (`tools/scripts/configure_only.py`). `PULP_GATES_NO_CONFIGURE=1` still keeps
    it build-free; its families prediction can still fail.
-   The skipped lanes are listed as NOT CHECKED, so the verdict reads "not a full
-   pass" rather than "safe to push". The cheap gates still run.
+   The refused heavy half is listed as NOT CHECKED, so the verdict reads "not a
+   full pass" rather than "safe to push". The cheap gates still run.
+   Before any gate runs, `gates_preflight.py` checks every prerequisite once and
+   prints one list with the exact fix command for each: a shallow clone
+   (`git fetch --unshallow`), the `pulp-gpu-ledger` merge driver and hooks path
+   (set for this worktree only: `git config extensions.worktreeConfig true`, then
+   `git config --worktree ...`; `install-githooks.sh` sets them for every worktree
+   of the clone), the VST3 and AU SDKs the committed census records for this
+   platform (`./setup.sh --deps-only`), the jsx-runtime packages (`npm ci`), and a
+   build dir with no CMake file-API reply. Only the first two always apply; the
+   SDK, package and file-API checks block only when the diff reaches a lane that
+   configures a build (generated manifests, families, census) and are otherwise
+   printed as notes, so a docs-only diff in a fresh worktree is not stopped.
+   `gates.sh --bootstrap` performs the blocking ones (setup.sh and `npm ci` at
+   nice 10, npm cache under the git dir or `npm_config_cache`, a configure-only
+   rerun of your existing build dir for the file-API reply, announced first, and never on a
+   host that serves the required gate, where it only prints a note) and
+   continues. A Vellum-enabled build dir (`PULP_ENABLE_PULP_VELLUM*`,
+   `PULP_ENABLE_RMLUI_ADAPTER` ON) is never chosen as the gate build dir, so it
+   stays where it is and the gates use `build/` or configure `build-gate`; naming
+   one in `PULP_GATES_BUILD_DIR` is a blocking finding. `PULP_GATES_SKIP_PREFLIGHT=1` skips it and lists it NOT CHECKED.
    When a gate fails, the final summary names every failed gate in a comma-separated
    `gates: failed:` line before the remediation advice.
    Two lanes read their commands from the CI jobs themselves, so a step added
@@ -57,8 +90,8 @@ on a real PR. Do them in order.
    (docs-sync, screenshot-sync, release-tag report, CLI/MCP parity, source
    contracts, the gate-script fixture tests) run from
    `source_selftests.py run --sync-job`, and the `drift-fast` job's selection
-   (`tools/ci/drift_fast.json`) runs from `--drift-fast`. On a gate host the
-   sync job's checks still run and its fixture tests are listed NOT CHECKED.
+   (`tools/ci/drift_fast.json`) runs from `--drift-fast`. On a gate host both run
+   under the cap described above.
    `tools/ci/sync_job_parity.json` names what `gates.sh` runs itself, and
    `tools/scripts/test_gates_sync_parity.py` fails when the workflow and
    `gates.sh` disagree.
@@ -110,7 +143,11 @@ on a real PR. Do them in order.
      covers `Processor`, `PluginSlot`, and the experimental `GpuAudioNode`
      surface. New GPU-audio virtual hooks belong at the end of that class;
      inserting one in the middle shifts existing slots even though the SDK
-     remains source-rebuild oriented. The editor-host interfaces (`Editor`,
+     remains source-rebuild oriented. The gate reads
+     `PULP_FORMAT_LEGACY_VIEW_NAME(x)` in `processor.hpp` as `x` (the reserved
+     names a UI-free SDK gives the view hooks) and expands no other macro, so
+     a renamed spelling of an existing slot passes and a changed signature
+     inside the macro still fails. The editor-host interfaces (`Editor`,
      `EditorContext`, `EditorFactory`, `NativeSurfaceHost`) are checked under a
      stricter FROZEN policy: an appended virtual fails too, because a UI
      package and a format adapter are separate prebuilt binaries. Don't "fix"
@@ -196,6 +233,12 @@ on a real PR. Do them in order.
    `shipyard wait pr <N> --state merged`, then
    `git fetch origin main -q && git merge-base --is-ancestor <merge-sha> origin/main`.
    A `wait` exit code is not merge proof.
+
+The PR route of `version-at-land` keeps the standing bump description aligned
+with its commit. It compares the complete normalized body, filters the bump
+branch to this repository's head owner, and emits an Actions error plus a
+failing status when the description GET or PATCH fails; the next drain retries
+the reconciliation.
 
 ## A `run:` step stops at the first failing command
 
@@ -3378,7 +3421,8 @@ Without the second line a zero is ambiguous between "not wired" and "bad grep".
 `.github/workflows/scene3d-advisory.yml` now covers that surface: path-filtered,
 advisory, `macos-15`, SCENE3D ON, not on `merge_group`. The `Vellum SDK
 consumer` lane also turns SCENE3D ON, for `integrations/pulp-vellum-renderer3d`
-(the scene3d renderer on gpu-runtime's device): that package refuses to
+(the scene3d renderer on gpu-runtime's device) and `integrations/pulp-vellum-scene`
+(Vellum's Draco decoder behind the glTF loader hook): those packages refuse to
 configure without `pulp::scene`. Three things about the scene3d lane
 generalize to any lane you add:
 
@@ -13950,6 +13994,13 @@ with `-k 0`, and uploads a JSON report grouped by capability-ledger row. Notes:
   (`cmake-vellum-ui-compat-real`, `-wrong-version`) take the label only when the
   configure found Vellum, and with `REQUIRE_VELLUM` they fail instead of
   printing SKIP, which ctest reports as skipped and leaves the lane green.
+- **The installed-SDK smoke is a separate configure and build.** `cmake
+  --install` aborts on any unbuilt target, and the labelled build above builds
+  only test targets, so the smoke step configures `build-vellum-install` with
+  the release profile and builds everything before running
+  `test/cmake/test_vellum_installed_sdk_smoke.cmake` (an install to an empty
+  prefix, then a from-scratch consumer). Its control configures the same
+  consumer with Vellum unfindable and must be refused.
 
 ## Exporting a platform's Vellum closure
 
@@ -14001,7 +14052,24 @@ main's SDK. A new optional Vellum integration package needs its option, its
 against main. The tests' ctest label should start with `pulp-vellum` so the
 lane's `-L pulp-vellum` filter runs them.
 
+The lane also runs the Yoga layout fixtures on Vellum's layout (`runner.py
+--verify --engine vellum`, `VELLUM_APP_HOST` set to the SDK's `bin/vellum-app-host`).
+Keep it a parallel mode: the `pulp-test-visual` lane stays until the UI cutover,
+and exit 3 (nothing measured) must keep failing the step.
+
+The lane's `-L pulp-vellum` run includes the GPU adapter probe and its
+empty-adapter negative control (`PASS_REGULAR_EXPRESSION` on the fail JSON, since
+the control must exit non-zero). The probe target is picked up by the
+`labelled-targets` derivation, so it needs no workflow edit.
+
 The same lane also runs the MCP UI tool cases (`pulp-test-mcp-server "[ui]"`)
 against the SDK's `bin/vellum-app-host` through `PULP_TEST_VELLUM_APP_HOST`. The
 step greps the output for `SKIPPED`, because Catch2 reports a skipped live case
 as a pass: keep that check if the step is edited.
+
+## Release SDK archive helpers are linted by workflow-lint
+
+`tools/scripts/test_archive_sdk.py` runs in `workflow-lint.yml` and its paths
+are in `tools/ci/workflow_lint_paths.txt`. A new script that a release step
+calls needs both, plus a regenerated `.shipyard/changed-surface-families.toml`
+(`changed_surface_script_families.py --configure-only --write`).
