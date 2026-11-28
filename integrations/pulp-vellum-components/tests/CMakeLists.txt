@@ -9,6 +9,8 @@ if(PULP_BUILD_TESTS AND TARGET Catch2::Catch2WithMain)
         ${CMAKE_CURRENT_SOURCE_DIR}/ab_compare_test.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/preferences_panel_test.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/property_panel_test.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/preset_browser_test.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/preset_browser_menu_test.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/catalogue_test.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/gpu_health_content_test.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/inspector_window_test.cpp
