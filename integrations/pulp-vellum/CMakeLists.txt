@@ -30,7 +30,8 @@ if(NOT TARGET Vellum::MirrorView_core)
         "and vellum::view::PluginViewHost::create(); the SDK is too old")
 endif()
 # The About view and the Swift motion bridge are built on Vellum's view layer.
-target_sources(pulp-vellum PRIVATE src/about_notices.cpp src/swift_motion_bridge.cpp)
+target_sources(pulp-vellum PRIVATE src/about_notices.cpp src/swift_motion_bridge.cpp
+    src/view_editor.cpp)
 set_property(TARGET pulp-vellum PROPERTY PULP_VELLUM_HAS_SWIFT_MOTION TRUE)
 target_include_directories(pulp-vellum PRIVATE ${PULP_ROOT_DIR}/apple/Sources/PulpSwift)
 target_link_libraries(pulp-vellum PUBLIC Vellum::MirrorView_core)
@@ -43,4 +44,18 @@ if(PULP_ENABLE_PULP_VELLUM_SCRIPTED AND TARGET Vellum::MirrorView_script)
     add_library(pulp::vellum-scripted ALIAS pulp-vellum-scripted)
     target_link_libraries(pulp-vellum-scripted PUBLIC pulp::vellum
         PRIVATE Vellum::MirrorView_script)
+endif()
+
+# GPU adapter probe over the installed Vellum GPU runtime. The verdict rules
+# are Pulp's own and compile here directly, so this directory does not depend
+# on tools/cli being configured. Needs the SDK's GPU and Dawn header targets.
+if(TARGET Vellum::Gpu AND TARGET Vellum::DawnHeaders)
+    add_executable(pulp-vellum-gpu-adapter-probe
+        src/gpu_adapter_probe_main.cpp
+        ${PULP_ROOT_DIR}/tools/cli/gpu_probe/src/adapter_probe.cpp)
+    target_compile_features(pulp-vellum-gpu-adapter-probe PRIVATE cxx_std_20)
+    target_include_directories(pulp-vellum-gpu-adapter-probe PRIVATE
+        ${PULP_ROOT_DIR}/tools/cli/gpu_probe/include)
+    target_link_libraries(pulp-vellum-gpu-adapter-probe PRIVATE
+        Vellum::Gpu Vellum::DawnHeaders)
 endif()

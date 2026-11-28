@@ -2,7 +2,9 @@
 
 #include <pulp/format/reload/build_fingerprint.hpp>
 
+#include <cstdio>
 #include <cstring>
+#include <string>
 #include <type_traits>
 
 using namespace pulp::format::reload;
@@ -88,4 +90,21 @@ TEST_CASE("diff reports every differing field at once",
     logic.sample_precision = 64;
     auto d = fingerprint_diff(shell, logic);
     REQUIRE(d.size() == 3);
+}
+
+TEST_CASE("a difference late in abi_flags is reported, not only refused",
+          "[hot-reload][fingerprint]") {
+    auto shell = current_build_fingerprint();
+    // Long flags whose only difference is the view mode, past character 64.
+    const char* prefix = "ndebug=1;exc=1;rtti=1;cxx11abi=1;itdbg=0;hardening=none;libcppabi=1;";
+    REQUIRE(std::strlen(prefix) > 64);
+    auto logic = shell;
+    std::snprintf(shell.abi_flags, sizeof shell.abi_flags, "%slegacyview=1", prefix);
+    std::snprintf(logic.abi_flags, sizeof logic.abi_flags, "%slegacyview=0", prefix);
+    REQUIRE_FALSE(fingerprints_match(shell, logic));
+    const auto d = fingerprint_diff(shell, logic);
+    REQUIRE(d.size() == 1);
+    CHECK(d.front().find("abi_flags") == 0);
+    CHECK(d.front().find("legacyview=1") != std::string::npos);
+    CHECK(d.front().find("legacyview=0") != std::string::npos);
 }
