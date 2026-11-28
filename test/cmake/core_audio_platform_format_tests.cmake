@@ -243,7 +243,7 @@ pulp_add_test_suite(pulp-test-tuning GROUP pulp-test-group-cap-midi
 # State tests
 pulp_add_test_suite(pulp-test-state
     SOURCES test_state.cpp harness/rt_allocation_probe.cpp
-    LIBRARIES pulp::state pulp::events)
+    LIBRARIES pulp::state pulp::events pulp::dataplane)
 
 add_test(
     NAME pulp-state-link-closure
