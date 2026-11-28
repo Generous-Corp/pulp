@@ -1,0 +1,11 @@
+{
+ "name": "examples-manifest-guard",
+ "record": {
+  "entry": "tools/scripts/examples_manifest_guard.py",
+  "inputs": [
+   "docs/status/examples-manifest.json",
+   "tools/scripts/examples_manifest_guard.py"
+  ],
+  "kind": "python"
+ }
+}
