@@ -11,6 +11,7 @@ PRIVATE static link and require it to be found.
 from __future__ import annotations
 
 import io
+import json
 import sys
 import tempfile
 import unittest
@@ -277,6 +278,42 @@ class ClosureWalk(unittest.TestCase):
         code, _, _ = self.run_check({"pulp-a": ("", "")}, ["pulp-a"], ["pulp-view*"],
                                     allow=["nonsense"])
         self.assertEqual(code, 2)
+
+
+class CodemodelWalk(unittest.TestCase):
+    """The File API `dependencies` field is the only edge source for these targets."""
+
+    def write_model(self, root: Path, targets: dict[str, list[str]]) -> Path:
+        reply = root / ".cmake" / "api" / "v1" / "reply"
+        reply.mkdir(parents=True)
+        entries = []
+        for name, deps in targets.items():
+            ident = f"{name}::@abc"
+            entries.append({"name": name, "id": ident, "jsonFile": f"target-{name}.json"})
+            (reply / f"target-{name}.json").write_text(json.dumps({
+                "name": name, "id": ident, "type": "STATIC_LIBRARY",
+                "dependencies": [{"id": f"{dep}::@abc"} for dep in deps]}), encoding="utf-8")
+        (reply / "codemodel-v2-x.json").write_text(json.dumps({
+            "version": {"major": 2, "minor": 9},
+            "configurations": [{"targets": entries}]}), encoding="utf-8")
+        return root
+
+    def test_dependencies_field_edges_are_traversed(self) -> None:
+        targets = {"app": ["mid"], "mid": ["pulp-canvas"], "pulp-canvas": []}
+        targets.update({f"pulp-pad-{i}": [] for i in range(25)})
+        with tempfile.TemporaryDirectory() as tmp:
+            build = self.write_model(Path(tmp) / "build", targets)
+            graph = lcc.Graph.from_codemodel(build)
+            paths = lcc.find_paths(graph, "app", ["pulp-canvas"], set())
+        self.assertEqual(len(paths), 1)
+        self.assertIn("mid", [graph.display(n) for n in paths[0]])
+
+    def test_clean_dependencies_do_not_report(self) -> None:
+        targets = {"app": ["mid"], "mid": [], "pulp-canvas": []}
+        with tempfile.TemporaryDirectory() as tmp:
+            build = self.write_model(Path(tmp) / "build", targets)
+            graph = lcc.Graph.from_codemodel(build)
+            self.assertEqual(lcc.find_paths(graph, "app", ["pulp-canvas"], set()), [])
 
 
 if __name__ == "__main__":

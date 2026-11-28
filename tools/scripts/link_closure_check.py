@@ -210,6 +210,19 @@ class Graph:
                         if dependency_id:
                             graph.explicit.add(target_name)
                             graph.link_edges.add((name, target_name))
+            # File API `dependencies` carries CMake's own resolved target links
+            # (the standard field; the keys above are not in the File API).
+            for dependency in target.get("dependencies", []):
+                dependency_id = dependency.get("id")
+                if not dependency_id:
+                    continue
+                dependency_name = names.get(dependency_id)
+                if dependency_name is None:
+                    dependency_name = canonical(dependency_id.split("::@", 1)[0])
+                if dependency_name != name and dependency_name not in graph.edges[name]:
+                    graph.edges[name].append(dependency_name)
+                graph.explicit.add(dependency_name)
+                graph.link_edges.add((name, dependency_name))
             for source in target.get("sources", []):
                 source_name = source.get("path")
                 if source_name:
