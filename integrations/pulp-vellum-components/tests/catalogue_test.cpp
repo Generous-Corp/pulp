@@ -1,6 +1,7 @@
 // The catalogue builds each retained component by stable id and hands back a
 // Vellum view.
 
+#include "preset_test_sandbox.hpp"
 #include <pulp/vellum_components/catalogue.hpp>
 #include <pulp/vellum_components/lasso.hpp>
 #include <pulp/vellum_components/model_manager_view.hpp>
@@ -9,7 +10,6 @@
 
 #include <catch2/catch_test_macros.hpp>
 
-#include <filesystem>
 #include <memory>
 #include <optional>
 #include <string>
@@ -98,10 +98,10 @@ TEST_CASE("a catalogue preferences panel restores the stored page once bound",
 
 TEST_CASE("the catalogue builds a program editor over the context's library",
           "[pulp-vellum-components][catalogue]") {
+    pulp::test::PresetTestSandbox sandbox("pulp-catalogue-editor");
     pulp::state::StateStore store;
     pulp::state::PresetManager manager(store, "CatalogueCo", "CatalogueEditor");
-    pulp::state::PresetLibrary library(manager, std::filesystem::temp_directory_path() /
-                                                    "pulp-catalogue-editor-library.json");
+    pulp::state::PresetLibrary library(manager, sandbox.root / "library.json");
 
     PulpViewComponentContext ctx;
     CHECK(make_pulp_view_component("pulp.preset_program_editor", ctx) == nullptr);
