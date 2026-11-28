@@ -93,6 +93,7 @@ if(PULP_BUILD_TESTS AND TARGET Catch2::Catch2WithMain)
         endif()
         if(TARGET pulp-vellum-scripted)
             add_executable(pulp-test-vellum-scripted-wiring test_scripted_editor_wiring.cpp)
+            target_include_directories(pulp-test-vellum-scripted-wiring PRIVATE ${PULP_ROOT_DIR}/test)
             target_link_libraries(pulp-test-vellum-scripted-wiring PRIVATE
                 pulp-vellum-scripted Vellum::MirrorView_script Catch2::Catch2WithMain Threads::Threads)
             # Keep format-core's environment gate deterministic in CI. This
@@ -177,16 +178,63 @@ if(PULP_BUILD_TESTS AND TARGET Catch2::Catch2WithMain)
         target_link_libraries(pulp-test-pulp-vellum-about-notices PRIVATE
             pulp::vellum Vellum::MirrorView_core Catch2::Catch2WithMain Threads::Threads)
         catch_discover_tests(pulp-test-pulp-vellum-about-notices PROPERTIES LABELS pulp-vellum-editor)
+
+        # The AAX GUI's contract-editor shell hosting a Vellum editor: the
+        # SDK-free AAX editor test source built a second time against Pulp's
+        # Vellum bridge, running only its Vellum cases. Needs no AAX SDK.
+        add_executable(pulp-test-aax-vellum-editor ${PULP_ROOT_DIR}/test/test_aax_editor.cpp)
+        target_include_directories(pulp-test-aax-vellum-editor PRIVATE ${PULP_ROOT_DIR}/test)
+        target_link_libraries(pulp-test-aax-vellum-editor PRIVATE
+            pulp::vellum Vellum::MirrorView_core Catch2::Catch2WithMain Threads::Threads)
+        target_compile_definitions(pulp-test-aax-vellum-editor PRIVATE PULP_TEST_AAX_VELLUM=1)
+        catch_discover_tests(pulp-test-aax-vellum-editor TEST_SPEC "[vellum]"
+            PROPERTIES LABELS pulp-vellum-editor)
+
         # A macOS AUv3 plug-in with a Vellum editor package: the appex stub
         # must link, and the editor code must live in the framework.
         if(APPLE AND NOT PULP_IOS)
             add_subdirectory(auv3_editor_package)
         endif()
 
-
         # An AU v2 host opening a Vellum editor. The target defines a test-only
         # macro, so its definition lives under test/ with the other test targets.
         include(${PULP_ROOT_DIR}/test/cmake/au_v2_vellum_view_tests.cmake)
+
+        # An AU v3 host opening a Vellum editor: the AU v3 contract view test
+        # source built a second time against Pulp's Vellum bridge, running only
+        # its Vellum cases.
+        if(APPLE AND NOT PULP_IOS)
+            add_executable(pulp-test-au-v3-vellum-view
+                ${PULP_ROOT_DIR}/test/test_au_v3_contract_view.mm
+                ${PULP_ROOT_DIR}/core/format/src/au_v3_contract_view.mm)
+            target_include_directories(pulp-test-au-v3-vellum-view PRIVATE ${PULP_ROOT_DIR}/test)
+            target_link_libraries(pulp-test-au-v3-vellum-view PRIVATE
+                pulp::vellum Vellum::MirrorView_core Catch2::Catch2WithMain "-framework AppKit")
+            target_compile_definitions(pulp-test-au-v3-vellum-view PRIVATE
+                PULP_AUV3_CONTRACT_VIEW_CLASS=PulpAUv3ContractView_Test PULP_TEST_AU_VELLUM=1)
+            set_target_properties(pulp-test-au-v3-vellum-view PROPERTIES CXX_STANDARD 23)
+            target_compile_options(pulp-test-au-v3-vellum-view PRIVATE
+                $<$<COMPILE_LANGUAGE:OBJCXX>:-std=gnu++23>)
+            catch_discover_tests(pulp-test-au-v3-vellum-view TEST_SPEC "[vellum]"
+                PROPERTIES LABELS pulp-vellum-editor)
+        endif()
+
+        # The standalone app's contract window hosting a Vellum editor: its
+        # test source built a second time against Pulp's Vellum bridge and the
+        # view-free standalone core, running only its Vellum cases.
+        if(APPLE AND NOT PULP_IOS AND TARGET pulp-standalone-contract)
+            add_executable(pulp-test-standalone-vellum-editor
+                ${PULP_ROOT_DIR}/test/test_standalone_contract_editor.mm)
+            target_include_directories(pulp-test-standalone-vellum-editor PRIVATE
+                ${PULP_ROOT_DIR}/test)
+            target_link_libraries(pulp-test-standalone-vellum-editor PRIVATE
+                pulp::vellum pulp::standalone-contract Vellum::MirrorView_core
+                Catch2::Catch2WithMain "-framework AppKit")
+            target_compile_definitions(pulp-test-standalone-vellum-editor PRIVATE
+                PULP_TEST_STANDALONE_VELLUM=1)
+            catch_discover_tests(pulp-test-standalone-vellum-editor TEST_SPEC "[vellum]"
+                PROPERTIES LABELS pulp-vellum-editor)
+        endif()
     else()
         message(STATUS "pulp-vellum: Vellum::MirrorView_core not in this Vellum SDK; "
             "skipping pulp-test-pulp-vellum-editor")
