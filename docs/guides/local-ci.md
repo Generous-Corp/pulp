@@ -1138,6 +1138,26 @@ therefore skips that step. Set the repository variable `PULP_PUSH_LINUX_TESTS`
 to `1` to run it on push again; pull requests, merge groups and manual
 dispatches are not affected by the variable.
 
+## Linux, Windows, iOS and web build UI-off
+
+The Windows, Linux, iOS, Android and web UI hosts live in
+`integrations/legacy-platform-hosts/` until each platform's Vellum host lands,
+so those lanes prove the audio side only:
+
+- `build.yml` configures its Linux and Windows legs with `-DPULP_ENABLE_GPU=OFF`.
+  The macOS leg, and so the required `macos` check, configures as before.
+- `cross-platform-check.yml` configures Linux, Linux ARM64 and Windows GPU-off
+  and skips the Skia/Dawn fetch, the software Vulkan adapter and the
+  software-GPU render proof while `PULP_LEGACY_DESKTOP_UI` is `off`.
+- `test/cmake/test_ios_compile_gate.sh` builds the non-UI iOS targets for the
+  simulator and device SDKs. It has no GPU or editor leg.
+- `web-plugins.yml` builds the DSP-only WAM and WebCLAP plug-ins and skips the
+  Pulp UI wasm module, its browser fixture and the shipped GPU demo page while
+  `PULP_LEGACY_WEB_UI` is `off`.
+
+When a platform's Vellum host lands, its lane gets a UI build again against
+Vellum, and its subtree leaves the quarantine.
+
 ## Windows runs nightly, not per merge
 
 Windows is billed at **2x** on GitHub-hosted runners and **gates nothing** — no
