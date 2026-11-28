@@ -1073,6 +1073,42 @@ TEST_CASE("AAX follows the host container when it is resized",
     shell.close();
 }
 
+TEST_CASE("AAX exposes the requested size during host publication and restores rejected sizes",
+          "[aax][editor-host][aax-contract][resize]") {
+    for (const bool fixed : {false, true}) {
+        for (const bool accept : {false, true}) {
+            reset_contract_recording();
+            contract_config() = {};
+            contract_config().fixed_size = fixed;
+            RecordingContractFactory factory;
+            FakeModel model(&factory);
+            ContractEditorShell shell;
+            int publications = 0;
+            REQUIRE(shell.create(model, [&](uint32_t width, uint32_t height) {
+                ++publications;
+                const auto during = shell.plan();
+                REQUIRE(during);
+                CHECK(during->width == width);
+                CHECK(during->height == height);
+                // Only the host-facing answer is staged before acceptance.
+                CHECK(shell.session()->size().width == 400);
+                CHECK(shell.session()->size().height == 300);
+                return accept;
+            }));
+            REQUIRE(shell.attach(aax_parent()));
+            CHECK(contract_log().context->request_resize({640, 480, 1.0}) == accept);
+            CHECK(publications == 1);
+            const auto after = shell.plan();
+            REQUIRE(after);
+            CHECK(after->width == (accept ? 640 : 400));
+            CHECK(after->height == (accept ? 480 : 300));
+            CHECK(shell.session()->size().width == after->width);
+            CHECK(shell.session()->size().height == after->height);
+        }
+    }
+    contract_config() = {};
+}
+
 TEST_CASE("AAX closes a factory editor before the model deletes its processor",
           "[aax][editor-host][aax-contract]") {
     using pulp::format::aax::ContractEditorShell;

@@ -82,8 +82,10 @@ file built against Vellum as `pulp-test-aax-vellum-editor`). It builds the
 editor in `CreateViewContents()`, unattached, because Pro Tools asks
 `GetViewSize` before it makes the window and only a built editor knows its
 size; it attaches in `CreateViewContainer()`. AAX has no host resize callback,
-so a `SetViewSize` the host accepts is applied to the editor at once. The host
-container is read from `TimerWakeup()` to follow host-driven frame changes.
+so a `SetViewSize` the host accepts is applied to the editor at once. During
+publication, stage the proposed sizing answer: Pro Tools may synchronously
+query `GetViewSize` inside `SetViewSize`. A rejection restores the old answer
+without resizing the editor. The host container is read from `TimerWakeup()` to follow host-driven frame changes.
 Contract creation, attachment and sizing are enabled only where that reader
 exists (currently macOS). Windows retains the legacy `create_view()` path;
 a factory-only editor is not created or used for contract sizing there.

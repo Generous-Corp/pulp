@@ -6,6 +6,7 @@
 #include <pulp/format/plugin_descriptor.hpp>
 #include <pulp/format/processor.hpp>
 #include <pulp/runtime/log.hpp>
+#include <pulp/runtime/scope_guard.hpp>
 #include <pulp/state/parameter.hpp>
 #include <pulp/state/store.hpp>
 
@@ -576,9 +577,18 @@ class ContractEditorShell {
         // AAX has no host resize callback: an accepted SetViewSize is the
         // host's answer, so the editor takes that size at once.
         hooks.request_resize = [this](const EditorSize& size) {
-            if (!attached() || !publish_ || !publish_(size.width, size.height))
+            if (!attached() || !publish_)
                 return false;
-            return host_resized(size.width, size.height);
+            bool accepted = false;
+            {
+                // SetViewSize may synchronously ask GetViewSize. Publish the
+                // proposed answer without resizing the editor before acceptance.
+                const auto previous = std::exchange(publishing_size_, size);
+                auto restore =
+                    runtime::make_scope_guard([this, previous] { publishing_size_ = previous; });
+                accepted = publish_(size.width, size.height);
+            }
+            return accepted && host_resized(size.width, size.height);
         };
         auto session = ContractEditorSession::create(
             *processor, *model.editor_store(), *processor->editor_factory(), std::move(hooks));
@@ -624,7 +634,7 @@ class ContractEditorShell {
         if (!session_)
             return std::nullopt;
         auto hints = session_->size_hints();
-        const auto size = session_->size();
+        const auto size = publishing_size_ ? *publishing_size_ : session_->size();
         if (size.width != 0 && size.height != 0) {
             hints.preferred_width = size.width;
             hints.preferred_height = size.height;
@@ -706,6 +716,7 @@ class ContractEditorShell {
   private:
     EditorHost* model_ = nullptr;
     PublishSize publish_;
+    std::optional<EditorSize> publishing_size_;
     void* parent_ = nullptr; ///< the host container while attached
     uint32_t seen_parent_width_ = 0;
     uint32_t seen_parent_height_ = 0;
