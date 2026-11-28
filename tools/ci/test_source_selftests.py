@@ -780,11 +780,13 @@ class GatesWiringTests(unittest.TestCase):
             )
             log = root / "not-checked.log"
             self.not_checked = ""
-            # gates.sh sets gate_host_builds_skipped before this block (1 on a
-            # tartci gate host, which refuses these suites).
+            # gates.sh sets these before this block. `gate_host` here is the opt-out
+            # (PULP_GATES_GATE_HOST_PYTHON=0 on a tartci gate host), the one way the
+            # lanes are refused; a gate host runs them by default.
             script = (f'ROOT={str(root)!r}\nPYTHON={sys.executable!r}\nBASE=origin/main\nfail=0\nfailed_gates=()\n'
                       'gate_fail() { fail=1; failed_gates+=("$1"); }\n'
-                      f'gate_host_builds_skipped={gate_host}\n'
+                      f'gate_host_builds_skipped={gate_host}\ngate_host_python_lanes={1 - gate_host}\n'
+                      'gate_host_cap_s=600\ngate_python_runner=()\ngate_python_jobs=()\n'
                       f'not_checked_log={str(log)!r}\n: > "$not_checked_log"\n'
                       + self._block() + '\necho "fail=$fail"\n')
             env = {k: v for k, v in os.environ.items()
@@ -803,7 +805,7 @@ class GatesWiringTests(unittest.TestCase):
         calls = argv.splitlines()
         self.assertEqual(calls[0], "run --changed-from origin/main --label-base-failures")
 
-    def test_a_gate_host_runs_no_lane_and_records_nothing_here(self) -> None:
+    def test_a_gate_host_that_opted_out_runs_no_lane_and_records_nothing_here(self) -> None:
         # gates.sh records the refusal itself, once, before this block.
         out, argv = self._run_block(1, gate_host=1).split("|", 1)
         self.assertEqual(out, "fail=0")
@@ -1206,6 +1208,101 @@ class ImportClosureSelectionTests(unittest.TestCase):
         self.assertEqual(picked, [])
 
 
+class GateHostSafetyTests(unittest.TestCase):
+    """A gate host leaves out suites that compile, and a capped base re-run leaves nothing behind."""
+
+    def test_compiling_suites_are_dropped_and_named_not_the_rest(self) -> None:
+        entries = [{"name": "tools/ci/test_object_deps.py", "argv": ["python3", "tools/ci/test_object_deps.py"]},
+                   {"name": "ccache-pch", "argv": ["python3", "tools/scripts/test_ccache_pch_isolation.py"]},
+                   {"name": "tools/scripts/test_check_installed_rpaths.py", "argv": []},
+                   {"name": "tools/scripts/test_plain.py", "argv": ["python3", "tools/scripts/test_plain.py"]}]
+        dropped = lane.drop_compiling(entries)
+        self.assertEqual(sorted(dropped), ["ccache-pch", "tools/ci/test_object_deps.py",
+                                           "tools/scripts/test_check_installed_rpaths.py"])
+        self.assertEqual([e["name"] for e in entries], ["tools/scripts/test_plain.py"])
+
+    def test_every_compiling_suite_named_in_the_review_is_listed(self) -> None:
+        self.assertEqual(sorted(lane.COMPILING_SUITES), [
+            "test_ccache_pch_isolation.py", "test_check_installed_rpaths.py", "test_object_deps.py",
+            "test_vellum_sdk_consumer.py"])
+
+    def test_the_lane_leaves_out_the_labels_the_required_gate_leaves_out(self) -> None:
+        sys.path.insert(0, str(HERE))
+        import ctest_gate_args  # noqa: PLC0415
+        self.assertEqual(lane.shared_host_labels(), frozenset(ctest_gate_args.SHARED_HOST_LABEL_EXCLUDE.split("|")))
+        self.assertTrue({"validation", "slow", "performance", "bench", "quality-lab"} <= lane.shared_host_labels())
+        # And the gate's own set is the shared one plus source-selftest, so the lane never excludes less.
+        self.assertTrue(lane.shared_host_labels() <= frozenset(ctest_gate_args.GATE_LABEL_EXCLUDE.split("|")))
+
+    def test_a_performance_labelled_timing_test_is_excluded_on_the_real_tree_and_kept_without_the_filter(self) -> None:
+        name = "graph-paced-timing-matrix-wall-clock"
+        everything = [e["name"] for e in lane.python_ctest_entries()]
+        filtered = [e["name"] for e in lane.python_ctest_entries(exclude_labels=lane.shared_host_labels())]
+        self.assertIn(name, everything, "control: the unfiltered lane does contain it")
+        self.assertNotIn(name, filtered)
+        entry = next(e for e in lane.python_ctest_entries() if e["name"] == name)
+        self.assertIn("performance", entry["labels"])
+        # An unlabelled-for-load test stays.
+        self.assertTrue(set(filtered) < set(everything) and len(filtered) > 100)
+
+    def test_a_registration_environment_that_names_the_source_dir_points_at_the_checkout_being_run(self) -> None:
+        # PYTHONPATH=${CMAKE_SOURCE_DIR} stayed literal, so the suite could not import from the repo
+        # root: it failed in this lane (and on origin/main) while passing on its own.
+        entry = next(e for e in lane.python_ctest_entries() if e["name"] == "harness-differential-contract-selftest")
+        self.assertEqual(entry["env"], {"PYTHONPATH": "{repo}"})
+        result = lane.run([entry], stream=__import__("io").StringIO())[0]
+        self.assertEqual(result["returncode"], 0, result.get("output"))
+        # Control: the literal the lane used to pass really does fail this suite.
+        broken = {**entry, "env": {"PYTHONPATH": "${CMAKE_SOURCE_DIR}"}}
+        self.assertNotEqual(lane.run([broken], stream=__import__("io").StringIO())[0]["returncode"], 0)
+
+    def _repo(self, tmp: pathlib.Path) -> pathlib.Path:
+        repo = tmp / "repo"
+        repo.mkdir()
+        for cmd in (["git", "init", "-q", "-b", "main"],
+                    ["git", "-c", "user.name=t", "-c", "user.email=t@example.invalid", "commit", "-q",
+                     "--allow-empty", "-m", "x"]):
+            subprocess.run(cmd, cwd=repo, check=True, capture_output=True)
+        return repo
+
+    def _holders(self, tmp: pathlib.Path) -> list[str]:
+        return sorted(p.name for p in tmp.glob(".source-selftests-base-*"))
+
+    def _enter_and_wait(self, repo: pathlib.Path) -> subprocess.Popen:
+        code = ("import sys,time,pathlib\n"
+                f"sys.path.insert(0, {str(HERE)!r})\n"
+                "import source_selftests as l\n"
+                f"with l.base_checkout('HEAD', pathlib.Path({str(repo)!r})) as b:\n"
+                "    print('ready', flush=True)\n"
+                "    time.sleep(60)\n")
+        proc = subprocess.Popen([sys.executable, "-c", code], stdout=subprocess.PIPE, text=True, encoding="utf-8")
+        self.assertEqual(proc.stdout.readline().strip(), "ready")
+        return proc
+
+    def test_a_term_during_the_base_rerun_removes_the_checkout_and_its_registration(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp).resolve()
+            repo = self._repo(root)
+            proc = self._enter_and_wait(repo)
+            self.assertEqual(len(self._holders(root)), 1)
+            proc.terminate()
+            proc.wait(timeout=30)
+            self.assertEqual(self._holders(root), [])
+            listed = subprocess.run(["git", "worktree", "list"], cwd=repo, capture_output=True, text=True,
+                                encoding="utf-8").stdout
+            self.assertEqual(len(listed.strip().splitlines()), 1, listed)
+
+    def test_control_a_leaked_checkout_is_what_the_old_code_left(self) -> None:
+        # Killing with SIGKILL cannot run any cleanup, so this proves the harness sees a leftover at all.
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp).resolve()
+            repo = self._repo(root)
+            proc = self._enter_and_wait(repo)
+            proc.kill()
+            proc.wait(timeout=30)
+            self.assertEqual(len(self._holders(root)), 1)
+
+
 class BuildDirChoiceTests(unittest.TestCase):
     """The pr-fast lane reads the build that is current, not the one named build/."""
 
@@ -1273,6 +1370,39 @@ class BuildDirChoiceTests(unittest.TestCase):
                     chosen, why = lane.choose_build_dir(root, {lane.GATES_BUILD_DIR_ENV: declared})
                     self.assertIsNone(chosen)
                     self.assertIn("temporary configure_only.py tree", why)
+
+    def _vellum(self, build: pathlib.Path, option: str = "PULP_ENABLE_PULP_VELLUM", value: str = "ON") -> None:
+        with (build / "CMakeCache.txt").open("a", encoding="utf-8") as cache:
+            cache.write(f"{option}:BOOL={value}\n")
+
+    def test_a_vellum_enabled_build_is_passed_over_for_the_default_profile(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp).resolve()
+            self._tree(root)
+            # The Vellum tree is the NEWER configure; only its options disqualify it.
+            self._vellum(self._build(root, "build-vellum", "Ninja", 4000), "PULP_ENABLE_PULP_VELLUM_GRAPH")
+            plain = self._build(root, "build", "Ninja", 3000)
+            chosen, why = lane.choose_build_dir(root, {})
+        self.assertEqual(chosen, plain)
+        self.assertIn("build-vellum: Vellum options on (PULP_ENABLE_PULP_VELLUM_GRAPH)", why)
+
+    def test_a_vellum_only_checkout_has_no_usable_build(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp).resolve()
+            self._tree(root)
+            self._vellum(self._build(root, "build", "Ninja", 3000), "PULP_ENABLE_RMLUI_ADAPTER")
+            chosen, why = lane.choose_build_dir(root, {})
+        self.assertIsNone(chosen)
+        self.assertIn("Vellum options on", why)
+
+    def test_control_vellum_switches_that_are_off_do_not_disqualify(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp).resolve()
+            self._tree(root)
+            build = self._build(root, "build", "Ninja", 3000)
+            self._vellum(build, "PULP_ENABLE_PULP_VELLUM", "OFF")
+            self._vellum(build, "VELLUM_ENABLE_MIRROR", "ON")  # the Vellum repo's own switch, not Pulp's
+            self.assertEqual(lane.choose_build_dir(root, {})[0], build)
 
     def test_no_build_says_so(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -2105,12 +2235,13 @@ class PrepushHookWiringTests(unittest.TestCase):
         self.assertIn("prepush_receipt_note skipped fixture-tests", block)
         self.assertRegex(block, r"\n\s+3\)\n")
         self.assertIn('"$_prepush_source_update_mode" = "no-source"', block)
-        verdict = text[text.index("_prepush_fixtures_verdict=\"\""):]
-        self.assertIn("gates passed except $_prepush_fixtures_verdict", verdict)
-        # "gates clean" is never printed beside a fixture NOT CHECKED.
-        for line in verdict[:verdict.index("exit 0")].splitlines():
-            if "gates clean" in line:
-                self.assertNotIn("_prepush_fixtures_verdict", line)
+        verdict = text[text.index("_prepush_final_verdict_line() {"):]
+        verdict = verdict[:verdict.index("\n}\n")]
+        self.assertIn('fixture tests: $_prepush_fixtures_not_checked NOT CHECKED', verdict)
+        self.assertIn("gates passed except $skipped", verdict)
+        # "gates clean" is only printed when nothing was skipped.
+        self.assertEqual(verdict.count('gates clean.'), 1)
+        self.assertIn('elif [ -n "$skipped" ]', verdict)
 
 
 if __name__ == "__main__":

@@ -625,6 +625,11 @@ These files form the release pipeline. The `ci` skill (`.agents/skills/ci/SKILL.
 maps `.github/workflows/**` so the existing skill-sync check already requires `ci`
 to be updated on workflow changes — when you do that, update this doc too.
 
+SDK archives are created by `tools/scripts/archive_sdk.py` with every member and
+the gzip header set to the commit timestamp from `SOURCE_DATE_EPOCH`. The release
+job runs `tools/scripts/check_archive_mtimes.py` against that same bound, so a
+future-dated member fails packaging before publication.
+
 ## Related docs
 
 - [versioning.md](versioning.md) — how version bumps happen on the PR side (the inputs to `auto-release.yml`)

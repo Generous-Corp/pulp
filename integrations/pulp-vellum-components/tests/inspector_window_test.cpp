@@ -348,6 +348,32 @@ TEST_CASE("InspectorWindow follows a new inspected root",
     REQUIRE(tree->find_node_by_user_data(fx.knob) == nullptr);
 }
 
+TEST_CASE("InspectorWindow shows an empty inspector when the root is cleared",
+          "[pulp-vellum-components][inspector-window]") {
+    Fixture fx;
+    InspectorWindow window(fx.root);
+    auto* tree = tree_of(window);
+    window.select_view(fx.knob);
+    REQUIRE(tree->find_node_by_user_data(fx.knob) != nullptr);
+    REQUIRE(has_label_containing(window, "ID: gain"));
+    REQUIRE(has_label_containing(window, "accent.primary"));
+
+    window.set_inspected_root(nullptr);
+    REQUIRE(tree->find_node_by_user_data(fx.knob) == nullptr);
+    REQUIRE(tree->find_node_by_user_data(&fx.root) == nullptr);
+    REQUIRE(tree->selected_node() == nullptr);
+    REQUIRE_FALSE(has_label_containing(window, "ID: gain"));
+    REQUIRE_FALSE(has_label_containing(window, "accent.primary"));
+    REQUIRE(has_label_containing(window, "Type: \xE2\x80\x94"));
+
+    // A periodic refresh with no root stays empty, and a new root repopulates.
+    REQUIRE_NOTHROW(window.refresh());
+    REQUIRE(tree->find_node_by_user_data(fx.knob) == nullptr);
+    window.set_inspected_root(&fx.root);
+    REQUIRE(tree->find_node_by_user_data(fx.knob) != nullptr);
+    REQUIRE(has_label_containing(window, "accent.primary"));
+}
+
 TEST_CASE("InspectorWindow drops a selection whose view is gone after a rebuild",
           "[pulp-vellum-components][inspector-window]") {
     View root;

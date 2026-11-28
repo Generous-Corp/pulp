@@ -169,6 +169,16 @@
       "timeout": 30.0
     },
     {
+      "name": "claude-plugin-command-discovery-selftest",
+      "argv": [
+        "-m",
+        "unittest",
+        "test_claude_plugin_command_discovery"
+      ],
+      "cwd": "{repo}/tools/scripts",
+      "timeout": 60.0
+    },
+    {
       "name": "clean-build-cov-selftest",
       "argv": [
         "-m",
@@ -372,6 +382,20 @@
       "name": "examples-index-guard-selftest",
       "argv": [
         "{repo}/tools/scripts/test_examples_index_guard.py"
+      ],
+      "timeout": 120.0
+    },
+    {
+      "name": "examples-manifest-guard-selftest",
+      "argv": [
+        "{repo}/tools/scripts/test_examples_manifest_guard.py"
+      ],
+      "timeout": 120.0
+    },
+    {
+      "name": "examples-manifest-guard",
+      "argv": [
+        "{repo}/tools/scripts/examples_manifest_guard.py"
       ],
       "timeout": 120.0
     },

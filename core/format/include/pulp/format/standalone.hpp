@@ -45,6 +45,7 @@ class PresetLibrary;
 namespace pulp::format {
 
 class PresetProgramRouter;
+class StandalonePanel;
 
 namespace detail {
 class StandaloneMusicalTyping;
@@ -333,6 +334,12 @@ public:
         return state_persist_.saves;
     }
 
+    /// How many tool panels this run holds (standalone_panel.hpp). Valid from
+    /// the moment the panels are built, before audio starts, until shutdown.
+    std::size_t panel_count() const noexcept {
+        return panels_.size();
+    }
+
   private:
     // run_with_editor() for a processor with an editor factory: the editor-host
     // contract editor in its own native window (detail/standalone_contract_editor.hpp).
@@ -397,6 +404,13 @@ public:
     // Test-only accessor (defined in test/test_standalone_settings_model.cpp)
     // that injects `midi_system_factory_` and reads the opened MIDI input.
     friend struct StandaloneMidiTestAccess;
+
+    // Tool windows installed by a UI integration (standalone_panel.hpp).
+    // Created before audio starts and destroyed after it stops, so the audio
+    // thread can drain them without a lock.
+    void create_panels(const StandaloneConfig& config);
+    void shutdown_panels() noexcept;
+    std::vector<std::unique_ptr<StandalonePanel>> panels_;
 
     ProcessorFactory factory_;
     // The store is declared before the Processor so it is destroyed after it.

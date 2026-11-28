@@ -138,13 +138,29 @@ target_sources(pulp-view-core PRIVATE
     src/bubble_message.cpp
 )
 
+# The editor bridge's dispatch core (handlers, JSON and WebView dispatch,
+# response helpers) needs only CHOC and the runtime, so it is its own target and
+# a Vellum-backed Pulp::view-tooling can link it without Pulp's view libraries.
+# The attach_native_runtime overloads that name view-script types stay in
+# pulp-view-tooling (editor_bridge_native_runtime.cpp).
+add_library(pulp-editor-bridge)
+add_library(pulp::editor-bridge ALIAS pulp-editor-bridge)
+target_sources(pulp-editor-bridge PRIVATE src/editor_bridge.cpp)
+target_include_directories(pulp-editor-bridge PUBLIC
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+    $<BUILD_INTERFACE:${choc_SOURCE_DIR}>
+    $<INSTALL_INTERFACE:include>)
+target_compile_features(pulp-editor-bridge PUBLIC cxx_std_20)
+target_link_libraries(pulp-editor-bridge PUBLIC pulp::runtime)
+target_link_libraries(pulp-view-tooling PUBLIC pulp::editor-bridge)
+
 # Pulp-kept plugin-host and editor facilities: the component inspector and the
-# editor bridge. They stay outside pulp-view-core's extractable closure; their
+# editor bridge attachments. They stay outside pulp-view-core's extractable closure; their
 # public headers keep their installed paths, and the view umbrellas link this
 # target. The HostParamSurface contract and its StateStore-backed adapter live
 # in core/dataplane.
 target_sources(pulp-view-tooling PRIVATE
-    src/editor_bridge.cpp
+    src/editor_bridge_native_runtime.cpp
     src/editor_bridge_scaffold.cpp
     src/inspector.cpp
     src/inspector_window.cpp

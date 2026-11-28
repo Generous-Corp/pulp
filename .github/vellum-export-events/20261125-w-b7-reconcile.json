@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "event_id": "20261125-w-b7-reconcile",
+  "kind": "exported-path-change",
+  "created_at": "2026-11-25T11:42:40Z",
+  "receipt_export_id": "20261107-f0ac0a4ff392",
+  "paths": [
+    "core/view/cmake/PulpViewJsPreludes.cmake"
+  ],
+  "vellum_inherits": false,
+  "rationale": "The directory override exists so Pulp's suites can run against Vellum's published prelude copies during the cutover. Vellum embeds its own framework preludes and publishes them through VellumWebCompat.cmake, so it has no use for the override."
+}

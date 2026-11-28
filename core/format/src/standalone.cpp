@@ -1,4 +1,5 @@
 #include <pulp/format/standalone.hpp>
+#include <pulp/format/standalone_panel.hpp>
 #include <pulp/format/audio_workgroup_client.hpp>
 #include <pulp/format/app_updates.hpp>
 #include <pulp/format/detail/standalone_environment.hpp>
@@ -508,6 +509,8 @@ void StandaloneApp::render_audio_block(
         // them ahead of the queued note-on they are cancelling. The helper is
         // created before audio starts and remains stable until after it stops.
         drain_view_input(midi_in, ctx.buffer_size);
+        for (const auto& panel : panels_)
+            panel->drain_midi_into(midi_in, ctx.buffer_size);
         midi_in.sort();
         // Bank Select + Program Change: latch only; the load runs on the main
         // thread from service_program_changes().
@@ -903,6 +906,21 @@ bool StandaloneApp::apply_config(const StandaloneConfig& new_config) {
     return ok;
 }
 
+void StandaloneApp::create_panels(const StandaloneConfig& config) {
+    detail::install_standalone_panels();
+    StandalonePanelContext context{
+        config, [this](const midi::MidiEvent& event) { return ui_midi_collector_.push_now(event); },
+        [] { return detail::standalone_text_input_has_focus(); }};
+    panels_ = detail::create_standalone_panels(context);
+}
+
+void StandaloneApp::shutdown_panels() noexcept {
+    // Audio has stopped, or never started, at every call site.
+    for (const auto& panel : panels_)
+        panel->shutdown();
+    panels_.clear();
+}
+
 bool StandaloneApp::run_contract_editor(EditorFactory& factory) {
     if (!detail::standalone_contract_editor_supported()) {
         runtime::log_error(
@@ -933,6 +951,8 @@ bool StandaloneApp::run_contract_editor(EditorFactory& factory) {
         config_.transport_playing = playing;
     };
     options.on_open_settings = [this] { return open_settings_window(); };
+    for (const auto& panel : panels_)
+        options.panels.push_back(panel.get());
     options.on_idle = [this] {
         service_state_persistence();
         service_program_changes();
@@ -995,6 +1015,7 @@ bool StandaloneApp::open_settings_window() {
 bool StandaloneApp::run_with_editor(bool use_gpu) {
     shutdown_view_input();
     musical_typing_.reset();
+    shutdown_panels();
 #if PULP_ENABLE_AUDIO_PROBES
     audio_inspector_.reset();
 #endif
@@ -1027,9 +1048,10 @@ bool StandaloneApp::run_with_editor(bool use_gpu) {
     }
 
     // Construct before start(): the audio callback may begin immediately and
-    // reads the musical typing helper to drain its lock-free stuck-note
-    // recovery.
+    // reads the musical typing helper and the panels to drain their lock-free
+    // stuck-note recovery.
     prepare_view_input(effective_config);
+    create_panels(effective_config);
 
     config_ = effective_config;
     if (!start()) return false;
@@ -1069,6 +1091,7 @@ void StandaloneApp::stop() {
     detail::close_standalone_settings_windows(this);
     shutdown_view_input();
     stop_audio_keep_processor();
+    shutdown_panels();
 #if PULP_ENABLE_AUDIO_PROBES
     // Tear the Audio Inspector down before the processor / probe so its raw
     // `output_probe_` pointer never dangles. Destroying the window first also

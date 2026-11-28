@@ -169,7 +169,7 @@
     "gpu-first-visible-acceptance-v2-selftest": 15.4,
     "gpu-first-visible-campaign-selftest": 4.6,
     "gpu-handoff-pin-freshness-selftest": 7.2,
-    "gpu-handoff-provenance-selftest": 52.4,
+    "gpu-handoff-provenance-selftest": 19.0,
     "gpu-health-contract-selftest": 0.1,
     "gpu-health-read-contract-selftest": 0.1,
     "gpu-health-run-attestation": 60.2,

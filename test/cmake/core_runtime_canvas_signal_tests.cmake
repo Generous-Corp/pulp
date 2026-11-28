@@ -1256,6 +1256,21 @@ if(APPLE AND NOT PULP_IOS)
     catch_discover_tests(pulp-test-standalone-contract-editor)
 endif()
 
+# The view-free standalone's generated panel registrar (the one a UI package
+# plug-in's Standalone gets): launching headless builds the Vellum typing panel.
+if(APPLE AND NOT PULP_IOS AND TARGET pulp::vellum-audio AND TARGET pulp::standalone-contract)
+    if(NOT COMMAND _pulp_add_standalone_panel_registrar)
+        include("${CMAKE_SOURCE_DIR}/tools/cmake/PulpAppTargets.cmake")
+    endif()
+    add_executable(pulp-test-vellum-standalone-panel-registrar
+        test_vellum_standalone_panel_registrar.mm)
+    _pulp_add_standalone_panel_registrar(pulp-test-vellum-standalone-panel-registrar)
+    target_link_libraries(pulp-test-vellum-standalone-panel-registrar PRIVATE
+        pulp::standalone-contract Catch2::Catch2WithMain "-framework AppKit")
+    catch_discover_tests(pulp-test-vellum-standalone-panel-registrar
+        PROPERTIES LABELS pulp-vellum)
+endif()
+
 # Audio/MIDI settings model shared by the view SettingsPanel and the native
 # settings window (no device is opened).
 pulp_add_test_suite(pulp-test-standalone-settings-model GROUP pulp-test-group-core-standalone

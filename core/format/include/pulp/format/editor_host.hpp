@@ -54,7 +54,8 @@
 
 namespace pulp::state {
 class StateStore;
-}
+struct ParamGroup;
+} // namespace pulp::state
 
 namespace pulp::format {
 
@@ -126,6 +127,11 @@ class ParamPort {
     virtual std::span<const state::ParamInfo> params() const = 0;
     /// One parameter's description, or null for an unknown id. Any thread.
     virtual const state::ParamInfo* info(state::ParamID id) const = 0;
+    /// The named parameter groups `ParamInfo::group_id` refers to, in
+    /// registration order. Empty by default, which a generated editor reads
+    /// as one ungrouped grid. `state::ParamGroup` is declared in
+    /// pulp/state/store.hpp, which a caller reading the groups includes.
+    virtual std::span<const state::ParamGroup> groups() const;
     /// The current plain value (the host's automation included). Any thread.
     virtual float get(state::ParamID id) const = 0;
 
@@ -180,8 +186,8 @@ class ParamPort {
 /// `add_listener()` are then refused, and the port's subscriptions are
 /// already removed.
 ///
-/// `params()` and `info()` describe the parameters as they were when the port
-/// was made. The span and pointers they return stay valid for the port's
+/// `params()`, `info()` and `groups()` describe the parameters as they were
+/// when the port was made. The span and pointers they return stay valid for the port's
 /// lifetime, connected or not, so an editor may keep them.
 class StateStoreParamPort final : public ParamPort {
   public:
@@ -193,6 +199,7 @@ class StateStoreParamPort final : public ParamPort {
 
     std::span<const state::ParamInfo> params() const override;
     const state::ParamInfo* info(state::ParamID id) const override;
+    std::span<const state::ParamGroup> groups() const override;
     float get(state::ParamID id) const override;
     void begin(state::ParamID id) override;
     void set(state::ParamID id, float plain_value) override;
@@ -382,6 +389,17 @@ enum class KeyDisposition : std::uint8_t {
     forward = 0,  ///< not the editor's: the host acts on it (Space → transport)
     consumed = 1, ///< the editor handled it; the host must not act on it
 };
+
+/// `EditorContext::query_extension()` id a host answers with a non-null
+/// pointer when every key it offers through `Editor::offer_key()` has already
+/// been through the platform's key-equivalent pass over the editor's own
+/// native view, as the keys reaching an AppKit container have. That pass gave
+/// the editor's global shortcuts their one look at the press, so the editor's
+/// `offer_key()` must not offer the press to them again. A host that offers
+/// keys outside the native event path (VST3 `IPlugView::onKeyDown`) answers
+/// null, and there the offer is the only one.
+inline constexpr std::string_view editor_keys_after_native_pass_extension_id =
+    "dev.pulp.editor.keys-after-native-pass/1";
 
 // ── Editor ───────────────────────────────────────────────────────────────────
 

@@ -10,6 +10,7 @@ asserted too, so a checker that rejects everything cannot pass this suite.
 from __future__ import annotations
 
 import io
+import json
 import sys
 import tempfile
 import unittest
@@ -33,8 +34,10 @@ def baseline_properties(root: Path) -> dict[str, str]:
         "device.source_dir": str(root / "render"),
         "render.link": "pulp::runtime;pulp::canvas;pulp::gpu-device-api;pulp::gpu-device;skia::skia",
         "render.interface_link":
-            "pulp::runtime;pulp::canvas;pulp::gpu-device-api;"
+            "pulp::runtime;pulp::canvas;pulp::gpu-device-api;pulp::gpu-compute;"
             "$<LINK_ONLY:pulp::gpu-device>;skia::skia",
+        "compute.type": "INTERFACE_LIBRARY",
+        "compute.interface_link": "pulp::gpu-device;pulp::runtime;skia::skia",
         "gpu_audio.link": "pulp::audio;pulp::runtime;$<LINK_ONLY:Threads::Threads>;"
                           "pulp::gpu-device;pulp::signal",
         "gpu_audio.source_dir": str(root / "gpu_audio"),
@@ -138,7 +141,8 @@ class LinkClosureRules(unittest.TestCase):
 
     def test_render_dropping_device_fails(self) -> None:
         self.props["render.link"] = "pulp::runtime;pulp::canvas;pulp::gpu-device-api"
-        self.props["render.interface_link"] = "pulp::runtime;pulp::canvas;pulp::gpu-device-api"
+        self.props["render.interface_link"] = (
+            "pulp::runtime;pulp::canvas;pulp::gpu-device-api;pulp::gpu-compute")
         self.assertEqual(self.codes(), ["render-device-unlinked", "render-missing-device"])
 
     def test_consumer_with_extra_module_fails(self) -> None:
@@ -168,6 +172,54 @@ class LinkClosureRules(unittest.TestCase):
     def test_missing_api_header_fails(self) -> None:
         (self.include / "pulp/render/gpu_render_time.hpp").unlink()
         self.assertEqual(self.codes(), ["api-header-missing"])
+
+    def test_compute_linking_canvas_fails(self) -> None:
+        self.props["compute.interface_link"] += ";pulp::canvas"
+        self.assertEqual(self.codes(), ["compute-reaches-up"])
+
+    def test_compute_as_static_library_fails(self) -> None:
+        self.props["compute.type"] = "STATIC_LIBRARY"
+        self.assertEqual(self.codes(), ["compute-not-interface"])
+
+    def test_compute_without_device_fails(self) -> None:
+        self.props["compute.interface_link"] = "pulp::runtime"
+        self.assertEqual(self.codes(), ["compute-missing-device"])
+
+    def test_render_dropping_compute_fails(self) -> None:
+        self.props["render.interface_link"] = self.props["render.interface_link"].replace(
+            "pulp::gpu-compute;", "")
+        self.assertEqual(self.codes(), ["render-missing-compute"])
+
+    def deletion_violations(self, delete_paths: list[str]) -> list[str]:
+        inputs = self.root / "cutover_inputs.json"
+        inputs.write_text(json.dumps({"delete_paths": delete_paths}), encoding="utf-8")
+        return sorted(v.code for v in check.check_deletion_list(
+            self.props, self.include, self.root, inputs))
+
+    def test_device_files_on_the_deletion_list_fail(self) -> None:
+        # Baseline: a list that names only UI files holds no device file.
+        self.assertEqual(self.deletion_violations(["render/include/pulp/render/skia_surface.hpp"]),
+                         [])
+        # An API header, a device source and nothing else on the list.
+        self.assertEqual(
+            self.deletion_violations(["render/include/pulp/render/gpu_render_time.hpp"]),
+            ["device-file-on-deletion-list"])
+        self.assertEqual(self.deletion_violations(["render/src/gpu_surface_dawn.cpp"]),
+                         ["device-file-on-deletion-list"])
+
+    def test_deletion_list_flag_reaches_main(self) -> None:
+        path = self.root / "props.txt"
+        path.write_text("".join(f"{k}\t{v}\n" for k, v in self.props.items()), encoding="utf-8")
+        inputs = self.root / "cutover_inputs.json"
+        inputs.write_text(json.dumps(
+            {"delete_paths": ["render/include/pulp/render/gpu_diagnostics.hpp"]}),
+            encoding="utf-8")
+        stderr = io.StringIO()
+        with redirect_stdout(io.StringIO()), redirect_stderr(stderr):
+            code = check.main(["--properties", str(path), "--render-include", str(self.include),
+                               "--cutover-inputs", str(inputs), "--repo-root", str(self.root)])
+        self.assertEqual(code, 1)
+        self.assertIn("device-file-on-deletion-list", stderr.getvalue())
 
     def test_incomplete_properties_is_inconclusive(self) -> None:
         del self.props["render.link"]

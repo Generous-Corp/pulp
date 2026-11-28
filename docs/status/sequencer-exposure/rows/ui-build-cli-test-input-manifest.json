@@ -15,7 +15,8 @@
       "path": "test/test_cli_ui.cpp",
       "needles": [
         "pulp ui without a subcommand prints the complete usage contract",
-        "pulp ui forwards lint arguments and preserves delegate failures"
+        "pulp ui forwards lint arguments and preserves delegate failures",
+        "pulp ui forwards to vellum ui outside a checkout that carries the tool"
       ]
     },
     {
@@ -32,7 +33,7 @@
     },
     "offline_timeline_cli": {
       "disposition": "not_applicable",
-      "rationale": "The UI build CLI is unrelated to sequenced timeline editing."
+      "rationale": "The UI build CLI, including its forwarding to `vellum ui`, is unrelated to sequenced timeline editing."
     },
     "offline_timeline_mcp": {
       "disposition": "not_applicable",

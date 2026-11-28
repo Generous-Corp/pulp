@@ -180,6 +180,7 @@ class InspectorWindow : public View {
     void refresh_console();
     void refresh_performance();
     void refresh_state();
+    void clear_elements();
     void populate_tree_from_view(::vellum::view::TreeNode& parent, View* view);
     void show_properties_for(View* view);
     std::size_t compute_tree_signature(const View* view) const;

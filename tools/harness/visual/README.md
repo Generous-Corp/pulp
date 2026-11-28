@@ -170,3 +170,12 @@ whose hosted-runner toolcache defaults are not writable on the persistent Mac.
 The canonical raster-golden gate for future PNG tests is the arm64-darwin
 software/raster lane. The Docker image is the reproducible dependency
 environment for smoke and developer parity, not a replacement for that lane.
+
+## Layout fixtures on Vellum
+
+`runner.py --verify --engine vellum [--vellum-host PATH]` (or `$VELLUM_APP_HOST`)
+maps each layout fixture onto a Vellum bundle (`vellum_layout.py` has the property
+table), runs `vellum-app-host --dump-tree` and compares node rectangles with the
+Yoga goldens. A fixture using a property with no Vellum equivalent is skipped by
+name; exit 3 means nothing was measured. The default engine still runs
+`pulp-test-visual`.

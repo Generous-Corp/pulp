@@ -94,8 +94,11 @@ class NativeEditor final : public format::Editor, public format::EditorAutomatio
         return {static_cast<std::uint32_t>(view_.frame.size.width),
                 static_cast<std::uint32_t>(view_.frame.size.height), scale_};
     }
+    format::ViewSize size_hints() const override {
+        return slice_editor_size_hints(size());
+    }
     bool set_size(const format::EditorSize& size) override {
-        if (size.width < 120 || size.height < 80)
+        if (size.width < kEditorMinWidth || size.height < kEditorMinHeight)
             return false;
         [view_ setFrameSize:NSMakeSize(size.width, size.height)];
         scale_ = size.scale;
