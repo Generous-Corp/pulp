@@ -261,6 +261,12 @@ if(TARGET pulp-arm64ec-stl-thunks)
         RENAME pulp-arm64ec-stl-thunks.lib)
 endif()
 
+# The in-tree Vellum mode leaves Pulp's UI directories out, so their targets
+# are not in this tree to export (PulpVellumUiInTree.cmake).
+if(PULP_UI_FROM_VELLUM_IN_TREE)
+    pulp_vellum_in_tree_drop_ui_targets(PULP_SDK_TARGETS)
+endif()
+
 foreach(_sdk_target IN LISTS PULP_SDK_TARGETS)
     string(REPLACE "pulp-" "" _sdk_export_name "${_sdk_target}")
     set_target_properties(${_sdk_target} PROPERTIES EXPORT_NAME "${_sdk_export_name}")
@@ -414,6 +420,10 @@ list(APPEND _pulp_sdk_header_subsystems
 if(TARGET pulp-host)
     list(APPEND _pulp_sdk_header_subsystems host)
 endif()
+# Nor are the headers of the UI directories that mode leaves out.
+if(PULP_UI_FROM_VELLUM_IN_TREE)
+    pulp_vellum_in_tree_drop_ui_headers(_pulp_sdk_header_subsystems)
+endif()
 foreach(subsystem IN LISTS _pulp_sdk_header_subsystems)
     set(_inc_dir "${CMAKE_CURRENT_SOURCE_DIR}/core/${subsystem}/include")
     if(EXISTS "${_inc_dir}")
@@ -438,10 +448,13 @@ if(TARGET pulp-native)
 endif()
 
 # GraphEditorView is an audio-UI header kept outside view-core, while retaining
-# its public pulp/view/widgets include path for installed consumers.
-install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/core/view/audio/include/pulp/"
-    DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/pulp"
-    FILES_MATCHING PATTERN "*.hpp" PATTERN "*.h")
+# its public pulp/view/widgets include path for installed consumers. Not in
+# PULP_UI_FROM_VELLUM_IN_TREE, which leaves core/view out.
+if(NOT PULP_UI_FROM_VELLUM_IN_TREE)
+    install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/core/view/audio/include/pulp/"
+        DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/pulp"
+        FILES_MATCHING PATTERN "*.hpp" PATTERN "*.h")
+endif()
 
 if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tools/audio/analysis/include/pulp")
     install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/tools/audio/analysis/include/pulp/"
@@ -1102,9 +1115,14 @@ install(FILES
     # pulp_add_ios_auv3() consumes these at downstream build time when the
     # installed SDK advertises its verified Three.js runtime.
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/scripts/bundle_threejs_for_jsc.mjs"
-    "${CMAKE_CURRENT_SOURCE_DIR}/core/view/js/web-compat-three-shim.js"
     DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/Pulp/scripts
 )
+# The Three.js shim is a core/view script, which PULP_UI_FROM_VELLUM_IN_TREE
+# leaves out.
+if(NOT PULP_UI_FROM_VELLUM_IN_TREE)
+    install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/core/view/js/web-compat-three-shim.js"
+        DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/Pulp/scripts)
+endif()
 
 # Templates for standalone project scaffolding
 install(DIRECTORY tools/templates/
@@ -1212,10 +1230,12 @@ install(FILES
 # archive references Chromium raw_ptr / PartitionAlloc support symbols without
 # shipping a PartitionAlloc archive. Installed SDK consumers need the same
 # source because they link the installed Skia archives through find_package(Pulp).
-install(FILES
-    "${CMAKE_CURRENT_SOURCE_DIR}/core/canvas/src/skia_chromium_raw_ptr_compat.cpp"
-    DESTINATION src/pulp/canvas
-)
+if(NOT PULP_UI_FROM_VELLUM_IN_TREE)
+    install(FILES
+        "${CMAKE_CURRENT_SOURCE_DIR}/core/canvas/src/skia_chromium_raw_ptr_compat.cpp"
+        DESTINATION src/pulp/canvas
+    )
+endif()
 
 # macOS view/window/accessibility Objective-C cluster. _pulp_apply_view_mac_objc_suffix()
 # (PulpUtils.cmake) compiles a per-binary copy of these into each shipped plug-in /
@@ -1224,8 +1244,10 @@ install(FILES
 # there — otherwise an installed-SDK consumer silently falls back to pulp-view-core's
 # shared fixed-name copies and the cross-plug-in class collision returns. The
 # private headers (pulp_mac_objc_names.h, mac_gpu_host_config.h + the window_host_mac split headers) ship
-# alongside because the .mm include them by relative path.
-if(APPLE)
+# alongside because the .mm include them by relative path. Not in
+# PULP_UI_FROM_VELLUM_IN_TREE: the cluster is Pulp's own window host, which that
+# mode leaves out, and a plug-in must not compile it beside Vellum's.
+if(APPLE AND NOT PULP_UI_FROM_VELLUM_IN_TREE)
     install(FILES
         "${CMAKE_CURRENT_SOURCE_DIR}/core/view/platform/mac/app_menu_mac.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/core/view/platform/mac/app_menu_mac.mm"

@@ -78,19 +78,30 @@ function(_pulp_vellum_link_tokens item out)
     set(${out} "${_tokens}" PARENT_SCOPE)
 endfunction()
 
+# Marks `target` as an owner of one GPU device layer. In a source tree the
+# package names are aliases (PulpVellumUiInTree.cmake), and a property can only
+# be set on the target an alias names.
+function(_pulp_vellum_mark_gpu_runtime_owner target owner)
+    get_target_property(_real "${target}" ALIASED_TARGET)
+    if(NOT _real)
+        set(_real "${target}")
+    endif()
+    set_property(TARGET "${_real}" PROPERTY PULP_GPU_RUNTIME_OWNER ${owner})
+endfunction()
+
 function(_pulp_vellum_mark_gpu_runtime_owners)
     foreach(_target IN ITEMS Pulp::gpu-device Pulp::gpu-audio VellumGpuRuntime::Device
             VellumGpuRuntime::Bootstrap VellumGpuRuntime::SkiaLogBridge)
         if(TARGET "${_target}")
-            set_property(TARGET "${_target}" PROPERTY PULP_GPU_RUNTIME_OWNER static)
+            _pulp_vellum_mark_gpu_runtime_owner("${_target}" static)
         endif()
     endforeach()
     foreach(_name IN LISTS ARGN)
-        set_property(TARGET "Pulp::${_name}" PROPERTY PULP_GPU_RUNTIME_OWNER provider)
+        _pulp_vellum_mark_gpu_runtime_owner("Pulp::${_name}" provider)
         get_target_property(_backing "Pulp::${_name}" INTERFACE_LINK_LIBRARIES)
         foreach(_target IN LISTS _backing)
             if(_target MATCHES "^Vellum::" AND TARGET "${_target}")
-                set_property(TARGET "${_target}" PROPERTY PULP_GPU_RUNTIME_OWNER provider)
+                _pulp_vellum_mark_gpu_runtime_owner("${_target}" provider)
             endif()
         endforeach()
     endforeach()
@@ -249,6 +260,12 @@ function(_pulp_vellum_ui_compat_define name)
         endif()
     endforeach()
     add_library("${_target}" INTERFACE IMPORTED)
+    # In a source tree (PulpVellumUiInTree.cmake) the names are defined after
+    # the directories that link them, so they must be global to resolve there;
+    # the alias below inherits that. An installed SDK leaves them directory-scoped.
+    if(_PULP_VELLUM_UI_COMPAT_GLOBAL)
+        set_property(TARGET "${_target}" PROPERTY IMPORTED_GLOBAL TRUE)
+    endif()
     set_target_properties("${_target}" PROPERTIES
         INTERFACE_LINK_LIBRARIES "${_links}"
         INTERFACE_COMPILE_FEATURES cxx_std_20

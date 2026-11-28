@@ -1750,6 +1750,55 @@ unset(_vellum_ui_compat_test)
 unset(_vellum_ui_compat_args)
 unset(_vellum_ui_compat_labels)
 
+# PULP_UI_FROM_VELLUM_IN_TREE: the source tree with Pulp's UI directories left
+# out and the UI names served from Vellum. `guards` uses stand-ins and runs
+# everywhere. `real` configures this tree twice against the Vellum SDK the build
+# found; registered with it, it carries the pulp-vellum label the Vellum SDK
+# consumer lane runs and fails rather than skips.
+add_test(NAME cmake-vellum-ui-in-tree-guards
+    COMMAND ${CMAKE_COMMAND}
+        -DPULP_SOURCE_DIR=${CMAKE_SOURCE_DIR}
+        -DFIXTURE_DIR=${CMAKE_CURRENT_BINARY_DIR}/vellum-ui-in-tree
+        -DSCENARIO=guards
+        -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/test_vellum_ui_in_tree.cmake)
+set_tests_properties(cmake-vellum-ui-in-tree-guards PROPERTIES
+    LABELS "cmake;sdk" TIMEOUT 120)
+add_test(NAME cmake-vellum-ui-in-tree-install-rules
+    COMMAND ${CMAKE_COMMAND}
+        -DPULP_SOURCE_DIR=${CMAKE_SOURCE_DIR}
+        -DFIXTURE_DIR=${CMAKE_CURRENT_BINARY_DIR}/vellum-ui-in-tree
+        -DSCENARIO=install-rules
+        -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/test_vellum_ui_in_tree.cmake)
+set_tests_properties(cmake-vellum-ui-in-tree-install-rules PROPERTIES
+    LABELS "cmake;sdk" TIMEOUT 60)
+add_test(NAME cmake-vellum-ui-in-tree-cli-force-load
+    COMMAND ${CMAKE_COMMAND}
+        -DPULP_SOURCE_DIR=${CMAKE_SOURCE_DIR}
+        -DFIXTURE_DIR=${CMAKE_CURRENT_BINARY_DIR}/vellum-ui-in-tree
+        -DSCENARIO=cli-force-load
+        -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/test_vellum_ui_in_tree.cmake)
+set_tests_properties(cmake-vellum-ui-in-tree-cli-force-load PROPERTIES
+    LABELS "cmake;sdk" TIMEOUT 120
+    SKIP_REGULAR_EXPRESSION "SKIP: the CLI force-load is macOS only")
+set(_vellum_ui_in_tree_args "")
+set(_vellum_ui_in_tree_labels "cmake;sdk")
+if(Vellum_DIR)
+    set(_vellum_ui_in_tree_args -DVELLUM_DIR=${Vellum_DIR} -DREQUIRE_VELLUM=ON)
+    set(_vellum_ui_in_tree_labels "cmake;sdk;pulp-vellum")
+endif()
+add_test(NAME cmake-vellum-ui-in-tree-real
+    COMMAND ${CMAKE_COMMAND}
+        -DPULP_SOURCE_DIR=${CMAKE_SOURCE_DIR}
+        -DFIXTURE_DIR=${CMAKE_CURRENT_BINARY_DIR}/vellum-ui-in-tree
+        -DSCENARIO=real
+        ${_vellum_ui_in_tree_args}
+        -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/test_vellum_ui_in_tree.cmake)
+set_tests_properties(cmake-vellum-ui-in-tree-real PROPERTIES
+    LABELS "${_vellum_ui_in_tree_labels}" TIMEOUT 120
+    SKIP_REGULAR_EXPRESSION "SKIP: no installed Vellum SDK")
+unset(_vellum_ui_in_tree_args)
+unset(_vellum_ui_in_tree_labels)
+
 # The consumer modules read PULP_UI_PROVIDER, so a Vellum-backed Pulp::view
 # never has Pulp's view, render or editor-adapter sources compiled against it.
 foreach(_ui_provider_scenario provider editor no-editor bundle reload objc bytecode standalone)

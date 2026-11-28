@@ -73,6 +73,14 @@ on:
       - 'tools/cmake/PulpInstallRules.cmake'
       - 'test/cmake/test_vellum_installed_sdk_smoke.cmake'
       - 'tools/validation/sdk-smoke/vellum-installed/**'
+      # PULP_UI_FROM_VELLUM_IN_TREE: its module, its scenario driver, and the
+      # CMake files whose consumers the `real` scenario pins, so a change that
+      # ports or adds a consumer runs the test that judges it.
+      - 'integrations/pulp-vellum/cmake/PulpVellumUiInTree.cmake'
+      - 'test/cmake/test_vellum_ui_in_tree.cmake'
+      - 'core/**/CMakeLists.txt'
+      - 'inspect/CMakeLists.txt'
+      - 'tools/cli/cmake/PulpCliForceLoad.cmake'
       - '.github/workflows/vellum-sdk-consumer.yml'
   workflow_dispatch:
     inputs:

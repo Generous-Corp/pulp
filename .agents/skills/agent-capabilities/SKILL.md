@@ -1703,7 +1703,13 @@ the bypass trailer by reflex:
   without `core/view`; its header installs as `pulp/view/editor_bridge.hpp`
   through the `editor_bridge` header subsystem) and the view layer's inspector
   and screenshot surfaces), only in an SDK configured with
-  `PULP_SDK_UI_FROM_VELLUM` (off until Pulp's UI libraries are removed). Never
+  `PULP_SDK_UI_FROM_VELLUM` (off until Pulp's UI libraries are removed).
+  `PULP_UI_FROM_VELLUM_IN_TREE` reuses the same mapping inside the source tree
+  (`PulpVellumUiInTree.cmake`), where the package names are aliases of in-tree
+  targets: GPU-owner marks go on an alias's real target, and the install rules
+  drop the skipped directories' targets and headers. The installed `PulpConfig`
+  still records `PULP_SDK_UI_FROM_VELLUM` OFF, so installing such a tree does not
+  yet produce a Vellum-mode SDK. Never
   key that off one name's absence: a GPU-off or design-import-off bridge SDK
   lacks `Pulp::render` or `Pulp::design-import` while still shipping Pulp's own
   view. It installs no header and adds no archive, so no covered root

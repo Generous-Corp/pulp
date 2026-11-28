@@ -350,6 +350,18 @@ project root's `build/tools/cli`, so those tests stage `PULP_CLI_BINARY`
 there through `CliProjectRoot` (test/mcp_server_test_support.hpp) rather than
 running whatever sits in the checkout's `build/`.
 
+### `pulp-cli` force-loads Pulp's own UI archives
+
+On macOS `pulp-cli` force-loads `pulp-view-core`, `pulp-design-import`,
+`pulp-view-script` and `pulp-canvas` (with `pulp-runtime` and
+`pulp-inspect-protocol`), because Apple ld scans an archive once and the CLI's
+helper objects would otherwise be dropped. The list lives in
+`tools/cli/cmake/PulpCliForceLoad.cmake`. Under `PULP_UI_FROM_VELLUM_IN_TREE`
+those archives do not exist, and skipping them would link a CLI with undefined
+symbols, so the function refuses that mode instead.
+`cmake-vellum-ui-in-tree-cli-force-load` holds both behaviours. Porting the CLI
+to the Vellum-backed names means changing that function and the test together.
+
 ### A shell-out test's data includes what the spawned CLI reads
 
 A test selector reuses a test's result when none of its inputs changed, and
