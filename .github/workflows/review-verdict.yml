@@ -283,6 +283,12 @@ jobs:
             # rule as the review-verdict job, from the default branch.
             head=$(sed -nE 's/^review-verdict: success on ([0-9a-f]{40})$/\1/p' "$dir/out.txt" | tail -n 1)
             if [ -n "$head" ]; then
+              # Hold the head at pending while its items are judged, so
+              # Shipyard's fresh success cannot admit it in the meantime.
+              gh api -X POST "repos/${GITHUB_REPOSITORY}/statuses/${head}" -f state=pending \
+                -f context=review-verdict \
+                -f "description=judging review items for head ${head:0:12}" > /dev/null \
+                || echo "::warning::could not hold $head at pending"
               auth="AUTHORIZATION: basic $(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)"
               item_rc=0
               # An unfetched head cannot be read, and the checker then posts failure.
@@ -293,6 +299,13 @@ jobs:
                 --repo "$GITHUB_REPOSITORY" --pr "$number" --head "$head" \
                 --base "origin/$BASE_BRANCH" --post-status --posted-marker "$dir/posted" \
                 --target-url "$RUN_URL") || item_rc=$?
+              if [ "$item_rc" -eq 0 ]; then
+                # Allowed and every item accepted: restore the success the hold replaced.
+                gh api -X POST "repos/${GITHUB_REPOSITORY}/statuses/${head}" -f state=success \
+                  -f context=review-verdict \
+                  -f "description=approved; every review item is accepted" \
+                  -f "target_url=${RUN_URL}" > /dev/null || item_rc=2
+              fi
               if [ "$item_rc" -ne 0 ] && [ ! -f "$dir/posted" ]; then
                 # Refused, killed or timed out without a confirmed failure
                 # status: refuse the head here.

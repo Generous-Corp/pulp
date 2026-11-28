@@ -161,12 +161,18 @@ def collect_items(root: Path, base: str, head: str) -> tuple[list[dict[str, Any]
     except (OSError, ValueError, RuntimeError) as exc:
         raise ReviewItemError(f"cannot compute review items: {exc}") from exc
     ledgers = ledger_items(root, base, head)
+    # Only a header the branch itself deleted is a failure: one main started
+    # tracking after the merge-base never existed on the branch.
+    anchor = _git(root, "merge-base", base, head).strip()
+    at_anchor = set(_git(root, "ls-tree", "-r", "--name-only", anchor).splitlines())
+    never_on_branch = {path for path in missing if path not in at_anchor}
     still_tracked = head_ledger_headers(root, head)
     dropped = {path for path in missing
                if still_tracked is not None and path not in still_tracked
                and any(item["path"] == FANOUT_LEDGER for item in ledgers)}
     failures = [f"hotspot edit refused: {spot['path']}" for spot, _ in refusals]
-    failures += [f for f in fanout_failures if f.split(":", 1)[0] not in dropped]
+    failures += [f for f in fanout_failures
+                 if f.split(":", 1)[0] not in dropped | never_on_branch]
     return hotspot_items + fanout_items + ledgers, failures
 
 

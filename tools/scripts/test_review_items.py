@@ -312,6 +312,22 @@ class HardFailures(RepoCase):
         items, _ = ri.collect_items(self.root, "main", head)
         self.assertIn(FANOUT_ID, [i["id"] for i in items])
 
+    def test_a_header_main_tracks_after_the_branch_point_is_not_missing(self) -> None:
+        newer = "core/a/include/pulp/a/newer.hpp"
+        git(self.root, "checkout", "-q", "main")
+        write(self.root, newer, "#pragma once\n")
+        write(self.root, FANOUT_LEDGER, json.dumps({
+            "schema_version": 1, "headers": [{"path": HEAVY, "max_tus": 5},
+                                             {"path": newer, "max_tus": 5}]}))
+        self.commit("main tracks a new header")
+        git(self.root, "checkout", "-q", "topic")
+        write(self.root, "README.md", "x\n")
+        head = self.commit("unrelated change on the older branch")
+        items, failures = ri.collect_items(self.root, "main", head)
+        self.assertEqual(failures, [])
+        rc, out = self.check(head, [])
+        self.assertEqual(rc, 0, out)
+
     def test_a_hard_failure_posts_a_failure_status(self) -> None:
         write(self.root, AGGREGATE, "{}\n")
         head = self.commit("re-add the split aggregate")
