@@ -449,18 +449,18 @@
       "pulp_paths": [
         {
           "repo": "Generous-Corp/pulp",
-          "path": "core/view/platform/mac/window_host_mac.mm",
+          "path": "core/editor_bridge/src/editor_bridge.cpp",
           "state": "pulp-owned-retained",
-          "revision": "12423ff4dc0fcbe6d97aed148ae47841dc654d70",
-          "object_id": "7a22dc64f747e34f5b1bf29c3b33c6be10b5b654",
+          "revision": "c5f6589dc8e59d436777d644cba3a6142f690f88",
+          "object_id": "2c88932fff9c7adf500bdf17031baa51d89173f1",
           "object_type": "blob"
         },
         {
           "repo": "Generous-Corp/pulp",
-          "path": "core/view/src/editor_bridge.cpp",
+          "path": "core/view/platform/mac/window_host_mac.mm",
           "state": "pulp-owned-retained",
-          "revision": "ec910149d1a234903b3474832605a2fafeb11f08",
-          "object_id": "2c88932fff9c7adf500bdf17031baa51d89173f1",
+          "revision": "12423ff4dc0fcbe6d97aed148ae47841dc654d70",
+          "object_id": "7a22dc64f747e34f5b1bf29c3b33c6be10b5b654",
           "object_type": "blob"
         },
         {
@@ -578,8 +578,8 @@
         "duplicate_rejection": "Reject double emission from both Pulp and Vellum for one semantic event."
       },
       "retained_paths": [
+        "core/editor_bridge/src/editor_bridge.cpp",
         "core/view/platform/mac/window_host_mac.mm",
-        "core/view/src/editor_bridge.cpp",
         "core/view/src/view.cpp",
         "core/view/src/widget_bridge.cpp",
         "core/view/src/widget_bridge/bridge_dispatch.cpp"
@@ -2735,8 +2735,8 @@
           "repo": "Generous-Corp/pulp",
           "path": ".agents/skills/pulp-vellum-change-routing/SKILL.md",
           "state": "pulp-owned-retained",
-          "revision": "a0ec784d98fe5c77b9d5503e63e7520862c699f2",
-          "object_id": "af32ed607a903702f0522e90dcf9db12ea4492c3",
+          "revision": "19ac292daa83275f65c62dc7af47c34ea9b22aa1",
+          "object_id": "116e84b4f9c69dd354cd2241c4d37ef69aec4965",
           "object_type": "blob"
         },
         {
@@ -2775,8 +2775,8 @@
           "repo": "Generous-Corp/pulp",
           "path": ".agents/skills/view-bridge/SKILL.md",
           "state": "pulp-owned-retained",
-          "revision": "7310703f3e3151cd992eb15962b051bcc04bf98b",
-          "object_id": "f561030ea7c16b768f87693d065625c037dcb2d8",
+          "revision": "19ac292daa83275f65c62dc7af47c34ea9b22aa1",
+          "object_id": "c35c04b668ceff9961e0fb3ba9ca8726f5140661",
           "object_type": "blob"
         },
         {

@@ -409,7 +409,7 @@ if(TARGET pulp-authoring-capsule)
 endif()
 list(APPEND _pulp_sdk_header_subsystems
     simd timeline_agent_view timeline_editor playback interchange dawproject smf events content state audio midi signal dataplane graph format sequence osc canvas
-    render view gpu_audio native-components dsl
+    render view editor_bridge gpu_audio native-components dsl
 )
 if(TARGET pulp-host)
     list(APPEND _pulp_sdk_header_subsystems host)
