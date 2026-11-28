@@ -38,6 +38,7 @@ import hashlib
 import io
 import json
 import os
+import re
 import shlex
 import shutil
 import subprocess
@@ -132,9 +133,73 @@ def pick_run(runs: list[dict]) -> dict:
 # earlier proof and therefore have no evidence artifact, so inspect the whole
 # page before declaring that no usable SDK exists.
 RUN_SEARCH_LIMIT = 50
+# The reuse step annotates the gpu job with "Tree <sha> was proven by <run URL>"
+# (a ::notice::, readable as a check-run annotation) when it skips the build.
+REUSE_SOURCE_RE = re.compile(
+    r"Tree [0-9a-f]+ was proven by "
+    + re.escape(f"https://github.com/{VELLUM_REPO}/actions/runs/") + r"([1-9][0-9]*)")
+GPU_JOB_NAME = "gpu-macos-arm64"
+REUSE_CHAIN_MAX_DEPTH = 20
 
 
-def select_run(runs: list[dict], fetch_artifacts, limit: int = RUN_SEARCH_LIMIT) -> tuple[dict, dict]:
+def reuse_source_run(text: bytes | str) -> int | None:
+    """The source run id named by a reuse notice in annotation or log text.
+    Only a run of this repository counts."""
+    payload = text.decode("utf-8", "replace") if isinstance(text, bytes) else text
+    match = REUSE_SOURCE_RE.search(payload)
+    return int(match.group(1)) if match else None
+
+
+def _reuse_chain(run: dict, fetch_artifacts, fetch_run, fetch_reuse_source,
+                 *, max_depth: int = REUSE_CHAIN_MAX_DEPTH) -> tuple[dict, dict]:
+    """Follow recorded reuse pointers from `run` to a run with a live evidence artifact."""
+    chain = [run["id"]]
+    current = run
+    for _ in range(max_depth):
+        matches = [a for a in fetch_artifacts(current) if a.get("name") == EVIDENCE_ARTIFACT]
+        live = [a for a in matches if not a.get("expired")]
+        if len(live) == 1:
+            return current, live[0]
+        trail = " -> ".join(map(str, chain))
+        source_id = fetch_reuse_source(current)
+        if source_id is None:
+            state = "has expired" if matches else "is absent"
+            raise ResolveError(f"reuse chain {trail} ends at run {current['id']}, "
+                               f"whose '{EVIDENCE_ARTIFACT}' artifact {state}")
+        if source_id in chain:
+            raise ResolveError(f"reuse chain {trail} -> {source_id} loops")
+        chain.append(source_id)
+        current = fetch_run(source_id)
+        if current.get("name") != GPU_WORKFLOW_NAME or current.get("conclusion") != "success":
+            raise ResolveError(f"reuse chain {' -> '.join(map(str, chain))}: run {source_id} "
+                               f"is not a successful '{GPU_WORKFLOW_NAME}' run")
+    raise ResolveError(f"reuse chain {' -> '.join(map(str, chain))} exceeds {max_depth} runs")
+
+
+def run_reuse_source(jobs: list[dict], fetch_annotations, fetch_logs) -> int | None:
+    """The source run a reused proof names. The check-run annotations are the
+    structured record; the job log is read only when a job has no annotations
+    (or they cannot be fetched)."""
+    for job in jobs:
+        if job.get("name") != GPU_JOB_NAME:
+            continue
+        try:
+            annotations = fetch_annotations(job)
+        except ResolveError:
+            annotations = []
+        for annotation in annotations:
+            source_id = reuse_source_run(annotation.get("message") or "")
+            if source_id is not None:
+                return source_id
+        if not annotations:
+            source_id = reuse_source_run(fetch_logs(job))
+            if source_id is not None:
+                return source_id
+    return None
+
+
+def select_run(runs: list[dict], fetch_artifacts, limit: int = RUN_SEARCH_LIMIT,
+               fetch_reuse_source=None, fetch_run=None) -> tuple[dict, dict]:
     """The newest successful push run on main that still carries the evidence
     artifact, looking at no more than `limit` runs. A run whose change the
     classifier skipped (for example an observatory-only push) is green but
@@ -147,13 +212,21 @@ def select_run(runs: list[dict], fetch_artifacts, limit: int = RUN_SEARCH_LIMIT)
         key=lambda run: (run.get("created_at") or "", run.get("id") or 0), reverse=True)
     if not candidates:
         raise ResolveError(f"no successful '{GPU_WORKFLOW_NAME}' push run on {VELLUM_REPO} main")
+    chain_errors = []
     for run in candidates[:limit]:
         live = [a for a in fetch_artifacts(run)
                 if a.get("name") == EVIDENCE_ARTIFACT and not a.get("expired")]
         if len(live) == 1:
             return run, live[0]
+        if fetch_reuse_source is not None and fetch_run is not None:
+            try:
+                if fetch_reuse_source(run) is not None:
+                    return _reuse_chain(run, fetch_artifacts, fetch_run, fetch_reuse_source)
+            except ResolveError as error:
+                chain_errors.append(str(error))
+    detail = f"; first reuse failure: {chain_errors[0]}" if chain_errors else ""
     raise ResolveError(f"none of the newest {min(limit, len(candidates))} successful '{GPU_WORKFLOW_NAME}' "
-                       f"runs on {VELLUM_REPO} main has an unexpired '{EVIDENCE_ARTIFACT}' artifact")
+                       f"runs on {VELLUM_REPO} main has an unexpired '{EVIDENCE_ARTIFACT}' artifact{detail}")
 
 
 def run_contains_commit(token: str, minimum: str, head: str) -> bool:
@@ -241,9 +314,26 @@ def resolve(args: argparse.Namespace) -> int:
         else:
             listing = _api(f"repos/{VELLUM_REPO}/actions/runs?branch=main&event=push&status=success&per_page=50",
                            token)
+            def fetch_artifacts(candidate):
+                return _api(f"repos/{VELLUM_REPO}/actions/runs/{candidate['id']}/artifacts", token).get("artifacts", [])
+
+            def fetch_run(run_id):
+                return _api(f"repos/{VELLUM_REPO}/actions/runs/{run_id}", token)
+
+            def fetch_reuse_source(candidate):
+                jobs = _api(f"repos/{VELLUM_REPO}/actions/runs/{candidate['id']}/jobs?per_page=100",
+                            token).get("jobs", [])
+                return run_reuse_source(
+                    jobs,
+                    lambda job: _api(f"repos/{VELLUM_REPO}/check-runs/{job['id']}/annotations?per_page=100", token),
+                    lambda job: _api(f"repos/{VELLUM_REPO}/actions/jobs/{job['id']}/logs", token, raw=True))
+
             run, artifact = select_run(
                 listing.get("workflow_runs", []),
-                lambda r: _api(f"repos/{VELLUM_REPO}/actions/runs/{r['id']}/artifacts", token).get("artifacts", []))
+                fetch_artifacts,
+                fetch_reuse_source=fetch_reuse_source,
+                fetch_run=fetch_run,
+            )
         head = run["head_sha"]
         minimum = getattr(args, "min_vellum_sha", None)
         if minimum and not run_contains_commit(token, minimum, head):
