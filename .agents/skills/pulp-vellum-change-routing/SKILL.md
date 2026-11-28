@@ -393,6 +393,14 @@ pinned path, so a bare `write` alongside an inventory change turns it green, and
 python3 -B tools/scripts/test_gpu_handoff_provenance.py -k published_receipt
 ```
 
+That selftest takes about 20 s, down from about 47 s: the generator and the
+catalog validator resolve their per-path Git queries side by side
+(`resolve_inventory_identities`, and the prewarm in
+`validate_handoff_routing`) instead of one subprocess at a time. The pre-push
+fixture step caps itself at 60 s, so a test over the cap is reported NOT
+CHECKED; if this one creeps back up, look for a Git query that was moved back
+inside a per-row loop before touching the cap.
+
 **A capability-registry change stales a handoff pin without touching any GPU or
 Vellum file.** `tools/scripts/test_release_artifact_contents.py` is a pinned
 path *and* one of the sites that hardcodes the control-registry digest, so

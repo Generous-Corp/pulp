@@ -80,6 +80,12 @@ if(Python3_Interpreter_FOUND)
     add_test(NAME gates-named-failures-selftest COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/scripts/test_gates_named_failures.py")
     set_tests_properties(gates-named-failures-selftest PROPERTIES LABELS "tools;selftest" TIMEOUT 120)
+    add_test(NAME gates-preflight-selftest COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/scripts/test_gates_preflight.py")
+    set_tests_properties(gates-preflight-selftest PROPERTIES LABELS "tools;selftest" TIMEOUT 120)
+    add_test(NAME gates-gate-host-python-selftest COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/scripts/test_gates_gate_host_python.py")
+    set_tests_properties(gates-gate-host-python-selftest PROPERTIES LABELS "tools;selftest" TIMEOUT 120)
     add_test(NAME deps-audit-selftest COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/deps/test_audit.py")
     set_tests_properties(deps-audit-selftest PROPERTIES LABELS "tools;selftest" TIMEOUT 120)

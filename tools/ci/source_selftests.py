@@ -44,6 +44,7 @@ import os
 import pathlib
 import re
 import shutil
+import signal
 import subprocess
 import sys
 import tempfile
@@ -681,6 +682,29 @@ def change_tokens(path: str) -> set[str]:
 WORKFLOW_LINT = REPO_ROOT / ".github" / "workflows" / "workflow-lint.yml"
 # Workflow suites that cannot run in bounded time on a developer checkout. Each
 # is reported as NOT CHECKED, never as a pass; the workflow still runs it.
+# Suites that configure a build, compile or link something. A gate host that
+# serves the required gate refuses them (gates.sh passes --no-compile there).
+COMPILING_SUITES = {
+    "test_object_deps.py": "builds targets with cmake --build",
+    "test_ccache_pch_isolation.py": "drives clang and ccache",
+    "test_check_installed_rpaths.py": "links a dylib with clang",
+    "test_vellum_sdk_consumer.py": "configures and builds a consumer with ninja",
+}
+
+
+def drop_compiling(entries: list[dict[str, Any]]) -> dict[str, str]:
+    """Remove the suites that compile from ``entries`` in place; name -> why."""
+    dropped: dict[str, str] = {}
+    for entry in list(entries):
+        words = [entry.get("name", ""), *[str(a) for a in entry.get("argv", [])]]
+        for suite, why in COMPILING_SUITES.items():
+            if any(w.endswith(suite) for w in words):
+                entries.remove(entry)
+                dropped[entry["name"]] = why
+                break
+    return dropped
+
+
 WORKFLOW_LOCAL_SKIPS = {
     "tools/scripts/test_generated_version_bump_check.py": (
         "35 fixtures each clone the checkout and let the check add a worktree, so "
@@ -1129,6 +1153,9 @@ def _entry_from_command(name: str, argv: list[str], props: dict[str, Any],
         value = props["ENVIRONMENT"]
         pairs = value if isinstance(value, list) else str(value).split(";")
         entry["env"] = dict(p.split("=", 1) for p in pairs if "=" in p)
+    if props.get("LABELS"):
+        value = props["LABELS"]
+        entry["labels"] = value if isinstance(value, list) else str(value).split(";")
     if props.get("RESOURCE_LOCK"):
         value = props["RESOURCE_LOCK"]
         entry["resource_lock"] = value if isinstance(value, list) else str(value).split(";")
@@ -1220,6 +1247,22 @@ def set_aside_census_tests(entries: list[dict[str, Any]], build: pathlib.Path,
 
 CONFIGURE_ONLY_PREFIX = "build-configure-only."  # tools/scripts/configure_only.py TEMP_PREFIX
 
+# Pulp's own switches that pull a Vellum SDK or adapter into a configure. A tree
+# with one ON measures a different link graph than the gate profile (the default
+# feature set), so the census and the registrations it yields are not the gate's.
+VELLUM_CACHE_OPTION_RE = re.compile(
+    r"^(PULP_ENABLE_PULP_VELLUM\w*|PULP_ENABLE_RMLUI_ADAPTER):BOOL=(ON|TRUE|YES|Y|1)\s*$",
+    re.MULTILINE)
+
+
+def vellum_options_on(build: pathlib.Path) -> list[str]:
+    """The Vellum-enabling cache options that are ON in ``build`` (sorted)."""
+    try:
+        text = (build / "CMakeCache.txt").read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return []
+    return sorted({m.group(1) for m in VELLUM_CACHE_OPTION_RE.finditer(text)})
+
 
 def choose_build_dir(repo: pathlib.Path = REPO_ROOT,
                      env: dict[str, str] | os._Environ[str] = os.environ,
@@ -1255,6 +1298,10 @@ def choose_build_dir(repo: pathlib.Path = REPO_ROOT,
         if not (candidate / "CMakeCache.txt").is_file():
             continue
         why = unusable_build_reason(candidate, repo)
+        vellum = vellum_options_on(candidate)
+        if not why and vellum:
+            why = (f"Vellum options on ({', '.join(vellum)}); the gate profile is the default "
+                   "feature set, so this tree would read as census drift")
         if why:
             rejected.append(f"{candidate.name}: {why}")
         else:
@@ -1511,6 +1558,17 @@ def _resolve_members(names, commands, props, substitutions, repo):
                 member_props.pop("WORKING_DIRECTORY")
             else:
                 member_props["WORKING_DIRECTORY"] = wd
+        # ENVIRONMENT names the checkout the same way (PYTHONPATH=${CMAKE_SOURCE_DIR}); left
+        # literal it breaks any suite that imports from the repo root. `{repo}` is expanded
+        # at run time, so a base re-run points at the base checkout.
+        if member_props.get("ENVIRONMENT"):
+            def _in_repo(text: str) -> str:
+                for var in _CMAKE_SOURCE_VARS:
+                    text = text.replace("${" + var + "}", "{repo}")
+                return text
+            env_value = member_props["ENVIRONMENT"]
+            member_props["ENVIRONMENT"] = ([_in_repo(v) for v in env_value] if isinstance(env_value, list)
+                                           else _in_repo(str(env_value)))
         # A TIMEOUT computed at configure time (pulp_scaled_test_timeout's
         # output variable) has no value here; ctest's default stands in.
         if "${" in str(member_props.get("TIMEOUT", "")):
@@ -1519,7 +1577,17 @@ def _resolve_members(names, commands, props, substitutions, repo):
     return entries, not_checked
 
 
-def python_ctest_entries(repo: pathlib.Path = REPO_ROOT) -> list[dict[str, Any]]:
+def shared_host_labels() -> frozenset[str]:
+    """The labels the required `macos` gate leaves out (ctest_gate_args.SHARED_HOST_LABEL_EXCLUDE):
+    timing, performance and hardware-evidence tests that measure runner load."""
+    sys.path.insert(0, str(REPO_ROOT / "tools" / "ci"))
+    import ctest_gate_args  # noqa: PLC0415
+
+    return frozenset(ctest_gate_args.SHARED_HOST_LABEL_EXCLUDE.split("|"))
+
+
+def python_ctest_entries(repo: pathlib.Path = REPO_ROOT,
+                         exclude_labels: frozenset[str] = frozenset()) -> list[dict[str, Any]]:
     """Every registered ctest that hands a checkout Python script to Python.
 
     The pr-fast tier and the source-selftest manifest are left out: gates.sh
@@ -1539,6 +1607,8 @@ def python_ctest_entries(repo: pathlib.Path = REPO_ROOT) -> list[dict[str, Any]]
         if not (argv[1].startswith("{repo}/") and argv[1].endswith(".py")):
             continue
         if pathlib.Path(expand(argv[1], repo)).resolve() in manifest_scripts:
+            continue
+        if exclude_labels & set(entry.get("labels", [])):
             continue
         python.append(entry)
     return python
@@ -1620,16 +1690,32 @@ def base_checkout(ref: str, repo: pathlib.Path = REPO_ROOT) -> Iterator[pathlib.
     # would then fail on the base for a reason the branch does not share.
     holder = pathlib.Path(tempfile.mkdtemp(prefix=".source-selftests-base-", dir=repo.parent))
     checkout = holder / "base"
-    subprocess.run(
-        ["git", "worktree", "add", "--quiet", "--detach", str(checkout), merge_base],
-        cwd=repo, capture_output=True, text=True, check=True,
-    )
+    # A TERM or HUP (a wall-time cap, a closed terminal) would otherwise skip the
+    # cleanup below and leave a registered worktree and a full checkout behind.
+    previous: dict[int, Any] = {}
+
+    def _exit_on_signal(signum: int, _frame: Any) -> None:
+        raise SystemExit(128 + signum)
+
+    for sig in (signal.SIGTERM, signal.SIGHUP):
+        try:
+            previous[sig] = signal.signal(sig, _exit_on_signal)
+        except ValueError:  # not the main thread
+            break
     try:
+        subprocess.run(
+            ["git", "worktree", "add", "--quiet", "--detach", str(checkout), merge_base],
+            cwd=repo, capture_output=True, text=True, encoding="utf-8", check=True,
+        )
         yield checkout
     finally:
+        for sig, handler in previous.items():
+            signal.signal(sig, handler)
         subprocess.run(["git", "worktree", "remove", "--force", str(checkout)],
                        cwd=repo, capture_output=True, text=True, check=False)
         shutil.rmtree(holder, ignore_errors=True)
+        subprocess.run(["git", "worktree", "prune"], cwd=repo, capture_output=True, text=True, encoding="utf-8",
+                       check=False)
 
 
 def rerun_on_base(
@@ -1822,6 +1908,12 @@ def entry_from_registration(test: dict[str, Any], repo: pathlib.Path, build: str
 
 def _run_and_report(args: argparse.Namespace, parser: argparse.ArgumentParser,
                     entries: list[dict[str, Any]], start: float) -> int:
+    if getattr(args, "no_compile", False):
+        for name, why in sorted(drop_compiling(entries).items()):
+            print(f"source-selftests: NOT CHECKED locally: {name} (it {why}, which a gate host "
+                  "refuses); CI runs it", flush=True)
+        if not entries:
+            return 0
     results = run(entries, jobs=args.jobs)
     failed = [r for r in results if r["returncode"] != 0]
     # A step CI marks continue-on-error reports here too, and cannot fail the run.
@@ -1933,6 +2025,19 @@ def main(argv: list[str] | None = None) -> int:
     )
     p_run.add_argument("--build-dir", type=pathlib.Path)
     p_run.add_argument(
+        "--shared-host-labels",
+        action="store_true",
+        help="with --ctest-python, leave out the tests carrying a label the required macos gate "
+        "excludes (validation, slow, performance, bench, quality-lab, gpu-proof): load-sensitive "
+        "timing tests that must not decide a gate-host run",
+    )
+    p_run.add_argument(
+        "--no-compile",
+        action="store_true",
+        help="leave out the suites that configure or compile something and list them NOT CHECKED "
+        "(a gate host that serves the required gate passes this)",
+    )
+    p_run.add_argument(
         "--ctest-python",
         action="store_true",
         help="run the registered ctests that execute a checkout Python script "
@@ -2027,7 +2132,13 @@ def main(argv: list[str] | None = None) -> int:
             print(f"source-selftests: {len(entries)} sync-job command(s) read from "
                   f"{LANE_WORKFLOW.relative_to(REPO_ROOT)}", flush=True)
         elif args.ctest_python:
-            entries = python_ctest_entries()
+            exclude = shared_host_labels() if args.shared_host_labels else frozenset()
+            entries = python_ctest_entries(exclude_labels=exclude)
+            if exclude:
+                left = len(python_ctest_entries())
+                print(f"source-selftests: {left - len(entries)} of {left} ctest-registered Python "
+                      f"test(s) carry a label ({'|'.join(sorted(exclude))}) the required gate leaves "
+                      "out, so they are not run here either", flush=True)
         else:
             entries = (workflow_entries(args.workflow.resolve()) if args.workflow
                        else load_manifest(args.manifest))

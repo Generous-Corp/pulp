@@ -85,6 +85,9 @@ tools/scripts/test_merge_stall_watchdog.py
 tools/scripts/stale_run_reaper.py
 tools/scripts/test_stale_run_reaper.py
 tools/scripts/test_release_breakage_watchdog_wiring.py
+tools/scripts/archive_sdk.py
+tools/scripts/check_archive_mtimes.py
+tools/scripts/test_archive_sdk.py
 tools/scripts/test_codecov_upload_contract.py
 tools/scripts/test_coverage_surface_contract.py
 ci/coverage-surfaces.yaml
