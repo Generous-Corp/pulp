@@ -2451,6 +2451,18 @@ construct, so the slot can only return null or do nothing. Gotchas:
   binary built in the other mode would call the wrong one without any error.
   `format-legacy-view-slot-layout` compares the slot positions of both modes
   and of a header with one slot removed; it fails if they drift.
+- **A ViewProcessor offers what `has_view(role)` says**, answered without
+  building anything (default: the editor only); `create_view()` is pure, and a
+  plug-in whose view can be null overrides `has_view`. It cannot be adopted
+  before the switch: in a mode-1 SDK its header `#error`s with the reason, and
+  docs/guides/editor-host-contract.md lists each downstream's changes.
+- **A plug-in keeps `create_view()` by deriving from `pulp::vellum::ViewProcessor<>`**
+  (`view_processor.hpp`), which `#error`s unless the macro is 0. Its factory is
+  one static per `Base`, shared by every processor; it reaches the processor
+  only through the `Processor&` the host passes to `create()`. Its test links a
+  mode-0 `format.cpp` ahead of the mode-1 `pulp-format-core` archive, which works
+  only because the slot layout matches; a duplicate-symbol or missing
+  `reserved_legacy_view_*` link error there means a slot or a name drifted.
 - **A new view-named virtual goes through the macro too.** `node_abi_gate.py`
   reads `PULP_FORMAT_LEGACY_VIEW_NAME(x)` as `x`, expands no other macro, and
   fails when the macro's default definition is anything but the plain name.

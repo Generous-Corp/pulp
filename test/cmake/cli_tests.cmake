@@ -23,9 +23,9 @@ catch_discover_tests(pulp-test-cli-design-binding
     PROPERTIES LABELS "parser-import")
 
 # `pulp ui` keeps the user-facing help contract in the native dispatcher while
-# delegating implementation to the dependency-free Python emitter. Test both
-# the help path and the forwarding/exit-status boundary without launching a
-# subprocess or mutating a checkout.
+# delegating to the Python emitter in a checkout that carries it, or to
+# `vellum ui` elsewhere. Test the help path and both forwarding boundaries
+# without launching a subprocess.
 add_executable(pulp-test-cli-ui-command
     test_cli_ui.cpp
     ${CMAKE_SOURCE_DIR}/tools/cli/cmd_ui.cpp
@@ -36,6 +36,16 @@ target_include_directories(pulp-test-cli-ui-command PRIVATE
 target_link_libraries(pulp-test-cli-ui-command PRIVATE Catch2::Catch2WithMain)
 catch_discover_tests(pulp-test-cli-ui-command
     PROPERTIES LABELS "cli;ui")
+
+# `pulp import-design` without the importer maps each lane to its
+# `vellum import` spelling.
+add_executable(pulp-test-cli-import-design-moved
+    test_cli_import_design_moved.cpp
+    ${CMAKE_SOURCE_DIR}/tools/cli/import_design_moved.cpp)
+target_include_directories(pulp-test-cli-import-design-moved PRIVATE ${CMAKE_SOURCE_DIR})
+target_link_libraries(pulp-test-cli-import-design-moved PRIVATE Catch2::Catch2WithMain)
+catch_discover_tests(pulp-test-cli-import-design-moved
+    PROPERTIES LABELS "cli;import")
 
 # CLI create target selection tests
 add_executable(pulp-test-cli-create-targets test_cli_create_targets.cpp ${CMAKE_SOURCE_DIR}/tools/cli/create_build_commands.cpp ${CMAKE_SOURCE_DIR}/tools/cli/shell_quote.cpp
