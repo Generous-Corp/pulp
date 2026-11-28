@@ -3,6 +3,7 @@
 
 # Link graph the closure checks read.
 include("${CMAKE_CURRENT_LIST_DIR}/link_closure_graph.cmake")
+include("${CMAKE_CURRENT_LIST_DIR}/inspect_control_closure_tests.cmake")
 
 # Build check (no Catch2 dependency)
 add_executable(pulp-test-build-check test_build_check.cpp)

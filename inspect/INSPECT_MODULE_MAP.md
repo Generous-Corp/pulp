@@ -25,6 +25,29 @@ this file, CMake wiring, tests, and any newly added hotspot ceilings in the same
 change. `hotspot_size_guard.json` tracks the largest current inspect hotspots
 and watches newly added `inspect/**` files for large-file warnings.
 
+## Control Stack and View Side
+
+`inspect/` holds two stacks that move independently. The control stack
+(`pulp-inspect-protocol`, `-control`, `-client`, `-runtime`, `-telemetry`,
+`-observability-runtime`, `-authoring`, the sample-region and graph runtimes and
+`pulp-control-broker`) builds without `pulp::view`, `pulp::canvas` or
+`pulp::render`: it reads the editor data plane through `pulp/dataplane/*`, not
+through the view-layer spellings of those names. The view side (the overlay,
+window, motion tools, script inspector and the Standalone UI adapters, in
+`pulp-inspect`, `-ui-runtime`, `-runtime-eval` and `-standalone-runtime`) draws
+or reads the view tree and goes with the UI layer.
+
+Two checks hold the line. `inspect-control-link-closure` walks the configured
+link graph from every control root and fails when one reaches a view, canvas or
+render target, directly, through an intermediate archive, or through a PRIVATE
+static link; its controls must be reported. `inspect-control-includes` reads the
+sources: `inspect_control_include_check.py` names the view-side files exactly, so
+every other file under `inspect/` must include no UI header and a listed file
+that no longer does is reported as stale. `pulp-inspect-offline-runtime` and
+`pulp-inspect-agent-toolkit` link `pulp::format`, which still reaches the view
+layer through `pulp-format-view`; that single edge is allowed by name until the
+Processor editor seam leaves the format layer.
+
 ## Dependency Tiers
 
 Classify extraction candidates by their minimum dependency, not by the current

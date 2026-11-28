@@ -9,9 +9,25 @@
 # The graph lands in ${CMAKE_BINARY_DIR}/link-closure-graph.tsv. Each closure
 # check registered from a test manifest reads it, so the walk covers the real
 # configured graph rather than a hand-listed approximation.
+# A CMake File API codemodel query is also requested. The checker refreshes the
+# graph from that generated model at test time, when directory-scoped imported
+# target records and aliases are available with their resolved properties.
+
+file(MAKE_DIRECTORY "${CMAKE_BINARY_DIR}/.cmake/api/v1/query")
+file(WRITE "${CMAKE_BINARY_DIR}/.cmake/api/v1/query/codemodel-v2" "")
+file(WRITE "${CMAKE_BINARY_DIR}/link-closure-graph.codemodel" "${CMAKE_BINARY_DIR}")
 
 function(_pulp_link_closure_collect dir out_var)
     get_property(_targets DIRECTORY "${dir}" PROPERTY BUILDSYSTEM_TARGETS)
+    get_property(_imported DIRECTORY "${dir}" PROPERTY IMPORTED_TARGETS)
+    # Imported targets are directory-scoped unless declared GLOBAL.  Keep their
+    # names in the graph's target reference set even though the deferred writer
+    # runs at the top level and cannot inspect their properties from there.
+    get_property(_known_imported GLOBAL PROPERTY PULP_LINK_CLOSURE_IMPORTED_TARGETS)
+    list(APPEND _known_imported ${_imported})
+    list(REMOVE_DUPLICATES _known_imported)
+    set_property(GLOBAL PROPERTY PULP_LINK_CLOSURE_IMPORTED_TARGETS "${_known_imported}")
+    list(APPEND _targets ${_imported})
     get_property(_subdirs DIRECTORY "${dir}" PROPERTY SUBDIRECTORIES)
     foreach(_sub IN LISTS _subdirs)
         _pulp_link_closure_collect("${_sub}" _sub_targets)
@@ -38,15 +54,29 @@ endfunction()
 # targets, aliases and the targets of $<TARGET_OBJECTS:...>), with the
 # properties a closure walk follows: LINK_LIBRARIES, INTERFACE_LINK_LIBRARIES,
 # SOURCES and INTERFACE_SOURCES, unevaluated. An alias records one edge to the
-# target it names. The record is `name<TAB>type<TAB>link<TAB>iface<TAB>sources`.
+# target it names. The record is `name<TAB>type<TAB>link<TAB>iface<TAB>sources<TAB>refs`,
+# where refs lists the words that CMake resolved to a target, so the checker can tell
+# a missing target record from a system library whatever the target is called.
 function(_pulp_link_closure_write_graph)
     _pulp_link_closure_collect("${CMAKE_SOURCE_DIR}" _queue)
     list(REMOVE_DUPLICATES _queue)
+    get_property(_known_imported GLOBAL PROPERTY PULP_LINK_CLOSURE_IMPORTED_TARGETS)
     set(_seen "")
     set(_content "")
     while(_queue)
         list(POP_FRONT _queue _target)
-        if(_target IN_LIST _seen OR NOT TARGET "${_target}")
+        if(_target IN_LIST _seen)
+            continue()
+        endif()
+        if(NOT TARGET "${_target}")
+            if(_target IN_LIST _known_imported)
+                # Local imported targets are not visible from this deferred
+                # top-level scope. Emit their node now; the codemodel refresh
+                # at test time supplies the declaring-directory properties.
+                list(APPEND _seen "${_target}")
+                string(APPEND _content
+                       "${_target}\tIMPORTED_DIRECTORY_SCOPED\t\t\t\t\n")
+            endif()
             continue()
         endif()
         list(APPEND _seen "${_target}")
@@ -70,18 +100,23 @@ function(_pulp_link_closure_write_graph)
             endforeach()
             set(_sources "${_src};${_isrc}")
         endif()
+        set(_refs "")
         foreach(_value IN ITEMS "${_link}" "${_iface}" "${_sources}")
             _pulp_link_closure_words("${_value}" _words)
             foreach(_word IN LISTS _words)
-                if(TARGET "${_word}" AND NOT _word IN_LIST _seen)
-                    list(APPEND _queue "${_word}")
+                if(TARGET "${_word}" OR _word IN_LIST _known_imported)
+                    list(APPEND _refs "${_word}")
+                    if(NOT _word IN_LIST _seen)
+                        list(APPEND _queue "${_word}")
+                    endif()
                 endif()
             endforeach()
         endforeach()
+        list(REMOVE_DUPLICATES _refs)
         string(REGEX REPLACE "[\t\n\r]+" ";" _link "${_link}")
         string(REGEX REPLACE "[\t\n\r]+" ";" _iface "${_iface}")
         string(REGEX REPLACE "[\t\n\r]+" ";" _sources "${_sources}")
-        string(APPEND _content "${_target}\t${_type}\t${_link}\t${_iface}\t${_sources}\n")
+        string(APPEND _content "${_target}\t${_type}\t${_link}\t${_iface}\t${_sources}\t${_refs}\n")
     endwhile()
     file(WRITE "${CMAKE_BINARY_DIR}/link-closure-graph.tsv" "${_content}")
 endfunction()

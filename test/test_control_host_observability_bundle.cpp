@@ -1,7 +1,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <pulp/inspect/control_host_observability_bundle.hpp>
-#include <pulp/view/value_channel_set.hpp>
+#include <pulp/dataplane/value_channel_set.hpp>
 
 #include <choc/text/choc_JSON.h>
 
@@ -109,7 +109,7 @@ TEST_CASE("observability bundle enforces exact authority heartbeat and disconnec
 
 TEST_CASE("observability bundle exposes typed bounded telemetry lifecycle",
           "[inspect][control][observability][telemetry][loss][redaction]") {
-    pulp::view::ValueChannelSet channels;
+    pulp::dataplane::ValueChannelSet channels;
     auto* gain = channels.declare_scalar("gain");
     REQUIRE(gain);
     auto now = std::chrono::steady_clock::time_point{10s};

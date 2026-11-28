@@ -1,8 +1,8 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/catch_approx.hpp>
 #include <pulp/format/headless.hpp>
-#include <pulp/view/value_channel_set.hpp>
-#include <pulp/view/value_source.hpp>
+#include <pulp/dataplane/value_channel_set.hpp>
+#include <pulp/dataplane/value_source.hpp>
 #include "{{HEADER_NAME}}"
 
 using Catch::Approx;

@@ -32,7 +32,7 @@
 #include <pulp/view/screenshot.hpp>
 #include <pulp/view/screenshot_compare.hpp>
 #include <pulp/view/scripted_ui.hpp>
-#include <pulp/view/value_channel_set.hpp>
+#include <pulp/dataplane/value_channel_set.hpp>
 #include <pulp/view/window_host.hpp>
 
 #include <algorithm>

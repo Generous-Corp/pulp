@@ -1,6 +1,6 @@
 #pragma once
 
-#include <pulp/view/value_channel_telemetry.hpp>
+#include <pulp/dataplane/value_channel_telemetry.hpp>
 
 #include <chrono>
 #include <cstddef>
@@ -31,7 +31,7 @@ struct ControlTelemetrySubscriptionRequest {
 
 struct ControlTelemetryChannelSample {
     std::string channel;
-    view::ValueChannelShape shape = view::ValueChannelShape::scalar;
+    dataplane::ValueChannelShape shape = dataplane::ValueChannelShape::scalar;
     std::vector<float> values;
     std::uint64_t source_publication = 0;
     std::uint64_t source_dropped = 0;
@@ -76,7 +76,7 @@ class ControlTelemetryTap {
     ControlTelemetryTap(const ControlTelemetryTap&) = delete;
     ControlTelemetryTap& operator=(const ControlTelemetryTap&) = delete;
 
-    bool attach(view::ValueChannelTelemetryAttachment attachment, Classifier classifier = {});
+    bool attach(dataplane::ValueChannelTelemetryAttachment attachment, Classifier classifier = {});
     void detach() noexcept;
     std::optional<std::string> subscribe(const ControlTelemetryAuthority& authority,
                                          ControlTelemetrySubscriptionRequest request);

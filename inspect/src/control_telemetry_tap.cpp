@@ -31,9 +31,9 @@ bool same_authority(const ControlTelemetryAuthority& left, const ControlTelemetr
 struct ControlTelemetryTap::Impl {
     struct Channel {
         std::size_t index = 0;
-        view::ValueChannelTelemetryDescriptor descriptor;
-        view::ValueChannelTelemetrySnapshot continuous;
-        std::vector<view::ValueChannelTelemetryEventBatch> events;
+        dataplane::ValueChannelTelemetryDescriptor descriptor;
+        dataplane::ValueChannelTelemetrySnapshot continuous;
+        std::vector<dataplane::ValueChannelTelemetryEventBatch> events;
         std::uint64_t event_overflow = 0;
     };
     struct Subscription {
@@ -58,7 +58,7 @@ struct ControlTelemetryTap::Impl {
     ControlTelemetryTapConfig config;
     Clock clock;
     Classifier classifier;
-    view::ValueChannelTelemetryAttachment attachment;
+    dataplane::ValueChannelTelemetryAttachment attachment;
     std::vector<Channel> channels;
     std::unordered_map<std::string, std::size_t> channel_index;
     std::map<std::string, Subscription, std::less<>> subscriptions;
@@ -71,8 +71,8 @@ struct ControlTelemetryTap::Impl {
     void refresh() {
         for (auto& channel : channels) {
             channel.events.clear();
-            if (channel.descriptor.info.shape == view::ValueChannelShape::events) {
-                view::ValueChannelTelemetryEventBatch batch;
+            if (channel.descriptor.info.shape == dataplane::ValueChannelShape::events) {
+                dataplane::ValueChannelTelemetryEventBatch batch;
                 for (std::size_t count = 0; count < config.maximum_vector_values &&
                                             attachment.try_pop_events(channel.index, batch);
                      ++count)
@@ -102,7 +102,7 @@ struct ControlTelemetryTap::Impl {
             result.redacted = true;
             return result;
         }
-        if (channel.descriptor.info.shape == view::ValueChannelShape::events) {
+        if (channel.descriptor.info.shape == dataplane::ValueChannelShape::events) {
             const auto pending = subscription.pending_events.find(name);
             if (pending == subscription.pending_events.end())
                 return result;
@@ -119,10 +119,10 @@ struct ControlTelemetryTap::Impl {
                 using T = std::decay_t<decltype(payload)>;
                 if constexpr (std::is_same_v<T, float>) {
                     result.values.push_back(payload);
-                } else if constexpr (std::is_same_v<T, view::MeterFrame>) {
+                } else if constexpr (std::is_same_v<T, dataplane::MeterFrame>) {
                     const auto count = std::min<std::size_t>(
                         static_cast<std::size_t>(
-                            std::clamp(payload.channels, 0, view::MeterFrame::kMaxChannels)),
+                            std::clamp(payload.channels, 0, dataplane::MeterFrame::kMaxChannels)),
                         subscription.maximum_vector_values / 2);
                     for (std::size_t index = 0; index < count; ++index) {
                         result.values.push_back(payload.peak[index]);
@@ -131,7 +131,7 @@ struct ControlTelemetryTap::Impl {
                 } else {
                     const auto count = std::min<std::size_t>(
                         static_cast<std::size_t>(
-                            std::clamp(payload.count, 0, view::VectorFrame::kMaxSamples)),
+                            std::clamp(payload.count, 0, dataplane::VectorFrame::kMaxSamples)),
                         subscription.maximum_vector_values);
                     result.values.insert(result.values.end(), payload.samples.begin(),
                                          payload.samples.begin() +
@@ -152,7 +152,7 @@ ControlTelemetryTap::~ControlTelemetryTap() = default;
 ControlTelemetryTap::ControlTelemetryTap(ControlTelemetryTap&&) noexcept = default;
 ControlTelemetryTap& ControlTelemetryTap::operator=(ControlTelemetryTap&&) noexcept = default;
 
-bool ControlTelemetryTap::attach(view::ValueChannelTelemetryAttachment attachment,
+bool ControlTelemetryTap::attach(dataplane::ValueChannelTelemetryAttachment attachment,
                                  Classifier classifier) {
     std::lock_guard lock(impl_->mutex);
     impl_->subscriptions.clear();
@@ -231,7 +231,7 @@ ControlTelemetryTap::subscribe(const ControlTelemetryAuthority& authority,
     };
     for (const auto& name : subscription.names) {
         const auto& channel = impl_->channels[impl_->channel_index.at(name)];
-        if (channel.descriptor.info.shape == view::ValueChannelShape::events) {
+        if (channel.descriptor.info.shape == dataplane::ValueChannelShape::events) {
             subscription.pending_events.emplace(
                 name, Impl::Subscription::PendingEvents{
                           .observed_overflow =
@@ -277,7 +277,7 @@ void ControlTelemetryTap::poll() {
             if (channel_found == impl_->channel_index.end())
                 continue;
             const auto& channel = impl_->channels[channel_found->second];
-            if (channel.descriptor.info.shape != view::ValueChannelShape::events)
+            if (channel.descriptor.info.shape != dataplane::ValueChannelShape::events)
                 continue;
             auto& pending = subscription.pending_events.at(name);
             if (channel.event_overflow >= pending.observed_overflow)

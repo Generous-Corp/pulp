@@ -12,9 +12,9 @@
 
 #include "harness/rt_allocation_probe.hpp"
 
-#include <pulp/view/value_channel_set.hpp>
+#include <pulp/dataplane/value_channel_set.hpp>
 
-using namespace pulp::view;
+using namespace pulp::dataplane;
 
 namespace {
 MeterFrame stereo(float rms, float peak) {

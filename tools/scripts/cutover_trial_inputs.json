@@ -131,7 +131,6 @@
   "core/canvas/src/text_layout.cpp",
   "core/canvas/src/text_run_planner.cpp",
   "core/canvas/src/text_shaper.cpp",
-  "core/dataplane/include/pulp/dataplane/fwd.hpp",
   "core/render/include/pulp/render/dirty_tracker.hpp",
   "core/render/include/pulp/render/draco_decoder.hpp",
   "core/render/include/pulp/render/headless_surface.hpp",

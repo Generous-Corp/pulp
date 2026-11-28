@@ -270,7 +270,7 @@ target_include_directories(pulp-inspect-telemetry
 target_link_libraries(pulp-inspect-telemetry
     PUBLIC
         pulp::inspect-protocol
-        pulp::view-core)
+        pulp::dataplane)
 
 add_library(pulp-inspect-observability-objects OBJECT
     src/control_host_observability_bundle.cpp)
@@ -346,7 +346,7 @@ target_sources(pulp-inspect PRIVATE
 )
 
 target_link_libraries(pulp-inspect
-    PUBLIC pulp::view pulp::render pulp::state pulp::events pulp::audio
+    PUBLIC pulp::view pulp::render pulp::state pulp::events pulp::audio pulp::dataplane
     PRIVATE
         pulp::inspect-runtime
         pulp::inspect-telemetry

@@ -2,7 +2,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <pulp/inspect/value_channel_telemetry_broker.hpp>
-#include <pulp/view/value_channel_set.hpp>
+#include <pulp/dataplane/value_channel_set.hpp>
 
 #include <choc/text/choc_JSON.h>
 
@@ -18,11 +18,11 @@ using namespace std::chrono_literals;
 
 namespace {
 
+using pulp::dataplane::ValueChannelSet;
 using pulp::inspect::InspectorMessage;
 using pulp::inspect::InspectorRequestContext;
 using pulp::inspect::InspectorTargetedEventResult;
 using pulp::inspect::ValueChannelTelemetryBroker;
-using pulp::view::ValueChannelSet;
 
 InspectorMessage request(std::int64_t id, std::string method, std::string params = "{}") {
     return pulp::inspect::make_request(id, std::move(method), std::move(params));
@@ -108,7 +108,7 @@ TEST_CASE("telemetry serializes every shape and marks consumed snapshots stale",
 
     scalar->publish(-6.0f);
     scalar->read();
-    pulp::view::MeterFrame meter_frame;
+    pulp::dataplane::MeterFrame meter_frame;
     meter_frame.channels = 1;
     meter_frame.rms[0] = 0.25f;
     meter_frame.peak[0] = 0.5f;
@@ -117,7 +117,7 @@ TEST_CASE("telemetry serializes every shape and marks consumed snapshots stale",
     const std::array<float, 3> scope{0.0f, 0.5f, -0.5f};
     vector->publish(scope.data(), static_cast<int>(scope.size()));
     vector->read();
-    const pulp::view::ValueEvent zero{.frame_index = 0, .value = 0.0f};
+    const pulp::dataplane::ValueEvent zero{.frame_index = 0, .value = 0.0f};
     events->publish(&zero, 1);
 
     auto response = broker.handle(InspectorRequestContext{.client_id = "reader"},
@@ -156,7 +156,7 @@ TEST_CASE("event snapshots retain the newest bounded suffix and expose loss",
     config.max_events_per_channel = 2;
     ValueChannelTelemetryBroker broker(config);
     REQUIRE(broker.replace_attachment(channels.attach_telemetry()));
-    const std::array<pulp::view::ValueEvent, 3> first{{
+    const std::array<pulp::dataplane::ValueEvent, 3> first{{
         {.frame_index = 1, .value = 1.0f},
         {.frame_index = 2, .value = 2.0f},
         {.frame_index = 3, .value = 3.0f},
@@ -173,7 +173,7 @@ TEST_CASE("event snapshots retain the newest bounded suffix and expose loss",
     CHECK(onsets["coalesced"].getWithDefault<std::int64_t>(0) == 1);
     CHECK(onsets["sourcePublication"].getWithDefault<std::int64_t>(0) > 0);
 
-    const pulp::view::ValueEvent overflow{.frame_index = 7, .value = 1.0f};
+    const pulp::dataplane::ValueEvent overflow{.frame_index = 7, .value = 1.0f};
     for (int i = 0; i < 20; ++i)
         events->publish(&overflow, 1);
     response = broker.handle(InspectorRequestContext{.client_id = "reader"},
@@ -191,7 +191,7 @@ TEST_CASE("event snapshots retain the newest bounded suffix and expose loss",
     wire_config.max_wire_bytes = 1024;
     ValueChannelTelemetryBroker wire_broker(wire_config);
     REQUIRE(wire_broker.replace_attachment(wire_channels.attach_telemetry()));
-    std::array<pulp::view::ValueEvent, 12> wire_batch{};
+    std::array<pulp::dataplane::ValueEvent, 12> wire_batch{};
     for (std::size_t i = 0; i < wire_batch.size(); ++i) {
         wire_batch[i] = {
             .frame_index = static_cast<std::uint32_t>(i + 1),
@@ -230,7 +230,7 @@ TEST_CASE("telemetry preserves non-finite values as parseable wire sentinels",
 
     scalar->publish(std::numeric_limits<float>::quiet_NaN());
     scalar->read();
-    pulp::view::MeterFrame meter_frame;
+    pulp::dataplane::MeterFrame meter_frame;
     meter_frame.channels = 1;
     meter_frame.rms[0] = std::numeric_limits<float>::infinity();
     meter_frame.peak[0] = 0.5f;
@@ -239,7 +239,7 @@ TEST_CASE("telemetry preserves non-finite values as parseable wire sentinels",
     const std::array<float, 1> vector_frame{-std::numeric_limits<float>::infinity()};
     vector->publish(vector_frame.data(), static_cast<int>(vector_frame.size()));
     vector->read();
-    const pulp::view::ValueEvent event{
+    const pulp::dataplane::ValueEvent event{
         .frame_index = 7,
         .value = std::numeric_limits<float>::quiet_NaN(),
     };
@@ -371,7 +371,7 @@ TEST_CASE("telemetry poll retains source and transport loss debt until delivery"
                                             R"({"channels":["onsets"],"rateHz":60})"));
     REQUIRE_FALSE(subscribed.is_error);
 
-    const pulp::view::ValueEvent event{.frame_index = 7, .value = 1.0f};
+    const pulp::dataplane::ValueEvent event{.frame_index = 7, .value = 1.0f};
     for (int i = 0; i < 20; ++i)
         events->publish(&event, 1);
     broker.poll();
@@ -444,7 +444,7 @@ TEST_CASE("telemetry subscription starts after the event overflow baseline",
     ValueChannelTelemetryBroker broker({}, [&] { return now; });
     REQUIRE(broker.replace_attachment(channels.attach_telemetry()));
 
-    const pulp::view::ValueEvent occurrence{.frame_index = 3, .value = 1.0f};
+    const pulp::dataplane::ValueEvent occurrence{.frame_index = 3, .value = 1.0f};
     for (int i = 0; i < 20; ++i)
         events->publish(&occurrence, 1);
 
@@ -502,7 +502,7 @@ TEST_CASE("telemetry fans one event drain to isolated client delivery state",
                                               R"({"channels":["onsets"],"rateHz":60})"));
         REQUIRE_FALSE(response.is_error);
     }
-    const pulp::view::ValueEvent occurrence{.frame_index = 3, .value = 0.0f};
+    const pulp::dataplane::ValueEvent occurrence{.frame_index = 3, .value = 0.0f};
     events->publish(&occurrence, 1);
     broker.poll();
     REQUIRE(slow.size() == 1);

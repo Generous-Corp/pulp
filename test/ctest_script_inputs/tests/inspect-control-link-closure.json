@@ -1,0 +1,10 @@
+{
+ "name": "inspect-control-link-closure",
+ "record": {
+  "entry": "tools/scripts/link_closure_check.py",
+  "inputs": [
+   "tools/scripts/link_closure_check.py"
+  ],
+  "kind": "python"
+ }
+}

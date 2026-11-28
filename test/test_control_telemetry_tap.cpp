@@ -2,7 +2,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <pulp/inspect/control_telemetry_tap.hpp>
-#include <pulp/view/value_channel_set.hpp>
+#include <pulp/dataplane/value_channel_set.hpp>
 
 #include <array>
 #include <atomic>
@@ -24,7 +24,7 @@ ControlTelemetryAuthority authority(std::string client = "client-a") {
 
 TEST_CASE("canonical telemetry tap is disabled by default and preserves sole-reader ownership",
           "[inspect][control][telemetry][security]") {
-    pulp::view::ValueChannelSet channels;
+    pulp::dataplane::ValueChannelSet channels;
     channels.declare_scalar("gain");
     ControlTelemetryTap disabled({});
     CHECK_FALSE(disabled.attach(channels.attach_telemetry()));
@@ -34,7 +34,7 @@ TEST_CASE("canonical telemetry tap is disabled by default and preserves sole-rea
 
 TEST_CASE("bounded telemetry fanout downsamples redacts and accounts slow subscribers",
           "[inspect][control][telemetry][loss][redaction][soak]") {
-    pulp::view::ValueChannelSet channels;
+    pulp::dataplane::ValueChannelSet channels;
     auto* gain = channels.declare_scalar("gain");
     auto* secret = channels.declare_scalar("auth-token");
     REQUIRE(gain);
@@ -80,7 +80,7 @@ TEST_CASE("bounded telemetry fanout downsamples redacts and accounts slow subscr
 
 TEST_CASE("telemetry without a classifier fails closed",
           "[inspect][control][telemetry][security][redaction]") {
-    pulp::view::ValueChannelSet channels;
+    pulp::dataplane::ValueChannelSet channels;
     auto* value = channels.declare_scalar("unclassified");
     REQUIRE(value);
     ControlTelemetryTap tap({.enabled = true});
@@ -101,7 +101,7 @@ TEST_CASE("telemetry without a classifier fails closed",
 
 TEST_CASE("sensitive telemetry names and values require explicit authority",
           "[inspect][control][telemetry][security][redaction]") {
-    pulp::view::ValueChannelSet channels;
+    pulp::dataplane::ValueChannelSet channels;
     auto* secret = channels.declare_scalar("secret-level");
     REQUIRE(secret);
     ControlTelemetryTap tap({.enabled = true});
@@ -125,7 +125,7 @@ TEST_CASE("sensitive telemetry names and values require explicit authority",
 
 TEST_CASE("slow telemetry subscribers retain event batches until their next sample",
           "[inspect][control][telemetry][events][downsampling]") {
-    pulp::view::ValueChannelSet channels;
+    pulp::dataplane::ValueChannelSet channels;
     auto* events = channels.declare_events("hits");
     REQUIRE(events);
     auto now = std::chrono::steady_clock::now();
@@ -139,7 +139,7 @@ TEST_CASE("slow telemetry subscribers retain event batches until their next samp
     tap.poll();
     REQUIRE(tap.try_pop(*subscription, subscriber));
 
-    const std::array<pulp::view::ValueEvent, 3> event{{
+    const std::array<pulp::dataplane::ValueEvent, 3> event{{
         {.frame_index = 1, .value = 1.0f},
         {.frame_index = 2, .value = 1.0f},
         {.frame_index = 3, .value = 1.0f},
@@ -162,7 +162,7 @@ TEST_CASE("telemetry producer and slow subscriber sustain bounded high-iteration
     constexpr std::size_t kPolls = 10'000;
     constexpr std::size_t kPublications = 100'000;
     constexpr std::size_t kQueueCapacity = 4;
-    auto channels = std::make_shared<pulp::view::ValueChannelSet>();
+    auto channels = std::make_shared<pulp::dataplane::ValueChannelSet>();
     auto* gain = channels->declare_scalar("gain");
     REQUIRE(gain);
     auto now = std::chrono::steady_clock::now();

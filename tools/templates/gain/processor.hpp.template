@@ -2,8 +2,9 @@
 
 #include <pulp/audio/buffer_ops.hpp>
 #include <pulp/format/processor.hpp>
-#include <pulp/view/value_channel_set.hpp>
-#include <pulp/view/value_source.hpp>
+#include <pulp/dataplane/fwd.hpp>
+#include <pulp/dataplane/value_channel_set.hpp>
+#include <pulp/dataplane/value_source.hpp>
 #include <algorithm>
 #include <cmath>
 
