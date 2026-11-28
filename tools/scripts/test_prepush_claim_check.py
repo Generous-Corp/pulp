@@ -3,6 +3,7 @@ import json
 import os
 import subprocess
 import shlex
+import shutil
 import sys
 import tempfile
 import unittest
@@ -36,7 +37,8 @@ def page(items, connection, cursor):
         'hasNextPage': end < len(items), 'endCursor': str(end)}}
 def pr_node(pr):
     return {'number': pr['number'], 'comments': page(
-        [{'body': body} for body in pr['comments']], 'comments', 'commentsCursor')}
+        [{'body': body} if isinstance(body, str) else {'body': body['body'], 'fullDatabaseId': str(body['id'])}
+         for body in pr['comments']], 'comments', 'commentsCursor')}
 if 'pullRequests(' in query:
     connection = page(prs, 'pullRequests', 'prsCursor')
     connection['nodes'] = [pr_node(pr) for pr in connection['nodes']]
@@ -50,7 +52,7 @@ print(json.dumps({'data': {'repository': result}}))
     def tearDown(self):
         self.tmp.cleanup()
 
-    def run_check(self, comments, *, own=None, pr=True, prs=None, extra_env=None):
+    def run_check(self, comments, *, own=None, pr=True, prs=None, extra_env=None, cwd=None):
         if prs is None:
             prs = [{"number": 42, "comments": comments}] if pr else []
         data = self.dir / "response.json"
@@ -65,7 +67,111 @@ print(json.dumps({'data': {'repository': result}}))
         command = [sys.executable, str(TOOL), "--repo", "OWNER/REPO", "--branch", "feature/test"]
         if own:
             command += ["--own-claim", own]
-        return subprocess.run(command, env=env, text=True, encoding="utf-8", capture_output=True)
+        return subprocess.run(command, env=env, text=True, encoding="utf-8", capture_output=True,
+                              cwd=cwd or self.dir)
+
+    # A session's own claim, proven by the record `shipyard claim post` writes in its
+    # worktree's own config.worktree, with the same exact-match rule as Shipyard's fence.
+
+    MINE = "repair-claim: lane-a until 2099-01-02T03:04:00Z"
+
+    def git(self, cwd, *args):
+        env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
+        env.update(GIT_CONFIG_NOSYSTEM="1", GIT_CONFIG_GLOBAL=os.devnull)
+        return subprocess.run(["git", "-c", "user.name=t", "-c", "user.email=t@t", *args], cwd=cwd,
+                              env=env, check=True, capture_output=True, text=True, encoding="utf-8")
+
+    def worktrees(self):
+        main, lane = self.dir / "main", self.dir / "lane"
+        main.mkdir()
+        self.git(main, "init", "-q", "-b", "main")
+        self.git(main, "commit", "-q", "--allow-empty", "-m", "x")
+        self.git(main, "worktree", "add", "-q", str(lane), "-b", "lane")
+        self.git(main, "config", "extensions.worktreeConfig", "true")
+        return main, lane
+
+    def record(self, cwd, pr=42, comment_id=10, owner="lane-a", repo="owner/repo", scope="--worktree"):
+        self.git(cwd, "config", scope, f"shipyard.claim.{repo}#{pr}.record",
+                 f"{owner} 2099-01-02T03:04:00Z {comment_id}")
+
+    def test_a_worktree_record_naming_the_live_claim_allows_its_own_push(self):
+        _, lane = self.worktrees()
+        self.record(lane)
+        result = self.run_check([{"id": 10, "body": self.MINE}], cwd=lane)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertNotIn("counts for nothing", result.stderr)
+        # Without the record the same claim refuses.
+        self.assertEqual(self.run_check([{"id": 10, "body": self.MINE}]).returncode, 1)
+
+    def test_a_record_naming_another_comment_than_the_live_claim_refuses(self):
+        _, lane = self.worktrees()
+        self.record(lane)
+        # Another session claimed under the same id: its comment, not ours.
+        result = self.run_check([{"id": 10, "body": self.MINE}, {"id": 12, "body": self.MINE}], cwd=lane)
+        self.assertEqual(result.returncode, 1, result.stderr)
+        self.assertIn("names comment 10 by lane-a", result.stderr)
+
+    def test_a_record_for_an_expired_released_or_taken_claim_refuses(self):
+        _, lane = self.worktrees()
+        self.record(lane)
+        again = {"id": 12, "body": self.MINE}
+        for comments in [
+            [{"id": 10, "body": "repair-claim: lane-a until 2000-01-02T03:04:00Z"}, again],
+            [{"id": 10, "body": self.MINE}, {"id": 11, "body": "repair-claim-released: lane-a"}, again],
+            [{"id": 10, "body": self.MINE},
+             {"id": 11, "body": "repair-claim-taken: lane-b from lane-a reason=idle"}],
+            # Taken by ids outside Pulp's claim grammar, which `shipyard claim take` accepts.
+            *[[{"id": 10, "body": self.MINE},
+               {"id": 11, "body": f"repair-claim-taken: {taker} from lane-a reason=idle"}]
+              for taker in ["team@m3", "lane:3", "a/b/c"]],
+        ]:
+            with self.subTest(comments=comments):
+                result = self.run_check(comments, cwd=lane)
+                self.assertEqual(result.returncode, 1, result.stderr)
+                self.assertIn("counts for nothing", result.stderr)
+
+    def test_a_take_moves_the_claim_to_its_new_owner(self):
+        comments = [{"id": 10, "body": self.MINE},
+                    {"id": 11, "body": "repair-claim-taken: lane-b from lane-a reason=idle"}]
+        self.assertEqual(self.run_check(comments, own="lane-b").returncode, 0)
+        result = self.run_check(comments, own="lane-a")
+        self.assertEqual(result.returncode, 1, result.stderr)
+        self.assertIn("live repair-claim lane-b", result.stderr)
+
+    def test_a_record_does_not_exempt_another_sessions_claim(self):
+        _, lane = self.worktrees()
+        self.record(lane)
+        result = self.run_check([{"id": 10, "body": self.MINE},
+                                 {"id": 11, "body": "repair-claim: lane-b until 2099-01-02T03:04Z"}], cwd=lane)
+        self.assertEqual(result.returncode, 1, result.stderr)
+        self.assertIn("live repair-claim lane-b", result.stderr)
+
+    def test_a_record_for_another_pull_request_or_repository_refuses(self):
+        for kwargs in [{"pr": 41}, {"repo": "owner/other"}]:
+            with self.subTest(**kwargs):
+                shutil.rmtree(self.dir / "main", ignore_errors=True)
+                shutil.rmtree(self.dir / "lane", ignore_errors=True)
+                _, lane = self.worktrees()
+                self.record(lane, **kwargs)
+                result = self.run_check([{"id": 10, "body": self.MINE}], cwd=lane)
+                self.assertEqual(result.returncode, 1, result.stderr)
+        # The branch's PR is #42; a record for #42 does not cover a claim on #41's branch.
+        shutil.rmtree(self.dir / "main", ignore_errors=True)
+        shutil.rmtree(self.dir / "lane", ignore_errors=True)
+        _, lane = self.worktrees()
+        self.record(lane)
+        result = self.run_check([], prs=[{"number": 41, "comments": [{"id": 10, "body": self.MINE}]}], cwd=lane)
+        self.assertEqual(result.returncode, 1, result.stderr)
+
+    def test_a_record_stays_in_the_worktree_that_wrote_it(self):
+        main, lane = self.worktrees()
+        self.record(lane)
+        claim = [{"id": 10, "body": self.MINE}]
+        self.assertEqual(self.run_check(claim, cwd=lane).returncode, 0)
+        self.assertEqual(self.run_check(claim, cwd=main).returncode, 1, "leaked into the main worktree")
+        # A record in the clone's shared config is no worktree's own.
+        self.record(main, scope="--local")
+        self.assertEqual(self.run_check(claim, cwd=main).returncode, 1, "shared config counted")
 
     def test_a_fleet_lanes_own_claim_from_its_runner_passes(self):
         claim = ["repair-claim: repair-lane/repair-3 until 2099-01-02T03:04Z"]

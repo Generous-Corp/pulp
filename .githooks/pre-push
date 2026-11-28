@@ -68,7 +68,8 @@ PREPUSH_REMOTE_URL="${2:-}"
 # Live repair-claim check from ANY actor, run immediately before every path that
 # allows the push (including PULP_SKIP_PREPUSH and demoted gates). It reads the
 # comments of every open PR for each updated branch; a read failure warns and
-# allows (CI and the repair lane still check), a live foreign claim refuses. PULP_REPAIR_CLAIM_ID names your own.
+# allows (CI and the repair lane still check), a live foreign claim refuses. Your own claim is the
+# one `shipyard claim post` recorded in this worktree (or SHIPYARD_CLAIM_OWNER / PULP_REPAIR_CLAIM_ID).
 prepush_claim_check_final() {
     # This is deliberately the final check: the gates above can take minutes,
     # so a repair claim is read as close as possible to Git sending the push.
