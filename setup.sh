@@ -325,7 +325,9 @@ reuse_shared_git_source() {
     local marker_path="$4"
 
     if [ ! -L "$local_dir" ] && [ -e "$local_dir" ]; then
-        # Real checkouts are developer-managed.
+        # A real directory is developer-managed (a hand clone, an unpacked
+        # release), so never delete it, but say so loudly: a stale one builds
+        # everything against the wrong version in silence.
         if [ ! -e "$local_dir/$marker_path" ]; then
             fail "$label at $local_dir is missing $marker_path — remove the directory and re-run ./setup.sh"
             return 1
@@ -347,6 +349,12 @@ reuse_shared_git_source() {
         return 1
     fi
 
+    # A symlink is current only if it points at the shared cache for the ref
+    # pinned now. The cache directory name embeds the ref, so after a re-pin an
+    # old link keeps resolving and the build silently uses the previous SDK
+    # version. Repoint it. The shared cache is validated above first, and the
+    # replacement is a same-filesystem rename, so a failed or invalid cache
+    # never leaves the link missing.
     if [ -L "$local_dir" ]; then
         if [ "$(readlink "$local_dir")" = "$shared_dir" ]; then
             info "$label linked from shared cache"
