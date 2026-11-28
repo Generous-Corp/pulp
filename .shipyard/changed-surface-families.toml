@@ -4,19 +4,22 @@
 # Resolve a merge conflict in this file by regenerating, never by hand.
 
 [[families]]
-name = "script-readers-435e8c775b94"
+name = "script-readers-b0de2f5fbc23"
 paths = [
   "tools/scripts/action_pin_lint.py",
+  "tools/scripts/archive_sdk.py",
   "tools/scripts/audio_inspect_crosscheck.py",
   "tools/scripts/build_speed_proxies.py",
   "tools/scripts/build_speed_scorecard.py",
   "tools/scripts/build_time_report.py",
+  "tools/scripts/check_archive_mtimes.py",
   "tools/scripts/check_codecov_receipts.py",
   "tools/scripts/check_daw_bench_evidence.py",
   "tools/scripts/check_headers_selfcontained.py",
   "tools/scripts/check_host_matrix_evidence.py",
   "tools/scripts/check_sdk_complete.py",
   "tools/scripts/clean_worktree_planning.py",
+  "tools/scripts/component_regression.py",
   "tools/scripts/coverage_diff_comment.py",
   "tools/scripts/ctest_nonruns.py",
   "tools/scripts/frontend_ir_codegen_artifact_gate.py",
@@ -41,6 +44,7 @@ paths = [
   "tools/scripts/frontend_ir_tokens.py",
   "tools/scripts/frontend_ir_tweaks.py",
   "tools/scripts/frontend_ir_validation.py",
+  "tools/scripts/gallery_regression.py",
   "tools/scripts/generate_sample_region_compat_inputs.py",
   "tools/scripts/github_app_jwt.py",
   "tools/scripts/gpu_audio_p4_lead_campaign.py",
@@ -76,6 +80,7 @@ paths = [
   "tools/scripts/test_android_premerge_probe.py",
   "tools/scripts/test_android_target.py",
   "tools/scripts/test_api_contracts_workflow.py",
+  "tools/scripts/test_archive_sdk.py",
   "tools/scripts/test_audit_top_level.py",
   "tools/scripts/test_auto_release_decision_extra.py",
   "tools/scripts/test_bench_diff.py",
@@ -146,6 +151,7 @@ paths = [
   "tools/scripts/test_frontend_ir_session_manifest.py",
   "tools/scripts/test_frontend_ir_static_html.py",
   "tools/scripts/test_frontend_ir_tweaks.py",
+  "tools/scripts/test_gates_preflight.py",
   "tools/scripts/test_generate_vellum_cut_manifest.py",
   "tools/scripts/test_generate_vellum_ownership_projection.py",
   "tools/scripts/test_generate_widget_bridge_api.py",
@@ -295,6 +301,7 @@ tests = [
   "configure-only-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
+  "gates-preflight-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -320,7 +327,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-b08bd45d10c8"
+name = "script-readers-ef51824a2d0a"
 paths = ["tools/scripts/check_bundled_font_lists.py"]
 tests = [
   "build-parallelism-guard",
@@ -334,6 +341,7 @@ tests = [
   "configure-only-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
+  "gates-preflight-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -359,7 +367,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-d8647c6356ad"
+name = "script-readers-3cd90aafa996"
 paths = ["tools/scripts/check_host_adapter_tracing_contract.py"]
 tests = [
   "build-parallelism-guard",
@@ -372,6 +380,7 @@ tests = [
   "configure-only-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
+  "gates-preflight-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -398,7 +407,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-b5633ad2bd5f"
+name = "script-readers-a1846b2b76c1"
 paths = ["tools/scripts/check_inspector_protocol_registry.py"]
 tests = [
   "build-parallelism-guard",
@@ -411,6 +420,7 @@ tests = [
   "configure-only-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
+  "gates-preflight-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -438,7 +448,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-44146217622c"
+name = "script-readers-f857606c39f2"
 paths = ["tools/scripts/check_visual_python_deps.py"]
 tests = [
   "build-parallelism-guard",
@@ -451,6 +461,7 @@ tests = [
   "configure-only-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
+  "gates-preflight-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -478,7 +489,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-f2b58544d8ad"
+name = "script-readers-7f010d22da2d"
 paths = ["tools/scripts/ci_routing_digest.py"]
 tests = [
   "build-parallelism-guard",
@@ -493,6 +504,7 @@ tests = [
   "configure-only-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
+  "gates-preflight-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -518,7 +530,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-c05395659093"
+name = "script-readers-0323cb42ec57"
 paths = ["tools/scripts/convolver_crossover_check.py"]
 tests = [
   "build-parallelism-guard",
@@ -532,6 +544,7 @@ tests = [
   "convolver-crossover-table",
   "flake-exoneration-selftest",
   "gate-common-selftest",
+  "gates-preflight-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -557,7 +570,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-121f15521760"
+name = "script-readers-2fe0f35fa99a"
 paths = ["tools/scripts/ctest_inventory_parity.py"]
 tests = [
   "build-parallelism-guard",
@@ -571,6 +584,7 @@ tests = [
   "ctest-inventory-parity-self-check",
   "flake-exoneration-selftest",
   "gate-common-selftest",
+  "gates-preflight-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -596,7 +610,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-b531349b0422"
+name = "script-readers-95e8b57ae4cc"
 paths = ["tools/scripts/ctest_unique_names_check.py"]
 tests = [
   "build-parallelism-guard",
@@ -611,6 +625,7 @@ tests = [
   "ctest-unique-names-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
+  "gates-preflight-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -636,7 +651,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-1ad2484cc02d"
+name = "script-readers-e4375655a348"
 paths = [
   "tools/scripts/cutover_trial.py",
   "tools/scripts/test_cutover_trial.py",
@@ -653,6 +668,7 @@ tests = [
   "cutover-trial-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
+  "gates-preflight-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -679,7 +695,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-77b98f0eefdd"
+name = "script-readers-7a97f5db816a"
 paths = ["tools/scripts/date_sensitive_selftests_tz_matrix.py"]
 tests = [
   "build-parallelism-guard",
@@ -694,6 +710,7 @@ tests = [
   "date-sensitive-selftests-tz-matrix-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
+  "gates-preflight-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -719,7 +736,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-d25270d34293"
+name = "script-readers-fc035c829753"
 paths = ["tools/scripts/design_unit_boundary_check.py"]
 tests = [
   "build-parallelism-guard",
@@ -734,6 +751,7 @@ tests = [
   "design-unit-boundary-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
+  "gates-preflight-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -759,7 +777,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-71665383c4b4"
+name = "script-readers-fdebc952102c"
 paths = ["tools/scripts/dsp_provenance_audit.py"]
 tests = [
   "build-parallelism-guard",
@@ -773,6 +791,7 @@ tests = [
   "dsp-provenance-audit",
   "flake-exoneration-selftest",
   "gate-common-selftest",
+  "gates-preflight-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -798,7 +817,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-e9ae97948d81"
+name = "script-readers-fe103be4ae03"
 paths = ["tools/scripts/examples_manifest_guard.py"]
 tests = [
   "build-parallelism-guard",
@@ -813,6 +832,7 @@ tests = [
   "examples-manifest-guard-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
+  "gates-preflight-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -838,7 +858,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-e46d412a063c"
+name = "script-readers-69b61dcde053"
 paths = ["tools/scripts/format_header_view_boundary.py"]
 tests = [
   "build-parallelism-guard",
@@ -852,6 +872,7 @@ tests = [
   "flake-exoneration-selftest",
   "format-header-view-boundary",
   "gate-common-selftest",
+  "gates-preflight-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -877,7 +898,50 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-696961bbb583"
+name = "script-readers-07bd451256fe"
+paths = [
+  "tools/scripts/gallery_visual_diff.py",
+  "tools/scripts/test_gallery_visual_diff.py",
+]
+tests = [
+  "build-parallelism-guard",
+  "changed-surface-policy-inventory",
+  "changed-surface-policy-selftest",
+  "changed-surface-script-families-drift",
+  "changed-surface-script-families-selftest",
+  "changed-surface-shadow-plans-selftest",
+  "clean-worktree-planning-selftest",
+  "configure-only-selftest",
+  "flake-exoneration-selftest",
+  "gallery-diff-selftest",
+  "gate-common-selftest",
+  "gates-preflight-selftest",
+  "gpu-audio-provider-identity-selftest",
+  "gpu-dpr-runner-selftest",
+  "gpu-first-visible-acceptance-selftest",
+  "gpu-first-visible-campaign-selftest",
+  "gpu-first-visible-external-adapter-selftest",
+  "gpu-first-visible-role-producers-selftest",
+  "gpu-handoff-provenance-selftest",
+  "legacy-platform-hosts-guard",
+  "pr-head-affected-tests-selftest",
+  "pr-head-diff-scoped-registrations",
+  "prepush-receipt",
+  "prepush-refresh-push",
+  "reuse-policy-replay-selftest",
+  "sample-region-compat-baseline-selftest",
+  "vellum-watch-preflight-selftest",
+  "wide-non-native-selftest",
+]
+build_targets = ["pulp-cli"]
+supported_build_types = [
+  "debug",
+  "release",
+]
+risk_class = "low"
+
+[[families]]
+name = "script-readers-1e63cb395fe9"
 paths = ["tools/scripts/gate_python_imports_check.py"]
 tests = [
   "build-parallelism-guard",
@@ -893,6 +957,7 @@ tests = [
   "gate-common-selftest",
   "gate-python-imports",
   "gate-python-imports-selftest",
+  "gates-preflight-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -920,7 +985,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-23862844cdc6"
+name = "script-readers-1ce0a0cd2a5e"
 paths = ["tools/scripts/gpu_audio_header_vocabulary_guard.py"]
 tests = [
   "build-parallelism-guard",
@@ -933,6 +998,7 @@ tests = [
   "configure-only-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
+  "gates-preflight-selftest",
   "gpu-audio-header-vocabulary-guard",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
@@ -959,7 +1025,50 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-5d34f990415b"
+name = "script-readers-474ba6012ccd"
+paths = [
+  "tools/scripts/gpu_device_link_closure_check.py",
+  "tools/scripts/test_gpu_device_link_closure_check.py",
+]
+tests = [
+  "build-parallelism-guard",
+  "changed-surface-policy-inventory",
+  "changed-surface-policy-selftest",
+  "changed-surface-script-families-drift",
+  "changed-surface-script-families-selftest",
+  "changed-surface-shadow-plans-selftest",
+  "clean-worktree-planning-selftest",
+  "configure-only-selftest",
+  "flake-exoneration-selftest",
+  "gate-common-selftest",
+  "gates-preflight-selftest",
+  "gpu-audio-provider-identity-selftest",
+  "gpu-device-link-closure-rules",
+  "gpu-dpr-runner-selftest",
+  "gpu-first-visible-acceptance-selftest",
+  "gpu-first-visible-campaign-selftest",
+  "gpu-first-visible-external-adapter-selftest",
+  "gpu-first-visible-role-producers-selftest",
+  "gpu-handoff-provenance-selftest",
+  "legacy-platform-hosts-guard",
+  "pr-head-affected-tests-selftest",
+  "pr-head-diff-scoped-registrations",
+  "prepush-receipt",
+  "prepush-refresh-push",
+  "reuse-policy-replay-selftest",
+  "sample-region-compat-baseline-selftest",
+  "vellum-watch-preflight-selftest",
+  "wide-non-native-selftest",
+]
+build_targets = ["pulp-cli"]
+supported_build_types = [
+  "debug",
+  "release",
+]
+risk_class = "low"
+
+[[families]]
+name = "script-readers-b077a8323e3e"
 paths = ["tools/scripts/gpu_fault_hooks_release_gate.py"]
 tests = [
   "build-parallelism-guard",
@@ -972,6 +1081,7 @@ tests = [
   "configure-only-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
+  "gates-preflight-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-fault-hooks-release-gate",
@@ -998,7 +1108,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-ac21e6c0e7e0"
+name = "script-readers-df1b6555036a"
 paths = ["tools/scripts/integrations_boundary_check.py"]
 tests = [
   "build-parallelism-guard",
@@ -1011,6 +1121,7 @@ tests = [
   "configure-only-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
+  "gates-preflight-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -1037,7 +1148,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-ef131c1536f2"
+name = "script-readers-5503f28d6ea3"
 paths = ["tools/scripts/link_floor_selftest.py"]
 tests = [
   "build-parallelism-guard",
@@ -1051,6 +1162,7 @@ tests = [
   "configure-only-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
+  "gates-preflight-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -1076,7 +1188,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-fbe7268ea8ea"
+name = "script-readers-ac6c49146697"
 paths = ["tools/scripts/mac_objc_source_list_guard.py"]
 tests = [
   "build-parallelism-guard",
@@ -1089,6 +1201,7 @@ tests = [
   "configure-only-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
+  "gates-preflight-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -1116,7 +1229,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-8e7249599cc7"
+name = "script-readers-e6be0cf3fc7f"
 paths = ["tools/scripts/msvc_string_literal_guard.py"]
 tests = [
   "build-parallelism-guard",
@@ -1129,6 +1242,7 @@ tests = [
   "configure-only-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
+  "gates-preflight-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -1155,7 +1269,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-0b66fcb4c1b8"
+name = "script-readers-1b1d533a187c"
 paths = ["tools/scripts/nonuniform_head_check.py"]
 tests = [
   "build-parallelism-guard",
@@ -1168,6 +1282,7 @@ tests = [
   "configure-only-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
+  "gates-preflight-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -1194,7 +1309,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-fc67573c93cf"
+name = "script-readers-7badc2e3372a"
 paths = ["tools/scripts/pch_wiring_check.py"]
 tests = [
   "build-parallelism-guard",
@@ -1208,6 +1323,7 @@ tests = [
   "configure-only-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
+  "gates-preflight-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -1235,7 +1351,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-fd30a0b29688"
+name = "script-readers-6ac59ece7101"
 paths = ["tools/scripts/plugin_footprint_check.py"]
 tests = [
   "build-parallelism-guard",
@@ -1248,6 +1364,7 @@ tests = [
   "configure-only-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
+  "gates-preflight-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -1267,10 +1384,7 @@ tests = [
   "vellum-watch-preflight-selftest",
   "wide-non-native-selftest",
 ]
-build_targets = [
-  "pulp-cli",
-  "pulp-test-group-canvas-text",
-]
+build_targets = ["pulp-cli"]
 supported_build_types = [
   "debug",
   "release",
@@ -1278,7 +1392,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-caceaf747307"
+name = "script-readers-bb9d30571895"
 paths = ["tools/scripts/pr_fast_tier_check.py"]
 tests = [
   "build-parallelism-guard",
@@ -1291,6 +1405,7 @@ tests = [
   "configure-only-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
+  "gates-preflight-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -1317,7 +1432,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-3341b5fe3bf5"
+name = "script-readers-82f0f537909a"
 paths = [
   "tools/scripts/queue_admission_guard.py",
   "tools/scripts/test_queue_batch_attribute.py",
@@ -1333,6 +1448,7 @@ tests = [
   "configure-only-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
+  "gates-preflight-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -1359,7 +1475,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-5835be8bbeab"
+name = "script-readers-0cefffe84666"
 paths = ["tools/scripts/raw_this_async_check.py"]
 tests = [
   "build-parallelism-guard",
@@ -1372,6 +1488,7 @@ tests = [
   "configure-only-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
+  "gates-preflight-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -1399,7 +1516,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-55d0f636a335"
+name = "script-readers-3246cfc40d2c"
 paths = [
   "tools/scripts/regen_agent_capability_after_merge.py",
   "tools/scripts/test_regen_agent_capability_after_merge.py",
@@ -1415,6 +1532,7 @@ tests = [
   "configure-only-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
+  "gates-preflight-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -1441,7 +1559,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-884442452a1d"
+name = "script-readers-50b2658090bb"
 paths = ["tools/scripts/relay_contract_check.py"]
 tests = [
   "build-parallelism-guard",
@@ -1454,6 +1572,7 @@ tests = [
   "configure-only-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
+  "gates-preflight-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -1481,7 +1600,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-01e52b920a40"
+name = "script-readers-e685f34958c2"
 paths = ["tools/scripts/render_upward_edge_check.py"]
 tests = [
   "build-parallelism-guard",
@@ -1494,6 +1613,7 @@ tests = [
   "configure-only-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
+  "gates-preflight-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -1521,7 +1641,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-8120307acf08"
+name = "script-readers-9ab77b8dc4d4"
 paths = ["tools/scripts/rust_cli_build_edge_check.py"]
 tests = [
   "build-parallelism-guard",
@@ -1534,6 +1654,7 @@ tests = [
   "configure-only-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
+  "gates-preflight-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -1561,7 +1682,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-3dca81ba7925"
+name = "script-readers-d636bd9eee30"
 paths = ["tools/scripts/sample_region_compat_baseline.py"]
 tests = [
   "build-parallelism-guard",
@@ -1574,6 +1695,7 @@ tests = [
   "configure-only-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
+  "gates-preflight-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -1600,7 +1722,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-d6eac37f93de"
+name = "script-readers-a527b904f1e2"
 paths = ["tools/scripts/sequencer_control_skill_check.py"]
 tests = [
   "build-parallelism-guard",
@@ -1613,6 +1735,7 @@ tests = [
   "configure-only-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
+  "gates-preflight-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -1640,7 +1763,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-fec355cc9049"
+name = "script-readers-8a38a460378d"
 paths = ["tools/scripts/setup_bootstrap_plan_guard.py"]
 tests = [
   "build-parallelism-guard",
@@ -1653,6 +1776,7 @@ tests = [
   "configure-only-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
+  "gates-preflight-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -1679,7 +1803,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-020268b3baf8"
+name = "script-readers-2fef6c5281db"
 paths = ["tools/scripts/shared_test_objects_check.py"]
 tests = [
   "build-parallelism-guard",
@@ -1692,6 +1816,7 @@ tests = [
   "configure-only-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
+  "gates-preflight-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -1719,7 +1844,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-0665bb4bb7e7"
+name = "script-readers-cdb615e97721"
 paths = ["tools/scripts/shipping_macro_guard.py"]
 tests = [
   "build-parallelism-guard",
@@ -1732,6 +1857,7 @@ tests = [
   "configure-only-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
+  "gates-preflight-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -1758,7 +1884,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-7174c5779c02"
+name = "script-readers-6644588128e1"
 paths = ["tools/scripts/status_tone_signal_lint.py"]
 tests = [
   "build-parallelism-guard",
@@ -1771,6 +1897,7 @@ tests = [
   "configure-only-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
+  "gates-preflight-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -1797,7 +1924,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-2c46510d69ff"
+name = "script-readers-f3936db7fe90"
 paths = ["tools/scripts/swift_bridge_split_guard.py"]
 tests = [
   "build-parallelism-guard",
@@ -1810,6 +1937,7 @@ tests = [
   "configure-only-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
+  "gates-preflight-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -1836,7 +1964,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-0ca912b44ff2"
+name = "script-readers-9e6ff67dfeb4"
 paths = ["tools/scripts/test_advisory_macos_runner_policy.py"]
 tests = [
   "advisory-macos-runner-policy",
@@ -1850,6 +1978,7 @@ tests = [
   "configure-only-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
+  "gates-preflight-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -1875,7 +2004,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-0dc459b7ffbf"
+name = "script-readers-d0431364e26e"
 paths = ["tools/scripts/test_affected_targets.py"]
 tests = [
   "affected-targets-selftest",
@@ -1889,6 +2018,7 @@ tests = [
   "configure-only-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
+  "gates-preflight-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -1914,7 +2044,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-6996c620312f"
+name = "script-readers-aaeebae8c130"
 paths = ["tools/scripts/test_agent_capability_store.py"]
 tests = [
   "agent-capability-store-selftest",
@@ -1928,6 +2058,7 @@ tests = [
   "configure-only-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
+  "gates-preflight-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -1953,7 +2084,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-4baff38a3076"
+name = "script-readers-0a31c8e244d3"
 paths = ["tools/scripts/test_agent_hook_paths.py"]
 tests = [
   "agent-hook-paths",
@@ -1967,6 +2098,7 @@ tests = [
   "configure-only-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
+  "gates-preflight-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -1992,7 +2124,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-999fb91820fd"
+name = "script-readers-b5eb0b2811bb"
 paths = ["tools/scripts/test_android_surface_runtime_contract.py"]
 tests = [
   "android-surface-runtime-contract",
@@ -2006,6 +2138,7 @@ tests = [
   "configure-only-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
+  "gates-preflight-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -2031,7 +2164,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-8489b3508e32"
+name = "script-readers-cbd16995c8c4"
 paths = ["tools/scripts/test_archive_symbol_closure_check.py"]
 tests = [
   "archive-symbol-closure-selftest",
@@ -2045,6 +2178,7 @@ tests = [
   "configure-only-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
+  "gates-preflight-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -2070,7 +2204,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-f2d0ec1b7d5f"
+name = "script-readers-a1095892e7a5"
 paths = ["tools/scripts/test_build_combined_installer.py"]
 tests = [
   "build-parallelism-guard",
@@ -2084,6 +2218,7 @@ tests = [
   "configure-only-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
+  "gates-preflight-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -2109,7 +2244,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-db3f833a4276"
+name = "script-readers-52ea091fac03"
 paths = ["tools/scripts/test_build_parallelism_guard.py"]
 tests = [
   "build-parallelism-guard",
@@ -2123,6 +2258,7 @@ tests = [
   "configure-only-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
+  "gates-preflight-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -2148,7 +2284,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-f8552f5dbccc"
+name = "script-readers-e59d130575fd"
 paths = ["tools/scripts/test_build_speed_proxies.py"]
 tests = [
   "build-parallelism-guard",
@@ -2162,6 +2298,7 @@ tests = [
   "configure-only-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
+  "gates-preflight-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -2187,7 +2324,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-ed601196f1bf"
+name = "script-readers-ec494487d04a"
 paths = ["tools/scripts/test_build_speed_scorecard.py"]
 tests = [
   "build-parallelism-guard",
@@ -2201,6 +2338,7 @@ tests = [
   "configure-only-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
+  "gates-preflight-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -2226,7 +2364,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-c5ebfe94b9d8"
+name = "script-readers-9d931fb65ae7"
 paths = ["tools/scripts/test_build_time_report.py"]
 tests = [
   "build-parallelism-guard",
@@ -2240,6 +2378,7 @@ tests = [
   "configure-only-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
+  "gates-preflight-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -2265,7 +2404,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-035985b8ba96"
+name = "script-readers-ea194ac9c8cb"
 paths = ["tools/scripts/test_bump_fastpath.py"]
 tests = [
   "build-parallelism-guard",
@@ -2279,6 +2418,7 @@ tests = [
   "configure-only-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
+  "gates-preflight-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -2304,7 +2444,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-3b39bab2dfd1"
+name = "script-readers-a7852001ec24"
 paths = ["tools/scripts/test_bundle_vellum_sdk.py"]
 tests = [
   "build-parallelism-guard",
@@ -2317,6 +2457,7 @@ tests = [
   "configure-only-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
+  "gates-preflight-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -2343,7 +2484,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-64c9a10d1fae"
+name = "script-readers-5d839bf9e4d5"
 paths = ["tools/scripts/test_capability_contract_gate.py"]
 tests = [
   "build-parallelism-guard",
@@ -2357,6 +2498,7 @@ tests = [
   "configure-only-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
+  "gates-preflight-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -2382,7 +2524,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-4660f0df247a"
+name = "script-readers-bb09d2d2db3d"
 paths = ["tools/scripts/test_catch_discover_timeout_guard.py"]
 tests = [
   "build-parallelism-guard",
@@ -2396,6 +2538,7 @@ tests = [
   "configure-only-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
+  "gates-preflight-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -2421,7 +2564,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-0d66af4ffb5c"
+name = "script-readers-2798328162a2"
 paths = ["tools/scripts/test_catch_multilabel_properties.py"]
 tests = [
   "build-parallelism-guard",
@@ -2435,6 +2578,7 @@ tests = [
   "configure-only-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
+  "gates-preflight-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -2460,7 +2604,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-c7a9e812ff30"
+name = "script-readers-9d7e19b76a90"
 paths = ["tools/scripts/test_catch_test_name_guard.py"]
 tests = [
   "build-parallelism-guard",
@@ -2474,6 +2618,7 @@ tests = [
   "configure-only-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
+  "gates-preflight-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -2499,7 +2644,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-b9cfabb00af2"
+name = "script-readers-da5c3d8c42f8"
 paths = ["tools/scripts/test_changed_surface_registration_projection.py"]
 tests = [
   "build-parallelism-guard",
@@ -2513,6 +2658,7 @@ tests = [
   "configure-only-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
+  "gates-preflight-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -2538,7 +2684,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-38ffa4f73d82"
+name = "script-readers-975e076464d3"
 paths = ["tools/scripts/test_check_android_jni_exports.py"]
 tests = [
   "android-jni-exports-selftest",
@@ -2552,6 +2698,7 @@ tests = [
   "configure-only-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
+  "gates-preflight-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -2577,7 +2724,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-428ff729b409"
+name = "script-readers-66d20e70eae1"
 paths = ["tools/scripts/test_check_apple_bundle_signing.py"]
 tests = [
   "apple-bundle-signing-check",
@@ -2591,6 +2738,7 @@ tests = [
   "configure-only-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
+  "gates-preflight-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -2616,7 +2764,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-c40dacd2405f"
+name = "script-readers-4b1765390ee1"
 paths = ["tools/scripts/test_check_au_component_preflight.py"]
 tests = [
   "au-component-preflight-selftest",
@@ -2630,6 +2778,7 @@ tests = [
   "configure-only-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
+  "gates-preflight-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -2655,7 +2804,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-38bfb77fd276"
+name = "script-readers-5e2cf9fe9dcb"
 paths = ["tools/scripts/test_check_bundle_architectures.py"]
 tests = [
   "build-parallelism-guard",
@@ -2669,6 +2818,7 @@ tests = [
   "configure-only-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
+  "gates-preflight-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -2694,7 +2844,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-45534c21c8ba"
+name = "script-readers-b6b28952ae5f"
 paths = ["tools/scripts/test_check_canvas_path_flush.py"]
 tests = [
   "build-parallelism-guard",
@@ -2708,6 +2858,7 @@ tests = [
   "configure-only-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
+  "gates-preflight-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -2733,7 +2884,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-14e9b2f16db3"
+name = "script-readers-e6c86274cf33"
 paths = ["tools/scripts/test_check_host_adapter_tracing_contract.py"]
 tests = [
   "build-parallelism-guard",
@@ -2746,6 +2897,7 @@ tests = [
   "configure-only-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
+  "gates-preflight-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -2772,7 +2924,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-f223b0be668e"
+name = "script-readers-5ee1ee2fb628"
 paths = ["tools/scripts/test_check_installed_rpaths.py"]
 tests = [
   "build-parallelism-guard",
@@ -2785,6 +2937,7 @@ tests = [
   "configure-only-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
+  "gates-preflight-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -2800,6 +2953,7 @@ tests = [
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
   "sample-region-compat-baseline-selftest",
+  "source-selftest-lane-selftest",
   "vellum-watch-preflight-selftest",
   "wide-non-native-selftest",
 ]
@@ -2811,7 +2965,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-415cfe75575e"
+name = "script-readers-983b51c4e597"
 paths = ["tools/scripts/test_check_skip_not_pass.py"]
 tests = [
   "build-parallelism-guard",
@@ -2824,6 +2978,7 @@ tests = [
   "configure-only-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
+  "gates-preflight-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -2850,7 +3005,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-d676561ba3cb"
+name = "script-readers-87d6aa10ed7c"
 paths = ["tools/scripts/test_check_test_file_paths.py"]
 tests = [
   "build-parallelism-guard",
@@ -2863,6 +3018,7 @@ tests = [
   "configure-only-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
+  "gates-preflight-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -2889,7 +3045,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-965d78de87cb"
+name = "script-readers-f692bf185a87"
 paths = ["tools/scripts/test_check_transient_interaction_trace.py"]
 tests = [
   "build-parallelism-guard",
@@ -2902,6 +3058,7 @@ tests = [
   "configure-only-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
+  "gates-preflight-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -2928,7 +3085,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-9d2ca624ad30"
+name = "script-readers-0e29b1558e01"
 paths = ["tools/scripts/test_check_vellum_sdk_staging.py"]
 tests = [
   "build-parallelism-guard",
@@ -2941,6 +3098,7 @@ tests = [
   "configure-only-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
+  "gates-preflight-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -2967,7 +3125,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-16d17422e590"
+name = "script-readers-777a9711ce87"
 paths = ["tools/scripts/test_check_visual_python_deps.py"]
 tests = [
   "build-parallelism-guard",
@@ -2980,6 +3138,7 @@ tests = [
   "configure-only-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
+  "gates-preflight-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -3006,7 +3165,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-9b27f6d64dde"
+name = "script-readers-b9435383a079"
 paths = ["tools/scripts/test_check_yoga_oracle_pin.py"]
 tests = [
   "build-parallelism-guard",
@@ -3019,6 +3178,7 @@ tests = [
   "configure-only-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
+  "gates-preflight-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -3045,7 +3205,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-f300b8a4717f"
+name = "script-readers-ef6d40fc8483"
 paths = ["tools/scripts/test_ci_routing_digest.py"]
 tests = [
   "build-parallelism-guard",
@@ -3059,6 +3219,7 @@ tests = [
   "configure-only-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
+  "gates-preflight-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -3084,7 +3245,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-c48331ab7d60"
+name = "script-readers-8f8b3acb0dca"
 paths = ["tools/scripts/test_clap_preset_library_gate.py"]
 tests = [
   "build-parallelism-guard",
@@ -3098,6 +3259,7 @@ tests = [
   "configure-only-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
+  "gates-preflight-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -3123,7 +3285,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-2d27b381f422"
+name = "script-readers-6a8c3c5a8648"
 paths = ["tools/scripts/test_claude_plugin_command_discovery.py"]
 tests = [
   "build-parallelism-guard",
@@ -3137,6 +3299,7 @@ tests = [
   "configure-only-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
+  "gates-preflight-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -3162,7 +3325,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-f6dc4524af25"
+name = "script-readers-b00e254c10e4"
 paths = ["tools/scripts/test_clean_build_cov.py"]
 tests = [
   "build-parallelism-guard",
@@ -3176,6 +3339,7 @@ tests = [
   "configure-only-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
+  "gates-preflight-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -3201,7 +3365,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-74bf7fe02f7f"
+name = "script-readers-b3215bb42389"
 paths = ["tools/scripts/test_clean_worktree_builds.py"]
 tests = [
   "build-parallelism-guard",
@@ -3215,6 +3379,7 @@ tests = [
   "configure-only-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
+  "gates-preflight-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -3240,7 +3405,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-b42a5eb71f01"
+name = "script-readers-8e9e194c11a4"
 paths = ["tools/scripts/test_clean_worktrees.py"]
 tests = [
   "build-parallelism-guard",
@@ -3254,6 +3419,7 @@ tests = [
   "configure-only-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
+  "gates-preflight-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -3279,7 +3445,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-10ade7e7e9c7"
+name = "script-readers-38184a2356e7"
 paths = ["tools/scripts/test_clock_in_tests_lint.py"]
 tests = [
   "build-parallelism-guard",
@@ -3293,6 +3459,7 @@ tests = [
   "configure-only-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
+  "gates-preflight-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -3318,7 +3485,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-82418f49e3af"
+name = "script-readers-94aab72e65bd"
 paths = ["tools/scripts/test_clock_only_temp_key_guard.py"]
 tests = [
   "build-parallelism-guard",
@@ -3332,6 +3499,7 @@ tests = [
   "configure-only-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
+  "gates-preflight-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -3357,7 +3525,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-a49906b8cf27"
+name = "script-readers-372279626df0"
 paths = ["tools/scripts/test_cmake_manifest_parse.py"]
 tests = [
   "build-parallelism-guard",
@@ -3371,6 +3539,7 @@ tests = [
   "configure-only-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
+  "gates-preflight-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -3396,7 +3565,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-a1333e75fe11"
+name = "script-readers-9e955483bac0"
 paths = ["tools/scripts/test_connected_git_history.py"]
 tests = [
   "build-parallelism-guard",
@@ -3409,6 +3578,7 @@ tests = [
   "configure-only-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
+  "gates-preflight-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-connected-git-history-selftest",
   "gpu-dpr-runner-selftest",
@@ -3435,7 +3605,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-794cf614f8ae"
+name = "script-readers-3387ea209da2"
 paths = ["tools/scripts/test_consumption_census.py"]
 tests = [
   "build-parallelism-guard",
@@ -3449,6 +3619,7 @@ tests = [
   "consumption-census-drift-description",
   "flake-exoneration-selftest",
   "gate-common-selftest",
+  "gates-preflight-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -3474,7 +3645,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-10a246c0ebcf"
+name = "script-readers-02301ac50b28"
 paths = ["tools/scripts/test_control_profile_downgrade_is_announced.py"]
 tests = [
   "build-parallelism-guard",
@@ -3488,6 +3659,7 @@ tests = [
   "control-profile-downgrade-announced",
   "flake-exoneration-selftest",
   "gate-common-selftest",
+  "gates-preflight-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -3513,7 +3685,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-27b61474438c"
+name = "script-readers-ca0594ad2f9c"
 paths = ["tools/scripts/test_core_vellum_direction.py"]
 tests = [
   "build-parallelism-guard",
@@ -3527,6 +3699,7 @@ tests = [
   "core-vellum-direction-negative-contract",
   "flake-exoneration-selftest",
   "gate-common-selftest",
+  "gates-preflight-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -3552,7 +3725,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-237f262ed848"
+name = "script-readers-fd57b1d3e72e"
 paths = ["tools/scripts/test_ctest_coremidi_lock.py"]
 tests = [
   "build-parallelism-guard",
@@ -3566,6 +3739,7 @@ tests = [
   "ctest-coremidi-lock-contract",
   "flake-exoneration-selftest",
   "gate-common-selftest",
+  "gates-preflight-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -3591,7 +3765,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-68dd27045a7f"
+name = "script-readers-3b48a25bfc43"
 paths = ["tools/scripts/test_ctest_label_exclusion_guard.py"]
 tests = [
   "build-parallelism-guard",
@@ -3605,6 +3779,7 @@ tests = [
   "ctest-label-exclusion-guard-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
+  "gates-preflight-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -3630,7 +3805,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-2798db4f0945"
+name = "script-readers-808fbfc4aa56"
 paths = ["tools/scripts/test_ctest_unique_names_check.py"]
 tests = [
   "build-parallelism-guard",
@@ -3644,6 +3819,7 @@ tests = [
   "ctest-unique-names-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
+  "gates-preflight-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -3669,7 +3845,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-062def351f3b"
+name = "script-readers-6f25e0dc1cc4"
 paths = ["tools/scripts/test_date_sensitive_selftests_tz_matrix.py"]
 tests = [
   "build-parallelism-guard",
@@ -3683,6 +3859,7 @@ tests = [
   "date-sensitive-selftests-tz-matrix-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
+  "gates-preflight-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -3708,7 +3885,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-18c2b37c2ae3"
+name = "script-readers-f715bf0ae73c"
 paths = ["tools/scripts/test_dawn_binding_census.py"]
 tests = [
   "build-parallelism-guard",
@@ -3722,6 +3899,7 @@ tests = [
   "dawn-binding-census-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
+  "gates-preflight-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -3747,7 +3925,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-893b73b6d2d1"
+name = "script-readers-efaea0d9a42c"
 paths = ["tools/scripts/test_dead_test_guard.py"]
 tests = [
   "build-parallelism-guard",
@@ -3761,6 +3939,7 @@ tests = [
   "dead-test-guard-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
+  "gates-preflight-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -3786,7 +3965,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-fb10cead5d6d"
+name = "script-readers-5d8826a5695c"
 paths = ["tools/scripts/test_design_unit_boundary_check.py"]
 tests = [
   "build-parallelism-guard",
@@ -3800,6 +3979,7 @@ tests = [
   "design-unit-boundary-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
+  "gates-preflight-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -3825,7 +4005,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-4387a9fbf417"
+name = "script-readers-ade65ceb601e"
 paths = ["tools/scripts/test_doxygen_installed_header_check.py"]
 tests = [
   "build-parallelism-guard",
@@ -3839,6 +4019,7 @@ tests = [
   "doxygen-installed-header-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
+  "gates-preflight-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -3864,7 +4045,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-0b97b7dec6f8"
+name = "script-readers-9fa7bc2b30bf"
 paths = ["tools/scripts/test_dsp_capability_registry.py"]
 tests = [
   "build-parallelism-guard",
@@ -3879,6 +4060,7 @@ tests = [
   "dsp-capability-registry-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
+  "gates-preflight-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -3904,7 +4086,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-425f1d9c5868"
+name = "script-readers-26b2a76f19ca"
 paths = ["tools/scripts/test_dsp_provenance_audit.py"]
 tests = [
   "build-parallelism-guard",
@@ -3918,6 +4100,7 @@ tests = [
   "dsp-provenance-audit-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
+  "gates-preflight-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -3943,7 +4126,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-31984716d518"
+name = "script-readers-017f5411fe4f"
 paths = ["tools/scripts/test_editor_host_acceptance.py"]
 tests = [
   "build-parallelism-guard",
@@ -3957,6 +4140,7 @@ tests = [
   "editor-host-acceptance-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
+  "gates-preflight-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -3982,7 +4166,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-80c81851f32c"
+name = "script-readers-8ec1cc0cc9dc"
 paths = ["tools/scripts/test_example_validation_paths.py"]
 tests = [
   "build-parallelism-guard",
@@ -3996,6 +4180,7 @@ tests = [
   "example-validation-paths",
   "flake-exoneration-selftest",
   "gate-common-selftest",
+  "gates-preflight-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -4021,7 +4206,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-8ce9c36ee30d"
+name = "script-readers-190654b95b3b"
 paths = ["tools/scripts/test_examples_index_guard.py"]
 tests = [
   "build-parallelism-guard",
@@ -4035,6 +4220,7 @@ tests = [
   "examples-index-guard-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
+  "gates-preflight-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -4060,7 +4246,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-60b0f91e82a0"
+name = "script-readers-90c72b7102f3"
 paths = ["tools/scripts/test_examples_manifest_guard.py"]
 tests = [
   "build-parallelism-guard",
@@ -4074,6 +4260,7 @@ tests = [
   "examples-manifest-guard-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
+  "gates-preflight-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -4099,7 +4286,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-26e01dc80075"
+name = "script-readers-ea465724db4a"
 paths = ["tools/scripts/test_findskia_arch_assert.py"]
 tests = [
   "build-parallelism-guard",
@@ -4113,6 +4300,7 @@ tests = [
   "findskia-arch-assert-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
+  "gates-preflight-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -4138,7 +4326,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-00b4f119102d"
+name = "script-readers-da241d3df842"
 paths = ["tools/scripts/test_findskia_windows_arm64_slice.py"]
 tests = [
   "build-parallelism-guard",
@@ -4152,6 +4340,7 @@ tests = [
   "findskia-windows-arm64-slice-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
+  "gates-preflight-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -4177,7 +4366,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-51aaf57a1528"
+name = "script-readers-566fdae7320a"
 paths = ["tools/scripts/test_fleet_snapshot.py"]
 tests = [
   "build-parallelism-guard",
@@ -4191,6 +4380,7 @@ tests = [
   "flake-exoneration-selftest",
   "fleet-snapshot-selftest",
   "gate-common-selftest",
+  "gates-preflight-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -4216,7 +4406,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-aedce1aed5f8"
+name = "script-readers-712cccc2a632"
 paths = ["tools/scripts/test_fold_migration_notes.py"]
 tests = [
   "build-parallelism-guard",
@@ -4230,6 +4420,7 @@ tests = [
   "flake-exoneration-selftest",
   "fold-migration-notes-selftest",
   "gate-common-selftest",
+  "gates-preflight-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -4255,7 +4446,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-02809d8c8f25"
+name = "script-readers-c68f975863cb"
 paths = ["tools/scripts/test_fork_pr_runner_routing.py"]
 tests = [
   "build-parallelism-guard",
@@ -4269,6 +4460,7 @@ tests = [
   "flake-exoneration-selftest",
   "fork-pr-runner-routing",
   "gate-common-selftest",
+  "gates-preflight-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -4294,7 +4486,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-78091dcf7738"
+name = "script-readers-3faa725c0014"
 paths = ["tools/scripts/test_format_baseline_diff.py"]
 tests = [
   "build-parallelism-guard",
@@ -4308,6 +4500,7 @@ tests = [
   "flake-exoneration-selftest",
   "format-baseline-diff-selftest",
   "gate-common-selftest",
+  "gates-preflight-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -4333,7 +4526,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-5b70f319fde0"
+name = "script-readers-7e0164c1cbf9"
 paths = ["tools/scripts/test_foundation_include_lint.py"]
 tests = [
   "build-parallelism-guard",
@@ -4347,6 +4540,7 @@ tests = [
   "flake-exoneration-selftest",
   "foundation-include-lint-negative-contract",
   "gate-common-selftest",
+  "gates-preflight-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -4372,46 +4566,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-a8fb27a9e465"
-paths = ["tools/scripts/test_gallery_visual_diff.py"]
-tests = [
-  "build-parallelism-guard",
-  "changed-surface-policy-inventory",
-  "changed-surface-policy-selftest",
-  "changed-surface-script-families-drift",
-  "changed-surface-script-families-selftest",
-  "changed-surface-shadow-plans-selftest",
-  "clean-worktree-planning-selftest",
-  "configure-only-selftest",
-  "flake-exoneration-selftest",
-  "gallery-diff-selftest",
-  "gate-common-selftest",
-  "gpu-audio-provider-identity-selftest",
-  "gpu-dpr-runner-selftest",
-  "gpu-first-visible-acceptance-selftest",
-  "gpu-first-visible-campaign-selftest",
-  "gpu-first-visible-external-adapter-selftest",
-  "gpu-first-visible-role-producers-selftest",
-  "gpu-handoff-provenance-selftest",
-  "legacy-platform-hosts-guard",
-  "pr-head-affected-tests-selftest",
-  "pr-head-diff-scoped-registrations",
-  "prepush-receipt",
-  "prepush-refresh-push",
-  "reuse-policy-replay-selftest",
-  "sample-region-compat-baseline-selftest",
-  "vellum-watch-preflight-selftest",
-  "wide-non-native-selftest",
-]
-build_targets = ["pulp-cli"]
-supported_build_types = [
-  "debug",
-  "release",
-]
-risk_class = "low"
-
-[[families]]
-name = "script-readers-0339479ad437"
+name = "script-readers-fc8354daeb6c"
 paths = ["tools/scripts/test_gate_python_imports_check.py"]
 tests = [
   "build-parallelism-guard",
@@ -4425,6 +4580,7 @@ tests = [
   "flake-exoneration-selftest",
   "gate-common-selftest",
   "gate-python-imports-selftest",
+  "gates-preflight-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -4450,7 +4606,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-b2e4cec0645d"
+name = "script-readers-be3534e6d8c0"
 paths = ["tools/scripts/test_gate_suite_executed.py"]
 tests = [
   "build-parallelism-guard",
@@ -4464,6 +4620,7 @@ tests = [
   "flake-exoneration-selftest",
   "gate-common-selftest",
   "gate-suite-executed-selftest",
+  "gates-preflight-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -4489,7 +4646,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-1405a9a54a18"
+name = "script-readers-964657905dbd"
 paths = ["tools/scripts/test_gates_named_failures.py"]
 tests = [
   "build-parallelism-guard",
@@ -4503,6 +4660,7 @@ tests = [
   "flake-exoneration-selftest",
   "gate-common-selftest",
   "gates-named-failures-selftest",
+  "gates-preflight-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -4528,7 +4686,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-727fb1d4db90"
+name = "script-readers-70b24056551c"
 paths = ["tools/scripts/test_generated_version_bump_check.py"]
 tests = [
   "build-parallelism-guard",
@@ -4542,6 +4700,7 @@ tests = [
   "drift-fast-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
+  "gates-preflight-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -4569,7 +4728,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-4687ad4ac14d"
+name = "script-readers-01810b342463"
 paths = ["tools/scripts/test_git_read_memo.py"]
 tests = [
   "build-parallelism-guard",
@@ -4582,6 +4741,7 @@ tests = [
   "configure-only-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
+  "gates-preflight-selftest",
   "git-read-memo-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
@@ -4608,7 +4768,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-4663166b9746"
+name = "script-readers-2ec3f82c4f09"
 paths = ["tools/scripts/test_git_stdin_pipe_deadlock.py"]
 tests = [
   "build-parallelism-guard",
@@ -4621,6 +4781,7 @@ tests = [
   "configure-only-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
+  "gates-preflight-selftest",
   "git-stdin-pipe-deadlock-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
@@ -4647,7 +4808,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-dbb2fd0da664"
+name = "script-readers-b5fd35b9fc91"
 paths = ["tools/scripts/test_gpu_audio_comparator_v2.py"]
 tests = [
   "build-parallelism-guard",
@@ -4660,6 +4821,7 @@ tests = [
   "configure-only-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
+  "gates-preflight-selftest",
   "gpu-audio-comparator-v2-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
@@ -4686,7 +4848,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-e61f8e1998c2"
+name = "script-readers-93aa2e2a6099"
 paths = ["tools/scripts/test_gpu_audio_header_vocabulary_guard.py"]
 tests = [
   "build-parallelism-guard",
@@ -4699,6 +4861,7 @@ tests = [
   "configure-only-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
+  "gates-preflight-selftest",
   "gpu-audio-header-vocabulary-guard-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
@@ -4725,7 +4888,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-65ce830f7dbe"
+name = "script-readers-3735aa2ab368"
 paths = ["tools/scripts/test_gpu_audio_p2_campaign.py"]
 tests = [
   "build-parallelism-guard",
@@ -4738,6 +4901,7 @@ tests = [
   "configure-only-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
+  "gates-preflight-selftest",
   "gpu-audio-p2-campaign-contract-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
@@ -4764,7 +4928,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-caf460f873ec"
+name = "script-readers-c6965ccf0dd9"
 paths = ["tools/scripts/test_gpu_audio_p2_host_preflight.py"]
 tests = [
   "build-parallelism-guard",
@@ -4777,6 +4941,7 @@ tests = [
   "configure-only-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
+  "gates-preflight-selftest",
   "gpu-audio-p2-host-preflight-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
@@ -4803,7 +4968,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-375c76335f6c"
+name = "script-readers-870483c618c3"
 paths = ["tools/scripts/test_gpu_audio_p4_evidence.py"]
 tests = [
   "build-parallelism-guard",
@@ -4816,6 +4981,7 @@ tests = [
   "configure-only-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
+  "gates-preflight-selftest",
   "gpu-audio-p4-evidence-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
@@ -4842,7 +5008,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-f80c679dd0a8"
+name = "script-readers-f1284c8aa6f7"
 paths = ["tools/scripts/test_gpu_clean_agent_journey.py"]
 tests = [
   "build-parallelism-guard",
@@ -4855,6 +5021,7 @@ tests = [
   "configure-only-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
+  "gates-preflight-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-clean-agent-journey-selftest",
   "gpu-dpr-runner-selftest",
@@ -4881,46 +5048,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-41353c9a5d08"
-paths = ["tools/scripts/test_gpu_device_link_closure_check.py"]
-tests = [
-  "build-parallelism-guard",
-  "changed-surface-policy-inventory",
-  "changed-surface-policy-selftest",
-  "changed-surface-script-families-drift",
-  "changed-surface-script-families-selftest",
-  "changed-surface-shadow-plans-selftest",
-  "clean-worktree-planning-selftest",
-  "configure-only-selftest",
-  "flake-exoneration-selftest",
-  "gate-common-selftest",
-  "gpu-audio-provider-identity-selftest",
-  "gpu-device-link-closure-rules",
-  "gpu-dpr-runner-selftest",
-  "gpu-first-visible-acceptance-selftest",
-  "gpu-first-visible-campaign-selftest",
-  "gpu-first-visible-external-adapter-selftest",
-  "gpu-first-visible-role-producers-selftest",
-  "gpu-handoff-provenance-selftest",
-  "legacy-platform-hosts-guard",
-  "pr-head-affected-tests-selftest",
-  "pr-head-diff-scoped-registrations",
-  "prepush-receipt",
-  "prepush-refresh-push",
-  "reuse-policy-replay-selftest",
-  "sample-region-compat-baseline-selftest",
-  "vellum-watch-preflight-selftest",
-  "wide-non-native-selftest",
-]
-build_targets = ["pulp-cli"]
-supported_build_types = [
-  "debug",
-  "release",
-]
-risk_class = "low"
-
-[[families]]
-name = "script-readers-99dbea99aefa"
+name = "script-readers-a74b36f847af"
 paths = ["tools/scripts/test_gpu_dpr_experiment.py"]
 tests = [
   "build-parallelism-guard",
@@ -4933,6 +5061,7 @@ tests = [
   "configure-only-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
+  "gates-preflight-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-experiment-contract-selftest",
   "gpu-dpr-runner-selftest",
@@ -4959,7 +5088,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-de9f95bfea78"
+name = "script-readers-f3d40cdd1f91"
 paths = ["tools/scripts/test_gpu_dpr_pulp_native_adapter.py"]
 tests = [
   "build-parallelism-guard",
@@ -4972,6 +5101,7 @@ tests = [
   "configure-only-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
+  "gates-preflight-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-pulp-native-adapter-selftest",
   "gpu-dpr-runner-selftest",
@@ -4998,7 +5128,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-12e580c2beb4"
+name = "script-readers-a4ccc6a73dd8"
 paths = ["tools/scripts/test_gpu_dpr_v2_evidence.py"]
 tests = [
   "build-parallelism-guard",
@@ -5011,6 +5141,7 @@ tests = [
   "configure-only-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
+  "gates-preflight-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-dpr-v2-evidence-selftest",
@@ -5037,7 +5168,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-ee30f9e1175f"
+name = "script-readers-7936b9404d0d"
 paths = ["tools/scripts/test_gpu_dpr_web_adapter.py"]
 tests = [
   "build-parallelism-guard",
@@ -5050,6 +5181,7 @@ tests = [
   "configure-only-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
+  "gates-preflight-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-dpr-web-adapter-selftest",
@@ -5076,7 +5208,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-f50fe54ee8ef"
+name = "script-readers-40046fa24048"
 paths = ["tools/scripts/test_gpu_fault_hooks_release_gate.py"]
 tests = [
   "build-parallelism-guard",
@@ -5089,6 +5221,7 @@ tests = [
   "configure-only-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
+  "gates-preflight-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-fault-hooks-release-gate-macos-selftest",
@@ -5116,7 +5249,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-5100f397574e"
+name = "script-readers-b7076545c3ed"
 paths = ["tools/scripts/test_gpu_fault_hooks_release_gate_macos.py"]
 tests = [
   "build-parallelism-guard",
@@ -5129,6 +5262,7 @@ tests = [
   "configure-only-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
+  "gates-preflight-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-fault-hooks-release-gate-macos-selftest",
@@ -5155,7 +5289,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-799679ba274c"
+name = "script-readers-74b52f2b3293"
 paths = ["tools/scripts/test_gpu_first_visible_a3_acceptance_v2.py"]
 tests = [
   "build-parallelism-guard",
@@ -5168,6 +5302,7 @@ tests = [
   "configure-only-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
+  "gates-preflight-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -5194,7 +5329,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-42dfc37b923f"
+name = "script-readers-18f888a314ef"
 paths = ["tools/scripts/test_gpu_handoff_pin_freshness.py"]
 tests = [
   "build-parallelism-guard",
@@ -5207,6 +5342,7 @@ tests = [
   "configure-only-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
+  "gates-preflight-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -5233,7 +5369,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-9532e63d060e"
+name = "script-readers-906ed553baaf"
 paths = ["tools/scripts/test_gpu_health_contract.py"]
 tests = [
   "build-parallelism-guard",
@@ -5246,6 +5382,7 @@ tests = [
   "configure-only-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
+  "gates-preflight-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -5272,7 +5409,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-65b4b8982a3d"
+name = "script-readers-ff46f72232b8"
 paths = ["tools/scripts/test_gpu_health_read_contract.py"]
 tests = [
   "build-parallelism-guard",
@@ -5285,6 +5422,7 @@ tests = [
   "configure-only-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
+  "gates-preflight-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -5311,7 +5449,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-0eb686e7ff58"
+name = "script-readers-855c6cca08c5"
 paths = ["tools/scripts/test_gpu_health_run_attestation.py"]
 tests = [
   "build-parallelism-guard",
@@ -5324,6 +5462,7 @@ tests = [
   "configure-only-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
+  "gates-preflight-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -5350,7 +5489,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-efb58787499e"
+name = "script-readers-d49a2c3f6fed"
 paths = ["tools/scripts/test_gpu_probe_acceptance.py"]
 tests = [
   "build-parallelism-guard",
@@ -5363,6 +5502,7 @@ tests = [
   "configure-only-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
+  "gates-preflight-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -5389,7 +5529,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-907845bb14bf"
+name = "script-readers-4adac522ec2e"
 paths = ["tools/scripts/test_gpu_recipe_catalog.py"]
 tests = [
   "build-parallelism-guard",
@@ -5402,6 +5542,7 @@ tests = [
   "configure-only-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
+  "gates-preflight-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -5428,7 +5569,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-72bdab2f9da2"
+name = "script-readers-5aff52b91c9e"
 paths = ["tools/scripts/test_gpu_test_resource_locks.py"]
 tests = [
   "build-parallelism-guard",
@@ -5441,6 +5582,7 @@ tests = [
   "configure-only-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
+  "gates-preflight-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -5468,7 +5610,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-c1b573c94236"
+name = "script-readers-9f4e7e928eab"
 paths = ["tools/scripts/test_hotspot_edit_guard.py"]
 tests = [
   "build-parallelism-guard",
@@ -5481,6 +5623,7 @@ tests = [
   "configure-only-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
+  "gates-preflight-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -5507,7 +5650,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-8ff8da437a85"
+name = "script-readers-5fe92da8f63b"
 paths = ["tools/scripts/test_hydrate_gpu_provenance_commits.py"]
 tests = [
   "build-parallelism-guard",
@@ -5520,6 +5663,7 @@ tests = [
   "configure-only-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
+  "gates-preflight-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -5546,7 +5690,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-2aab37f01750"
+name = "script-readers-e931f501857a"
 paths = ["tools/scripts/test_hydrate_real_git.py"]
 tests = [
   "build-parallelism-guard",
@@ -5559,6 +5703,7 @@ tests = [
   "configure-only-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
+  "gates-preflight-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -5585,7 +5730,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-dd9e03cf5c7d"
+name = "script-readers-b97db6fe6bd8"
 paths = ["tools/scripts/test_include_boundary.py"]
 tests = [
   "build-parallelism-guard",
@@ -5598,6 +5743,7 @@ tests = [
   "configure-only-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
+  "gates-preflight-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -5624,7 +5770,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-16afe8c066e1"
+name = "script-readers-5f95ff57068b"
 paths = ["tools/scripts/test_inspector_truth_check.py"]
 tests = [
   "build-parallelism-guard",
@@ -5637,6 +5783,7 @@ tests = [
   "configure-only-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
+  "gates-preflight-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -5663,7 +5810,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-2c6b7af44f4f"
+name = "script-readers-d0ef806381f4"
 paths = ["tools/scripts/test_install_sha256sums.py"]
 tests = [
   "build-parallelism-guard",
@@ -5676,6 +5823,7 @@ tests = [
   "configure-only-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
+  "gates-preflight-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -5702,7 +5850,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-4d1fb7d12346"
+name = "script-readers-0e5a55166df3"
 paths = ["tools/scripts/test_install_shipyard_queue_repair.py"]
 tests = [
   "build-parallelism-guard",
@@ -5715,6 +5863,7 @@ tests = [
   "configure-only-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
+  "gates-preflight-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -5741,7 +5890,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-b2a2d4fc8aed"
+name = "script-readers-1f7809e338c5"
 paths = ["tools/scripts/test_integrations_boundary_check.py"]
 tests = [
   "build-parallelism-guard",
@@ -5754,6 +5903,7 @@ tests = [
   "configure-only-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
+  "gates-preflight-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -5780,7 +5930,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-ac1b6ed4daa8"
+name = "script-readers-2a131b1d0b12"
 paths = ["tools/scripts/test_legacy_platform_hosts_guard.py"]
 tests = [
   "build-parallelism-guard",
@@ -5793,6 +5943,7 @@ tests = [
   "configure-only-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
+  "gates-preflight-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -5819,7 +5970,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-570e79943393"
+name = "script-readers-b669c18493a2"
 paths = ["tools/scripts/test_link_closure_check.py"]
 tests = [
   "build-parallelism-guard",
@@ -5832,6 +5983,7 @@ tests = [
   "configure-only-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
+  "gates-preflight-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -5858,7 +6010,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-1b83ec37a277"
+name = "script-readers-a141f9699fc7"
 paths = ["tools/scripts/test_live_build_check.py"]
 tests = [
   "build-parallelism-guard",
@@ -5871,6 +6023,7 @@ tests = [
   "configure-only-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
+  "gates-preflight-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -5897,7 +6050,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-24d7aa799db0"
+name = "script-readers-9c762f4f1290"
 paths = ["tools/scripts/test_mac_objc_source_list_guard.py"]
 tests = [
   "build-parallelism-guard",
@@ -5910,6 +6063,7 @@ tests = [
   "configure-only-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
+  "gates-preflight-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -5936,7 +6090,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-9d9291357c98"
+name = "script-readers-f54578718e2a"
 paths = ["tools/scripts/test_measure_min_os.py"]
 tests = [
   "build-parallelism-guard",
@@ -5949,6 +6103,7 @@ tests = [
   "configure-only-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
+  "gates-preflight-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -5975,7 +6130,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-cdeb62afec79"
+name = "script-readers-ad7b8a04270d"
 paths = ["tools/scripts/test_migration_note_guard.py"]
 tests = [
   "build-parallelism-guard",
@@ -5988,6 +6143,7 @@ tests = [
   "configure-only-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
+  "gates-preflight-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -6014,7 +6170,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-c5f817102e8a"
+name = "script-readers-aa327a55ffdf"
 paths = ["tools/scripts/test_minos_registry_absent.py"]
 tests = [
   "build-parallelism-guard",
@@ -6027,6 +6183,7 @@ tests = [
   "configure-only-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
+  "gates-preflight-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -6053,7 +6210,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-5449a3e70bfc"
+name = "script-readers-080941332255"
 paths = ["tools/scripts/test_modules_yaml_dirs_check.py"]
 tests = [
   "build-parallelism-guard",
@@ -6066,6 +6223,7 @@ tests = [
   "configure-only-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
+  "gates-preflight-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -6092,7 +6250,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-add94c673200"
+name = "script-readers-d75bec3bd824"
 paths = ["tools/scripts/test_nm_symbols.py"]
 tests = [
   "build-parallelism-guard",
@@ -6105,6 +6263,7 @@ tests = [
   "configure-only-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
+  "gates-preflight-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -6131,7 +6290,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-af773cd822e0"
+name = "script-readers-99d9e61b142c"
 paths = ["tools/scripts/test_p0_layered_replay_receipt.py"]
 tests = [
   "build-parallelism-guard",
@@ -6144,6 +6303,7 @@ tests = [
   "configure-only-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
+  "gates-preflight-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -6170,7 +6330,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-28f827d0f3ce"
+name = "script-readers-55dd8ed45512"
 paths = ["tools/scripts/test_param_designator_order.py"]
 tests = [
   "build-parallelism-guard",
@@ -6183,6 +6343,7 @@ tests = [
   "configure-only-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
+  "gates-preflight-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -6209,7 +6370,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-fea1056f5e8a"
+name = "script-readers-30d29a7de46e"
 paths = ["tools/scripts/test_patched_os_name_path_lint.py"]
 tests = [
   "build-parallelism-guard",
@@ -6222,6 +6383,7 @@ tests = [
   "configure-only-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
+  "gates-preflight-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -6248,7 +6410,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-0c575dd7cea4"
+name = "script-readers-2a0bb9709418"
 paths = ["tools/scripts/test_pch_wiring_check.py"]
 tests = [
   "build-parallelism-guard",
@@ -6261,6 +6423,7 @@ tests = [
   "configure-only-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
+  "gates-preflight-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -6287,7 +6450,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-78514d81530a"
+name = "script-readers-42894688da3a"
 paths = ["tools/scripts/test_planning_gitlink_guard.py"]
 tests = [
   "build-parallelism-guard",
@@ -6300,6 +6463,7 @@ tests = [
   "configure-only-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
+  "gates-preflight-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -6326,7 +6490,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-152cb44e47c5"
+name = "script-readers-5b665d592ab1"
 paths = ["tools/scripts/test_plugin_footprint_check.py"]
 tests = [
   "build-parallelism-guard",
@@ -6339,6 +6503,7 @@ tests = [
   "configure-only-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
+  "gates-preflight-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -6365,7 +6530,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-13e4c17e6556"
+name = "script-readers-d736cd325fba"
 paths = ["tools/scripts/test_pr_batch_advisor.py"]
 tests = [
   "build-parallelism-guard",
@@ -6378,6 +6543,7 @@ tests = [
   "configure-only-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
+  "gates-preflight-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -6404,7 +6570,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-52c156086cc1"
+name = "script-readers-e388b11b68b4"
 paths = ["tools/scripts/test_pr_check_triage.py"]
 tests = [
   "build-parallelism-guard",
@@ -6417,6 +6583,7 @@ tests = [
   "configure-only-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
+  "gates-preflight-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -6443,7 +6610,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-c44af0e02023"
+name = "script-readers-3dbc386ed1d5"
 paths = ["tools/scripts/test_pr_fast_tier_check.py"]
 tests = [
   "build-parallelism-guard",
@@ -6456,6 +6623,7 @@ tests = [
   "configure-only-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
+  "gates-preflight-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -6482,7 +6650,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-14500c397456"
+name = "script-readers-97434f9c07c7"
 paths = ["tools/scripts/test_pr_flow_audit.py"]
 tests = [
   "build-parallelism-guard",
@@ -6495,6 +6663,7 @@ tests = [
   "configure-only-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
+  "gates-preflight-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -6521,7 +6690,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-4b4fd9f61a35"
+name = "script-readers-6642d74da6f4"
 paths = ["tools/scripts/test_prepush_affected_tests.py"]
 tests = [
   "build-parallelism-guard",
@@ -6534,6 +6703,7 @@ tests = [
   "configure-only-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
+  "gates-preflight-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -6560,7 +6730,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-40f0947ebaf9"
+name = "script-readers-9baa82ab3272"
 paths = ["tools/scripts/test_prepush_claim_check.py"]
 tests = [
   "build-parallelism-guard",
@@ -6573,6 +6743,7 @@ tests = [
   "configure-only-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
+  "gates-preflight-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -6599,7 +6770,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-586471f8d603"
+name = "script-readers-3f415907e9f1"
 paths = ["tools/scripts/test_prepush_format_gate.py"]
 tests = [
   "build-parallelism-guard",
@@ -6612,6 +6783,7 @@ tests = [
   "configure-only-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
+  "gates-preflight-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -6638,7 +6810,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-bd764ff89407"
+name = "script-readers-351a8ac54ecc"
 paths = ["tools/scripts/test_prepush_gate_output.py"]
 tests = [
   "build-parallelism-guard",
@@ -6651,6 +6823,7 @@ tests = [
   "configure-only-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
+  "gates-preflight-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -6677,7 +6850,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-3942650cdf17"
+name = "script-readers-fe245fbb892e"
 paths = ["tools/scripts/test_prepush_queue_rebase_hint.py"]
 tests = [
   "build-parallelism-guard",
@@ -6690,6 +6863,7 @@ tests = [
   "configure-only-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
+  "gates-preflight-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -6716,7 +6890,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-df80dcbe3522"
+name = "script-readers-babd230e751c"
 paths = ["tools/scripts/test_protected_merge_receipt.py"]
 tests = [
   "build-parallelism-guard",
@@ -6729,6 +6903,7 @@ tests = [
   "configure-only-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
+  "gates-preflight-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -6756,7 +6931,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-4701abb63498"
+name = "script-readers-e61a8e33f83e"
 paths = ["tools/scripts/test_pulp_test_data_cmake.py"]
 tests = [
   "build-parallelism-guard",
@@ -6769,6 +6944,7 @@ tests = [
   "configure-only-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
+  "gates-preflight-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -6795,7 +6971,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-639aa88fa582"
+name = "script-readers-1f3f9cc809ed"
 paths = ["tools/scripts/test_pulp_test_group.py"]
 tests = [
   "build-parallelism-guard",
@@ -6809,6 +6985,7 @@ tests = [
   "configure-only-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
+  "gates-preflight-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -6834,7 +7011,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-ede5f0bc2181"
+name = "script-readers-d3c25148a022"
 paths = ["tools/scripts/test_pulp_uninstall.py"]
 tests = [
   "build-parallelism-guard",
@@ -6847,6 +7024,7 @@ tests = [
   "configure-only-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
+  "gates-preflight-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -6873,7 +7051,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-786c8a6b8354"
+name = "script-readers-802ef85858f3"
 paths = ["tools/scripts/test_realtime_pool_resource_locks.py"]
 tests = [
   "build-parallelism-guard",
@@ -6886,6 +7064,7 @@ tests = [
   "configure-only-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
+  "gates-preflight-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -6912,7 +7091,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-8c5e1d910bfa"
+name = "script-readers-978a201230e9"
 paths = ["tools/scripts/test_relay_contract_check.py"]
 tests = [
   "build-parallelism-guard",
@@ -6925,6 +7104,7 @@ tests = [
   "configure-only-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
+  "gates-preflight-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -6951,7 +7131,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-13446509adf4"
+name = "script-readers-6bf5e2e9fe55"
 paths = ["tools/scripts/test_release_trailer_guard.py"]
 tests = [
   "build-parallelism-guard",
@@ -6964,6 +7144,7 @@ tests = [
   "configure-only-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
+  "gates-preflight-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -6990,7 +7171,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-db152b9f9711"
+name = "script-readers-953598559e75"
 paths = ["tools/scripts/test_render_upward_edge_check.py"]
 tests = [
   "build-parallelism-guard",
@@ -7003,6 +7184,7 @@ tests = [
   "configure-only-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
+  "gates-preflight-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -7029,7 +7211,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-ac656bffbca8"
+name = "script-readers-9ff12b7ba02d"
 paths = ["tools/scripts/test_repo_source_scan.py"]
 tests = [
   "build-parallelism-guard",
@@ -7042,6 +7224,7 @@ tests = [
   "configure-only-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
+  "gates-preflight-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -7068,7 +7251,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-e5cf4f583b24"
+name = "script-readers-f03391deff42"
 paths = ["tools/scripts/test_resolve_classify_base.py"]
 tests = [
   "build-parallelism-guard",
@@ -7081,6 +7264,7 @@ tests = [
   "configure-only-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
+  "gates-preflight-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -7107,7 +7291,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-0d6ae4f7dbef"
+name = "script-readers-4a226e5a8743"
 paths = ["tools/scripts/test_run_changed_surface_tests.py"]
 tests = [
   "build-parallelism-guard",
@@ -7121,6 +7305,7 @@ tests = [
   "configure-only-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
+  "gates-preflight-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -7146,7 +7331,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-876053a892d9"
+name = "script-readers-668836e1e766"
 paths = ["tools/scripts/test_runner_topology_check.py"]
 tests = [
   "build-parallelism-guard",
@@ -7159,6 +7344,7 @@ tests = [
   "configure-only-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
+  "gates-preflight-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -7185,7 +7371,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-948cd544cc02"
+name = "script-readers-ed2e5088eced"
 paths = ["tools/scripts/test_runner_topology_static.py"]
 tests = [
   "build-parallelism-guard",
@@ -7198,6 +7384,7 @@ tests = [
   "configure-only-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
+  "gates-preflight-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -7224,7 +7411,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-18b2d1996310"
+name = "script-readers-eb67b5e34bd4"
 paths = ["tools/scripts/test_rust_cli_build_edge_check.py"]
 tests = [
   "build-parallelism-guard",
@@ -7237,6 +7424,7 @@ tests = [
   "configure-only-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
+  "gates-preflight-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -7263,7 +7451,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-2522e39381cb"
+name = "script-readers-3ed2f947452e"
 paths = ["tools/scripts/test_sample_region_catalogs.py"]
 tests = [
   "build-parallelism-guard",
@@ -7276,6 +7464,7 @@ tests = [
   "configure-only-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
+  "gates-preflight-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -7302,7 +7491,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-a289d86fa268"
+name = "script-readers-74c6af1affa8"
 paths = ["tools/scripts/test_schema_drift_check.py"]
 tests = [
   "build-parallelism-guard",
@@ -7315,6 +7504,7 @@ tests = [
   "configure-only-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
+  "gates-preflight-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -7341,7 +7531,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-f4f0556b5217"
+name = "script-readers-5e91ea3c78c9"
 paths = ["tools/scripts/test_script_argv.py"]
 tests = [
   "build-parallelism-guard",
@@ -7354,6 +7544,7 @@ tests = [
   "configure-only-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
+  "gates-preflight-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -7380,7 +7571,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-73b0453eeeb9"
+name = "script-readers-e11a9e142c06"
 paths = ["tools/scripts/test_script_inputs_offline.py"]
 tests = [
   "build-parallelism-guard",
@@ -7393,6 +7584,7 @@ tests = [
   "configure-only-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
+  "gates-preflight-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -7419,7 +7611,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-f13be4211ca8"
+name = "script-readers-52ca405ebd38"
 paths = ["tools/scripts/test_script_inputs_precheck.py"]
 tests = [
   "build-parallelism-guard",
@@ -7432,6 +7624,7 @@ tests = [
   "configure-only-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
+  "gates-preflight-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -7458,7 +7651,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-c27142fcbdf4"
+name = "script-readers-6b54a75bc565"
 paths = ["tools/scripts/test_script_inputs_store.py"]
 tests = [
   "build-parallelism-guard",
@@ -7471,6 +7664,7 @@ tests = [
   "configure-only-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
+  "gates-preflight-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -7497,7 +7691,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-7fb02e961949"
+name = "script-readers-7a2039b4285d"
 paths = ["tools/scripts/test_script_test_inputs.py"]
 tests = [
   "build-parallelism-guard",
@@ -7510,6 +7704,7 @@ tests = [
   "configure-only-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
+  "gates-preflight-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -7536,7 +7731,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-4a96de4b4250"
+name = "script-readers-1c427f98ebbc"
 paths = ["tools/scripts/test_sdk_capability_handoff.py"]
 tests = [
   "agent-capability-sdk-handoff-selftest",
@@ -7550,6 +7745,7 @@ tests = [
   "configure-only-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
+  "gates-preflight-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -7575,7 +7771,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-d1ebd412b04e"
+name = "script-readers-31520a9a4b7b"
 paths = ["tools/scripts/test_sdk_consumer_sweep.py"]
 tests = [
   "build-parallelism-guard",
@@ -7588,6 +7784,7 @@ tests = [
   "configure-only-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
+  "gates-preflight-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -7614,7 +7811,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-1689a6a00562"
+name = "script-readers-2be188ab23f4"
 paths = ["tools/scripts/test_sdk_consumer_update.py"]
 tests = [
   "build-parallelism-guard",
@@ -7627,6 +7824,7 @@ tests = [
   "configure-only-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
+  "gates-preflight-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -7653,7 +7851,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-bfe91bf7b1e7"
+name = "script-readers-ffa335b6d78b"
 paths = ["tools/scripts/test_sdk_plist_templates_installed.py"]
 tests = [
   "build-parallelism-guard",
@@ -7666,6 +7864,7 @@ tests = [
   "configure-only-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
+  "gates-preflight-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -7692,7 +7891,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-5d68d399955e"
+name = "script-readers-3a0eef63f03b"
 paths = ["tools/scripts/test_seed_build_dir.py"]
 tests = [
   "build-parallelism-guard",
@@ -7705,6 +7904,7 @@ tests = [
   "configure-only-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
+  "gates-preflight-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -7731,7 +7931,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-0d0c03d50c83"
+name = "script-readers-3c4b689679eb"
 paths = ["tools/scripts/test_sequencer_control_skill_check.py"]
 tests = [
   "build-parallelism-guard",
@@ -7744,6 +7944,7 @@ tests = [
   "configure-only-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
+  "gates-preflight-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -7770,7 +7971,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-566a803325eb"
+name = "script-readers-4689eeedee9b"
 paths = ["tools/scripts/test_setup_bootstrap_plan_guard.py"]
 tests = [
   "build-parallelism-guard",
@@ -7783,6 +7984,7 @@ tests = [
   "configure-only-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
+  "gates-preflight-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -7809,7 +8011,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-e5945062fb0a"
+name = "script-readers-b5d451c3b6bb"
 paths = ["tools/scripts/test_shared_test_objects_check.py"]
 tests = [
   "build-parallelism-guard",
@@ -7822,6 +8024,7 @@ tests = [
   "configure-only-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
+  "gates-preflight-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -7848,7 +8051,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-b0547648983f"
+name = "script-readers-6f155dcc001c"
 paths = ["tools/scripts/test_shipping_macro_guard.py"]
 tests = [
   "build-parallelism-guard",
@@ -7861,6 +8064,7 @@ tests = [
   "configure-only-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
+  "gates-preflight-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -7888,7 +8092,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-fdc51438e186"
+name = "script-readers-f1f7dadcace4"
 paths = ["tools/scripts/test_shipyard_merge_gate_evidence.py"]
 tests = [
   "build-parallelism-guard",
@@ -7901,6 +8105,7 @@ tests = [
   "configure-only-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
+  "gates-preflight-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -7927,7 +8132,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-40d788c5ae38"
+name = "script-readers-4253ec404883"
 paths = ["tools/scripts/test_silent_revert_guard.py"]
 tests = [
   "build-parallelism-guard",
@@ -7940,6 +8145,7 @@ tests = [
   "configure-only-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
+  "gates-preflight-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -7966,7 +8172,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-77ded2a85844"
+name = "script-readers-d84cd94d07e9"
 paths = ["tools/scripts/test_skills_doc_check.py"]
 tests = [
   "build-parallelism-guard",
@@ -7979,6 +8185,7 @@ tests = [
   "configure-only-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
+  "gates-preflight-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -8005,7 +8212,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-96b2eff187c3"
+name = "script-readers-4114e5b5ec33"
 paths = ["tools/scripts/test_status_tone_signal_lint.py"]
 tests = [
   "build-parallelism-guard",
@@ -8018,6 +8225,7 @@ tests = [
   "configure-only-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
+  "gates-preflight-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -8044,7 +8252,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-fde5310b33cb"
+name = "script-readers-3403681842d9"
 paths = ["tools/scripts/test_swift_bridge_split_guard.py"]
 tests = [
   "build-parallelism-guard",
@@ -8057,6 +8265,7 @@ tests = [
   "configure-only-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
+  "gates-preflight-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -8083,7 +8292,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-317076a56a89"
+name = "script-readers-8498536d1d7b"
 paths = ["tools/scripts/test_tart_home_resolution.py"]
 tests = [
   "build-parallelism-guard",
@@ -8096,6 +8305,7 @@ tests = [
   "configure-only-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
+  "gates-preflight-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -8122,7 +8332,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-c3c76a000c99"
+name = "script-readers-f27081bfaf20"
 paths = ["tools/scripts/test_timeline_fixture_coverage_check.py"]
 tests = [
   "build-parallelism-guard",
@@ -8135,6 +8345,7 @@ tests = [
   "configure-only-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
+  "gates-preflight-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -8161,7 +8372,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-b839fe94820b"
+name = "script-readers-fa3501d013e1"
 paths = ["tools/scripts/test_tmp_leak_guard.py"]
 tests = [
   "build-parallelism-guard",
@@ -8174,6 +8385,7 @@ tests = [
   "configure-only-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
+  "gates-preflight-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -8200,7 +8412,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-68b09ec1fe7c"
+name = "script-readers-dbae53df51d1"
 paths = ["tools/scripts/test_tools_registry_check.py"]
 tests = [
   "build-parallelism-guard",
@@ -8213,6 +8425,7 @@ tests = [
   "configure-only-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
+  "gates-preflight-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -8239,7 +8452,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-2adb91fb099c"
+name = "script-readers-83131bdb73eb"
 paths = ["tools/scripts/test_trace_frame_cost.py"]
 tests = [
   "build-parallelism-guard",
@@ -8252,6 +8465,7 @@ tests = [
   "configure-only-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
+  "gates-preflight-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -8278,7 +8492,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-f6bcf3a73714"
+name = "script-readers-f508f25f611c"
 paths = ["tools/scripts/test_trace_span_category_lint.py"]
 tests = [
   "build-parallelism-guard",
@@ -8291,6 +8505,7 @@ tests = [
   "configure-only-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
+  "gates-preflight-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -8317,7 +8532,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-7cf906180da4"
+name = "script-readers-204e978e4c75"
 paths = ["tools/scripts/test_unbounded_wait_lint.py"]
 tests = [
   "build-parallelism-guard",
@@ -8330,6 +8545,7 @@ tests = [
   "configure-only-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
+  "gates-preflight-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -8356,7 +8572,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-92fba1109af3"
+name = "script-readers-7c88abc49aaf"
 paths = ["tools/scripts/test_undefined_names_check.py"]
 tests = [
   "build-parallelism-guard",
@@ -8369,6 +8585,7 @@ tests = [
   "configure-only-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
+  "gates-preflight-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -8395,7 +8612,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-8ec8df95a2af"
+name = "script-readers-ebf3d0681e0d"
 paths = ["tools/scripts/test_unregistered_tests_check.py"]
 tests = [
   "build-parallelism-guard",
@@ -8408,6 +8625,7 @@ tests = [
   "configure-only-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
+  "gates-preflight-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -8434,7 +8652,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-628656a1e082"
+name = "script-readers-83a5b24d1c95"
 paths = ["tools/scripts/test_validate_gpu_audio_trace_captures.py"]
 tests = [
   "build-parallelism-guard",
@@ -8447,6 +8665,7 @@ tests = [
   "configure-only-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
+  "gates-preflight-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-audio-trace-validator-selftest",
   "gpu-dpr-runner-selftest",
@@ -8473,7 +8692,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-76434bd3952d"
+name = "script-readers-7e7b8e48950d"
 paths = ["tools/scripts/test_vellum_boundary_lint.py"]
 tests = [
   "build-parallelism-guard",
@@ -8486,6 +8705,7 @@ tests = [
   "configure-only-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
+  "gates-preflight-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -8512,7 +8732,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-cb869ba03023"
+name = "script-readers-249d7552e918"
 paths = ["tools/scripts/test_vellum_inheritance_ledger_check.py"]
 tests = [
   "build-parallelism-guard",
@@ -8525,6 +8745,7 @@ tests = [
   "configure-only-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
+  "gates-preflight-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -8551,7 +8772,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-ab3bdb05a336"
+name = "script-readers-69620768c552"
 paths = ["tools/scripts/test_vellum_trusted_merge.py"]
 tests = [
   "build-parallelism-guard",
@@ -8564,6 +8785,7 @@ tests = [
   "configure-only-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
+  "gates-preflight-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -8590,7 +8812,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-cedfe6307380"
+name = "script-readers-994e639fe38b"
 paths = ["tools/scripts/test_vellum_ui_drift_report.py"]
 tests = [
   "build-parallelism-guard",
@@ -8603,6 +8825,7 @@ tests = [
   "configure-only-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
+  "gates-preflight-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -8629,7 +8852,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-994264586e66"
+name = "script-readers-312c27e50b95"
 paths = ["tools/scripts/test_vellum_view_core_pulp_kept_check.py"]
 tests = [
   "build-parallelism-guard",
@@ -8642,6 +8865,7 @@ tests = [
   "configure-only-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
+  "gates-preflight-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -8668,7 +8892,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-a8aa1060580e"
+name = "script-readers-8fd229ee35da"
 paths = ["tools/scripts/test_vellum_workflow_dispatch.py"]
 tests = [
   "build-parallelism-guard",
@@ -8681,6 +8905,7 @@ tests = [
   "configure-only-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
+  "gates-preflight-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -8707,7 +8932,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-cc16af5a7448"
+name = "script-readers-21416da0a4be"
 paths = ["tools/scripts/test_verify_create_templates.py"]
 tests = [
   "build-parallelism-guard",
@@ -8721,6 +8946,7 @@ tests = [
   "create-templates-verify",
   "flake-exoneration-selftest",
   "gate-common-selftest",
+  "gates-preflight-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -8746,7 +8972,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-b377a074cf4e"
+name = "script-readers-94d80fa5967e"
 paths = ["tools/scripts/test_verify_gpu_dpr_inconclusive_receipt.py"]
 tests = [
   "build-parallelism-guard",
@@ -8759,6 +8985,7 @@ tests = [
   "configure-only-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
+  "gates-preflight-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-inconclusive-receipt-selftest",
   "gpu-dpr-runner-selftest",
@@ -8785,7 +9012,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-d169b2763470"
+name = "script-readers-762e963f15f5"
 paths = ["tools/scripts/test_verify_gpu_probe_acceptance.py"]
 tests = [
   "build-parallelism-guard",
@@ -8798,6 +9025,7 @@ tests = [
   "configure-only-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
+  "gates-preflight-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -8824,7 +9052,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-1cc72fdf4b79"
+name = "script-readers-22d33bdf602e"
 paths = ["tools/scripts/test_verify_rendered_panel.py"]
 tests = [
   "build-parallelism-guard",
@@ -8837,6 +9065,7 @@ tests = [
   "configure-only-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
+  "gates-preflight-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -8863,7 +9092,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-e4c96ed57bb3"
+name = "script-readers-3d6b635a9c57"
 paths = ["tools/scripts/test_version_at_land.py"]
 tests = [
   "build-parallelism-guard",
@@ -8876,6 +9105,7 @@ tests = [
   "configure-only-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
+  "gates-preflight-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -8902,7 +9132,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-fd9cc62435b5"
+name = "script-readers-4610c9c87340"
 paths = ["tools/scripts/test_view_audio_symbol_floor.py"]
 tests = [
   "build-parallelism-guard",
@@ -8915,6 +9145,7 @@ tests = [
   "configure-only-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
+  "gates-preflight-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -8941,7 +9172,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-dd5ee7545443"
+name = "script-readers-aad373e791c2"
 paths = ["tools/scripts/test_web_timeline_source_closure_check.py"]
 tests = [
   "build-parallelism-guard",
@@ -8954,6 +9185,7 @@ tests = [
   "configure-only-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
+  "gates-preflight-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -8980,7 +9212,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-78c80458bb57"
+name = "script-readers-a6071664254c"
 paths = ["tools/scripts/test_windows_posix_shims.py"]
 tests = [
   "build-parallelism-guard",
@@ -8993,6 +9225,7 @@ tests = [
   "configure-only-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
+  "gates-preflight-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -9019,7 +9252,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-0b3b27d65702"
+name = "script-readers-7f896a2e91c2"
 paths = ["tools/scripts/timeline_command_doc_check.py"]
 tests = [
   "build-parallelism-guard",
@@ -9032,6 +9265,7 @@ tests = [
   "configure-only-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
+  "gates-preflight-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -9058,7 +9292,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-bb774aae69ca"
+name = "script-readers-874263a7279b"
 paths = ["tools/scripts/timeline_engine_dependency_floor_check.py"]
 tests = [
   "build-parallelism-guard",
@@ -9071,6 +9305,7 @@ tests = [
   "configure-only-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
+  "gates-preflight-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -9098,7 +9333,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-13f7cd6c6a73"
+name = "script-readers-23198d43aed6"
 paths = ["tools/scripts/timeline_fixture_coverage_check.py"]
 tests = [
   "build-parallelism-guard",
@@ -9111,6 +9346,7 @@ tests = [
   "configure-only-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
+  "gates-preflight-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -9137,7 +9373,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-85f91731f1c3"
+name = "script-readers-e90209c42111"
 paths = ["tools/scripts/token_coverage_check.py"]
 tests = [
   "build-parallelism-guard",
@@ -9150,6 +9386,7 @@ tests = [
   "configure-only-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
+  "gates-preflight-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -9176,7 +9413,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-276f3d4fe59e"
+name = "script-readers-384602b2ad1b"
 paths = ["tools/scripts/token_key_check.py"]
 tests = [
   "build-parallelism-guard",
@@ -9189,6 +9426,7 @@ tests = [
   "configure-only-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
+  "gates-preflight-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -9215,7 +9453,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-0b8d231f80da"
+name = "script-readers-b91659f1872f"
 paths = ["tools/scripts/trace_span_category_lint.py"]
 tests = [
   "build-parallelism-guard",
@@ -9228,6 +9466,7 @@ tests = [
   "configure-only-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
+  "gates-preflight-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -9254,7 +9493,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-68336fc8826f"
+name = "script-readers-ca5e876a931c"
 paths = ["tools/scripts/vellum_view_core_pulp_kept_check.py"]
 tests = [
   "build-parallelism-guard",
@@ -9267,6 +9506,7 @@ tests = [
   "configure-only-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
+  "gates-preflight-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -9293,7 +9533,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-8adcf6546de8"
+name = "script-readers-69aa86e728d2"
 paths = ["tools/scripts/verify_downstream_consumers.py"]
 tests = [
   "build-parallelism-guard",
@@ -9306,6 +9546,7 @@ tests = [
   "configure-only-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
+  "gates-preflight-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -9333,7 +9574,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-63869a09a68b"
+name = "script-readers-bcf747848932"
 paths = ["tools/scripts/verify_downstream_consumers_contract.py"]
 tests = [
   "build-parallelism-guard",
@@ -9346,6 +9587,7 @@ tests = [
   "configure-only-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
+  "gates-preflight-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -9372,7 +9614,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-e7b391c5683b"
+name = "script-readers-f8b42ce518b5"
 paths = ["tools/scripts/verify_refactor_baselines.py"]
 tests = [
   "build-parallelism-guard",
@@ -9385,6 +9627,7 @@ tests = [
   "configure-only-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
+  "gates-preflight-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -9412,7 +9655,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-cc91aa607f4e"
+name = "script-readers-051b5e4f8b52"
 paths = ["tools/scripts/verify_refactor_baselines_contract.py"]
 tests = [
   "build-parallelism-guard",
@@ -9425,6 +9668,7 @@ tests = [
   "configure-only-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
+  "gates-preflight-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -9451,7 +9695,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-29bd91d15642"
+name = "script-readers-2f832e2d7898"
 paths = ["tools/scripts/verify_timeline_launcher_resource_contract.py"]
 tests = [
   "build-parallelism-guard",
@@ -9464,6 +9708,7 @@ tests = [
   "configure-only-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
+  "gates-preflight-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -9492,7 +9737,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-180129bacbcc"
+name = "script-readers-f19c863f29e1"
 paths = ["tools/scripts/verify_timeline_live_capture.py"]
 tests = [
   "build-parallelism-guard",
@@ -9505,6 +9750,7 @@ tests = [
   "configure-only-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
+  "gates-preflight-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -9531,7 +9777,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-d61ebbcd5276"
+name = "script-readers-9628081f3b86"
 paths = ["tools/scripts/verify_timeline_transaction_launcher_complexity.py"]
 tests = [
   "build-parallelism-guard",
@@ -9544,6 +9790,7 @@ tests = [
   "configure-only-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
+  "gates-preflight-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -9571,7 +9818,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-8a867f959827"
+name = "script-readers-7c57d772ddec"
 paths = ["tools/scripts/verify_wasm_skia_slice.py"]
 tests = [
   "build-parallelism-guard",
@@ -9584,6 +9831,7 @@ tests = [
   "configure-only-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
+  "gates-preflight-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -9611,7 +9859,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-9c05f6dfb13b"
+name = "script-readers-d0c306d8b641"
 paths = ["tools/scripts/view_audio_seam_debts.py"]
 tests = [
   "build-parallelism-guard",
@@ -9624,6 +9872,7 @@ tests = [
   "configure-only-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
+  "gates-preflight-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -9650,7 +9899,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-450e43dc15cc"
+name = "script-readers-4860719201bb"
 paths = ["tools/scripts/web_timeline_source_closure_check.py"]
 tests = [
   "build-parallelism-guard",
@@ -9663,6 +9912,7 @@ tests = [
   "configure-only-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
+  "gates-preflight-selftest",
   "gpu-audio-provider-identity-selftest",
   "gpu-dpr-runner-selftest",
   "gpu-first-visible-acceptance-selftest",
@@ -9728,7 +9978,9 @@ tests = [
   "framework-neutrality",
   "framework-neutrality-selftest",
   "gate-common-selftest",
+  "gates-gate-host-python-selftest",
   "gates-named-failures-selftest",
+  "gates-preflight-selftest",
   "gates-sh-fail-flag-selftest",
   "gpu-audio-trace-validator-selftest",
   "gpu-connected-git-history-selftest",
@@ -9799,10 +10051,7 @@ tests = [
   "wide-non-native-selftest",
   "windows-posix-shims-selftest",
 ]
-build_targets = [
-  "pulp-cli",
-  "pulp-control-broker",
-]
+build_targets = ["pulp-cli"]
 supported_build_types = [
   "debug",
   "release",
@@ -9814,10 +10063,12 @@ name = "script-surface-whole-tree"
 paths = [
   ".agents/skills/*/SKILL.md",
   "tools/scripts/action_pin_lint.py",
+  "tools/scripts/archive_sdk.py",
   "tools/scripts/audio_inspect_crosscheck.py",
   "tools/scripts/build_speed_proxies.py",
   "tools/scripts/build_speed_scorecard.py",
   "tools/scripts/build_time_report.py",
+  "tools/scripts/check_archive_mtimes.py",
   "tools/scripts/check_bundled_font_lists.py",
   "tools/scripts/check_codecov_receipts.py",
   "tools/scripts/check_daw_bench_evidence.py",
@@ -9829,6 +10080,7 @@ paths = [
   "tools/scripts/check_visual_python_deps.py",
   "tools/scripts/ci_routing_digest.py",
   "tools/scripts/clean_worktree_planning.py",
+  "tools/scripts/component_regression.py",
   "tools/scripts/convolver_crossover_check.py",
   "tools/scripts/coverage_diff_comment.py",
   "tools/scripts/ctest_inventory_parity.py",
@@ -9862,11 +10114,14 @@ paths = [
   "tools/scripts/frontend_ir_tokens.py",
   "tools/scripts/frontend_ir_tweaks.py",
   "tools/scripts/frontend_ir_validation.py",
+  "tools/scripts/gallery_regression.py",
+  "tools/scripts/gallery_visual_diff.py",
   "tools/scripts/gate_python_imports_check.py",
   "tools/scripts/generate_sample_region_compat_inputs.py",
   "tools/scripts/github_app_jwt.py",
   "tools/scripts/gpu_audio_header_vocabulary_guard.py",
   "tools/scripts/gpu_audio_p4_lead_campaign.py",
+  "tools/scripts/gpu_device_link_closure_check.py",
   "tools/scripts/gpu_dpr_test_support.py",
   "tools/scripts/gpu_fault_hooks_release_gate.py",
   "tools/scripts/host_quirks_staleness.py",
@@ -9926,6 +10181,7 @@ paths = [
   "tools/scripts/test_android_surface_runtime_contract.py",
   "tools/scripts/test_android_target.py",
   "tools/scripts/test_api_contracts_workflow.py",
+  "tools/scripts/test_archive_sdk.py",
   "tools/scripts/test_archive_symbol_closure_check.py",
   "tools/scripts/test_audit_top_level.py",
   "tools/scripts/test_auto_release_decision_extra.py",
@@ -10061,6 +10317,7 @@ paths = [
   "tools/scripts/test_gate_python_imports_check.py",
   "tools/scripts/test_gate_suite_executed.py",
   "tools/scripts/test_gates_named_failures.py",
+  "tools/scripts/test_gates_preflight.py",
   "tools/scripts/test_generate_vellum_cut_manifest.py",
   "tools/scripts/test_generate_vellum_ownership_projection.py",
   "tools/scripts/test_generate_widget_bridge_api.py",
@@ -10442,572 +10699,7 @@ tests = [
   "vellum-boundary-lint-negative-contract",
   "vellum-ui-drift-report-selftest",
 ]
-build_targets = [
-  "pulp-cli",
-  "pulp-host-lane-probe",
-  "pulp-timeline-schema-emit",
-]
-supported_build_types = [
-  "debug",
-  "release",
-]
-risk_class = "low"
-
-[[families]]
-name = "script-surface-environment-bound"
-paths = [
-  ".agents/skills/*/SKILL.md",
-  "tools/scripts/action_pin_lint.py",
-  "tools/scripts/audio_inspect_crosscheck.py",
-  "tools/scripts/build_speed_proxies.py",
-  "tools/scripts/build_speed_scorecard.py",
-  "tools/scripts/build_time_report.py",
-  "tools/scripts/check_bundled_font_lists.py",
-  "tools/scripts/check_codecov_receipts.py",
-  "tools/scripts/check_daw_bench_evidence.py",
-  "tools/scripts/check_headers_selfcontained.py",
-  "tools/scripts/check_host_adapter_tracing_contract.py",
-  "tools/scripts/check_host_matrix_evidence.py",
-  "tools/scripts/check_inspector_protocol_registry.py",
-  "tools/scripts/check_sdk_complete.py",
-  "tools/scripts/check_visual_python_deps.py",
-  "tools/scripts/ci_routing_digest.py",
-  "tools/scripts/clean_worktree_planning.py",
-  "tools/scripts/convolver_crossover_check.py",
-  "tools/scripts/coverage_diff_comment.py",
-  "tools/scripts/ctest_inventory_parity.py",
-  "tools/scripts/ctest_nonruns.py",
-  "tools/scripts/ctest_unique_names_check.py",
-  "tools/scripts/cutover_trial.py",
-  "tools/scripts/date_sensitive_selftests_tz_matrix.py",
-  "tools/scripts/design_unit_boundary_check.py",
-  "tools/scripts/dsp_provenance_audit.py",
-  "tools/scripts/examples_manifest_guard.py",
-  "tools/scripts/format_header_view_boundary.py",
-  "tools/scripts/frontend_ir_codegen_artifact_gate.py",
-  "tools/scripts/frontend_ir_codegen_artifacts.py",
-  "tools/scripts/frontend_ir_common.py",
-  "tools/scripts/frontend_ir_gate.py",
-  "tools/scripts/frontend_ir_inspector.py",
-  "tools/scripts/frontend_ir_native_validation_gate.py",
-  "tools/scripts/frontend_ir_nodes.py",
-  "tools/scripts/frontend_ir_primitive_gate.py",
-  "tools/scripts/frontend_ir_primitives.py",
-  "tools/scripts/frontend_ir_proofs.py",
-  "tools/scripts/frontend_ir_report.py",
-  "tools/scripts/frontend_ir_resources.py",
-  "tools/scripts/frontend_ir_routes.py",
-  "tools/scripts/frontend_ir_session.py",
-  "tools/scripts/frontend_ir_session_manifest.py",
-  "tools/scripts/frontend_ir_sources.py",
-  "tools/scripts/frontend_ir_state.py",
-  "tools/scripts/frontend_ir_static_html.py",
-  "tools/scripts/frontend_ir_styles.py",
-  "tools/scripts/frontend_ir_tokens.py",
-  "tools/scripts/frontend_ir_tweaks.py",
-  "tools/scripts/frontend_ir_validation.py",
-  "tools/scripts/gate_python_imports_check.py",
-  "tools/scripts/generate_sample_region_compat_inputs.py",
-  "tools/scripts/github_app_jwt.py",
-  "tools/scripts/gpu_audio_header_vocabulary_guard.py",
-  "tools/scripts/gpu_audio_p4_lead_campaign.py",
-  "tools/scripts/gpu_dpr_test_support.py",
-  "tools/scripts/gpu_fault_hooks_release_gate.py",
-  "tools/scripts/host_quirks_staleness.py",
-  "tools/scripts/install_shipyard_token_check.py",
-  "tools/scripts/integrations_boundary_check.py",
-  "tools/scripts/iwyu_annotate.py",
-  "tools/scripts/jsfx_subset.py",
-  "tools/scripts/landing_watchdog.py",
-  "tools/scripts/link_floor_selftest.py",
-  "tools/scripts/list_core_library_targets.py",
-  "tools/scripts/mac_objc_source_list_guard.py",
-  "tools/scripts/merge_cobertura.py",
-  "tools/scripts/msvc_string_literal_guard.py",
-  "tools/scripts/nonuniform_head_check.py",
-  "tools/scripts/pch_wiring_check.py",
-  "tools/scripts/pending_intent_liveness.py",
-  "tools/scripts/plugin_footprint_check.py",
-  "tools/scripts/pr_fast_tier_check.py",
-  "tools/scripts/prepare_logic_hostbench_au.py",
-  "tools/scripts/queue_admission_guard.py",
-  "tools/scripts/queue_age_watchdog.py",
-  "tools/scripts/raw_this_async_check.py",
-  "tools/scripts/reap_stranded_tracker.py",
-  "tools/scripts/regen_agent_capability_after_merge.py",
-  "tools/scripts/relay_contract_check.py",
-  "tools/scripts/release_checksum_manifest.py",
-  "tools/scripts/release_platform_subset_check.py",
-  "tools/scripts/release_step_timeouts.py",
-  "tools/scripts/render_upward_edge_check.py",
-  "tools/scripts/required_check_machinery.py",
-  "tools/scripts/resign_macos_release_tree.py",
-  "tools/scripts/resolve_linux_route.py",
-  "tools/scripts/run_reaper_hostbench_smoke.py",
-  "tools/scripts/run_software_gpu_break_confirm.py",
-  "tools/scripts/run_swift_coverage.py",
-  "tools/scripts/rust_cli_build_edge_check.py",
-  "tools/scripts/sample_region_compat_baseline.py",
-  "tools/scripts/sample_region_native_package_smoke.py",
-  "tools/scripts/sdk_development_provenance.py",
-  "tools/scripts/sequencer_control_skill_check.py",
-  "tools/scripts/setup_bootstrap_plan_guard.py",
-  "tools/scripts/shared_test_objects_check.py",
-  "tools/scripts/shipping_macro_guard.py",
-  "tools/scripts/shipyard_duplicate_pr_heads.py",
-  "tools/scripts/stale_run_reaper.py",
-  "tools/scripts/status_tone_signal_lint.py",
-  "tools/scripts/summarize_daw_bench_results.py",
-  "tools/scripts/swift_bridge_split_guard.py",
-  "tools/scripts/test_a2t_structural_verification_ci.py",
-  "tools/scripts/test_action_pin_lint.py",
-  "tools/scripts/test_add_component.py",
-  "tools/scripts/test_advisory_macos_runner_policy.py",
-  "tools/scripts/test_affected_targets.py",
-  "tools/scripts/test_agent_capability_store.py",
-  "tools/scripts/test_agent_hook_paths.py",
-  "tools/scripts/test_android_premerge_probe.py",
-  "tools/scripts/test_android_surface_runtime_contract.py",
-  "tools/scripts/test_android_target.py",
-  "tools/scripts/test_api_contracts_workflow.py",
-  "tools/scripts/test_archive_symbol_closure_check.py",
-  "tools/scripts/test_audit_top_level.py",
-  "tools/scripts/test_auto_release_decision_extra.py",
-  "tools/scripts/test_bench_diff.py",
-  "tools/scripts/test_build_combined_installer.py",
-  "tools/scripts/test_build_dir_sentinel.py",
-  "tools/scripts/test_build_fetch_resilience.py",
-  "tools/scripts/test_build_macos_workflow_dispatch.py",
-  "tools/scripts/test_build_migration_index.py",
-  "tools/scripts/test_build_migration_index_extra.py",
-  "tools/scripts/test_build_parallelism_guard.py",
-  "tools/scripts/test_build_skia_android_pin.py",
-  "tools/scripts/test_build_skia_source_pin.py",
-  "tools/scripts/test_build_speed_proxies.py",
-  "tools/scripts/test_build_speed_scorecard.py",
-  "tools/scripts/test_build_time_report.py",
-  "tools/scripts/test_build_workflow.py",
-  "tools/scripts/test_bump_fastpath.py",
-  "tools/scripts/test_bundle_vellum_sdk.py",
-  "tools/scripts/test_capability_contract_gate.py",
-  "tools/scripts/test_catch_discover_timeout_guard.py",
-  "tools/scripts/test_catch_multilabel_properties.py",
-  "tools/scripts/test_catch_test_name_guard.py",
-  "tools/scripts/test_changed_surface_policy.py",
-  "tools/scripts/test_changed_surface_registration_projection.py",
-  "tools/scripts/test_changed_surface_script_families.py",
-  "tools/scripts/test_changed_surface_shadow_plans.py",
-  "tools/scripts/test_check_android_jni_exports.py",
-  "tools/scripts/test_check_apple_bundle_signing.py",
-  "tools/scripts/test_check_au_component_preflight.py",
-  "tools/scripts/test_check_bundle_architectures.py",
-  "tools/scripts/test_check_canvas_path_flush.py",
-  "tools/scripts/test_check_cli_mcp_parity.py",
-  "tools/scripts/test_check_daw_bench_evidence.py",
-  "tools/scripts/test_check_docs_consistency.py",
-  "tools/scripts/test_check_headers_selfcontained.py",
-  "tools/scripts/test_check_host_adapter_tracing_contract.py",
-  "tools/scripts/test_check_host_matrix_evidence.py",
-  "tools/scripts/test_check_installed_rpaths.py",
-  "tools/scripts/test_check_manifest_mirrors.py",
-  "tools/scripts/test_check_sdk_complete.py",
-  "tools/scripts/test_check_skip_not_pass.py",
-  "tools/scripts/test_check_test_file_paths.py",
-  "tools/scripts/test_check_transient_interaction_trace.py",
-  "tools/scripts/test_check_vellum_sdk_staging.py",
-  "tools/scripts/test_check_visual_python_deps.py",
-  "tools/scripts/test_check_web_plugin_docs.py",
-  "tools/scripts/test_check_yoga_oracle_pin.py",
-  "tools/scripts/test_checkout_preflight.py",
-  "tools/scripts/test_ci_routing_digest.py",
-  "tools/scripts/test_clap_preset_library_gate.py",
-  "tools/scripts/test_claude_plugin_command_discovery.py",
-  "tools/scripts/test_clean_build_cov.py",
-  "tools/scripts/test_clean_worktree_builds.py",
-  "tools/scripts/test_clean_worktree_planning.py",
-  "tools/scripts/test_clean_worktrees.py",
-  "tools/scripts/test_cli_sync_check.py",
-  "tools/scripts/test_cli_sync_check_extra.py",
-  "tools/scripts/test_clock_in_tests_lint.py",
-  "tools/scripts/test_clock_only_temp_key_guard.py",
-  "tools/scripts/test_cmajor_external.py",
-  "tools/scripts/test_cmake_manifest_parse.py",
-  "tools/scripts/test_codecov_upload_contract.py",
-  "tools/scripts/test_codeql_workflow_concurrency.py",
-  "tools/scripts/test_compat_aggregate.py",
-  "tools/scripts/test_compat_sync_check.py",
-  "tools/scripts/test_compat_sync_check_extra.py",
-  "tools/scripts/test_config_doc_check.py",
-  "tools/scripts/test_configure_only.py",
-  "tools/scripts/test_connected_git_history.py",
-  "tools/scripts/test_consumption_census.py",
-  "tools/scripts/test_control_profile_downgrade_is_announced.py",
-  "tools/scripts/test_control_shipping_native_workflow.py",
-  "tools/scripts/test_core_vellum_direction.py",
-  "tools/scripts/test_coverage_diff_comment.py",
-  "tools/scripts/test_coverage_diff_comment_extra.py",
-  "tools/scripts/test_coverage_tier_check.py",
-  "tools/scripts/test_coverage_tier_check_extra.py",
-  "tools/scripts/test_cross_platform_check_concurrency.py",
-  "tools/scripts/test_ctest_coremidi_lock.py",
-  "tools/scripts/test_ctest_label_exclusion_guard.py",
-  "tools/scripts/test_ctest_nonruns.py",
-  "tools/scripts/test_ctest_unique_names_check.py",
-  "tools/scripts/test_cutover_trial.py",
-  "tools/scripts/test_date_sensitive_selftests_tz_matrix.py",
-  "tools/scripts/test_dawn_binding_census.py",
-  "tools/scripts/test_dead_test_guard.py",
-  "tools/scripts/test_design_unit_boundary_check.py",
-  "tools/scripts/test_designated_initializer_lint.py",
-  "tools/scripts/test_dispatch_advisory_lanes.py",
-  "tools/scripts/test_docs_generate.py",
-  "tools/scripts/test_docs_noise_lint.py",
-  "tools/scripts/test_docs_sync_check.py",
-  "tools/scripts/test_docs_sync_check_extra.py",
-  "tools/scripts/test_download_retry.py",
-  "tools/scripts/test_downstream_validation_manifest.py",
-  "tools/scripts/test_doxygen_installed_header_check.py",
-  "tools/scripts/test_dsp_capability_registry.py",
-  "tools/scripts/test_dsp_provenance_audit.py",
-  "tools/scripts/test_editor_host_acceptance.py",
-  "tools/scripts/test_embed_js.py",
-  "tools/scripts/test_encode_binary_data.py",
-  "tools/scripts/test_example_validation_paths.py",
-  "tools/scripts/test_examples_index_guard.py",
-  "tools/scripts/test_examples_manifest_guard.py",
-  "tools/scripts/test_fetch_skia_for_release.py",
-  "tools/scripts/test_fetch_skia_for_release_extra.py",
-  "tools/scripts/test_fetch_v8_for_release.py",
-  "tools/scripts/test_findskia_arch_assert.py",
-  "tools/scripts/test_findskia_windows_arm64_slice.py",
-  "tools/scripts/test_fleet_snapshot.py",
-  "tools/scripts/test_fold_migration_notes.py",
-  "tools/scripts/test_fork_pr_runner_routing.py",
-  "tools/scripts/test_fork_runner_guard_check.py",
-  "tools/scripts/test_format_baseline_diff.py",
-  "tools/scripts/test_foundation_include_lint.py",
-  "tools/scripts/test_frontend_ir_codegen_artifact_gate.py",
-  "tools/scripts/test_frontend_ir_codegen_artifacts.py",
-  "tools/scripts/test_frontend_ir_evidence_modules.py",
-  "tools/scripts/test_frontend_ir_gate.py",
-  "tools/scripts/test_frontend_ir_inspector.py",
-  "tools/scripts/test_frontend_ir_native_validation_gate.py",
-  "tools/scripts/test_frontend_ir_primitive_gate.py",
-  "tools/scripts/test_frontend_ir_primitives.py",
-  "tools/scripts/test_frontend_ir_report.py",
-  "tools/scripts/test_frontend_ir_review_regressions.py",
-  "tools/scripts/test_frontend_ir_schema_contract.py",
-  "tools/scripts/test_frontend_ir_session.py",
-  "tools/scripts/test_frontend_ir_session_manifest.py",
-  "tools/scripts/test_frontend_ir_static_html.py",
-  "tools/scripts/test_frontend_ir_tweaks.py",
-  "tools/scripts/test_gallery_visual_diff.py",
-  "tools/scripts/test_gate_python_imports_check.py",
-  "tools/scripts/test_gate_suite_executed.py",
-  "tools/scripts/test_gates_named_failures.py",
-  "tools/scripts/test_generate_vellum_cut_manifest.py",
-  "tools/scripts/test_generate_vellum_ownership_projection.py",
-  "tools/scripts/test_generate_widget_bridge_api.py",
-  "tools/scripts/test_generated_version_bump_check.py",
-  "tools/scripts/test_git_read_memo.py",
-  "tools/scripts/test_git_safe_push.py",
-  "tools/scripts/test_git_stdin_pipe_deadlock.py",
-  "tools/scripts/test_github_app_jwt.py",
-  "tools/scripts/test_gpu_audio_comparator_v2.py",
-  "tools/scripts/test_gpu_audio_header_vocabulary_guard.py",
-  "tools/scripts/test_gpu_audio_p2_campaign.py",
-  "tools/scripts/test_gpu_audio_p2_host_preflight.py",
-  "tools/scripts/test_gpu_audio_p4_evidence.py",
-  "tools/scripts/test_gpu_audio_p4_lead_campaign.py",
-  "tools/scripts/test_gpu_audio_provider_identity.py",
-  "tools/scripts/test_gpu_clean_agent_journey.py",
-  "tools/scripts/test_gpu_device_link_closure_check.py",
-  "tools/scripts/test_gpu_dpr_experiment.py",
-  "tools/scripts/test_gpu_dpr_pulp_native_adapter.py",
-  "tools/scripts/test_gpu_dpr_runner.py",
-  "tools/scripts/test_gpu_dpr_v2_evidence.py",
-  "tools/scripts/test_gpu_dpr_web_adapter.py",
-  "tools/scripts/test_gpu_fault_hooks_release_gate.py",
-  "tools/scripts/test_gpu_fault_hooks_release_gate_macos.py",
-  "tools/scripts/test_gpu_first_visible_a3_acceptance.py",
-  "tools/scripts/test_gpu_first_visible_a3_acceptance_v2.py",
-  "tools/scripts/test_gpu_first_visible_a3_campaign.py",
-  "tools/scripts/test_gpu_first_visible_a3_external_adapter.py",
-  "tools/scripts/test_gpu_first_visible_a3_role_producers.py",
-  "tools/scripts/test_gpu_handoff_pin_freshness.py",
-  "tools/scripts/test_gpu_handoff_provenance.py",
-  "tools/scripts/test_gpu_health_contract.py",
-  "tools/scripts/test_gpu_health_read_contract.py",
-  "tools/scripts/test_gpu_health_run_attestation.py",
-  "tools/scripts/test_gpu_probe_acceptance.py",
-  "tools/scripts/test_gpu_recipe_catalog.py",
-  "tools/scripts/test_gpu_test_resource_locks.py",
-  "tools/scripts/test_header_fanout_guard.py",
-  "tools/scripts/test_host_pump_lint.py",
-  "tools/scripts/test_host_quirks_staleness.py",
-  "tools/scripts/test_hotspot_edit_guard.py",
-  "tools/scripts/test_hotspot_size_guard.py",
-  "tools/scripts/test_hydrate_gpu_provenance_commits.py",
-  "tools/scripts/test_hydrate_real_git.py",
-  "tools/scripts/test_include_boundary.py",
-  "tools/scripts/test_inspector_truth_check.py",
-  "tools/scripts/test_install_sha256sums.py",
-  "tools/scripts/test_install_shipyard_queue_repair.py",
-  "tools/scripts/test_install_shipyard_token_check.py",
-  "tools/scripts/test_integrations_boundary_check.py",
-  "tools/scripts/test_ios_gate_skip_contract.py",
-  "tools/scripts/test_iwyu_annotate.py",
-  "tools/scripts/test_iwyu_annotate_extra.py",
-  "tools/scripts/test_jsfx_subset.py",
-  "tools/scripts/test_jsfx_subset_extra.py",
-  "tools/scripts/test_landing_watchdog.py",
-  "tools/scripts/test_lcov_cobertura.py",
-  "tools/scripts/test_lcov_cobertura_extra.py",
-  "tools/scripts/test_lcov_excl_propagation.py",
-  "tools/scripts/test_legacy_platform_hosts_guard.py",
-  "tools/scripts/test_link_closure_check.py",
-  "tools/scripts/test_live_build_check.py",
-  "tools/scripts/test_mac_objc_source_list_guard.py",
-  "tools/scripts/test_macos_reroute_watcher.py",
-  "tools/scripts/test_measure_min_os.py",
-  "tools/scripts/test_merge_cobertura.py",
-  "tools/scripts/test_merge_cobertura_extra.py",
-  "tools/scripts/test_merge_stall_watchdog.py",
-  "tools/scripts/test_migration_note_guard.py",
-  "tools/scripts/test_minos_registry_absent.py",
-  "tools/scripts/test_mkdocs_hooks.py",
-  "tools/scripts/test_modules_yaml_dirs_check.py",
-  "tools/scripts/test_nm_symbols.py",
-  "tools/scripts/test_node_abi_gate.py",
-  "tools/scripts/test_node_build_deps_step.py",
-  "tools/scripts/test_p0_layered_replay_receipt.py",
-  "tools/scripts/test_package_cli_extra.py",
-  "tools/scripts/test_param_designator_order.py",
-  "tools/scripts/test_patched_os_name_path_lint.py",
-  "tools/scripts/test_pch_wiring_check.py",
-  "tools/scripts/test_pending_intent_liveness.py",
-  "tools/scripts/test_planning_gitlink_guard.py",
-  "tools/scripts/test_plugin_footprint_check.py",
-  "tools/scripts/test_pr_batch_advisor.py",
-  "tools/scripts/test_pr_check_triage.py",
-  "tools/scripts/test_pr_fast_tier_check.py",
-  "tools/scripts/test_pr_flow_audit.py",
-  "tools/scripts/test_preamble_python_stable_cwd.py",
-  "tools/scripts/test_prepare_logic_hostbench_au.py",
-  "tools/scripts/test_prepare_node_runtime.py",
-  "tools/scripts/test_prepush_affected_tests.py",
-  "tools/scripts/test_prepush_claim_check.py",
-  "tools/scripts/test_prepush_format_gate.py",
-  "tools/scripts/test_prepush_gate_output.py",
-  "tools/scripts/test_prepush_queue_rebase_hint.py",
-  "tools/scripts/test_prepush_receipt.py",
-  "tools/scripts/test_process_liveness.py",
-  "tools/scripts/test_promote_quirk_tiers.py",
-  "tools/scripts/test_protected_merge_receipt.py",
-  "tools/scripts/test_pulp_lldb.py",
-  "tools/scripts/test_pulp_test_data_cmake.py",
-  "tools/scripts/test_pulp_test_group.py",
-  "tools/scripts/test_pulp_tooling_disposition.py",
-  "tools/scripts/test_pulp_uninstall.py",
-  "tools/scripts/test_python_floor_syntax_check.py",
-  "tools/scripts/test_queue_admission_guard.py",
-  "tools/scripts/test_queue_age_watchdog.py",
-  "tools/scripts/test_queue_batch_attribute.py",
-  "tools/scripts/test_realtime_pool_resource_locks.py",
-  "tools/scripts/test_reap_stranded_tracker.py",
-  "tools/scripts/test_refresh_push_check.py",
-  "tools/scripts/test_regen_agent_capability_after_merge.py",
-  "tools/scripts/test_relay_contract_check.py",
-  "tools/scripts/test_release_breakage_watchdog_wiring.py",
-  "tools/scripts/test_release_cache_isolation.py",
-  "tools/scripts/test_release_checksum_manifest.py",
-  "tools/scripts/test_release_cli_gpu_asset_coverage.py",
-  "tools/scripts/test_release_failure_diagnosis.py",
-  "tools/scripts/test_release_platform_subset_check.py",
-  "tools/scripts/test_release_reconcile.py",
-  "tools/scripts/test_release_step_timeouts.py",
-  "tools/scripts/test_release_trailer_guard.py",
-  "tools/scripts/test_release_workflow_test_step.py",
-  "tools/scripts/test_render_upward_edge_check.py",
-  "tools/scripts/test_repo_source_scan.py",
-  "tools/scripts/test_required_check_machinery.py",
-  "tools/scripts/test_required_gate_liveness.py",
-  "tools/scripts/test_required_macos_alias.py",
-  "tools/scripts/test_resign_macos_release_tree.py",
-  "tools/scripts/test_resolve_classify_base.py",
-  "tools/scripts/test_resolve_linux_route.py",
-  "tools/scripts/test_resolve_provider_busy_probe.py",
-  "tools/scripts/test_resolve_release_runners.py",
-  "tools/scripts/test_resolve_runs_on.py",
-  "tools/scripts/test_resolve_runs_on_extra.py",
-  "tools/scripts/test_resolve_runs_on_fork.py",
-  "tools/scripts/test_reuse_policy_replay.py",
-  "tools/scripts/test_ruleset_drift_config.py",
-  "tools/scripts/test_run_changed_surface_tests.py",
-  "tools/scripts/test_run_coverage.py",
-  "tools/scripts/test_run_python_coverage.py",
-  "tools/scripts/test_run_python_coverage_extra.py",
-  "tools/scripts/test_run_reaper_hostbench_smoke.py",
-  "tools/scripts/test_run_software_gpu_break_confirm.py",
-  "tools/scripts/test_run_swift_coverage.py",
-  "tools/scripts/test_run_swift_coverage_extra.py",
-  "tools/scripts/test_runner_topology_check.py",
-  "tools/scripts/test_runner_topology_static.py",
-  "tools/scripts/test_rust_cli_build_edge_check.py",
-  "tools/scripts/test_safe_path_guard_lint.py",
-  "tools/scripts/test_sample_region_catalogs.py",
-  "tools/scripts/test_sample_region_compat_baseline.py",
-  "tools/scripts/test_schedule_backstop_check.py",
-  "tools/scripts/test_scheduled_workflow_fork_guard_check.py",
-  "tools/scripts/test_schema_drift_check.py",
-  "tools/scripts/test_screenshot_sync_check.py",
-  "tools/scripts/test_script_argv.py",
-  "tools/scripts/test_script_inputs_offline.py",
-  "tools/scripts/test_script_inputs_precheck.py",
-  "tools/scripts/test_script_inputs_store.py",
-  "tools/scripts/test_script_test_inputs.py",
-  "tools/scripts/test_sdk_capability_handoff.py",
-  "tools/scripts/test_sdk_consumer_sweep.py",
-  "tools/scripts/test_sdk_consumer_update.py",
-  "tools/scripts/test_sdk_development_provenance.py",
-  "tools/scripts/test_sdk_plist_templates_installed.py",
-  "tools/scripts/test_sdk_provenance.py",
-  "tools/scripts/test_seed_build_dir.py",
-  "tools/scripts/test_sequencer_control_skill_check.py",
-  "tools/scripts/test_setup_bootstrap_plan_guard.py",
-  "tools/scripts/test_shared_test_objects_check.py",
-  "tools/scripts/test_shell_portability_check.py",
-  "tools/scripts/test_shipping_macro_guard.py",
-  "tools/scripts/test_shipyard_duplicate_pr_heads.py",
-  "tools/scripts/test_shipyard_merge_gate_evidence.py",
-  "tools/scripts/test_silent_revert_guard.py",
-  "tools/scripts/test_skia_linux_arm64_asset.py",
-  "tools/scripts/test_skills_doc_check.py",
-  "tools/scripts/test_spectr_forge_magenta_metadata_audit.py",
-  "tools/scripts/test_spectr_gpu_nam_forge_controls.py",
-  "tools/scripts/test_stale_run_reaper.py",
-  "tools/scripts/test_status_tone_signal_lint.py",
-  "tools/scripts/test_summarize_daw_bench_results.py",
-  "tools/scripts/test_swift_bridge_split_guard.py",
-  "tools/scripts/test_tart_home_resolution.py",
-  "tools/scripts/test_text_encoding_lint.py",
-  "tools/scripts/test_timeline_fixture_coverage_check.py",
-  "tools/scripts/test_tmp_leak_guard.py",
-  "tools/scripts/test_tools_registry_check.py",
-  "tools/scripts/test_trace_frame_cost.py",
-  "tools/scripts/test_trace_span_category_lint.py",
-  "tools/scripts/test_unbounded_wait_lint.py",
-  "tools/scripts/test_undefined_names_check.py",
-  "tools/scripts/test_unregistered_tests_check.py",
-  "tools/scripts/test_unserved_job_check.py",
-  "tools/scripts/test_validate_gpu_audio_trace_captures.py",
-  "tools/scripts/test_validate_hosts.py",
-  "tools/scripts/test_validate_registry_extra.py",
-  "tools/scripts/test_validation_profile_select.py",
-  "tools/scripts/test_vellum_authority_workflows.py",
-  "tools/scripts/test_vellum_borrowed_coverage_check.py",
-  "tools/scripts/test_vellum_boundary_lint.py",
-  "tools/scripts/test_vellum_expansion_watch_check.py",
-  "tools/scripts/test_vellum_freeze_check.py",
-  "tools/scripts/test_vellum_inheritance_ledger_check.py",
-  "tools/scripts/test_vellum_receipt_drift.py",
-  "tools/scripts/test_vellum_trusted_merge.py",
-  "tools/scripts/test_vellum_ui_drift_report.py",
-  "tools/scripts/test_vellum_view_core_pulp_kept_check.py",
-  "tools/scripts/test_vellum_watch_preflight.py",
-  "tools/scripts/test_vellum_workflow_dispatch.py",
-  "tools/scripts/test_verify_cobertura_xml.py",
-  "tools/scripts/test_verify_control_shipping_native_evidence.py",
-  "tools/scripts/test_verify_create_templates.py",
-  "tools/scripts/test_verify_gpu_dpr_inconclusive_receipt.py",
-  "tools/scripts/test_verify_gpu_probe_acceptance.py",
-  "tools/scripts/test_verify_macos_cross_artifacts.py",
-  "tools/scripts/test_verify_rendered_panel.py",
-  "tools/scripts/test_verify_skia_m153_capabilities.py",
-  "tools/scripts/test_version_at_land.py",
-  "tools/scripts/test_version_consistency_check.py",
-  "tools/scripts/test_version_consistency_check_extra.py",
-  "tools/scripts/test_view_audio_archive_manifest.py",
-  "tools/scripts/test_view_audio_symbol_floor.py",
-  "tools/scripts/test_visual_python_deps_step.py",
-  "tools/scripts/test_web_timeline_source_closure_check.py",
-  "tools/scripts/test_webclap_relevance.py",
-  "tools/scripts/test_win32_include_lint.py",
-  "tools/scripts/test_windows_cli_compile_scope.py",
-  "tools/scripts/test_windows_cli_compile_workflow.py",
-  "tools/scripts/test_windows_cli_release_precheck.py",
-  "tools/scripts/test_windows_posix_shims.py",
-  "tools/scripts/test_windows_runner_policy.py",
-  "tools/scripts/test_windows_runner_selector.py",
-  "tools/scripts/test_windows_x64_routing.py",
-  "tools/scripts/test_workflow_build_dirs.py",
-  "tools/scripts/test_workflow_lint.py",
-  "tools/scripts/test_workflow_runner_selector_audit.py",
-  "tools/scripts/timeline_command_doc_check.py",
-  "tools/scripts/timeline_engine_dependency_floor_check.py",
-  "tools/scripts/timeline_fixture_coverage_check.py",
-  "tools/scripts/token_coverage_check.py",
-  "tools/scripts/token_key_check.py",
-  "tools/scripts/trace_span_category_lint.py",
-  "tools/scripts/unserved_job_check.py",
-  "tools/scripts/validation_profile_select.py",
-  "tools/scripts/vellum_borrowed_coverage_check.py",
-  "tools/scripts/vellum_view_core_pulp_kept_check.py",
-  "tools/scripts/verify_cobertura_xml.py",
-  "tools/scripts/verify_control_shipping_native_evidence.py",
-  "tools/scripts/verify_downstream_consumers.py",
-  "tools/scripts/verify_downstream_consumers_contract.py",
-  "tools/scripts/verify_downstream_validation_manifest.py",
-  "tools/scripts/verify_macos_cross_artifacts.py",
-  "tools/scripts/verify_refactor_baselines.py",
-  "tools/scripts/verify_refactor_baselines_contract.py",
-  "tools/scripts/verify_sampler_interpolation_benchmark.py",
-  "tools/scripts/verify_skia_m153_capabilities.py",
-  "tools/scripts/verify_standalone_trace_close.py",
-  "tools/scripts/verify_timeline_launcher_resource_contract.py",
-  "tools/scripts/verify_timeline_live_capture.py",
-  "tools/scripts/verify_timeline_transaction_launcher_complexity.py",
-  "tools/scripts/verify_wasm_skia_slice.py",
-  "tools/scripts/version_consistency_check.py",
-  "tools/scripts/view_audio_archive_manifest.py",
-  "tools/scripts/view_audio_seam_debts.py",
-  "tools/scripts/web_timeline_source_closure_check.py",
-  "tools/scripts/webclap_relevance.py",
-  "tools/scripts/windows_cli_compile_scope.py",
-  "tools/scripts/windows_cli_release_precheck.py",
-  "tools/scripts/windows_runner_selector.py",
-]
-tests = [
-  "agent-capability-manifest-check",
-  "agent-capability-manifest-selftest",
-  "agent-capability-rederive-selftest",
-  "agent-capability-store-selftest",
-  "agent-panel-clipped-is-rejected",
-  "agent-panel-native-invariants",
-  "clean-worktree-builds-selftest",
-  "clean-worktree-planning-selftest",
-  "gpu-audio-p4-evidence-selftest",
-  "gpu-health-run-attestation",
-  "importer-lab-capture-scale",
-  "process-deadline-selftest",
-  "pulp-browser-capture-node-integration",
-  "pulp-browser-capture-node-unit",
-  "pulp-browser-capture-process-lifecycle",
-  "pulp-materialized-runtime-conformance",
-  "pulp-rust-gpu-trace-analysis-ctest-selftest",
-  "pulp-rust-gpu-trace-analysis-integration",
-  "pulp-test-native-metal-audio-comparator",
-  "pulp.vellum-closure-edge-negative",
-  "pulp.vellum-closure-external-input-negative",
-  "pulp.vellum-closure-gate-negative",
-  "pulp_bundle_threejs_for_jsc_smoke",
-]
-build_targets = [
-  "pulp-cli",
-  "pulp-design-ir-observe",
-  "pulp-import-design",
-  "pulp-test-native-metal-audio-comparator",
-]
+build_targets = ["pulp-cli"]
 supported_build_types = [
   "debug",
   "release",
