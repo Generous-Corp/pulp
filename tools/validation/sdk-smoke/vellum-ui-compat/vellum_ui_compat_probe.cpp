@@ -65,20 +65,35 @@ int main() {
     pulp::vellum_audio::KeyEvent press;
     press.key = pulp::vellum_audio::KeyCode::a;
     const bool consumed = typing.handle_key(press);
+#if defined(PULP_VELLUM_UI_COMPAT_VIEW_ALONE)
+    std::printf("Pulp::view alone -> MusicalTypingController 'a' sounds note %d\n", sounded);
+#else
     std::printf("Pulp::view-audio -> MusicalTypingController 'a' sounds note %d\n", sounded);
+#endif
     return consumed && sounded == typing.base_note() ? 0 : 1;
 }
 
 #elif defined(PULP_VELLUM_UI_COMPAT_PROBE_VIEW_TOOLING)
 // The screenshot surface is defined in the provider library behind the name, so
-// calling it makes the link depend on that library.
+// calling it makes the link depend on that library. EditorBridge comes from the
+// view-free editor-bridge target the name links, and a WebView-editor plug-in
+// dispatches through it.
+#include <pulp/view/editor_bridge.hpp>
 #include <vellum/view/screenshot.hpp>
+
+#include <string>
 
 int main() {
     const bool capable = vellum::view::has_screenshot_backend();
-    std::printf("Pulp::view-tooling -> vellum::view::has_screenshot_backend %s\n",
-                capable ? "yes" : "no");
-    return 0;
+    pulp::view::EditorBridge bridge;
+    bridge.add_handler("ping", [](const choc::value::ValueView&) {
+        return pulp::view::EditorBridge::ok_response();
+    });
+    const std::string reply = bridge.dispatch_json(R"({"type":"ping"})");
+    const bool dispatched = reply == pulp::view::EditorBridge::ok_response();
+    std::printf("Pulp::view-tooling -> vellum::view::has_screenshot_backend %s, EditorBridge %s\n",
+                capable ? "yes" : "no", dispatched ? "dispatched" : "failed");
+    return dispatched ? 0 : 1;
 }
 
 #else
