@@ -20,6 +20,7 @@ if str(REPO_ROOT_GUESS) not in sys.path:
 from tools.harness.visual import differ  # noqa: E402
 from tools.harness.visual import raster  # noqa: E402
 from tools.harness.visual import spec as visual_spec  # noqa: E402
+from tools.harness.visual import vellum_layout  # noqa: E402
 
 
 def find_repo_root(start: Path) -> Path:
@@ -312,6 +313,49 @@ def verify(
     return 0
 
 
+def verify_vellum(host: Path, repo_root: Path, surface: str, fixtures: list[Path]) -> int:
+    """Check layout fixtures on Vellum's layout against the Yoga goldens.
+
+    Only node ids and rectangles are compared. A fixture that uses a property
+    Vellum's authoring layout has no equivalent for is reported as skipped with
+    the property named, never approximated. Exit 0 needs at least one fixture
+    measured and none differing; a run that measured nothing exits 3 so it can
+    never read as a pass.
+    """
+    measured = skipped = failed = 0
+    for fixture_path in fixtures:
+        fixture = visual_spec.fixture_spec_from_file(fixture_path, default_surface=surface)
+        if fixture.kind != "layout":
+            continue
+        raw = load_fixture(fixture_path)
+        try:
+            tree = vellum_layout.map_fixture(raw)
+        except vellum_layout.Unsupported as exc:
+            skipped += 1
+            print(f"skipped {fixture.id}: unsupported by Vellum layout ({exc})")
+            continue
+        golden_file = golden_path_for(repo_root, surface, fixture_path)
+        if not golden_file.exists():
+            print(f"FAILED {fixture.id}: missing Yoga golden {golden_file.name}", file=sys.stderr)
+            failed += 1
+            continue
+        actual = vellum_layout.snapshot_from_dump(raw, vellum_layout.run_host(host, tree))
+        golden = json.loads(golden_file.read_text(encoding="utf-8"))
+        problems = vellum_layout.compare_rects(golden, actual, differ.tolerance_from_fixture(raw))
+        measured += 1
+        if problems:
+            failed += 1
+            print(f"FAILED {fixture.id}", file=sys.stderr)
+            for problem in problems:
+                print(f"  {problem}", file=sys.stderr)
+        else:
+            print(f"ok {fixture.id} (vellum)")
+    print(f"vellum layout: measured={measured} skipped={skipped} failed={failed}")
+    if failed:
+        return 1
+    return 0 if measured else 3
+
+
 def visual_pass_counts(repo_root: Path, surfaces: Iterable[str] | None = None) -> dict[str, dict[str, Any]]:
     compat_path = repo_root / "compat.json"
     compat = json.loads(compat_path.read_text(encoding="utf-8")) if compat_path.exists() else {}
@@ -441,6 +485,22 @@ def parse_args(argv: Optional[list[str]] = None) -> argparse.Namespace:
             "with --verify)."
         ),
     )
+    p.add_argument(
+        "--engine",
+        choices=("pulp", "vellum"),
+        default="pulp",
+        help=(
+            "pulp (default) runs pulp-test-visual. vellum maps layout fixtures onto a "
+            "Vellum bundle, runs vellum-app-host --dump-tree and compares node rectangles "
+            "with the Yoga goldens (verify only)."
+        ),
+    )
+    p.add_argument(
+        "--vellum-host",
+        type=Path,
+        default=None,
+        help="vellum-app-host for --engine vellum (default: $VELLUM_APP_HOST).",
+    )
     p.add_argument("--binary", type=Path, default=None, help="Path to pulp-test-visual.")
     p.add_argument("--build-dir", type=Path, default=None, help="CMake build directory.")
     p.add_argument("--repo-root", type=Path, default=None, help="Override repo root discovery.")
@@ -510,6 +570,22 @@ def main(argv: Optional[list[str]] = None) -> int:
         # native binary is deferred until a fixture actually needs it. Selecting
         # only those fixtures must not require a C++ build that is never
         # invoked.
+        if args.engine == "vellum":
+            if mode_generate:
+                print("error: --engine vellum verifies against the Yoga goldens; it has none of its own",
+                      file=sys.stderr)
+                return 2
+            host = args.vellum_host or (Path(os.environ[vellum_layout.HOST_ENV])
+                                        if os.environ.get(vellum_layout.HOST_ENV) else None)
+            if host is None or not host.is_file():
+                print(f"error: --engine vellum needs --vellum-host or ${vellum_layout.HOST_ENV} "
+                      "to name a vellum-app-host binary", file=sys.stderr)
+                return 2
+            worst = 0
+            for surface, fixtures in plan:
+                worst = max(worst, verify_vellum(host, repo_root, surface, fixtures))
+            return worst
+
         binary: Path | None = None
         if any(
             _needs_native_binary(surface, fixtures) for surface, fixtures in plan

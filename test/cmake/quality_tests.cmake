@@ -1,6 +1,9 @@
 # Build checks, Python ratchets, and test-manifest refactor guards.
 # Included by test/CMakeLists.txt; keep related test registrations here.
 
+# Link graph the closure checks read.
+include("${CMAKE_CURRENT_LIST_DIR}/link_closure_graph.cmake")
+
 # Build check (no Catch2 dependency)
 add_executable(pulp-test-build-check test_build_check.cpp)
 target_link_libraries(pulp-test-build-check PRIVATE pulp::platform pulp::runtime)

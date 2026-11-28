@@ -7,7 +7,6 @@
 /// upload, but they do not own Dawn/Skia/Metal resources. They are safe to use
 /// in CPU-only/headless builds and keep the waveform views display-only.
 
-#include <pulp/audio/waveform_overview.hpp>
 #include <pulp/vellum_audio/waveform_editor_primitives.hpp>
 
 #include <cstddef>
@@ -15,7 +14,15 @@
 #include <span>
 #include <vector>
 
+namespace pulp::audio {
+class WaveformOverview;
+} // namespace pulp::audio
+
 namespace pulp::vellum_audio {
+
+/// Matches pulp::audio::WaveformOverview::kAllChannels: fold every channel.
+/// Declared here so the header needs only a forward declaration of the overview.
+inline constexpr std::uint32_t kWaveformAllChannels = static_cast<std::uint32_t>(-1);
 
 struct WaveformPeakVertex {
     float x = 0.0f;
@@ -28,7 +35,7 @@ struct WaveformPeakVertex {
 
 struct WaveformGpuUploadKey {
     std::uint64_t source_generation = 0;
-    std::uint32_t channel = pulp::audio::WaveformOverview::kAllChannels;
+    std::uint32_t channel = kWaveformAllChannels;
     std::uint32_t overview_level_index = 0;
     std::uint32_t samples_per_peak = 0;
     std::uint32_t first_peak = 0;
@@ -54,7 +61,7 @@ struct WaveformGpuLayerConfig {
     // Required cache identity supplied by the source/editor owner. Increment
     // whenever thumbnail content changes; 0 produces an invalid GPU plan.
     std::uint64_t source_generation = 0;
-    std::uint32_t channel = pulp::audio::WaveformOverview::kAllChannels;
+    std::uint32_t channel = kWaveformAllChannels;
     std::uint32_t max_columns = 0;
     bool prefer_gpu = true;
 };
