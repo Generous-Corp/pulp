@@ -1,19 +1,24 @@
 #pragma once
 
 #include <pulp/format/aax_model.hpp>
+#include <pulp/format/contract_editor_session.hpp>
+#include <pulp/format/editor_host.hpp>
 #include <pulp/format/plugin_descriptor.hpp>
 #include <pulp/format/processor.hpp>
 #include <pulp/runtime/log.hpp>
+#include <pulp/runtime/scope_guard.hpp>
 #include <pulp/state/parameter.hpp>
 #include <pulp/state/store.hpp>
 
 #include <cstdint>
 #include <functional>
+#include <memory>
 #include <optional>
 #include <string>
 #include <string_view>
 #include <unordered_map>
 #include <unordered_set>
+#include <utility>
 
 // Editor-support logic for the AAX adapter: parameter-gesture routing and the
 // editor sizing contract. Both are expressed without any AAX SDK type so they
@@ -506,6 +511,216 @@ private:
     Sink release_;
     std::unordered_set<state::ParamID> touched_;
     std::uint64_t unknown_count_ = 0;
+};
+
+// ── Contract editors ─────────────────────────────────────────────────────────
+
+/// The AAX editor of a processor that supplies an editor factory
+/// (`Processor::editor_factory()`, see editor_host.hpp), free of AAX types so
+/// it is testable without the SDK. `PulpAaxEffectGUI` owns one and forwards the
+/// AAX_CEffectGUI calls to it; the create_view() editor stays the path for a
+/// processor without a factory. The mapping:
+///
+///   CreateViewContents              -> create(): the editor is built, unattached,
+///                                      so GetViewSize answers with its size
+///                                      before any window exists
+///   CreateViewContainer (parent)    -> attach()
+///   GetViewSize / GetMinimumViewSize -> plan(): plan_editor_size() over the
+///                                      editor's size hints and current size
+///   editor resize request           -> the publish hook (SetViewSize); an
+///                                      accepted size is the editor's at once
+///   native frame change             -> follow_parent_frame(): the container's
+///                                      size is read from the host's timer and
+///                                      handed to host_resized(), so the editor
+///                                      takes the size inside its hints
+///   SetControlHighlightInfo         -> parameter_highlight() (SDK forwarding
+///                                      not yet implemented)
+///   DeleteViewContainer             -> detach(): every gesture released,
+///                                      Editor::detach()
+///   GUI destroyed                   -> close(): the editor is destroyed
+///   processor about to go away      -> close(), before the model deletes it
+///
+/// The session ticks itself from a main-thread timer, so TimerWakeup has
+/// nothing to drive. Main thread.
+class ContractEditorShell {
+  public:
+    /// Asks the host to resize its window to a logical size; true when it did.
+    using PublishSize = std::function<bool(uint32_t width, uint32_t height)>;
+
+    ContractEditorShell() = default;
+    ContractEditorShell(const ContractEditorShell&) = delete;
+    ContractEditorShell& operator=(const ContractEditorShell&) = delete;
+    ~ContractEditorShell() {
+        close();
+    }
+
+    /// True when `model`'s editor opens through this shell.
+    static bool applies(EditorHost& model) {
+        auto* processor = model.editor_processor();
+        return processor != nullptr && model.editor_store() != nullptr &&
+               processor->editor_factory() != nullptr;
+    }
+
+    /// Build the processor's editor, unattached. The adapter passes whether it
+    /// can follow host frame changes; without that reader no factory is called.
+    /// False when the reader is unavailable, the shell does not apply or the
+    /// factory builds no editor. A supported second call keeps the editor built.
+    bool create(EditorHost& model, PublishSize publish, bool parent_size_readable = true) {
+        if (!parent_size_readable)
+            return false;
+        if (session_)
+            return true;
+        if (!applies(model))
+            return false;
+        auto* processor = model.editor_processor();
+        ContractEditorSession::HostHooks hooks;
+        // AAX has no host resize callback: an accepted SetViewSize is the
+        // host's answer, so the editor takes that size at once.
+        hooks.request_resize = [this](const EditorSize& size) {
+            if (!attached() || !publish_)
+                return false;
+            bool accepted = false;
+            {
+                // SetViewSize may synchronously ask GetViewSize. Publish the
+                // proposed answer without resizing the editor before acceptance.
+                const auto previous = std::exchange(publishing_size_, size);
+                auto restore =
+                    runtime::make_scope_guard([this, previous] { publishing_size_ = previous; });
+                accepted = publish_(size.width, size.height);
+            }
+            return accepted && host_resized(size.width, size.height);
+        };
+        auto session = ContractEditorSession::create(
+            *processor, *model.editor_store(), *processor->editor_factory(), std::move(hooks));
+        if (!session)
+            return false;
+        publish_ = std::move(publish);
+        model_ = &model;
+        session_ = std::move(session);
+        // The editor runs on the processor that renders audio when the host
+        // has built one; its removal must take the editor down first. The
+        // model copies the handler before calling it, so clearing it from
+        // inside is safe.
+        model.set_editor_invalidation_handler([this] { close(); });
+        return true;
+    }
+
+    /// Attach the built editor to the host's container. False when nothing is
+    /// built, it is already attached, or the editor refuses the parent; the
+    /// editor stays built for a later container.
+    bool attach(const NativeParent& parent) {
+        if (!session_ || parent.kind == NativeParentKind::none)
+            return false;
+        if (!session_->attach(parent)) {
+            runtime::log_error("AAX editor: the contract editor did not attach");
+            return false;
+        }
+        parent_ = parent.handle;
+        seen_parent_width_ = 0;
+        seen_parent_height_ = 0;
+        return true;
+    }
+
+    bool built() const {
+        return session_ != nullptr;
+    }
+    bool attached() const {
+        return session_ != nullptr && session_->is_attached();
+    }
+
+    /// The sizing plan the host is answered from, or nullopt while nothing is
+    /// built.
+    std::optional<EditorSizePlan> plan() const {
+        if (!session_)
+            return std::nullopt;
+        auto hints = session_->size_hints();
+        const auto size = publishing_size_ ? *publishing_size_ : session_->size();
+        if (size.width != 0 && size.height != 0) {
+            hints.preferred_width = size.width;
+            hints.preferred_height = size.height;
+        }
+        return plan_editor_size(hints);
+    }
+
+    /// The host resized the editor's native frame.
+    bool host_resized(uint32_t width, uint32_t height) {
+        if (!attached())
+            return false;
+        bool snapped = false;
+        return session_->set_host_size(width, height, snapped);
+    }
+
+    /// Reads the host container's size in logical units. False, leaving the
+    /// outputs untouched, when the container cannot be read.
+    using ParentSizeReader =
+        std::function<bool(void* native_parent, uint32_t& width, uint32_t& height)>;
+
+    /// Follow the host's container. AAX tells the plug-in nothing when Pro Tools
+    /// or the user resizes the window, so the adapter calls this from the
+    /// host's timer: a container size that differs from the last one seen, and
+    /// from the size the editor already has (the echo of its own SetViewSize),
+    /// is handed to host_resized(). True when the editor took a new size.
+    bool follow_parent_frame(const ParentSizeReader& read) {
+        if (!attached() || parent_ == nullptr || !read)
+            return false;
+        uint32_t width = 0;
+        uint32_t height = 0;
+        if (!read(parent_, width, height))
+            return false;
+        if (width == seen_parent_width_ && height == seen_parent_height_)
+            return false;
+        seen_parent_width_ = width;
+        seen_parent_height_ = height;
+        const auto current = session_->size();
+        if (width == current.width && height == current.height)
+            return false;
+        return host_resized(width, height);
+    }
+
+    /// The host highlights a parameter's control.
+    void parameter_highlight(state::ParamID id, bool highlighted, uint32_t color_rgb) {
+        if (auto* editor = session_ ? session_->editor() : nullptr)
+            editor->parameter_highlight(id, highlighted, color_rgb);
+    }
+
+    /// The open session, or null while nothing is built.
+    ContractEditorSession* session() {
+        return session_.get();
+    }
+
+    /// The host's container is going away: release every gesture, then detach
+    /// the editor. It stays built for the next container.
+    void detach() {
+        if (!session_)
+            return;
+        if (model_ != nullptr)
+            model_->release_editor_gestures();
+        session_->detach();
+        parent_ = nullptr;
+    }
+
+    /// Release every gesture and destroy the editor. Safe to call twice.
+    void close() {
+        if (!session_)
+            return;
+        auto session = std::move(session_);
+        parent_ = nullptr;
+        if (auto* model = std::exchange(model_, nullptr)) {
+            model->set_editor_invalidation_handler({});
+            model->release_editor_gestures();
+        }
+        session->close_for_owner();
+        publish_ = {};
+    }
+
+  private:
+    EditorHost* model_ = nullptr;
+    PublishSize publish_;
+    std::optional<EditorSize> publishing_size_;
+    void* parent_ = nullptr; ///< the host container while attached
+    uint32_t seen_parent_width_ = 0;
+    uint32_t seen_parent_height_ = 0;
+    std::unique_ptr<ContractEditorSession> session_;
 };
 
 } // namespace pulp::format::aax

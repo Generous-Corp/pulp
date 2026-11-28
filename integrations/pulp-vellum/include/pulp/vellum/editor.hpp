@@ -108,6 +108,8 @@ class Editor final : public format::Editor, public format::EditorAttachDiagnosti
                 visual_publish_counts_[i] = visual_feed_->publish_count(i);
         }
         root_ = make_root(env_);
+        if (failed_to_open())
+            return;
         if constexpr (requires(ViewType& view) {
                           { view.editor_view_size() } -> std::convertible_to<format::ViewSize>;
                       }) {
@@ -160,6 +162,18 @@ class Editor final : public format::Editor, public format::EditorAttachDiagnosti
     ~Editor() override {
         detach();
         invalidate();
+    }
+
+    /// True when the root reports, through an optional
+    /// `bool editor_failed_to_open() const`, that it could not build its
+    /// content. The factory then returns no editor and no host is created.
+    bool failed_to_open() const {
+        if constexpr (requires(const ViewType& view) {
+                          { view.editor_failed_to_open() } -> std::convertible_to<bool>;
+                      })
+            return static_cast<const ViewType&>(*root_).editor_failed_to_open();
+        else
+            return false;
     }
 
     // X11 is not offered: an X11 parent carries its window in window_id with a
@@ -392,7 +406,12 @@ template <typename ViewType> class EditorFactory final : public format::EditorFa
     std::unique_ptr<format::Editor> create(format::Processor& processor,
                                            format::EditorContext& context,
                                            format::EditorRole role) override {
-        return supports(role) ? std::make_unique<Editor<ViewType>>(context, processor) : nullptr;
+        if (!supports(role))
+            return nullptr;
+        auto editor = std::make_unique<Editor<ViewType>>(context, processor);
+        if (editor->failed_to_open())
+            return nullptr;
+        return editor;
     }
 };
 

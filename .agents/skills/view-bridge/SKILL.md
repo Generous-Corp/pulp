@@ -827,6 +827,7 @@ the `clap` skill's Parameters section for the complete transport contract.
 | AU v3 | `viewDidLoad` | After `PluginViewHost::attach_to_parent` in `viewDidLoad` |
 | AU v3, processor with an `editor_factory()` | `rebuildEditorIfReady` opens a `ContractEditorSession` in `PulpAUv3ContractView` and never creates a ViewBridge | n/a: the contract editor's `attach()` is the attach point |
 | AAX | `AAX_CEffectGUI::CreateViewContainer()` — not `CreateViewContents()`, which runs before any window exists | After `try_attach_to_parent` succeeds |
+| AAX, processor with an `editor_factory()` | `CreateViewContents()` builds the contract editor unattached through `aax::ContractEditorShell`, so `GetViewSize` knows its size; no ViewBridge | n/a: `CreateViewContainer()` calls the editor's `attach()` |
 | Standalone | Before `WindowHost::create` | After `WindowHost::create` succeeds |
 
 AAX keeps a host-side data model and a real-time algorithm instance, but the
@@ -3006,6 +3007,19 @@ session and a real host observer registry; publish a new surface after close to
 prove the subscription was removed, then reopen to prove it is re-established.
 Keep the prewarm recorder in its own executable so it can replace Vellum's
 external scheduler without changing the ordinary scripted editor tests.
+
+A script that fails to load opens no editor: the scripted root reports
+`editor_failed_to_open()`, `pulp::vellum::EditorFactory` then returns null
+before any `PluginViewHost` exists, and the adapter shows the host's own
+editor. It never opens an empty Vellum window.
+
+`ui-script-vellum-route-*` (test/fixtures/ui_script_plugin) prove the route on
+built images: each format of the `UI_ENGINE vellum` fixture defines
+`scripted_editor_factory` and no `pulp::view`, `ViewBridge` or legacy builder
+symbol, with the plain fixture as the control. The plug-ins are not test
+executables, so `ui-script-vellum-route-build` builds them first through
+`tools/ci/governed-build.sh`; a lane that builds only labelled executables
+would otherwise run the census on files that do not exist.
 
 `pulp_add_plugin(UI_SCRIPT)` no longer ships a plug-in that reads `ui.js` from
 the developer's absolute source path at every editor open. The script's bytes,
