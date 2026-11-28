@@ -9,6 +9,28 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
      release's bullet block. See docs/guides/versioning.md § Release pipeline
      for the full end-to-end flow. -->
 
+<a id="v12320"></a>
+## [1.232.0] - 2026-11-28
+
+- release/version bump ([#13032](https://github.com/Generous-Corp/pulp/pull/13032))
+- gate/vellum watch disjoint claims ([#13015](https://github.com/Generous-Corp/pulp/pull/13015))
+- feature/vellum waveform gpu render ([#13025](https://github.com/Generous-Corp/pulp/pull/13025))
+
+<a id="v12310"></a>
+## [1.231.0] - 2026-11-28
+
+- release/version bump ([#13028](https://github.com/Generous-Corp/pulp/pull/13028))
+- feature/vellum view processor ([#13010](https://github.com/Generous-Corp/pulp/pull/13010))
+- feature/cli vellum forwarders ([#12902](https://github.com/Generous-Corp/pulp/pull/12902))
+- feature/vellum renderer3d scene pass ([#13005](https://github.com/Generous-Corp/pulp/pull/13005))
+
+<a id="v12300"></a>
+## [1.230.0] - 2026-11-27
+
+- release/version bump ([#13022](https://github.com/Generous-Corp/pulp/pull/13022))
+- feature/vellum standalone typing panel ([#12955](https://github.com/Generous-Corp/pulp/pull/12955))
+- spectr/attested2 mirror binding ([#13016](https://github.com/Generous-Corp/pulp/pull/13016))
+
 <a id="v12290"></a>
 ## [1.229.0] - 2026-11-27
 
@@ -13912,6 +13934,9 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/Generous-Corp/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/Generous-Corp/pulp/pull/2))
 
+[1.232.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.232.0
+[1.231.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.231.0
+[1.230.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.230.0
 [1.229.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.229.0
 [1.228.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.228.0
 [1.227.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.227.0

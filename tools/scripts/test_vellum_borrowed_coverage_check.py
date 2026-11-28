@@ -98,7 +98,7 @@ class BorrowedCoverageCheckTest(_PreflightRepo, unittest.TestCase):
         self.assertEqual(code, 0, output)
         self.assertIn("::warning title=Vellum borrowed watch coverage::", output)
         self.assertIn("the pull request from parent (origin/parent)", output)
-        self.assertIn("Re-run this check after the parent merges", output)
+        self.assertIn("or after the parent merges", output)
         self.assertNotIn("origin/topic", output)
         # --fail is the promoted form: the same report exits 1.
         _git(self.repo, "checkout", "-q", "main")
