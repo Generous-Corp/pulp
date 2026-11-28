@@ -61,7 +61,10 @@ jobs:
       github.event_name != 'push' && github.event_name != 'workflow_dispatch'
       && (github.event_name != 'issue_comment' || github.event.issue.pull_request)
     runs-on: ubuntu-24.04
-    timeout-minutes: 5
+    # Shipyard's rule takes seconds; the review-item steps below carry their
+    # own step timeouts, and this leaves room for the step that refuses the
+    # head when one of them times out.
+    timeout-minutes: 25
     steps:
       - name: Check out the pinned rule
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -102,18 +105,50 @@ jobs:
           fi
           echo "head=$head" >> "$GITHUB_OUTPUT"
           echo "prs=$prs" >> "$GITHUB_OUTPUT"
+      - name: Hold the head while its review items are judged
+        # A comment's run has just posted Shipyard's `success` on a head whose
+        # check may already be green; pending closes that window until the
+        # review-item rule below (and the head's own re-run) decides.
+        if: steps.allowed.outputs.head != '' && github.event_name != 'pull_request_target'
+        shell: bash
+        timeout-minutes: 2
+        env:
+          GH_TOKEN: ${{ github.token }}
+          HEAD_SHA: ${{ steps.allowed.outputs.head }}
+        run: |
+          gh api -X POST "repos/${GITHUB_REPOSITORY}/statuses/${HEAD_SHA}" -f state=pending \
+            -f context=review-verdict -f "description=judging review items for head ${HEAD_SHA:0:12}"
       - name: Check out the default branch's review-item rules
         if: steps.allowed.outputs.head != ''
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        timeout-minutes: 5
         with:
           ref: ${{ github.event.repository.default_branch }}
           path: pulp-base
-          fetch-depth: 0
+          fetch-depth: 1
           persist-credentials: false
+      - name: Fetch the default branch's history and the head
+        # Only the default branch and the head: the merge-base and the head's
+        # commits are all the rule reads. Never checked out.
+        if: steps.allowed.outputs.head != ''
+        shell: bash
+        timeout-minutes: 10
+        working-directory: pulp-base
+        env:
+          GH_TOKEN: ${{ github.token }}
+          HEAD_SHA: ${{ steps.allowed.outputs.head }}
+          BASE_BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          set -euo pipefail
+          auth="AUTHORIZATION: basic $(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)"
+          git -c "http.https://github.com/.extraheader=$auth" fetch --no-tags --quiet --unshallow \
+            origin "+refs/heads/$BASE_BRANCH:refs/remotes/origin/$BASE_BRANCH"
+          git -c "http.https://github.com/.extraheader=$auth" fetch --no-tags --quiet origin "$HEAD_SHA"
       - name: Require the verdict to accept every review item
         id: items
         if: steps.allowed.outputs.head != ''
         shell: bash
+        timeout-minutes: 5
         working-directory: pulp-base
         env:
           GH_TOKEN: ${{ github.token }}
@@ -125,11 +160,6 @@ jobs:
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
           set -euo pipefail
-          auth="AUTHORIZATION: basic $(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)"
-          # A failed fetch is not fatal here: the checker cannot read the head
-          # then, and fails closed by posting a failure status.
-          git -c "http.https://github.com/.extraheader=$auth" fetch --no-tags --quiet origin "$HEAD_SHA" \
-            || echo "::warning::could not fetch $HEAD_SHA"
           rc=0
           for pr in $PRS; do
             "$PYTHON" tools/scripts/review_items.py check --root . --repo "$GITHUB_REPOSITORY" \
@@ -139,17 +169,22 @@ jobs:
           exit "$rc"
       - name: Refuse the head when the review-item rule could not run
         # Shipyard has already posted `success`; if the rule never ran (its
-        # checkout failed), that status must not stand. When the rule itself
-        # fails it has posted its own failure status.
-        if: failure() && steps.allowed.outputs.head != '' && steps.items.outcome != 'failure'
+        # checkout or fetch failed or timed out, or the run was cancelled),
+        # that status must not stand. When the rule itself fails it has posted
+        # its own failure status.
+        if: >-
+          (failure() || cancelled()) && steps.allowed.outputs.head != ''
+          && steps.items.outcome != 'failure'
         shell: bash
+        timeout-minutes: 2
         env:
           GH_TOKEN: ${{ github.token }}
           HEAD_SHA: ${{ steps.allowed.outputs.head }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
           gh api -X POST "repos/${GITHUB_REPOSITORY}/statuses/${HEAD_SHA}" -f state=failure \
-            -f context=review-verdict -f "description=review items could not be judged; see the run" \
+            -f context=review-verdict \
+            -f "description=review items could not be judged; see the run" \
             -f "target_url=${RUN_URL}"
           exit 1
 
@@ -185,8 +220,18 @@ jobs:
         with:
           ref: ${{ github.event.repository.default_branch }}
           path: pulp-base
-          fetch-depth: 0
+          fetch-depth: 1
           persist-credentials: false
+      - name: Fetch the default branch's history
+        timeout-minutes: 10
+        working-directory: pulp-base
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BASE_BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          auth="AUTHORIZATION: basic $(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)"
+          git -c "http.https://github.com/.extraheader=$auth" fetch --no-tags --quiet --unshallow \
+            origin "+refs/heads/$BASE_BRANCH:refs/remotes/origin/$BASE_BRANCH"
       - name: Post review-verdict for every open pull request
         env:
           GH_TOKEN: ${{ github.token }}
@@ -221,11 +266,18 @@ jobs:
               auth="AUTHORIZATION: basic $(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)"
               item_rc=0
               # An unfetched head cannot be read, and the checker then posts failure.
-              git -C pulp-base -c "http.https://github.com/.extraheader=$auth" \
+              timeout 300 git -C pulp-base -c "http.https://github.com/.extraheader=$auth" \
                 fetch --no-tags --quiet origin "$head" || echo "::warning::could not fetch $head"
-              (cd pulp-base && "$PYTHON" tools/scripts/review_items.py check --root . \
+              (cd pulp-base && timeout 300 "$PYTHON" tools/scripts/review_items.py check --root . \
                 --repo "$GITHUB_REPOSITORY" --pr "$number" --head "$head" \
                 --base "origin/$BASE_BRANCH" --post-status --target-url "$RUN_URL") || item_rc=$?
+              if [ "$item_rc" -gt 2 ]; then
+                # Killed or timed out before it could post: refuse the head here.
+                gh api -X POST "repos/${GITHUB_REPOSITORY}/statuses/${head}" -f state=failure \
+                  -f context=review-verdict \
+                  -f "description=review items could not be judged; see the run" \
+                  -f "target_url=${RUN_URL}" > /dev/null || true
+              fi
               if [ "$item_rc" -ne 0 ]; then
                 echo "::warning::PR #${number} has review items its verdict does not accept, or they could not be judged"
                 rc=1
