@@ -1978,3 +1978,49 @@ TEST_CASE("Design tool: export helpers cover native, W3C, and style preset forma
     REQUIRE_FALSE(popup->visible());
     REQUIRE_FALSE(backdrop->visible());
 }
+
+TEST_CASE("Design tool: palette and chat file actions never fall back to a shared temp path",
+          "[design-tool][security]") {
+    if (find_js_file("design-tool-palette.js").empty()) {
+        SKIP("design-tool modules not found");
+        return;
+    }
+
+    View root;
+    root.set_theme(Theme::dark());
+    root.flex().direction = FlexDirection::column;
+    root.set_bounds({0, 0, 1100, 700});
+
+    pulp::state::StateStore store;
+    ScriptEngine engine;
+    WidgetBridge bridge(engine, root, store);
+    load_design_tool(root, engine, bridge);
+
+    // Record every shell command instead of running it, and make the file
+    // dialogs report a cancelled selection (empty path).
+    REQUIRE_NOTHROW(
+        engine.evaluate("var __execLog = [];"
+                        "exec = function(cmd) { __execLog.push(String(cmd)); return ''; };"
+                        "var __dialogResult = '';"
+                        "showSaveDialog = function() { return __dialogResult; };"
+                        "showOpenDialog = function() { return __dialogResult; };"));
+
+    SECTION("cancelled dialogs touch no file") {
+        REQUIRE_NOTHROW(engine.evaluate("__dispatch__('palette-save-btn', 'click', 0);"));
+        REQUIRE_NOTHROW(engine.evaluate("__dispatch__('palette-load-btn', 'click', 0);"));
+        REQUIRE_NOTHROW(engine.evaluate("exportChatHistory();"));
+        REQUIRE(engine.evaluate("__execLog.length").getWithDefault<int>(-1) == 0);
+        REQUIRE(engine.evaluate("normalizePaletteSavePath('')").toString().empty());
+        REQUIRE(engine.evaluate("normalizeChatExportPath('')").toString().empty());
+    }
+
+    SECTION("a chosen destination is still written") {
+        REQUIRE_NOTHROW(engine.evaluate("__dialogResult = '/Users/example/Documents/mine';"
+                                        "__dispatch__('palette-save-btn', 'click', 0);"));
+        REQUIRE(engine.evaluate("__execLog.length").getWithDefault<int>(-1) == 1);
+        REQUIRE(engine.evaluate("__execLog[0].indexOf('mine.colorsystem.json') >= 0")
+                    .getWithDefault<bool>(false));
+        REQUIRE_FALSE(
+            engine.evaluate("__execLog[0].indexOf('/tmp/') >= 0").getWithDefault<bool>(false));
+    }
+}

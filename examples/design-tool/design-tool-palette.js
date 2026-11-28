@@ -1058,7 +1058,7 @@ function applySerializedPaletteConfiguration(json) {
 }
 
 function normalizePaletteSavePath(path) {
-    if (!path || path.length === 0) return "/tmp/pulp-palette.colorsystem.json";
+    if (!path || path.length === 0) return "";
     if (path.toLowerCase().slice(-5) === ".json") return path;
     return path + ".colorsystem.json";
 }
@@ -1088,6 +1088,7 @@ function buildPaletteSaveLoadRow() {
     registerClick("palette-save-btn");
     on("palette-save-btn", "click", function() {
         var path = normalizePaletteSavePath(showSaveDialog("Save Palette", "Color System JSON", "json"));
+        if (path.length === 0) return;
         writeTextFile(path, serializePaletteConfiguration());
         showToast("Palette saved to " + path);
     });
@@ -1104,7 +1105,7 @@ function buildPaletteSaveLoadRow() {
     registerClick("palette-load-btn");
     on("palette-load-btn", "click", function() {
         var path = showOpenDialog("Load Palette", "Color System JSON", "json");
-        if (!path || path.length === 0) path = "/tmp/pulp-palette.colorsystem.json";
+        if (!path || path.length === 0) return;
         var json = readTextFile(path);
         if (json && json.length > 10) {
             if (applySerializedPaletteConfiguration(json)) {

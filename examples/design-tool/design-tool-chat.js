@@ -598,7 +598,7 @@ var chatTypingPhase = 0;
 var chatHistory = [];
 
 function normalizeChatExportPath(path) {
-    if (!path || path.length === 0) return "/tmp/pulp-design-chat.md";
+    if (!path || path.length === 0) return "";
     var lower = path.toLowerCase();
     if (lower.slice(-3) === ".md" || lower.slice(-5) === ".json") return path;
     return path + ".md";
@@ -634,6 +634,7 @@ function serializeChatHistory(format) {
 
 function exportChatHistory() {
     var path = normalizeChatExportPath(showSaveDialog("Export Chat History", "Markdown", "md"));
+    if (path.length === 0) return;
     writeTextFile(path, serializeChatHistory("markdown"));
     showToast("Chat exported to " + path);
 }
