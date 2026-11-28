@@ -18,7 +18,7 @@ modules:
 
   - name: pulp_vellum_audio
     path: integrations/pulp-vellum-audio
-    summary: A lock-free TripleBuffer provider that publishes Pulp audio-thread meter and scope frames to Vellum value feeds, plus Vellum MultiMeter, CorrelationMeter, SpectrogramView, WaveformView, WaveformOverviewView, MusicalTypingKeyboard, EqCurveView, StepGridView, WaveformRecorderView and PianoRollView displays and the StandaloneTypingPanel tool window over pulp::signal and pulp::audio data, and backend-neutral waveform GPU upload planning with a generation-tagged resource cache, a render controller and a headless backend
+    summary: A lock-free TripleBuffer provider that publishes Pulp audio-thread meter and scope frames to Vellum value feeds, plus Vellum MultiMeter, CorrelationMeter, SpectrogramView, WaveformView, WaveformOverviewView, MusicalTypingKeyboard, EqCurveView, StepGridView, WaveformRecorderView and PianoRollView and AudioInspectorPanel displays and the StandaloneTypingPanel tool window over pulp::signal and pulp::audio data, and backend-neutral waveform GPU upload planning with a generation-tagged resource cache, a render controller and a headless backend
     status: experimental
     dependencies: [runtime, audio, signal, format, timeline, timeline_editor, timebase, pulp_vellum]
     docs: reference/modules.md#pulp_vellum_audio

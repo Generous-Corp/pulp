@@ -3,7 +3,7 @@
 # on Pulp runtime, signal and audio plus Vellum's value and view interfaces.
 find_package(Vellum CONFIG REQUIRED)
 
-add_library(pulp-vellum-audio STATIC src/audio_display_provider.cpp src/audio_widgets.cpp
+add_library(pulp-vellum-audio STATIC src/audio_display_provider.cpp src/audio_inspector_panel.cpp src/audio_widgets.cpp
     src/eq_curve_view.cpp src/graph_scale.cpp src/multi_meter.cpp src/musical_typing_keyboard.cpp src/piano_roll_pitch_ruler.cpp src/piano_roll_view.cpp
     src/musical_typing_keyboard_svg.cpp src/register_audio_widgets.cpp src/spectrogram_view.cpp
     src/standalone_typing_panel.cpp src/step_grid_view.cpp src/waveform_editor.cpp src/waveform_editor_primitives.cpp src/waveform_gpu_primitives.cpp src/waveform_gpu_render_controller.cpp
