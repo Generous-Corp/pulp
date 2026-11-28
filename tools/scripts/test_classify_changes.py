@@ -558,7 +558,7 @@ class IosCompileRequiredTests(unittest.TestCase):
     def test_ios_only_surfaces_run_the_per_pr_gate(self) -> None:
         for paths in (
             ["apple/Sources/PulpSwift/PulpBridge.swift"],
-            ["core/view/platform/ios/window_host_ios.mm"],
+            ["integrations/legacy-platform-hosts/ios/src/window_host_ios.mm"],
             ["examples/ios-auv3-synth/src/sine_synth.cpp"],
             ["templates/ios-auv3/HostApp/ContentView.swift"],
             ["tools/cmake/PulpAuv3.cmake"],

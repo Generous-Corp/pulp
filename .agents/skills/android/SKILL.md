@@ -80,7 +80,7 @@ Kotlin (Android UI)          C++ (Pulp core)
 | File | Purpose |
 |------|---------|
 | `tools/cmake/PulpAndroid.cmake` | NDK toolchain integration, Oboe, platform wiring |
-| `core/render/platform/android/gpu_surface_android.cpp` | Vulkan surface, touch routing, widget hierarchy |
+| `integrations/legacy-platform-hosts/android/src/gpu_surface_android.cpp` | Vulkan surface, touch routing, widget hierarchy |
 | `android/app/src/main/kotlin/com/pulp/render/PulpSurfaceView.kt` | SurfaceView + touch dispatch |
 | `android/app/src/main/kotlin/com/pulp/PulpApplication.kt` | JNI load, lifecycle |
 | `core/platform/src/android/jni_bridge.cpp` | JNI_OnLoad, class caching, exception guards |
@@ -605,7 +605,7 @@ These are hard-won lessons from the bringup. Violating any of these will cause c
 
 ### The Android app shell compiles into `pulp-jni`, not `pulp-render`
 
-`core/render/platform/android/gpu_surface_android.cpp` and its JNI bridge
+`integrations/legacy-platform-hosts/android/src/gpu_surface_android.cpp` and its JNI bridge
 `gpu_surface_android_jni.cpp` are the Android app shell. They own the GPU
 surface, drive the view hierarchy and the widget bridge, read the state store
 and play the demo synth. They are compiled straight into the `pulp-jni` shared
@@ -615,7 +615,7 @@ that target links the whole closure. `pulp-render` keeps just
 `render-upward-edge-check` ctest fails if a renderer source includes above
 `pulp/{render,canvas,runtime,scene}`, if a CMake file adds a shell source back
 to `pulp-render`, or if a shell source stops being compiled into `pulp-jni`.
-The files stay under `core/render/platform/android/`, because the accepted Vellum
+The files stay under `integrations/legacy-platform-hosts/android/src/`, because the accepted Vellum
 cut manifest pins their paths; the separation is by target, not directory.
 
 `pulp-jni` also whole-archives `pulp-render` and `pulp-gpu-device` (the Dawn
@@ -1197,7 +1197,7 @@ Falls back to C++ widget hierarchy if JS fails (any exception → catch → C++ 
 
 ### Bridge idle pump must run each vsync
 
-`android_render_frame()` (in `core/render/platform/android/gpu_surface_android.cpp`) MUST call both `g_widget_bridge->poll_async_results()` and `g_widget_bridge->service_frame_callbacks()` once per vsync at the top, before `begin_frame()`. Without this, JS `requestAnimationFrame` / `setTimeout` / async-result queues never fire on Android: callbacks get queued, but the AChoreographer loop has to drain async results and pump the engine message loop explicitly.
+`android_render_frame()` (in `integrations/legacy-platform-hosts/android/src/gpu_surface_android.cpp`) MUST call both `g_widget_bridge->poll_async_results()` and `g_widget_bridge->service_frame_callbacks()` once per vsync at the top, before `begin_frame()`. Without this, JS `requestAnimationFrame` / `setTimeout` / async-result queues never fire on Android: callbacks get queued, but the AChoreographer loop has to drain async results and pump the engine message loop explicitly.
 
 Symptoms when missing:
 - `requestAnimationFrame(loop)` chain queues forever, never animates
@@ -1221,14 +1221,14 @@ shared bridge pump.
 
 The Kotlin / Compose / View bridge for `pulp::view::motion` lives in
 `android/app/src/main/kotlin/com/pulp/motion/`. JNI shims live in
-`core/view/platform/android/jni_motion.cpp`. Full design and DSL
+`integrations/legacy-platform-hosts/android/src/jni_motion.cpp`. Full design and DSL
 docs are in the **motion** skill (Path H) — this section captures
 the Android-specific wiring gotchas only.
 
 ### CMake wiring — jni_motion.cpp belongs in `pulp-jni`
 
 `jni_motion.cpp` lives with the view sources
-(`core/view/platform/android/`) and is listed **explicitly** in the
+(`integrations/legacy-platform-hosts/android/src/`) and is listed **explicitly** in the
 `pulp-jni` SHARED target in the root `CMakeLists.txt`. It is not part of
 `pulp-view`'s Android sources (`PulpAndroid.cmake` adds only
 `accessibility_android.cpp` there), so it is compiled exactly once.
@@ -1306,7 +1306,7 @@ describe Android accessibility as working.**
 
 ## Accessibility (TalkBack) — the role ordinal is a wire format
 
-`core/view/platform/android/accessibility_android.cpp` marshals a view's role to
+`integrations/legacy-platform-hosts/android/src/accessibility_android.cpp` marshals a view's role to
 Kotlin as `static_cast<int>(View::AccessRole)`, and
 `android/app/src/main/kotlin/com/pulp/accessibility/PulpAccessibility.kt` matches
 on those integers (`ROLE_SLIDER = 1`, …). **There is no name in the protocol —

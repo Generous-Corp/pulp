@@ -4,10 +4,6 @@
   "entry": "tools/scripts/render_upward_edge_check.py",
   "inputs": [
    "core/render",
-   "core/render/platform/android/gpu_surface_android.cpp",
-   "core/render/platform/android/gpu_surface_android_internal.hpp",
-   "core/render/platform/android/gpu_surface_android_jni.cpp",
-   "core/render/platform/android/synth_ui.js.h",
    "tools/scripts/render_upward_edge_check.py"
   ],
   "kind": "python"

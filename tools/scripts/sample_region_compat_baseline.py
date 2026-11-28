@@ -606,7 +606,7 @@ COMPAT_INPUTS = (
     'core/view/platform/mac/window_host_mac_open_documents.mm',
     'core/view/platform/mac/window_host_mac_text_input.mm',
     'core/view/platform/mac/window_manager_mac.mm',
-    'core/view/platform/win/accessibility_win_fragment_topology.cpp',
+    'integrations/legacy-platform-hosts/win/src/accessibility_win_fragment_topology.cpp',
     'core/view/src/accessibility.cpp',
     'core/view/src/accessibility_tree.cpp',
     'core/view/src/anchor_strategy.cpp',

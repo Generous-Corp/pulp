@@ -21,8 +21,8 @@ import render_upward_edge_check as check  # noqa: E402
 JNI_CMAKE = """if(ANDROID)
     add_library(pulp-jni SHARED core/platform/src/android/jni_bridge.cpp)
     target_sources(pulp-jni PRIVATE
-        core/render/platform/android/gpu_surface_android.cpp
-        core/render/platform/android/gpu_surface_android_jni.cpp
+        integrations/legacy-platform-hosts/android/src/gpu_surface_android.cpp
+        integrations/legacy-platform-hosts/android/src/gpu_surface_android_jni.cpp
     )
 endif()
 """
@@ -71,7 +71,7 @@ class RenderUpwardEdgeRules(unittest.TestCase):
         self.assertEqual(check.main(["--repo", str(self.repo)]), 1)
 
     def test_renderer_including_state_fails(self) -> None:
-        self.write("core/render/platform/android/choreographer_android.cpp",
+        self.write("core/render/src/render_loop_android.cpp",
                    "#include <pulp/state/store.hpp>\n")
         self.assertEqual(self.codes(), ["render-includes-upward"])
 
@@ -91,7 +91,7 @@ class RenderUpwardEdgeRules(unittest.TestCase):
 
     def test_shell_dropped_from_jni_fails(self) -> None:
         self.write("CMakeLists.txt", JNI_CMAKE.replace(
-            "        core/render/platform/android/gpu_surface_android_jni.cpp\n", ""))
+            "        integrations/legacy-platform-hosts/android/src/gpu_surface_android_jni.cpp\n", ""))
         self.assertEqual(self.codes(), ["shell-not-in-jni"])
 
     def test_missing_shell_file_is_inconclusive(self) -> None:

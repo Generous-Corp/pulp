@@ -85,7 +85,7 @@ Your `Processor` subclass doesn't change either way; only the build flag does.
 | **Metal via Dawn + Skia Graphite** | Visualisers, waveform/FFT displays, shader-heavy designs, SDF text. | AUv3 extensions get a **restricted Metal budget**; the host co-owns the GPU. Keep draw count low. |
 | **WebView** | Reusing an existing HTML UI, design-tool imports from Figma/Stitch. | Heavier memory footprint; first-paint latency visible. |
 
-For Metal, `core/view/platform/ios/plugin_view_host_ios.mm` provides `IOSGpuPluginViewHost` under `PULP_HAS_SKIA` — wrap your root View with it instead of the CoreGraphics `IOSPluginViewHost`.
+For Metal, `integrations/legacy-platform-hosts/ios/src/plugin_view_host_ios.mm` provides `IOSGpuPluginViewHost` under `PULP_HAS_SKIA` — wrap your root View with it instead of the CoreGraphics `IOSPluginViewHost`.
 
 ---
 
@@ -111,7 +111,7 @@ For Metal, `core/view/platform/ios/plugin_view_host_ios.mm` provides `IOSGpuPlug
 
 ## Touch & Apple Pencil
 
-`core/view/platform/ios/window_host_ios.mm` and `plugin_view_host_ios.mm` handle UIKit's `touchesBegan/Moved/Ended/Cancelled` → `View::on_mouse_{down,drag,up,cancel}()`. Notes:
+`integrations/legacy-platform-hosts/ios/src/window_host_ios.mm` and `plugin_view_host_ios.mm` handle UIKit's `touchesBegan/Moved/Ended/Cancelled` → `View::on_mouse_{down,drag,up,cancel}()`. Notes:
 
 - Each `UITouch*` gets a stable `pointer_id` so `View::set_pointer_capture()` works for multi-touch gestures.
 - Apple Pencil sets `MouseEvent::pointer_type = PointerType::pen` plus altitude/azimuth — your widgets can branch on `me.isPen()`.
@@ -122,7 +122,7 @@ For Metal, `core/view/platform/ios/plugin_view_host_ios.mm` provides `IOSGpuPlug
 
 ## Accessibility
 
-- Bridge lives in `core/view/platform/ios/accessibility_ios.mm`.
+- Bridge lives in `integrations/legacy-platform-hosts/ios/src/accessibility_ios.mm`.
 - Unlike macOS, every `UIAccessibilityElement` is opt-in: set `isAccessibilityElement = YES` on the container view. Pulp's bridge handles this.
 - Test with VoiceOver on a real device; Simulator's Accessibility Inspector (`xcrun simctl ui booted appearance`) covers 80 %.
 
@@ -171,6 +171,6 @@ Track in `planning/production-readiness/05-auv3-mobile.md` and issue #218.
 ## See also
 
 - [`.agents/skills/ios/SKILL.md`](../../.agents/skills/ios/SKILL.md) — automation-side gotchas and build recipes
-- [`core/view/platform/ios/`](../../core/view/platform/ios/) — UIKit view hosts, accessibility bridge
+- [`integrations/legacy-platform-hosts/ios/src/`](../../integrations/legacy-platform-hosts/ios/src/) — UIKit view hosts, accessibility bridge
 - [`templates/ios-auv3/`](../../templates/ios-auv3/) — AUv3 Info.plist + entitlements templates
 - Apple: [App Extension Programming Guide — Audio Unit](https://developer.apple.com/documentation/audiotoolbox/audio_unit_v3_plug-ins)

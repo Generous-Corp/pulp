@@ -11,7 +11,7 @@ Pulp targets the browser through two audio ABIs and one UI host:
 |-------|-------|------------|
 | WAM v2 adapter | `core/format/src/wasm/wam_adapter.cpp`, `wam-runtime.mjs` | The whole module lives inside one `AudioWorklet` |
 | WebCLAP adapter | `core/format/src/wasm/` + `examples/web-demos/wclap-build/` | Real CLAP, wasm-hosted; needs COOP/COEP for threaded shared memory |
-| Browser window host | `core/view/platform/web/` | `core/view`'s widget tree painted by **Skia Ganesh on WebGL2** |
+| Browser window host | `integrations/legacy-platform-hosts/web/src/` | `core/view`'s widget tree painted by **Skia Ganesh on WebGL2** |
 
 The audio side and the UI side are **independent**. The browser UI module is
 DSP-free and talks to audio only through the web player's `HostAdapter` seam, so
@@ -604,7 +604,7 @@ specific test when a fixture needs semantics beyond those shared invariants.
   frames without it.
 - The render loop is `requestAnimationFrame`-driven
   (`core/render/src/render_loop_emscripten.cpp`); DOM pointer/key events are
-  translated in `core/view/include/pulp/view/web/web_event_translate.hpp`.
+  translated in `integrations/legacy-platform-hosts/web/include/pulp/view/web/web_event_translate.hpp`.
 - **`WebInputRouter` must not re-derive overlay dismissal.** The browser host is
   a platform host like the macOS and Windows ones, and the policy for a
   `<View overlay>` popover — route a press inside it into its own subtree,

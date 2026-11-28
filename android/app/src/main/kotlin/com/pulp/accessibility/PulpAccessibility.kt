@@ -164,7 +164,7 @@ class PulpAccessibilityDelegate : View.AccessibilityDelegate() {
         private const val TAG = PulpApplication.LOG_TAG
 
         // Pulp AccessRole ordinals — the JNI bridge
-        // (core/view/platform/android/accessibility_android.cpp) marshals the
+        // (integrations/legacy-platform-hosts/android/src/accessibility_android.cpp) marshals the
         // role as static_cast<int>(View::AccessRole), so these integers ARE the
         // wire format. They are append-only on the C++ side and locked by a
         // C++ test ("Android role ordinals are wire format" in

@@ -394,8 +394,8 @@
   "core/view/platform/mac/window_host_mac_text_input.mm",
   "core/view/platform/mac/window_host_mac_view.h",
   "core/view/platform/mac/window_manager_mac.mm",
-  "core/view/platform/win/accessibility_win_fragment_topology.cpp",
-  "core/view/platform/win/accessibility_win_fragment_topology.hpp",
+  "integrations/legacy-platform-hosts/win/src/accessibility_win_fragment_topology.cpp",
+  "integrations/legacy-platform-hosts/win/src/accessibility_win_fragment_topology.hpp",
   "core/view/src/accessibility.cpp",
   "core/view/src/accessibility_tree.cpp",
   "core/view/src/anchor_strategy.cpp",
@@ -719,14 +719,14 @@
    "id": "A9",
    "capability": "AUv3 and AU editor view controllers",
    "paths": [
-    "core/format/src/au_view_controller_ios.mm"
+    "integrations/legacy-platform-hosts/ios/src/au_view_controller_ios.mm"
    ]
   },
   {
    "id": "A10",
    "capability": "iOS window host, plug-in view host, accessibility",
    "paths": [
-    "core/view/platform/ios/"
+    "integrations/legacy-platform-hosts/ios/src/"
    ]
   },
   {
@@ -840,10 +840,10 @@
    "id": "D9",
    "capability": "Accessibility on Windows (UIA), Linux (AT-SPI), iOS, Android",
    "paths": [
-    "core/view/platform/win/",
-    "core/view/platform/linux/",
-    "core/view/platform/ios/",
-    "core/view/platform/android/",
+    "integrations/legacy-platform-hosts/win/src/",
+    "integrations/legacy-platform-hosts/linux/src/",
+    "integrations/legacy-platform-hosts/ios/src/",
+    "integrations/legacy-platform-hosts/android/src/",
     "pulp/view/platform/uia_mapping.hpp",
     "pulp/view/platform/atspi_mapping.hpp"
    ]
@@ -891,7 +891,7 @@
    "id": "E6",
    "capability": "Android rendering: surface, Choreographer, JNI, render loop",
    "paths": [
-    "core/render/platform/android/",
+    "integrations/legacy-platform-hosts/android/src/",
     "core/render/src/render_loop_android.cpp"
    ]
   },
@@ -907,14 +907,14 @@
    "id": "F3",
    "capability": "Windows hosts: plug-in view host, UIA, drag and drop, appearance, WebView2",
    "paths": [
-    "core/view/platform/win/"
+    "integrations/legacy-platform-hosts/win/src/"
    ]
   },
   {
    "id": "F4",
    "capability": "Linux hosts: X11 plug-in view host, XDND, AT-SPI, WebKitGTK",
    "paths": [
-    "core/view/platform/linux/"
+    "integrations/legacy-platform-hosts/linux/src/"
    ]
   },
   {
@@ -922,7 +922,7 @@
    "capability": "Android hosts: accessibility, motion JNI; Gradle app",
    "paths": [
     "android/",
-    "core/view/platform/android/"
+    "integrations/legacy-platform-hosts/android/src/"
    ]
   },
   {
@@ -991,7 +991,7 @@
    "id": "G10",
    "capability": "Pulp's own UI inside WAM and WebCLAP plug-ins",
    "paths": [
-    "core/view/platform/web/",
+    "integrations/legacy-platform-hosts/web/src/",
     "packages/pulp-web-player",
     "tools/cmake/PulpWebUi.cmake"
    ]

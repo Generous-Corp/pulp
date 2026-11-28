@@ -29,7 +29,7 @@
 #include <pulp/render/gpu_surface.hpp>
 #include <pulp/render/skia_surface.hpp>
 #include <pulp/view/view.hpp>
-#include "../core/view/platform/win/software_adapter_policy.hpp"
+#include "../integrations/legacy-platform-hosts/win/src/software_adapter_policy.hpp"
 
 #include "include/core/SkCanvas.h"
 #include "include/core/SkData.h"

@@ -130,7 +130,7 @@ function(pulp_wire_android_sources)
 
     # -- Accessibility: TalkBack bridge (#87) --
     if(TARGET pulp-view)
-        set(_android_a11y_dir "${CMAKE_SOURCE_DIR}/core/view/platform/android")
+        set(_android_a11y_dir "${CMAKE_SOURCE_DIR}/integrations/legacy-platform-hosts/android/src")
         if(EXISTS "${_android_a11y_dir}/accessibility_android.cpp")
             target_sources(pulp-view PRIVATE
                 ${_android_a11y_dir}/accessibility_android.cpp
@@ -142,7 +142,7 @@ function(pulp_wire_android_sources)
     # Note: jni_bridge.cpp is NOT added here — it is compiled into the
     # pulp-jni shared library target instead (see root CMakeLists.txt),
     # which links the full target closure. The view motion JNI bridge
-    # (core/view/platform/android/jni_motion.cpp) is also a pulp-jni
+    # (integrations/legacy-platform-hosts/android/src/jni_motion.cpp) is also a pulp-jni
     # source, so nothing under core/platform includes a view header.
     # The audio-dependent JNI exports live in
     # core/audio/platform/android/audio_jni.cpp, also compiled only into
@@ -168,7 +168,7 @@ function(pulp_wire_android_sources)
     # keeps only the render-layer Android source, and the
     # render-upward-edge-check ctest keeps it that way.
     if(TARGET pulp-render AND PULP_ENABLE_GPU)
-        set(_android_render_dir "${CMAKE_SOURCE_DIR}/core/render/platform/android")
+        set(_android_render_dir "${CMAKE_SOURCE_DIR}/integrations/legacy-platform-hosts/android/src")
         if(EXISTS "${_android_render_dir}/choreographer_android.cpp")
             target_sources(pulp-render PRIVATE
                 ${_android_render_dir}/choreographer_android.cpp

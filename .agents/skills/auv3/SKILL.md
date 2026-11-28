@@ -23,7 +23,7 @@ subclass surface.
 - Touching `core/format/src/au_audio_unit.h` — the Obj-C forward
   declaration used by `au_entry.mm` and the iOS view controller.
 - Editing the iOS extension view controller
-  (`core/format/src/au_view_controller_ios.mm`) — but first read the
+  (`integrations/legacy-platform-hosts/ios/src/au_view_controller_ios.mm`); but first read the
   `ios` and `view-bridge` skills; that file is **also** mapped to
   them.
 - An AUv3 host reports a behaviour issue — sidechain pull missing,
@@ -45,7 +45,7 @@ not edit `au_v2_adapter.cpp` as part of AU v3 work.**
 | Core adapter (Obj-C++) | `core/format/src/au_adapter.mm` |
 | Forward declaration used by entry / view | `core/format/src/au_audio_unit.h` |
 | Component entry factory | `core/format/src/au_entry.mm` |
-| iOS AUv3 extension view controller | `core/format/src/au_view_controller_ios.mm` (also mapped to `ios` + `view-bridge` skills) |
+| iOS AUv3 extension view controller | `integrations/legacy-platform-hosts/ios/src/au_view_controller_ios.mm` (also mapped to `ios` + `view-bridge` skills) |
 | Contract-editor view (both controllers) | `core/format/src/au_v3_contract_view.{h,mm}` |
 | iOS AU audio session helper | `core/format/src/ios_audio_session.cpp`, `core/format/include/pulp/format/ios_audio_session.{h,hpp}` |
 | Info.plist template (AU component bundle) | `tools/cmake/PulpInfoPlist.au.in` |
@@ -1842,9 +1842,14 @@ are ad-hoc signed before the containing framework is signed. iOS AUv3 keeps its
 flat-extension layout and rejects a UI package that declares runtime libraries
 until a dedicated iOS staging path exists. A package with no runtime libraries
 uses the ordinary AUv3 path unchanged.
-CMake also adds those shared libraries to the `.appex` stub's link line, so the
-stub gets an extra rpath into `<fw>.framework/Versions/A`; without it dyld cannot
-resolve the stub's own `@rpath/libvellum-*.dylib` references. The build leaves
+On macOS the generated editor-package source and the package link go to
+`${target}_AUv3Framework` only, never to the `.appex` stub (`_pulp_attach_ui_package`
+skips it when the framework target exists). The stub only `-force_load`s the
+framework, so the editor instantiation it would hold references the plug-in's
+editor code and fails to link (`undefined forge::...Editor::editor_idle()`), and
+the stub references no `@rpath/libvellum-*.dylib`, so it needs no rpath into the
+framework. `pulp_add_plugin` takes the AUv3 entry from `au_v3_entry.cpp` in the calling directory, or from `PULP_AUV3_ENTRY_SOURCE` when that is set. `vellum-auv3-appex-editor-package` (integrations/pulp-vellum/tests/
+auv3_editor_package) builds the pair and reads both symbol tables. The build leaves
 the dylibs ad-hoc signed, and `pulp ship sign` does not re-sign them with a real
 identity (it runs a single `codesign --force` on the path it is given, with no
 inner-out walk), so a distribution build must sign the nested dylibs, the

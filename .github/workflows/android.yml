@@ -13,6 +13,8 @@ on:
       - 'core/**'
       - 'tools/deps/manifest.json'
       - 'tools/cmake/PulpAndroid.cmake'
+      # The Android UI host and app shell PulpAndroid.cmake and pulp-jni compile.
+      - 'integrations/legacy-platform-hosts/android/**'
       - 'tools/cmake/PulpDependencies.cmake'
       - 'tools/scripts/test_android_aligned_buffer.py'
       - 'tools/scripts/check_android_jni_exports.py'

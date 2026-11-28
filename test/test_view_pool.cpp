@@ -2,7 +2,7 @@
 
 #include <pulp/view/view_pool.hpp>
 #include <pulp/view/virtual_list.hpp>
-#include "../core/view/platform/win/accessibility_win_fragment_topology.hpp"
+#include "../integrations/legacy-platform-hosts/win/src/accessibility_win_fragment_topology.hpp"
 
 #include <cstddef>
 #include <memory>

@@ -62,10 +62,10 @@ def main(argv: list[str] | None = None) -> int:
         f"{parents}, unmerged work this branch is stacked on, and this branch's own "
         "commits beyond it touch a watched family with no event. When that parent "
         "merges first, the merge queue measures only this change, finds no event, and "
-        "ejects the batch. This branch cannot carry its own event while stacked "
-        "(duplicate family claims are refused). Re-run this check after the parent "
-        "merges: merge main into this branch, write its own event with "
-        "python3 tools/scripts/vellum_watch_preflight.py --write-event, and push.")
+        "ejects the batch. Add this branch's own event now, in its own commit "
+        "(a family claimed twice passes only when the claims' paths are disjoint), "
+        "or after the parent merges: merge main into this branch, write its event "
+        "with python3 tools/scripts/vellum_watch_preflight.py --write-event, and push.")
     if not args.fail:
         print(f"::warning title=Vellum borrowed watch coverage::{message}")
         return 0

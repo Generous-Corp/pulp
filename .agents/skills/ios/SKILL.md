@@ -22,7 +22,7 @@ Swift / UIKit (iOS UI)        C++ (Pulp core)
 ├── HostApp (Xcode target)    ├── libpulp-format.a
 │   └── AVAudioEngine         │   └── PulpAudioUnit (AUv3)
 ├── AUv3 App Extension        │
-│   ├── Info.plist/NSExtension│   ├── core/view/platform/ios/
+│   ├── Info.plist/NSExtension│   ├── integrations/legacy-platform-hosts/ios/src/
 │   └── MetalView (optional)  │   │   ├── window_host_ios.mm (UIView)
 └── CoreAudio IO              │   │   ├── plugin_view_host_ios.mm
                               │   │   └── accessibility_ios.mm
@@ -33,10 +33,10 @@ Swift / UIKit (iOS UI)        C++ (Pulp core)
 
 | File | Purpose |
 |------|---------|
-| `core/view/platform/ios/window_host_ios.mm` | UIView root, touch/pencil dispatch → `View::on_mouse_*` |
-| `core/view/platform/ios/plugin_view_host_ios.mm` | AUv3 editor UIView |
-| `core/view/platform/ios/accessibility_ios.mm` | UIAccessibility bridge |
-| `core/format/src/au_view_controller_ios.mm` | AUv3 NSExtensionPrincipalClass |
+| `integrations/legacy-platform-hosts/ios/src/window_host_ios.mm` | UIView root, touch/pencil dispatch → `View::on_mouse_*` |
+| `integrations/legacy-platform-hosts/ios/src/plugin_view_host_ios.mm` | AUv3 editor UIView |
+| `integrations/legacy-platform-hosts/ios/src/accessibility_ios.mm` | UIAccessibility bridge |
+| `integrations/legacy-platform-hosts/ios/src/au_view_controller_ios.mm` | AUv3 NSExtensionPrincipalClass |
 | `core/platform/CMakeLists.txt` (`IOS` branch) | UIKit link, omit Cocoa/fork-exec |
 | `tools/cmake/PulpUtils.cmake` (`PULP_IOS` blocks) | AUv3 bundle, Info.plist generation, `pulp_add_ios_auv3()` helper |
 | `templates/ios-auv3/Info.plist.in` | AUv3 extension manifest template |
@@ -125,7 +125,7 @@ xcrun simctl launch --console booted com.example.MyApp
 > iOS stays monolithic. The threading hard guard (XPC queue →
 > `dispatch_async(main)` before any UIKit access) applies to BOTH
 > platforms, and is implemented in
-> `core/format/src/au_view_controller_ios.mm` for iOS. The lifecycle
+> `integrations/legacy-platform-hosts/ios/src/au_view_controller_ios.mm` for iOS. The lifecycle
 > fix (`createAudioUnitWithComponentDescription:` must actually
 > instantiate `PulpAudioUnit`, then `rebuildEditorIfReady` shared
 > between `viewDidLoad` and `setAudioUnit:`) also applies here. Full
@@ -775,7 +775,7 @@ Callers see `nullopt` / empty results — honest "unsupported" signaling
 
 ### `PulpAUViewController::dealloc` — never call `_bridge->close()` explicitly
 
-Touched here because `core/format/src/au_view_controller_ios.mm` is dual-owned by `ios` + `auv3` + `view-bridge`. The view controller's ivars are declared `_bridge`, `_fallbackView`, `_viewHost` (the GPU-plugin-view-host work reordered them — see below) and destroyed in REVERSE declaration order, so `_viewHost` is destroyed FIRST. That makes `root_.set_plugin_view_host(nullptr)` / `set_frame_clock(nullptr)` in `~PluginViewHost` safe on BOTH paths (the bridge's view and the `_fallbackView` are still alive). Calling `_bridge->close()` explicitly in `dealloc` reverses that order, frees the View first, and the host's destructor then dereferences a dangling reference — crashes AUv3 editor close. Full rationale lives in the `auv3` skill under "PulpAUViewController::dealloc — never call `_bridge->close()` explicitly". **Teardown must also run on the MAIN thread:** the GPU host's `CVDisplayLink` idle pump is dispatched to the main queue and dereferences the bridge, so `dealloc` resets `_viewHost` via `dispatch_sync(main)` when off-main (an AUv3 controller can be released on the XPC queue) before the reverse-order ivar destruction — otherwise a queued idle block races the free (SIGSEGV in `display_link_callback`). See the `view-bridge` skill, "AU v3 teardown must ALSO run on the main thread."
+Touched here because `integrations/legacy-platform-hosts/ios/src/au_view_controller_ios.mm` is dual-owned by `ios` + `auv3` + `view-bridge`. The view controller's ivars are declared `_bridge`, `_fallbackView`, `_viewHost` (the GPU-plugin-view-host work reordered them; see below) and destroyed in REVERSE declaration order, so `_viewHost` is destroyed FIRST. That makes `root_.set_plugin_view_host(nullptr)` / `set_frame_clock(nullptr)` in `~PluginViewHost` safe on BOTH paths (the bridge's view and the `_fallbackView` are still alive). Calling `_bridge->close()` explicitly in `dealloc` reverses that order, frees the View first, and the host's destructor then dereferences a dangling reference; crashes AUv3 editor close. Full rationale lives in the `auv3` skill under "PulpAUViewController::dealloc; never call `_bridge->close()` explicitly". **Teardown must also run on the MAIN thread:** the GPU host's `CVDisplayLink` idle pump is dispatched to the main queue and dereferences the bridge, so `dealloc` resets `_viewHost` via `dispatch_sync(main)` when off-main (an AUv3 controller can be released on the XPC queue) before the reverse-order ivar destruction; otherwise a queued idle block races the free (SIGSEGV in `display_link_callback`). See the `view-bridge` skill, "AU v3 teardown must ALSO run on the main thread."
 
 **Ivar order is load-bearing (2026-05 fallback-UAF fix):** the old order
 `_bridge, _viewHost, _fallbackView` destroyed `_fallbackView` BEFORE `_viewHost`.
@@ -821,7 +821,7 @@ SwiftUI host implementation that ships in the template; the
 
 ### iOS GPU host must run idle_callback inside the CADisplayLink tick
 
-`IOSGpuWindowHost::tick()` (in `core/view/platform/ios/window_host_ios.mm`) is the per-vsync entry point and MUST invoke `idle_callback_()` BEFORE the `needs_repaint` check. Without this, JS `requestAnimationFrame` / `setTimeout` / async-result queues never fire on iOS GPU because `set_idle_callback` can otherwise behave like a no-op relative to the CADisplayLink loop.
+`IOSGpuWindowHost::tick()` (in `integrations/legacy-platform-hosts/ios/src/window_host_ios.mm`) is the per-vsync entry point and MUST invoke `idle_callback_()` BEFORE the `needs_repaint` check. Without this, JS `requestAnimationFrame` / `setTimeout` / async-result queues never fire on iOS GPU because `set_idle_callback` can otherwise behave like a no-op relative to the CADisplayLink loop.
 
 The fix is two pieces:
 1. Override `set_idle_callback` to store the callback in a non-atomic field (CADisplayLink fires on `mainRunLoop` so the read-and-invoke happens on main only — no atomic guard needed unlike macOS GPU's CV thread).
@@ -856,7 +856,7 @@ once its host is attached, so the document mounts before the first frame
 display link's first frame is the mounted document. Presenting with the Core
 Animation transaction, as the macOS GPU host does, is not implemented here.
 
-`core/view/platform/ios/plugin_view_host_ios.mm` is the AUv3 plugin embed
+`integrations/legacy-platform-hosts/ios/src/plugin_view_host_ios.mm` is the AUv3 plugin embed
 host (vs `IOSGpuWindowHost` for standalone). Two things to know (2026-05
 GPU-plugin-view-host work):
 
@@ -931,7 +931,7 @@ chain of `PULP_` prints to grep.
 
 When the iOS configure first turns on Skia (i.e.
 `PULP_ENABLE_GPU=ON` + `PULP_HAS_SKIA` is set), two pre-existing bugs
-in `core/view/platform/ios/{window_host,plugin_view_host}_ios.mm`
+in `integrations/legacy-platform-hosts/ios/src/{window_host,plugin_view_host}_ios.mm`
 surfaced — they were inert because no prior iOS build had ever defined
 `PULP_HAS_SKIA`:
 

@@ -46,6 +46,7 @@ SCAN_GLOBS = (
     "examples/*/test_*.cpp",
     "forge-seam/test/test_*.cpp",
     "tools/*/test_*.cpp",
+    "integrations/legacy-platform-hosts/tests/test_*.cpp",
 )
 
 # Only a Catch2 translation unit can be judged by this rule. `WARN(...)` is also

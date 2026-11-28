@@ -1381,7 +1381,7 @@ TEST_CASE("HyperlinkButton carries its text as the accessibility label",
 
 TEST_CASE("Android role ordinals are wire format",
           "[view][accessibility][android]") {
-    // core/view/platform/android/accessibility_android.cpp marshals the role to
+    // integrations/legacy-platform-hosts/android/src/accessibility_android.cpp marshals the role to
     // Kotlin as static_cast<int>(role); PulpAccessibilityDelegate.kt matches on
     // those integers. Reordering or removing an AccessRole silently
     // re-labels every widget on TalkBack, so the ordinals are frozen here and

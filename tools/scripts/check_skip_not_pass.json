@@ -343,7 +343,7 @@
       "reason": "Whole-case `#else` arm on a host where the backend is not compiled. A real skip, but the case asserts nothing in that branch and several of these suites also assert their own case counts, so converting needs a per-suite audit."
     },
     {
-      "file": "test/test_text_accessibility_linux.cpp",
+      "file": "integrations/legacy-platform-hosts/tests/test_text_accessibility_linux.cpp",
       "sites": 1,
       "reason": "The case runs real assertions and then reports a trailing note. It verified something; SKIP() would report it as non-run."
     },

@@ -48,7 +48,7 @@ list(APPEND PULP_SDK_TARGETS
     pulp-interchange pulp-dawproject-import pulp-dawproject-export pulp-smf-interop pulp-smf-interchange
     pulp-audio pulp-midi pulp-signal pulp-dataplane pulp-dataplane-audio pulp-graph
     pulp-format pulp-format-core pulp-format-view pulp-sequence
-    pulp-osc pulp-canvas pulp-design-ir pulp-view-core pulp-view-tooling pulp-view-platform pulp-view-native pulp-view
+    pulp-osc pulp-canvas pulp-design-ir pulp-view-core pulp-editor-bridge pulp-view-tooling pulp-view-platform pulp-view-native pulp-view
     pulp-standalone pulp-standalone-native pulp-standalone-contract pulp-dsl pulp-native-components
 )
 if(TARGET pulp-audio-analysis)
@@ -1189,7 +1189,7 @@ install(FILES
     "${CMAKE_CURRENT_SOURCE_DIR}/core/format/src/au_v2_contract_view.mm"
     "${CMAKE_CURRENT_SOURCE_DIR}/core/format/src/au_v3_contract_view.h"
     "${CMAKE_CURRENT_SOURCE_DIR}/core/format/src/au_v3_contract_view.mm"
-    "${CMAKE_CURRENT_SOURCE_DIR}/core/format/src/au_view_controller_ios.mm"
+    "${CMAKE_CURRENT_SOURCE_DIR}/integrations/legacy-platform-hosts/ios/src/au_view_controller_ios.mm"
     "${CMAKE_CURRENT_SOURCE_DIR}/core/format/src/au_view_controller_mac.mm"
     "${CMAKE_CURRENT_SOURCE_DIR}/core/format/src/vst3_plug_view.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/core/format/src/vst3_no_editor.cpp"

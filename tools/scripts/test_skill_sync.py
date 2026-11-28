@@ -276,7 +276,7 @@ class RealSkillPathMapOwnershipTests(unittest.TestCase):
             "core/playback/PulpPlaybackSources.cmake",
             "tools/cmake/PulpWam.cmake",
             "tools/cmake/PulpWclap.cmake",
-            "core/view/platform/web/window_host_web.cpp",
+            "integrations/legacy-platform-hosts/web/src/window_host_web.cpp",
             ".github/workflows/web-plugins.yml",
         ):
             with self.subTest(path=path):

@@ -128,15 +128,17 @@ _DEFINE_RE = re.compile(r"^(add_library|add_executable|add_custom_target|"
 _REASON_HOST = "shared target compiles the platform host until that platform builds UI-off"
 _REASON_TEST = "shared test registration or test that covers a platform helper"
 _REASON_SDK = "installed SDK ships the iOS AUv3 view controller source"
+_REASON_PACKAGE = ("the root build adds the package, which attaches the Windows, Linux and iOS "
+                   "hosts to the core/view targets")
 _REASON_DEMO = "web demo drives the browser host's event translation"
+_REASON_SHAPE = ("SDK include path include/pulp/view shares its shape with the moved Linux "
+                 "headers; it does not name the quarantine")
 
 # (referencing file, platform, kind) -> (count, reason). Each row is an edge
 # that exists today; when the platform's subtree is removed, its rows go too.
 ALLOWED: dict[tuple[str, str, str], tuple[int, str]] = {
     ("CMakeLists.txt", "android", "path"): (4, _REASON_HOST),
-    ("core/view/CMakeLists.txt", "ios", "path"): (3, _REASON_HOST),
-    ("core/view/CMakeLists.txt", "linux", "path"): (5, _REASON_HOST),
-    ("core/view/CMakeLists.txt", "win", "path"): (10, _REASON_HOST),
+    ("CMakeLists.txt", "root", "path"): (1, _REASON_PACKAGE),
     ("examples/web-demos/super-convolver-ui/ui_entry.cpp", "web", "include"): (1, _REASON_DEMO),
     ("test/cmake/motion_tests.cmake", "android", "path"): (1, _REASON_TEST),
     ("test/cmake/motion_tests.cmake", "tests", "path"): (1, _REASON_TEST),
@@ -145,11 +147,13 @@ ALLOWED: dict[tuple[str, str, str], tuple[int, str]] = {
     ("test/test_accessibility_tree.cpp", "linux", "include"): (1, _REASON_TEST),
     ("test/test_drag_drop.cpp", "linux", "include"): (1, _REASON_TEST),
     ("test/test_plugin_frame_renderer.cpp", "win", "include"): (1, _REASON_TEST),
+    ("test/cmake/test_sdk_provenance_contract.cmake", "linux", "path"): (1, _REASON_SHAPE),
+    ("test/cmake/view_host_tests.cmake", "tests", "path"): (8, _REASON_TEST),
     ("test/test_view_pool.cpp", "win", "include"): (1, _REASON_TEST),
     ("tools/cmake/PulpAndroid.cmake", "android", "path"): (6, _REASON_HOST),
-    ("tools/cmake/PulpAuv3.cmake", "ios", "path"): (1, _REASON_HOST),
     ("tools/cmake/PulpInstallRules.cmake", "ios", "path"): (1, _REASON_SDK),
-    ("tools/cmake/PulpWebUi.cmake", "web", "path"): (2, _REASON_HOST),
+    ("tools/cmake/PulpUtils.cmake", "ios", "path"): (3, _REASON_HOST),
+    ("tools/cmake/PulpWebUi.cmake", "web", "path"): (3, _REASON_HOST),
 }
 
 
