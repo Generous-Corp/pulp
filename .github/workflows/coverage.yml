@@ -9,13 +9,9 @@ permissions:
 #              planning/coverage-tooling-decision-2026-04-21.md
 #
 # Coverage runs nightly on main and once at arm time through workflow_dispatch.
-# Scheduled and manually dispatched runs use the full {linux, macos, windows}
-# matrix, so the canonical main-branch head and approved PR heads keep a
-# complete per-OS Codecov picture.
-# Linux / Windows / Android coverage is provided by the nightly
-# `cross-platform-check.yml` lane instead, which runs the full non-macOS
-# build + test every night and files per-platform tracking issues on
-# breakage. Each OS still produces its own Cobertura XML and uploads to
+# Linux and macOS are required native report producers. Windows coverage
+# runs only when explicitly requested through a dispatch runner override.
+# Each native OS produces its own Cobertura XML and uploads to
 # Codecov tagged with an OS-axis flag (`os-linux`, `os-macos`,
 # `os-windows`) so Codecov can union same-file coverage across OSes via
 # the flag mechanism. We do NOT try to merge profdata across
@@ -26,9 +22,8 @@ permissions:
 on:
   schedule:
     # Supersession-immune main-dashboard refresh. A scheduled run lives in its
-    # own concurrency group (see `concurrency:` below) and forces the full
-    # native matrix (see the `classify` job), guaranteeing a periodic full
-    # cross-OS upload without starting on every main push.
+    # own concurrency group (see `concurrency:` below) and forces native
+    # coverage (see the `classify` job), without starting on every main push.
     - cron: '17 */8 * * *'  # 00:17, 08:17, 16:17 UTC — 3×/day, offset off the hour
   pull_request:
     types: [auto_merge_enabled]
@@ -45,7 +40,7 @@ on:
         default: ""
         type: string
       windows_runner_selector_json:
-        description: "Optional JSON runs-on override for Windows coverage"
+        description: "Opt in to required Windows coverage with this JSON runs-on selector"
         required: false
         default: ""
         type: string
@@ -210,7 +205,6 @@ jobs:
           EXPLICIT_WINDOWS_RUNNER_SELECTOR_JSON: ${{ inputs.windows_runner_selector_json || '' }}
           LINUX_RUNS_ON_JSON: ${{ vars.PULP_COVERAGE_LINUX_RUNS_ON_JSON }}
           MACOS_RUNS_ON_JSON: ${{ vars.PULP_COVERAGE_MACOS_RUNS_ON_JSON }}
-          WINDOWS_RUNS_ON_JSON: ${{ vars.PULP_COVERAGE_WINDOWS_RUNS_ON_JSON }}
           WINDOWS_X64_RUNS_ON_JSON: ${{ vars.PULP_LOCAL_WINDOWS_X64_RUNS_ON_JSON || '' }}
           ALLOW_HOSTED_WINDOWS: ${{ vars.PULP_ALLOW_HOSTED_WINDOWS || '' }}
           GH_TOKEN: ${{ github.token }}
@@ -258,38 +252,20 @@ jobs:
               ANDROID_KOTLIN_RUNS_ON_JSON \
               macos-latest)
           fi
-          # Windows coverage is best-effort (see the coverage job), and its
-          # instrumented build is the longest job in the workflow. It runs on
-          # the self-hosted Windows x64 lane, which is one VM, so:
-          #   - a pull request, fork or not, leaves it out unless
-          #     PULP_ALLOW_HOSTED_WINDOWS=1, which runs it on GitHub-hosted
-          #     windows-latest as before;
-          #   - the schedule leaves it out while another Windows x64 job is
-          #     already waiting (--max-backlog 1);
-          #   - a dispatch always queues it.
-          # A dispatch input, then PULP_COVERAGE_WINDOWS_RUNS_ON_JSON, override
-          # the lane. tools/scripts/windows_runner_selector.py polices both.
-          # Repository variables resolve for fork pull requests, so a pull
-          # request never reads the override.
-          windows_selector="${EXPLICIT_WINDOWS_RUNNER_SELECTOR_JSON:-${WINDOWS_RUNS_ON_JSON:-}}"
-          if [ "${GITHUB_EVENT_NAME}" = "pull_request" ]; then
-            windows_selector=""
+          # Normal refreshes must finish even when Windows has no runner:
+          # the receipt watchdog only credits completed workflow runs. An
+          # explicit dispatch can still request and require Windows proof.
+          windows_route=$(printf '%s\n' 'runs_on="windows-latest"' 'route=skip')
+          if [ "${GITHUB_EVENT_NAME}" = workflow_dispatch ] && [ -n "${EXPLICIT_WINDOWS_RUNNER_SELECTOR_JSON}" ]; then
+            windows_route=$(python3 tools/scripts/windows_runner_selector.py --route \
+              --selector "$EXPLICIT_WINDOWS_RUNNER_SELECTOR_JSON" \
+              --default-selector "$WINDOWS_X64_RUNS_ON_JSON" \
+              --allow-hosted "$ALLOW_HOSTED_WINDOWS" \
+              --head-repo "$PR_HEAD_REPO")
+            echo "$windows_route"
           fi
-          windows_route=$(python3 tools/scripts/windows_runner_selector.py --route \
-            --selector "$windows_selector" \
-            --default-selector "$WINDOWS_X64_RUNS_ON_JSON" \
-            --allow-hosted "$ALLOW_HOSTED_WINDOWS" \
-            --head-repo "$PR_HEAD_REPO" \
-            --max-backlog 1)
-          echo "$windows_route"
           windows=$(printf '%s\n' "$windows_route" | sed -n 's/^runs_on=//p')
           windows_leg=$(printf '%s\n' "$windows_route" | sed -n 's/^route=//p')
-          case "${ALLOW_HOSTED_WINDOWS}" in 1|true|TRUE) allow_hosted=1 ;; *) allow_hosted=0 ;; esac
-          # With the opt-in the route is always hosted: the selector puts a
-          # fork there first, and a pull request never passes a selector.
-          if [ "${GITHUB_EVENT_NAME}" = "pull_request" ] && [ "$allow_hosted" != 1 ]; then
-            windows_leg=skip
-          fi
           {
             echo "linux_runs_on=${linux}"
             echo "macos_runs_on=${macos}"
@@ -332,13 +308,8 @@ jobs:
             --base "${{ github.event.pull_request.base.sha || 'origin/main' }}"
 
   # ── Build the event-conditional coverage matrix ────────────────────────
-  # Scheduled refresh and workflow_dispatch use the full 3-OS matrix. This job emits the `coverage` job's matrix
-  # `include` list as JSON so the conditional lives in one place:
-  #   - schedule / workflow_dispatch → [linux, macOS, windows]
-  # The per-OS `runs_on_json` values are threaded through from the
-  # `resolve-runners` job so the matrix legs still honour any repo-variable
-  # or workflow_dispatch runner overrides. `os-windows` / `os-linux` flags
-  # are unchanged — they simply don't appear on PR runs.
+  # Windows proof is opt-in. Default refreshes never queue a Windows leg
+  # that can delay the native barrier or completion of the receipt set.
   matrix-config:
     if: github.head_ref != 'release/version-bump'
     runs-on: ubuntu-latest
@@ -353,12 +324,10 @@ jobs:
           MACOS_RUNS_ON_JSON: ${{ needs.resolve-runners.outputs.macos_runs_on }}
           WINDOWS_RUNS_ON_JSON: ${{ needs.resolve-runners.outputs.windows_runs_on }}
           WINDOWS_ROUTE: ${{ needs.resolve-runners.outputs.windows_route }}
+          WINDOWS_REQUIRED: ${{ (inputs.windows_runner_selector_json || '') != '' }}
         shell: bash
         run: |
           set -euo pipefail
-          # One include entry per OS leg. macOS is always present; Linux
-          # Linux and Windows are included for the full scheduled/dispatched matrix.
-          #
           # `runs_on_json` MUST be encoded with `tojson`, never `tostring`.
           # The downstream `coverage` job consumes it via
           # `fromJSON(matrix.runs_on_json)`, which requires valid JSON.
@@ -375,16 +344,13 @@ jobs:
           windows=$(jq -nc \
             --argjson runs_on "${WINDOWS_RUNS_ON_JSON}" \
             '{os:"windows", label:"Windows", flag:"os-windows", runs_on_json:($runs_on|tojson)}')
-          # The resolver drops Windows when the Windows x64 lane is busy or
-          # the event is a pull request without the hosted opt-in.
-          if [ "${WINDOWS_ROUTE}" = skip ]; then
-            include=$(jq -nc --argjson l "${linux}" --argjson m "${macos}" '[$l, $m]')
-          else
-            include=$(jq -nc \
-              --argjson l "${linux}" \
-              --argjson m "${macos}" \
-              --argjson w "${windows}" \
-              '[$l, $m, $w]')
+          include=$(jq -nc --argjson l "${linux}" --argjson m "${macos}" '[$l, $m]')
+          if [ "${WINDOWS_REQUIRED}" = true ]; then
+            if [ "${WINDOWS_ROUTE}" = skip ]; then
+              echo "::error::Explicit Windows coverage was requested but no Windows runner route resolved."
+              exit 1
+            fi
+            include=$(jq -nc --argjson inc "${include}" --argjson w "${windows}" '$inc + [$w]')
           fi
           matrix=$(jq -nc --argjson inc "${include}" '{include:$inc}')
           echo "matrix=${matrix}" >> "${GITHUB_OUTPUT}"
@@ -412,23 +378,11 @@ jobs:
       # when one leg flakes.
       #
       # The matrix `include` list is built by the `matrix-config` job and
-      # uses the full {linux, macos, windows} matrix on scheduled and dispatched runs.
+      # only includes Windows when a dispatch explicitly requests it.
       fail-fast: false
       max-parallel: 2
       matrix: ${{ fromJSON(needs.matrix-config.outputs.matrix) }}
     runs-on: ${{ fromJSON(matrix.runs_on_json) }}
-    # Windows coverage is best-effort and MUST NOT block a successful main
-    # coverage run. The instrumented MSVC build + ~9k instrumented tests +
-    # llvm-cov over 1000+ objects genuinely exceeds the 210-min cap on
-    # GitHub-hosted windows-latest, so the
-    # os-windows leg times out. Its C++ coverage adds little unique signal
-    # over the Linux/macOS legs (same sources via llvm-cov), and the
-    # receipt-aware upload watchdog requires exact Linux, macOS, Python,
-    # Apple, Android, and React receipts, but intentionally treats Windows as
-    # an explicit best-effort producer until it can reliably finish in budget.
-    # Letting Windows fail non-fatally therefore preserves the required fresh
-    # upload set. If Windows fits the cap, it still uploads its own current flag.
-    continue-on-error: ${{ matrix.os == 'windows' }}
     steps:
       - uses: actions/checkout@v7.0.1
         with:
@@ -1255,6 +1209,7 @@ jobs:
           REPO: ${{ github.repository }}
           RUN_ID: ${{ github.run_id }}
           SELF_JOB_NAME: Coverage queue watchdog
+          WINDOWS_REQUIRED: ${{ (inputs.windows_runner_selector_json || '') != '' }}
           # A coverage leg that has not been assigned a runner this long
           # is treated as orphaned by a saturated pool and reaped.
           #
@@ -1345,20 +1300,14 @@ jobs:
             while IFS=$'\t' read -r job_name job_status; do
               [ -z "${job_name}" ] && continue
               [ "${job_name}" = "${SELF_JOB_NAME}" ] && continue
-              # Only the REQUIRED native coverage legs — `Coverage report
-              # (macOS, Clang)` / `(Linux, Clang)` / `(Windows, Clang)`.
-              # These are the legs the `Diff coverage advisory`
-              # gate depends on and the ones that route to a saturated
-              # self-hosted / Namespace pool. Match a name that both
-              # starts with `Coverage report (` AND ends with `, Clang)`.
-              #
-              # `Coverage report (Android, Kotlin)` ends `, Kotlin)` and
-              # is deliberately NOT reaped: the Android lane is advisory,
-              # is not part of the required diff-coverage dependency
-              # chain, and reaping it would cancel the whole run —
-              # including the required native gate — for an advisory leg.
+              # These exact names belong to the required native matrix.
+              # Windows appears here only on an explicit proof dispatch.
+              # Ancillary producers must not cancel the whole workflow.
               case "${job_name}" in
-                "Coverage report ("*", Clang)") ;;
+                "Coverage report (Linux, Clang)"|"Coverage report (macOS, Clang)") ;;
+                "Coverage report (Windows, Clang)")
+                  [ "${WINDOWS_REQUIRED}" = true ] || continue
+                  ;;
                 *) continue ;;
               esac
               coverage_legs_this_poll=$((coverage_legs_this_poll + 1))
@@ -1413,11 +1362,8 @@ jobs:
     # when it succeeded: a skipped barrier reads green, so a failed or
     # cancelled native leg must fail here instead. The only legitimate skip
     # is `native_build_required != 'true'`, where no leg was required.
-    # Windows is best-effort (`continue-on-error` on its leg), so its failure
-    # never reaches `needs.coverage.result`. A dispatch that names a Windows
-    # runner is asking for Windows proof, so that run also requires the
-    # Windows Cobertura artifact; run 40162878355 read green with its Windows
-    # leg failed before the build started.
+    # A dispatch that names a Windows runner adds it to the required
+    # matrix and requires its artifact; normal refreshes do not queue it.
     name: Coverage publish barrier (native reports complete)
     needs: [classify, coverage]
     if: github.head_ref != 'release/version-bump' && (always() && (github.event_name != 'pull_request' || github.event.action == 'auto_merge_enabled') && needs.classify.outputs.native_build_required == 'true')
@@ -1433,7 +1379,7 @@ jobs:
         run: |
           set -euo pipefail
           if [ "${COVERAGE_RESULT}" != "success" ]; then
-            echo "::error::Native coverage matrix result is '${COVERAGE_RESULT}', not 'success' — a required Linux or macOS leg failed, was cancelled, or never ran."
+            echo "::error::Native coverage matrix result is '${COVERAGE_RESULT}', not 'success' — a required native leg failed, was cancelled, or never ran."
             exit 1
           fi
 
