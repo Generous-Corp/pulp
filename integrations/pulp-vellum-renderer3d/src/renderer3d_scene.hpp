@@ -23,6 +23,11 @@ struct DeferredPunctualLights {
     bool spot_cone = false;
 };
 
+float dot3(float ax, float ay, float az, float bx, float by, float bz);
+float length3(float x, float y, float z);
+void cross3(float ax, float ay, float az, float bx, float by, float bz, float& out_x, float& out_y,
+            float& out_z);
+
 bool node_has_non_identity_trs(const pulp::scene::NodeData& node);
 bool matrix_is_rigid_transform(const pulp::scene::NodeData& node);
 bool has_deferred_light_node_transform(const pulp::scene::SceneData& scene);

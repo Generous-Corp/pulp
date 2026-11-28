@@ -3,6 +3,7 @@
  "record": {
   "entry": "tools/scripts/test_agent_hook_paths.py",
   "inputs": [
+   ".claude/settings.json",
    "hooks/hooks.json",
    "hooks/scripts/cli-plugin-sync.sh",
    "hooks/scripts/docs-reminder.sh",

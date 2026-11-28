@@ -15,6 +15,23 @@ if(PULP_BUILD_TESTS AND TARGET Catch2::Catch2WithMain)
     include(Catch)
     catch_discover_tests(pulp-test-pulp-vellum PROPERTIES LABELS pulp-vellum)
 
+    # The adapter probe against the real GPU runtime: it must pass, and with the
+    # adapter name dropped it must fail for that reason.
+    if(TARGET pulp-vellum-gpu-adapter-probe)
+        add_test(NAME pulp-vellum-gpu-adapter-probe
+            COMMAND pulp-vellum-gpu-adapter-probe)
+        set_tests_properties(pulp-vellum-gpu-adapter-probe PROPERTIES
+            LABELS pulp-vellum TIMEOUT 60
+            ENVIRONMENT "MTL_DEBUG_LAYER=0"
+            PASS_REGULAR_EXPRESSION "\"verdict\":\"pass\".*\"swatches_mismatched\":0")
+        add_test(NAME pulp-vellum-gpu-adapter-probe-empty-adapter
+            COMMAND pulp-vellum-gpu-adapter-probe --simulate-empty-adapter)
+        set_tests_properties(pulp-vellum-gpu-adapter-probe-empty-adapter PROPERTIES
+            LABELS pulp-vellum TIMEOUT 60
+            ENVIRONMENT "MTL_DEBUG_LAYER=0"
+            PASS_REGULAR_EXPRESSION "\"verdict\":\"fail\",\"reason\":\"empty-adapter\"")
+    endif()
+
     # The SDK's imported targets can be scoped to the integration directory.
     get_property(_has_swift_motion TARGET pulp-vellum PROPERTY PULP_VELLUM_HAS_SWIFT_MOTION)
     if(_has_swift_motion)
@@ -37,6 +54,36 @@ if(PULP_BUILD_TESTS AND TARGET Catch2::Catch2WithMain)
         target_link_libraries(pulp-test-pulp-vellum-editor PRIVATE
             pulp::vellum Vellum::MirrorView_core Catch2::Catch2WithMain
             Threads::Threads)
+        # ViewProcessor<> in the mode an SDK with Vellum UI builds:
+        # PULP_FORMAT_LEGACY_VIEW=0. format.cpp is compiled here in that mode
+        # and wins over the archive's copy; every other Processor slot keeps
+        # its position in both modes, which format-legacy-view-slot-layout
+        # proves, so the rest of pulp-format-core links as built.
+        add_executable(pulp-test-pulp-vellum-view-processor
+            test_view_processor.cpp
+            ${PULP_ROOT_DIR}/core/format/src/format.cpp)
+        target_compile_definitions(pulp-test-pulp-vellum-view-processor PRIVATE
+            PULP_FORMAT_LEGACY_VIEW=0)
+        target_link_libraries(pulp-test-pulp-vellum-view-processor PRIVATE
+            pulp::vellum Vellum::MirrorView_core Catch2::Catch2WithMain Threads::Threads)
+        catch_discover_tests(pulp-test-pulp-vellum-view-processor
+            PROPERTIES LABELS pulp-vellum-editor)
+        # Header weight: each public header preprocesses on its own within
+        # budget and pulls in none of the implementation headers it keeps out.
+        include("${PULP_ROOT_DIR}/test/support/PulpHeaderWeight.cmake")
+        pulp_add_header_weight_test(pulp-vellum-header-weight-view-editor
+            HEADER pulp/vellum/view_editor.hpp USAGE pulp-vellum
+            FORBID "pulp/vellum/editor\\.hpp|/vellum/view/view\\.hpp"
+            MAX_LINES 80000 LABELS "pulp-vellum;header-weight")
+        # A CLAP host opening a Vellum editor through the view-free contract
+        # GUI: the plug-in entry compiles without PULP_CLAP_GUI and links the
+        # view-free CLAP adapter, as a `UI <package>` plug-in does.
+        if(TARGET pulp-format-clap-core)
+            target_link_libraries(pulp-test-pulp-vellum-editor PRIVATE
+                pulp::format-clap-core clap)
+            target_compile_definitions(pulp-test-pulp-vellum-editor PRIVATE
+                PULP_TEST_VELLUM_CLAP=1)
+        endif()
         if(TARGET Vellum::MirrorView_script)
             target_link_libraries(pulp-test-pulp-vellum-editor PRIVATE Vellum::MirrorView_script)
             target_compile_definitions(pulp-test-pulp-vellum-editor PRIVATE
@@ -130,6 +177,16 @@ if(PULP_BUILD_TESTS AND TARGET Catch2::Catch2WithMain)
         target_link_libraries(pulp-test-pulp-vellum-about-notices PRIVATE
             pulp::vellum Vellum::MirrorView_core Catch2::Catch2WithMain Threads::Threads)
         catch_discover_tests(pulp-test-pulp-vellum-about-notices PROPERTIES LABELS pulp-vellum-editor)
+        # A macOS AUv3 plug-in with a Vellum editor package: the appex stub
+        # must link, and the editor code must live in the framework.
+        if(APPLE AND NOT PULP_IOS)
+            add_subdirectory(auv3_editor_package)
+        endif()
+
+
+        # An AU v2 host opening a Vellum editor. The target defines a test-only
+        # macro, so its definition lives under test/ with the other test targets.
+        include(${PULP_ROOT_DIR}/test/cmake/au_v2_vellum_view_tests.cmake)
     else()
         message(STATUS "pulp-vellum: Vellum::MirrorView_core not in this Vellum SDK; "
             "skipping pulp-test-pulp-vellum-editor")

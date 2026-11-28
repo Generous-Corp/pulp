@@ -158,6 +158,18 @@ add_test(NAME examples-index-guard-selftest
         "${CMAKE_SOURCE_DIR}/tools/scripts/test_examples_index_guard.py")
 set_tests_properties(examples-index-guard-selftest PROPERTIES TIMEOUT 120)
 
+# docs/status/examples-manifest.json classifies every example directory for the
+# phased Vellum cut; the guard fails on an unclassified or phantom entry and on
+# UI code classified audio-only.
+add_test(NAME examples-manifest-guard
+    COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/scripts/examples_manifest_guard.py")
+set_tests_properties(examples-manifest-guard PROPERTIES TIMEOUT 120)
+add_test(NAME examples-manifest-guard-selftest
+    COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/scripts/test_examples_manifest_guard.py")
+set_tests_properties(examples-manifest-guard-selftest PROPERTIES TIMEOUT 120)
+
 set(_pulp_source_selftest_manifest "${CMAKE_SOURCE_DIR}/tools/ci/source_selftests.json")
 set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
     "${_pulp_source_selftest_manifest}")

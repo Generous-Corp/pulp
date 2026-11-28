@@ -319,6 +319,33 @@ unset(_pulp_gpu_target)
 unset(_pulp_gpu_provider_scope)
 unset(_pulp_gpu_provider_def_scope)
 
+# pulp-gpu-compute is the consumption target for GPU compute and diagnostics
+# code that needs the device layer and nothing above it: GPU audio, the
+# roofline and health tools, and the compute and diagnostics tests. It carries
+# the usage requirements pulp-render exports to its consumers (the Skia/Dawn
+# providers, the PULP_HAS_* feature definitions, the runtime include roots) with
+# no canvas, view or renderer source or link behind it, so a consumer keeps
+# compiling when the 2D renderer is absent. pulp-render links it PUBLIC, so
+# every pulp::render consumer sees the same requirements as before. Its closure
+# is checked by gpu-compute-link-closure (test/cmake/render_gpu_device_closure_tests.cmake).
+add_library(pulp-gpu-compute INTERFACE)
+add_library(pulp::gpu-compute ALIAS pulp-gpu-compute)
+target_link_libraries(pulp-gpu-compute INTERFACE pulp::gpu-device pulp::runtime)
+if(_pulp_gpu_links_wgpu)
+    target_link_libraries(pulp-gpu-compute INTERFACE webgpu)
+endif()
+if(PULP_HAS_WEBGPU)
+    target_compile_definitions(pulp-gpu-compute INTERFACE PULP_HAS_WEBGPU=1)
+endif()
+if(PULP_HAS_SKIA)
+    target_link_libraries(pulp-gpu-compute INTERFACE skia::skia)
+    if(TARGET skia::dawn)
+        target_link_libraries(pulp-gpu-compute INTERFACE skia::dawn)
+    endif()
+    target_compile_definitions(pulp-gpu-compute INTERFACE PULP_HAS_SKIA=1 PULP_HAS_DAWN=1)
+endif()
+target_link_libraries(pulp-render PUBLIC pulp::gpu-compute)
+
 # Dawn-dependent sources of the typed GPU pass API and the readback helper
 # Renderer3D shares. They need the Dawn headers, which arrive with Skia, and
 # build under the same condition as Renderer3D's Dawn path.
