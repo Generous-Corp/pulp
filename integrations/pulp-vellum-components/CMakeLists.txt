@@ -10,6 +10,7 @@ add_library(pulp-vellum-components STATIC
     src/catalogue.cpp
     src/gpu_health_content.cpp
     src/inspector_window.cpp
+    src/overlay_geometry.cpp
     src/view_inspector.cpp)
 add_library(pulp::vellum-components ALIAS pulp-vellum-components)
 target_include_directories(pulp-vellum-components PUBLIC

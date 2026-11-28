@@ -1740,6 +1740,7 @@
       "pulp/vellum_components/inspector_window.hpp",
       "pulp/vellum_components/lasso.hpp",
       "pulp/vellum_components/model_manager_view.hpp",
+      "pulp/vellum_components/overlay_geometry.hpp",
       "pulp/vellum_components/panic_button.hpp",
       "pulp/vellum_components/panic_target.hpp",
       "pulp/vellum_components/preferences_panel.hpp",
